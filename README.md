@@ -1,53 +1,94 @@
-# New Project Template
+# Data Migration ETA Tool
 
-This repository contains a template that can be used to seed a repository for a
-new Google open source project.
+This README provides a guide to setting up, installing, and running the Data Migration ETA Tool.
 
-See [go/releasing](http://go/releasing) (available externally at
-https://opensource.google/documentation/reference/releasing) for more information about
-releasing a new Google open source project.
+---
 
-This template uses the Apache license, as is Google's default.  See the
-documentation for instructions on using alternate license.
+## 🚀 Overview
 
-## How to use this template
+The Data Migration ETA Tool is a Python-based script that automates the process of analyzing Microsoft Exchange Email, Calendar and Contacts data to estimate the time it will take to migrate this data to Google Workspace.
 
-1. Clone it from GitHub.
-    * There is no reason to fork it.
-1. Create a new local repository and copy the files from this repo into it.
-1. Modify README.md and docs/contributing.md to represent your project, not the
-   template project.
-1. Develop your new project!
+---
 
-``` shell
-git clone https://github.com/google/new-project
-mkdir my-new-thing
-cd my-new-thing
-git init
-cp -r ../new-project/* ../new-project/.github .
-git add *
-git commit -a -m 'Boilerplate for new Google open source project'
-```
+## 🚦 Prerequisites
 
-## Source Code Headers
+To use the Data Migration ETA Tool, you need a Microsoft Azure subscription and administrative access to configure an application in Microsoft Entra ID (formerly Azure Active Directory).
 
-Every file containing source code must include copyright and license
-information. This includes any JS/CSS files that you might be serving out to
-browsers. (This is to help well-intentioned people avoid accidental copying that
-doesn't comply with the license.)
+### 1. Azure Multi-Tenant Application Setup
 
-Apache header:
+The Data Migration ETA Tool requires a Multi-Tenant Application registration in Azure to interact with resources across different Azure AD tenants.
 
-    Copyright 2024 Google LLC
+1.  **Sign in to Azure Portal:** Go to the [Azure portal](https://portal.azure.com/).
+2.  **Navigate to App registrations:** Search for and select "App registrations".
+3.  **New Registration:** Click **+ New registration**.
+4.  **Name your application:** Enter a descriptive name (e.g., "Data Migration ETA Tool Multi-Tenant App").
+5.  **Supported account types:** Select **"Accounts in any organizational directory (Any Azure AD directory - Multitenant)"**. This allows the application to be used by users in other Azure AD tenants.
+6.  **Redirect URI:** Leave this blank initially, or if your application requires a redirect URI for authentication flows, configure it here (e.g., `http://localhost:33333` for local development).
+7.  **Register:** Click **Register**.
 
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
+### 2. Obtain Application Credentials
 
-        https://www.apache.org/licenses/LICENSE-2.0
+After registration, you need to collect the following credentials from the Azure portal:
 
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
+1.  **Application (Client) ID:** On the "Overview" page of your registered app, copy the value labeled **"Application (client) ID"**. This uniquely identifies your application.
+2.  **Directory (Tenant) ID:** Also on the "Overview" page, copy the value labeled **"Directory (tenant) ID"**. This is the ID of *your* Azure AD tenant where the app is registered.
+3.  **Client Secret:**
+    *   In the left-hand menu of your app registration, go to **"Certificates & secrets"**.
+    *   Under "Client secrets," click **"+ New client secret"**.
+    *   Add a description and choose an expiration period.
+    *   Click **Add**.
+    *   **Crucially, copy the "Value" of the client secret displayed. This is only shown once.** Store this securely; it will be used for authentication.
+
+### 3. Grant API Permissions
+
+The multi-tenant application needs specific permissions to access the necessary resources in Azure.
+
+1.  In your app registration, go to **"API permissions"**.
+2.  Click **"+ Add a permission"**.
+3.  Select **"Microsoft Graph"**.
+4.  Choose **"Application permissions"**. This allows the Data Migration ETA Tool to run as a background service or daemon without a signed-in user.
+5.   Select the *specific* permissions required by the Data Migration ETA Tool. Based on its functionality, you might need permissions like:
+
+    *   `[User.Read.All]`
+    *   `[Directory.Read.All]`
+7.  Click **"Add permissions"**.
+8.  **Grant Admin Consent:** For "Application permissions" to take effect in your tenant, an administrator must grant consent. Click the **"Grant admin consent for Default Directory"** button and confirm. This step is essential for the application to function correctly.
+
+---
+
+## 💻 Installation
+
+Follow these steps to set up your Python environment and install the required dependencies.
+
+### 1. Install Python 3
+
+We recommend using Python 3.9 or higher.
+
+*   **Windows:** Download and run the installer from [python.org](https://www.python.org/downloads/). Ensure "Add Python to PATH" is selected during installation.
+*   **macOS:** Install via Homebrew: `brew install python@3.11`. You might need to update your PATH.
+*   **Linux:** Use your system's package manager: `sudo apt-get update && sudo apt-get install python3 python3-venv` (Debian/Ubuntu).
+
+### 2. Set up a Virtual Environment
+
+It's best practice to use a virtual environment to isolate project dependencies.
+
+1.  Navigate to the project's root directory in your terminal.
+2.  Create the virtual environment:
+    ```bash
+    python3 -m venv .venv
+    ```
+3.  Activate the virtual environment:
+    *   **Windows:** `.venv\Scripts\activate`
+    *   **Linux/macOS:** `source .venv/bin/activate` 
+### 3. Run the Application: Execute the main Python script for the Data Migration ETA Tool.
+
+Replace `data_migration_eta_tool.py` with the actual entry point file.
+
+    python3 data_migration_eta_tool.py
+
+
+### Privacy
+This script is designed to run locally within your environment. It **does not collect, transmit, or store any data** to Google or any third party. Your information and Azure credentials are used only for the execution of the script on your machine.
+
+### Important Considerations
+Any migration time estimates provided or generated by this tool are solely estimates. Actual migration times can be affected by numerous factors, including but not limited to network conditions, data volume, API rate limits, and Azure service performance. Please use these estimates for planning purposes only and prepare for variations.
