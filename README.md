@@ -1,94 +1,224 @@
-# Data Migration ETA Tool
+# Migration Planner Tool
 
-This README provides a guide to setting up, installing, and running the Data Migration ETA Tool.
+**Doc version: v0.5.1**
 
----
+## DISCLAIMER
 
-## 🚀 Overview
+*   The estimations provided by this tool are calculated projections intended for preliminary planning only. Actual migration timelines (ETAs) and wave execution may vary based on real-time network conditions, source/target throttling policies, migration configurations, and the volume of delta migrations. These figures do not constitute a performance guarantee or a binding service level agreement (SLA).
+*   Please note that this release is an experimental feature with limited and evolving functionality.
+*   Partners and/or Customers should **NOT** use this product for production projects where business outcomes rely on the product functionality or timelines.
+*   Partners and/or Customers should **NOT** commit hard migration timelines based on this product.
 
-The Data Migration ETA Tool is a Python-based script that automates the process of analyzing Microsoft Exchange Email, Calendar and Contacts data to estimate the time it will take to migrate this data to Google Workspace.
+### Functionality Limitations
 
----
-
-## 🚦 Prerequisites
-
-To use the Data Migration ETA Tool, you need a Microsoft Azure subscription and administrative access to configure an application in Microsoft Entra ID (formerly Azure Active Directory).
-
-### 1. Azure Multi-Tenant Application Setup
-
-The Data Migration ETA Tool requires a Multi-Tenant Application registration in Azure to interact with resources across different Azure AD tenants.
-
-1.  **Sign in to Azure Portal:** Go to the [Azure portal](https://portal.azure.com/).
-2.  **Navigate to App registrations:** Search for and select "App registrations".
-3.  **New Registration:** Click **+ New registration**.
-4.  **Name your application:** Enter a descriptive name (e.g., "Data Migration ETA Tool Multi-Tenant App").
-5.  **Supported account types:** Select **"Accounts in any organizational directory (Any Azure AD directory - Multitenant)"**. This allows the application to be used by users in other Azure AD tenants.
-6.  **Redirect URI:** Leave this blank initially, or if your application requires a redirect URI for authentication flows, configure it here (e.g., `http://localhost:33333` for local development).
-7.  **Register:** Click **Register**.
-
-### 2. Obtain Application Credentials
-
-After registration, you need to collect the following credentials from the Azure portal:
-
-1.  **Application (Client) ID:** On the "Overview" page of your registered app, copy the value labeled **"Application (client) ID"**. This uniquely identifies your application.
-2.  **Directory (Tenant) ID:** Also on the "Overview" page, copy the value labeled **"Directory (tenant) ID"**. This is the ID of *your* Azure AD tenant where the app is registered.
-3.  **Client Secret:**
-    *   In the left-hand menu of your app registration, go to **"Certificates & secrets"**.
-    *   Under "Client secrets," click **"+ New client secret"**.
-    *   Add a description and choose an expiration period.
-    *   Click **Add**.
-    *   **Crucially, copy the "Value" of the client secret displayed. This is only shown once.** Store this securely; it will be used for authentication.
-
-### 3. Grant API Permissions
-
-The multi-tenant application needs specific permissions to access the necessary resources in Azure.
-
-1.  In your app registration, go to **"API permissions"**.
-2.  Click **"+ Add a permission"**.
-3.  Select **"Microsoft Graph"**.
-4.  Choose **"Application permissions"**. This allows the Data Migration ETA Tool to run as a background service or daemon without a signed-in user.
-5.   Select the *specific* permissions required by the Data Migration ETA Tool. Based on its functionality, you might need permissions like:
-
-    *   `[User.Read.All]`
-    *   `[Directory.Read.All]`
-7.  Click **"Add permissions"**.
-8.  **Grant Admin Consent:** For "Application permissions" to take effect in your tenant, an administrator must grant consent. Click the **"Grant admin consent for Default Directory"** button and confirm. This step is essential for the application to function correctly.
+*   This tool only provides migration time estimates for the new Data Migration Service with specific enhancements for large scale migrations. It does not cover Google Workspace Migrate, or any other data migration tool.
+*   Only Microsoft Exchange Online scan and migration planning is supported. And ETAs are based on Email corpus only.
+*   This tool only provides a guesstimate, and migration timelines should in no way be taken as guarantee or SLA.
 
 ---
 
-## 💻 Installation
+## Table of Contents
 
-Follow these steps to set up your Python environment and install the required dependencies.
+1.  [Introduction](#introduction)
+2.  [Prerequisites & Installation](#prerequisites--installation)
+3.  [Setting up Microsoft Azure](#setting-up-microsoft-azure)
+4.  [Running the Tool](#running-the-tool)
+5.  [Tool Configuration & Scanning](#tool-configuration--scanning)
+6.  [Understanding the Results](#understanding-the-results)
+7.  [Outputs & Artifacts](#outputs--artifacts)
+8.  [Terms & Disclaimer](#terms--disclaimer)
 
-### 1. Install Python 3
+---
 
-We recommend using Python 3.9 or higher.
+## Introduction
 
-*   **Windows:** Download and run the installer from [python.org](https://www.python.org/downloads/). Ensure "Add Python to PATH" is selected during installation.
-*   **macOS:** Install via Homebrew: `brew install python@3.11`. You might need to update your PATH.
-*   **Linux:** Use your system's package manager: `sudo apt-get update && sudo apt-get install python3 python3-venv` (Debian/Ubuntu).
+The Migration Planner is a desktop application designed to help deployment partners and IT administrators assess a Microsoft Exchange Online tenant before migration. It scans source data (Emails, Contacts, Calendars) to provide accurate volume metrics and generates an optimized Migration Wave Plan with estimated completion times (ETAs).
 
-### 2. Set up a Virtual Environment
+---
 
-It's best practice to use a virtual environment to isolate project dependencies.
+## Prerequisites & Installation
 
-1.  Navigate to the project's root directory in your terminal.
-2.  Create the virtual environment:
-    ```bash
-    python3 -m venv .venv
+### 1. Python Version
+
+Please ensure you have **Python 3.10** or newer installed on your system.
+
+### 2. Installation Steps
+
+#### Windows
+1.  **Download Python**: Visit [python.org/downloads](https://www.python.org/downloads/) and download the latest installer.
+    *   **Important**: Ensure the checkbox **"tcl/tk and IDLE"** is selected during installation (it is usually selected by default). This installs the necessary GUI components.
+    *   **Important**: Check the box **"Add Python to PATH"** during installation.
+2.  **Verify Installation**: Open Command Prompt (cmd) or PowerShell and run:
+    ```cmd
+    python --version
+    pip --version
     ```
-3.  Activate the virtual environment:
-    *   **Windows:** `.venv\Scripts\activate`
-    *   **Linux/macOS:** `source .venv/bin/activate` 
-### 3. Run the Application: Execute the main Python script for the Data Migration ETA Tool.
+3.  **Install Dependencies**: Run the following command:
+    ```cmd
+    pip install customtkinter requests pandas psutil Pillow urllib3
+    ```
 
-Replace `data_migration_eta_tool.py` with the actual entry point file.
+#### macOS
+1.  **Download Python**: Visit [python.org/downloads](https://www.python.org/downloads/) and download the macOS installer. Alternatively, use Homebrew from the terminal (`brew install python`).
+2.  **Install Tkinter**: If you are using Homebrew or encounter GUI errors, install the Tkinter library:
+    ```bash
+    brew install python-tk
+    ```
+3.  **Verify Installation**: Open Terminal and run:
+    ```bash
+    python3 --version
+    pip3 --version
+    ```
+4.  **Install Dependencies**:
+    ```bash
+    pip3 install customtkinter requests pandas psutil Pillow urllib3
+    ```
 
-    python3 data_migration_eta_tool.py
+#### Linux (Ubuntu/Debian)
+1.  **Install Python**: Python is usually pre-installed. If not, run:
+    ```bash
+    sudo apt-get update
+    sudo apt-get install python3 python3-pip
+    ```
+2.  **Install Tkinter**: Linux often requires the separate Tkinter package:
+    ```bash
+    sudo apt-get install python3-tk
+    ```
+3.  **Install Dependencies**:
+    ```bash
+    pip3 install customtkinter requests pandas psutil Pillow urllib3
+    ```
 
+### 3. Setting up a Virtual Environment (Optional / Corp Policy)
 
-### Privacy
-This script is designed to run locally within your environment. It **does not collect, transmit, or store any data** to Google or any third party. Your information and Azure credentials are used only for the execution of the script on your machine.
+If your organization restricts installing packages globally, use a virtual environment:
 
-### Important Considerations
-Any migration time estimates provided or generated by this tool are solely estimates. Actual migration times can be affected by numerous factors, including but not limited to network conditions, data volume, API rate limits, and Azure service performance. Please use these estimates for planning purposes only and prepare for variations.
+1.  **Create the environment**:
+    ```bash
+    # Windows
+    python -m venv venv
+
+    # Mac/Linux
+    python3 -m venv venv
+    ```
+2.  **Activate the environment**:
+    *   Windows: `.\venv\Scripts\activate`
+    *   Mac/Linux: `source venv/bin/activate`
+3.  **Install packages** as shown above inside this environment.
+
+---
+
+## Setting up Microsoft Azure
+
+To scan your tenant, you need to register an app in the Microsoft Entra ID (formerly Azure AD) portal.
+
+### 1. Register the App
+1.  Go to [portal.azure.com](https://portal.azure.com/).
+2.  Navigate to **Microsoft Entra ID > App registrations > New registration**.
+3.  Name the app (e.g., "Migration Planner Tool").
+4.  Select **"Accounts in this organizational directory only"** (Single Tenant).
+5.  Click **Register**.
+
+### 2. Grant Permissions
+1.  In your new app, go to **API permissions > Add a permission > Microsoft Graph**.
+2.  Select **Application permissions** (NOT Delegated).
+3.  Search for and select these four permissions:
+    *   `User.Read.All` (To list users)
+    *   `Mail.Read` (To count emails)
+    *   `Contacts.Read` (To count contacts)
+    *   `Calendars.Read` (To count calendar events)
+4.  Click **Add permissions**.
+5.  **Crucial Step**: Click **"Grant admin consent for [Your Organization]"** and confirm "Yes". All status icons should turn green.
+
+### 3. Get Credentials
+You will need three values for the tool:
+1.  **Tenant ID**: Found on the app's Overview page ("Directory (tenant) ID").
+2.  **Client ID**: Found on the app's Overview page ("Application (client) ID").
+3.  **Client Secret**:
+    *   Go to **Certificates & secrets > New client secret**.
+    *   Add a description and click **Add**.
+    *   Copy the **"Value"** immediately (you won't see it again).
+
+---
+
+## Running the Tool
+
+1.  Open your terminal or command prompt.
+2.  Navigate to the folder containing the script:
+    ```bash
+    cd path/to/migration_planner
+    ```
+3.  Run the script:
+    *   Windows: `python migration_planner.py`
+    *   Mac/Linux: `python3 migration_planner.py`
+    *(Ensure you are in your virtual environment if you created one).*
+
+---
+
+## Tool Configuration & Scanning
+
+### 1. Connect & Source Selection
+*   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret.
+*   **User Source**:
+    *   **Scan All Users**: Automatically fetches every user in your tenant.
+    *   **Upload CSV**: Allows you to scan a specific subset of users or pre-load existing counts.
+    *   **CSV Format**: Must contain a header **Email Id** (e.g., `user@domain.com`).
+    *   **Smart Delta Scan**: If your CSV already contains columns like `Email Count`, `Contact Count` or `Calendar Count` and `Calendar Event Count`, the tool will skip scanning those specific items and use your provided numbers, speeding up the process significantly.
+
+### 2. Advanced Settings
+Click **"Show Advanced Settings"** to tune the performance:
+*   **Sources**: Check/Uncheck Emails, Contacts, or Calendars to define what you want to scan.
+*   **Concurrency**: Controls how many parallel threads the tool runs.
+    *   **Recommendation**: For a standard machine (8 Core, 16GB+ RAM), set this to **30**. Setting it too high may cause more frequent throttling errors from Microsoft and consume more resources from your system.
+*   **Max Waves**: Defines the upper cap for the number of waves to be generated by the migration plan. In case of very large corpuses, it might not be possible to adhere to this number.
+
+### 3. Starting the Scan
+Click **"Get Migration Estimates"**.
+*   A disclaimer will appear noting that results are estimates. Click **OK** to proceed.
+*   The tool will verify your credentials and permissions before starting.
+
+### 4. The Scan Page
+Once started, you will see a real-time progress screen:
+*   **Spinners**: Indicate active scanning phases.
+*   **Progress Bars**: Show percentage completion for Users, Emails, Contacts, and Calendars.
+*   **Live Counts**: Updates in real-time as items are discovered.
+
+---
+
+## Understanding the Results
+
+### 1. Top Level Metrics
+The top cards display the total scope of the migration:
+*   **Users**: Total distinct users identified/scanned.
+*   **Emails / Events / Contacts**: The aggregate sum of items across all users.
+
+### 2. Timeline Estimates & Parallel Waves
+The tool calculates an Estimated Completion Time (ETA) based on the email corpus using a heuristic based logic:
+*   **User Ordering**: Users are sorted in Ascending Order (Lightest users -> Heaviest users). The lightest users are packed into Wave 1, while the heaviest users usually end up in the final waves.
+*   The sorting logic is determined by:
+    $$ \text{Sorting Logic} = \max(\text{Emails}, (\text{Calendar Events} + \text{Contacts})) $$
+*   **Wave ETAs**: Calculated based on the email corpus present in the wave.
+*   **Bucketing**: Waves are distributed into Parallel Buckets.
+    *   **Example**: If you selected 4 parallel waves, the tool creates 4 "lanes". As soon as Wave 1 finishes in Lane 1, Wave 5 immediately starts in that same lane.
+*   The total ETA is calculated as follows:
+    $$ \text{Total ETA} = \text{The duration of the single longest bucket (lane)} $$
+
+---
+
+## Outputs & Artifacts
+
+Once the scan completes, the tool creates a folder in the `/outputs` directory named with the current timestamp (e.g., `/outputs/20240520_143000/`).
+
+It contains:
+1.  **User Report (user_report.csv)**: A master list of all users, their item counts, and their suggested Wave (e.g., "Wave 1").
+2.  **Wave Files (suggested waves/)**: Individual CSV files (Wave1.csv, Wave2.csv) ready for use in migration tool. Headers are formatted as **Source Exchange Email**.
+3.  **Logs (logs.log)**: Detailed execution logs, including system performance (CPU/RAM) and any API errors encountered.
+
+You can also download just the log file via the **"Export logs"** button or the user report via the **"Export full report"** button and save them in a custom location on your system.
+
+---
+
+## Terms & Disclaimer
+
+*   **Estimates Only**: The estimations provided by this tool are calculated projections intended for preliminary planning only. Actual migration timelines (ETAs) and wave execution may vary based on network latencies, Microsoft/Google throttling policies, migration configurations, data complexity (e.g., large attachments) and the volume of delta migrations. These figures do not constitute a performance guarantee or a binding service level agreement (SLA).
+*   **Security**: This tool runs locally. No credentials or user data are sent to any external server other than the direct Microsoft Graph API calls required to fetch the counts.
