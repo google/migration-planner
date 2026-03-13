@@ -1325,9 +1325,9 @@ class MigrationEstimatorTool(ctk.CTk):
       disclaimer = (
           "* The estimations provided by this tool are calculated projections"
           " intended for preliminary planning only. Actual migration timelines"
-          " (ETAs) and wave execution may vary based on real-time network"
+          " (ETAs) and wave execution may vary based on, for example, real-time network"
           " conditions, source/target throttling policies, migration"
-          " configurations, and the volume of delta migrations. These figures"
+          " configurations, and the volume of delta migrations. The estimations"
           " do not constitute a performance guarantee or a binding service"
           " level agreement (SLA)."
       )
