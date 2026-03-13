@@ -941,7 +941,7 @@ class MigrationEstimatorTool(ctk.CTk):
     ctk.CTkLabel(
         status_container,
         text=(
-            " Data stays local. We never transmit credentials or data"
+            " Data stays on your device. We never transmit credentials or data"
             " externally."
         ),
         font=FONT_BODY_MEDIUM,
