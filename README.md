@@ -68,7 +68,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
 1.  **Download Python**: Visit [python.org/downloads](https://www.python.org/downloads/) and download the latest installer.
     *   **Important**: Ensure the checkbox **"tcl/tk and IDLE"** is selected during installation (it is usually selected by default). This installs the necessary GUI components.
     *   **Important**: Check the box **"Add Python to PATH"** during installation.
-2.  **Verify Installation**: Open Command Prompt (cmd) or PowerShell and run:
+2.  **Verify Installation**: Open Command Prompt (cmd) or PowerShell and make sure the following commands run successfully and return you the version ids of python and pip:
     ```cmd
     python --version
     pip --version
@@ -80,11 +80,11 @@ Please ensure you have **Python 3.10** or newer installed on your system.
 
 #### macOS
 1.  **Download Python**: Visit [python.org/downloads](https://www.python.org/downloads/) and download the macOS installer. Alternatively, use Homebrew from the terminal (`brew install python`).
-2.  **Install Tkinter**: If you are using Homebrew or encounter GUI errors, install the Tkinter library:
+2.  **Install Tkinter**: If you are using Homebrew or encounter GUI errors, you may need to explicitly install the Tkinter library:
     ```bash
     brew install python-tk
     ```
-3.  **Verify Installation**: Open Terminal and run:
+3.  **Verify Installation**: Open Command Prompt (cmd) or PowerShell and make sure the following commands run successfully and return you the version ids of python and pip:
     ```bash
     python3 --version
     pip3 --version
@@ -215,14 +215,11 @@ The top cards display the total scope of the migration:
 ### 2. Timeline Estimates & Parallel Waves
 The tool calculates an Estimated Completion Time (ETA) based on the email corpus using a heuristic based logic:
 *   **User Ordering**: Users are sorted in Ascending Order (Lightest users -> Heaviest users). The lightest users are packed into Wave 1, while the heaviest users usually end up in the final waves.
-*   The sorting logic is determined by:
-    **Sorting Logic** = max(Emails, (Calendar Events + Contacts))
+*   Max(Emails , (Calendar Events + Contacts)) determines the sorting logic.
 *   **Wave ETAs**: Calculated based on the email corpus present in the wave.
 *   **Bucketing**: Waves are distributed into Parallel Buckets.
     *   **Example**: If you selected 4 parallel waves, the tool creates 4 "lanes". As soon as Wave 1 finishes in Lane 1, Wave 5 immediately starts in that same lane.
-*   The total ETA is calculated as follows:
-
-    **Total ETA** = The duration of the single longest bucket (lane)
+*   **Total ETA** = The duration of the single longest bucket(lane).
 
 ---
 
