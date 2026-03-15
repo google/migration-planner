@@ -216,12 +216,13 @@ The top cards display the total scope of the migration:
 The tool calculates an Estimated Completion Time (ETA) based on the email corpus using a heuristic based logic:
 *   **User Ordering**: Users are sorted in Ascending Order (Lightest users -> Heaviest users). The lightest users are packed into Wave 1, while the heaviest users usually end up in the final waves.
 *   The sorting logic is determined by:
-    $$ \text{Sorting Logic} = \max(\text{Emails}, (\text{Calendar Events} + \text{Contacts})) $$
+    **Sorting Logic** = max(Emails, (Calendar Events + Contacts))
 *   **Wave ETAs**: Calculated based on the email corpus present in the wave.
 *   **Bucketing**: Waves are distributed into Parallel Buckets.
     *   **Example**: If you selected 4 parallel waves, the tool creates 4 "lanes". As soon as Wave 1 finishes in Lane 1, Wave 5 immediately starts in that same lane.
 *   The total ETA is calculated as follows:
-    $$ \text{Total ETA} = \text{The duration of the single longest bucket (lane)} $$
+
+    **Total ETA** = The duration of the single longest bucket (lane)
 
 ---
 
