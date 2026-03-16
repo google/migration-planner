@@ -4,7 +4,7 @@
 
 ## DISCLAIMER
 
- *   The estimations provided by this tool are calculated projections intended for preliminary planning only. Actual migration timelines (ETAs) and wave execution may vary based on real-time network conditions, source/target throttling policies, migration configurations, and the volume of delta migrations. These figures do not constitute a performance guarantee or a binding service level agreement (SLA).
+ *   The estimations provided by this tool are calculated projections intended for preliminary planning only. Actual migration timelines (ETAs) and wave execution may vary based on real-time network conditions, source/target throttling policies, migration configurations, and the volume of delta migrations. The estimations do not constitute a performance guarantee or a binding service level agreement (SLA).
 *   Please note that this release is an experimental feature with limited and evolving functionality.
 *   Partners and/or Customers should **NOT** use this product for production projects where business outcomes rely on the product functionality or timelines.
 *   Partners and/or Customers should **NOT** commit hard migration timelines based on this product.
