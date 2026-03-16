@@ -23,7 +23,6 @@ import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import io
 import json
 import math
 import os
@@ -35,11 +34,9 @@ from tkinter import filedialog, messagebox
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 import webbrowser
-import zlib
 
 import customtkinter as ctk
 import pandas as pd
-from PIL import Image, ImageTk
 import psutil
 import requests
 from requests.adapters import HTTPAdapter
@@ -53,7 +50,7 @@ from urllib3.util.retry import Retry
 # --- API Configuration ---
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 TOKEN_URL_TEMPLATE = "https://login.microsoftonline.com/{0}/oauth2/v2.0/token"
-MAX_RETRIES = 15
+MAX_RETRIES = 30
 BACKOFF = 2
 SHOW_LOAD_MULTIPLIER = False
 
@@ -108,15 +105,9 @@ ETA_CONTACT_USER_LIMIT = 1
 ETA_CONTACT_BATCH_SIZE = 10
 ETA_CONTACT_BATCH_TIME = 25
 
-# --- Icons ---
-GOOGLE_ICON_DATA = """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"""
-ADMIN_CONSOLE_ICON_DATA = GOOGLE_ICON_DATA
-
-
 # =================================================================================
 # CONFIGURATION
 # =================================================================================
-
 
 @dataclass
 class ScanConfig:
@@ -673,7 +664,7 @@ def fetch_calendar_events(
   """Fetches event counts for a list of calendars."""
   total_events = 0
   batch_url = f"{GRAPH_BASE_URL}/$batch"
-  batch_size = 4  # Reduced to 4 to respect per-mailbox concurrency limits
+  batch_size = 4  # Since these are effectively concurrent calls within a mailbox, maintain at < 4.
   for i in range(0, len(calendars), batch_size):
     if stop_event and stop_event.is_set():
       break
@@ -757,7 +748,6 @@ class MigrationEstimatorTool(ctk.CTk):
     self.configure(fg_color=COLOR_BACKGROUND)
     self.title("Migration Planner")
     self.geometry("950x900")
-    self.set_app_icon()
 
     self.log_queue = queue.Queue()
     self.log_buffer = []
@@ -792,42 +782,11 @@ class MigrationEstimatorTool(ctk.CTk):
     self.parallel_waves = ctk.IntVar(value=10)
     self.scan_result_csv_path = ctk.StringVar()
 
-  def set_app_icon(self):
-    """Loads and sets the application icon."""
-    try:
-      compressed_image_data = base64.b64decode(GOOGLE_ICON_DATA)
-      image_data = zlib.decompress(compressed_image_data)
-      image = Image.open(io.BytesIO(image_data))
-
-      compressed_icon_data = base64.b64decode(ADMIN_CONSOLE_ICON_DATA)
-      icon_data = zlib.decompress(compressed_icon_data)
-      icon = Image.open(io.BytesIO(icon_data))
-
-      # 1. Set Window Icon
-      self.wm_iconphoto(True, ImageTk.PhotoImage(icon))
-
-      # 2. Store for UI
-      self.app_icon_image = ctk.CTkImage(
-          light_image=image, dark_image=image, size=(48, 48)
-      )
-    except Exception as e:
-      print(f"Warning: Could not load embedded icon: {e}")
-      self.app_icon_image = None
-
   def create_widgets(self):
     """Creates the main UI layout."""
     # --- HEADER ---
     self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
     self.header_frame.pack(fill="x", padx=30, pady=(20, 10))
-
-    # Branding
-    branding_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
-    branding_frame.pack(anchor="w")
-
-    if hasattr(self, "app_icon_image") and self.app_icon_image:
-      ctk.CTkLabel(branding_frame, text="", image=self.app_icon_image).pack(
-          side="left", padx=(0, 10)
-      )
 
     # Title
     ctk.CTkLabel(
@@ -941,7 +900,7 @@ class MigrationEstimatorTool(ctk.CTk):
     ctk.CTkLabel(
         status_container,
         text=(
-            " Data stays on your device. We never transmit credentials or data"
+            " Data stays local. We never transmit credentials or data"
             " externally."
         ),
         font=FONT_BODY_MEDIUM,
@@ -1325,9 +1284,9 @@ class MigrationEstimatorTool(ctk.CTk):
       disclaimer = (
           "* The estimations provided by this tool are calculated projections"
           " intended for preliminary planning only. Actual migration timelines"
-          " (ETAs) and wave execution may vary based on, for example, real-time network"
+          " (ETAs) and wave execution may vary based on real-time network"
           " conditions, source/target throttling policies, migration"
-          " configurations, and the volume of delta migrations. The estimations"
+          " configurations, and the volume of delta migrations. These figures"
           " do not constitute a performance guarantee or a binding service"
           " level agreement (SLA)."
       )
@@ -2634,7 +2593,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
     with self.log_lock:
       log_content = "\n".join(self.log_buffer)
-    with open(logs_path, "w") as f:
+    with open(logs_path, "w", encoding="utf-8") as f:
       f.write(log_content)
 
     result_data = {
