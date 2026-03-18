@@ -2090,7 +2090,7 @@ class MigrationEstimatorTool(ctk.CTk):
         " intended for preliminary planning only. Actual migration timelines"
         " (ETAs) and wave execution may vary based on real-time network"
         " conditions, source/target throttling policies, migration"
-        " configurations, and the volume of delta migrations. These figures do"
+        " configurations, and the volume of delta migrations. The estimates do"
         " not constitute a performance guarantee or a binding service level"
         " agreement (SLA)."
     )
