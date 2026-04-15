@@ -4,7 +4,7 @@ import threading
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 from typing import Any, Callable, Dict, List, Optional
-from util.utils import get_success_responses, get_failed_responses
+from util.utils import get_success_responses, get_failed_responses_that_can_be_retried
 import requests
 import queue
 import time
@@ -212,7 +212,6 @@ class UrlInvoker():
         stop_event: Optional[threading.Event] = None,
         context: str = ""
     ) -> List[Dict[str, Any]]:
-        print(" Inside URL Invoker ")
 
         token_data = self.token_manager.get_valid_token_slot(logger)
         session = self.token_manager.get_session()
@@ -226,7 +225,7 @@ class UrlInvoker():
 
         retry_count = 0
         while retry_count < self.batch_retry_count:
-            print(f"Retry Count: {retry_count}")
+            print(f"Retry Count: {retry_count} for url {curr_batch[0]['url']}")
             responses = self.execute_batch_request(
                     session,
                     batch_url,
@@ -239,10 +238,10 @@ class UrlInvoker():
                 )
             
             final_responses += get_success_responses(responses)
-            failed_responses = get_failed_responses(responses)
-            failed_response_ids = [id for id, response in responses.items() if response.get("status") != 200]
+            failed_responses = get_failed_responses_that_can_be_retried(responses)
+            failed_response_ids = [response["id"] for response in failed_responses]
 
-            curr_batch = [request for request in curr_batch if request["id"] in failed_response_ids]
+            curr_batch = [request for request in curr_batch if str(request["id"]) in failed_response_ids]
 
             if len(failed_responses) > 0:
                wait_time = self.initial_delay * pow(self.batch_backoff, retry_count) + random.uniform(0, self.jitter)
@@ -252,7 +251,9 @@ class UrlInvoker():
               break
 
         if len(failed_responses) > 0:
-           logger(f"Consistent failures observed for the following urls: {",".join(response.get("url") for response in failed_responses)}")
+           logger(f"Consistent failures observed for the following: {",".join(response.get("body") for response in failed_responses)}")
+
+        self.token_manager.return_token_slot(token_data)
 
         return final_responses
 

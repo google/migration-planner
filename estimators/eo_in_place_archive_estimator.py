@@ -1,4 +1,6 @@
 from typing import Any, Callable, Dict, List, Optional
+
+import concurrent
 from estimators.estimator import Estimator
 from util.connectors import TokenManager
 from util.connectors import UrlInvoker
@@ -8,6 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
 from util.utils import create_batches
 from util.atomic_int import AtomicInt
 import json
+import time
+
+GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
 TOKEN_URL_TEMPLATE = "https://login.microsoftonline.com/{0}/oauth2/v2.0/token"
 GRAPH_BETA_URL = "https://graph.microsoft.com/beta"
@@ -27,6 +32,7 @@ class EOInPlaceArchiveEstimator(Estimator):
         self.url_invoker = url_invoker
         self.logger = logger
         self.stop_event = stop_event
+        self.archive_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
 
     def calculate_migration_eta(self, data):
         # Implementation for calculating migration ETA
@@ -54,16 +60,21 @@ class EOInPlaceArchiveEstimator(Estimator):
         user_id_maps = [{"userId": user_id} for user_id in user_ids]
         user_batches = create_batches(exchange_api, user_id_maps, self.config.parallel_batches)
         
+        futures = []
         for batch in user_batches:
-            responses = self.url_invoker.invoke(GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
-            print(",".join([str(response) for response in responses]))
-            for response in responses:
-                if "body" not in response:
-                    continue
-                if "inPlaceArchiveMailboxId" not in response["body"]:
-                    continue
-                
-                mail_box_ids.append(response["body"]["inPlaceArchiveMailboxId"])
+            futures.append(self.archive_executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type()))
+
+        responses = []
+        for future in futures:
+            responses += future.result()
+
+        for response in responses:
+            if "body" not in response:
+                continue
+            if "inPlaceArchiveMailboxId" not in response["body"]:
+                continue
+            
+            mail_box_ids.append(response["body"]["inPlaceArchiveMailboxId"])
 
         # Start the BFS crawl
         return self.parse_and_count_in_place_archive_mail_box(mail_box_ids)
@@ -76,8 +87,15 @@ class EOInPlaceArchiveEstimator(Estimator):
         top_level_folders: Dict[str, List[Dict[str, Any]]] = {}      # Map of Mail box to top level folder list.
         mail_box_batches = create_batches(folder_api, mail_box_id_maps, self.config.parallel_batches, True)
 
+        futures = []
         for batch in mail_box_batches:
-            responses = self.url_invoker.invoke(GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+            futures.append(self.archive_executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type()))
+        
+        response_list = []
+        for future in futures:
+            response_list.append(future.result())
+        
+        for responses in response_list:
             group_responses_by_key(top_level_folders, batch, responses, "mailboxId")
 
         # Maintaining a global count of mails to avoid waiting for each thread
@@ -92,12 +110,10 @@ class EOInPlaceArchiveEstimator(Estimator):
 
         # TODO Add support for a thread count per user for progress bars
 
-        archive_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
         condition = threading.Condition()
         
         self.submit_child_folder_requests_to_executor (
             condition,
-            archive_executor,
             top_level_folders,
             archived_mail_count,
             active_thread_count
@@ -117,7 +133,6 @@ class EOInPlaceArchiveEstimator(Estimator):
     def parse_and_count_mails_in_child_folders(
             self,
             condition: threading.Condition, 
-            archive_executor: ThreadPoolExecutor, 
             folders: Dict[str, List[Dict[str, Any]]], 
             archived_mail_count: Dict[str, AtomicInt], 
             active_thread_count: AtomicInt,
@@ -129,7 +144,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             for folder in folder_list:
                 mail_box_id_to_folder_id.append({"mailBoxId": mail_box_id, "folderId": folder["id"]})
         
-        batches = create_batches(child_folder_api, mail_box_id_to_folder_id, self.config.parallel_batches, True)
+        batches = create_batches(child_folder_api, mail_box_id_to_folder_id, self.config.hierarchial_crawl_batch_limit, True)
 
         child_folders: Dict[str, List[Dict[str, Any]]] = {}
         
@@ -139,7 +154,6 @@ class EOInPlaceArchiveEstimator(Estimator):
 
         self.submit_child_folder_requests_to_executor (
             condition,
-            archive_executor,
             child_folders,
             archived_mail_count,
             active_thread_count
@@ -152,7 +166,6 @@ class EOInPlaceArchiveEstimator(Estimator):
     def submit_child_folder_requests_to_executor (
         self,
         condition: threading.Condition,
-        archive_executor: ThreadPoolExecutor,
         child_folders: Dict[str, List[Dict[str, Any]]],
         archived_mail_count: Dict[str, AtomicInt],
         active_thread_count: AtomicInt
@@ -172,7 +185,7 @@ class EOInPlaceArchiveEstimator(Estimator):
                 active_thread_count.increment()
 
                 #TODO Use a retry template and failure callback instead of try, except
-                archive_executor.submit(self.parse_and_count_mails_in_child_folders, condition, archive_executor, parseable_sub_folders, archived_mail_count, active_thread_count)
+                self.archive_executor.submit(self.parse_and_count_mails_in_child_folders, condition, parseable_sub_folders, archived_mail_count, active_thread_count)
             except:
                 active_thread_count.decrement()
                 with condition:

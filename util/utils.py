@@ -19,6 +19,9 @@ class ScanConfig:
   backoff: int
   eta_max_users: int
   parallel_batches: int
+  hierarchial_crawl_batch_limit: int = 4
+
+RETRYABLE_ERROR_CODES = [429, 500, 502, 503, 504]
 
 def create_batches(
     api: str, 
@@ -84,6 +87,9 @@ def get_success_responses(responses: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def get_failed_responses(responses: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [response for response in responses.values() 
-            if "body" in response and not (response["status"] >= 200 and 
+            if not (response["status"] >= 200 and 
             response["status"] < 300)]
 
+def get_failed_responses_that_can_be_retried(responses: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [response for response in responses.values() 
+            if "body" in response and response["status"] in RETRYABLE_ERROR_CODES]
