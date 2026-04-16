@@ -107,7 +107,6 @@ def get_failed_responses_that_can_be_retried(responses: Dict[str, Any]) -> List[
     return [response for response in responses.values() 
             if "body" in response and response["status"] in RETRYABLE_ERROR_CODES]
 
-
 def get_relative_url(url: str, base_url: str) -> str:
     if url.startswith(base_url):
         rel = url[len(base_url):]
