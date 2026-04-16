@@ -23,11 +23,11 @@ class EOGroupMailBoxEstimator(Estimator):
         self.stop_event = stop_event
         self.archive_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
 
-    def calculate_resource_count(self, data):
-        user_ids = [entry["user_id"] for entry in data]
+    def calculate_resource_count(self, data: Dict[str, Any]) -> Dict[str, int]:
+        user_ids: List[str] = data["user_ids"]
         return self.get_group_mail_box_count(user_ids)
 
-    def calculate_migration_eta(self, data):
+    def calculate_migration_eta(self, data: Dict[str, Any]) -> Dict[str, int]:
         return super().calculate_migration_eta(data)
     
     def get_resource_type(self):
@@ -42,7 +42,7 @@ class EOGroupMailBoxEstimator(Estimator):
         mailbox_setting_endpoint = "/users/{userId}/mailboxSettings/userPurpose"
         
         batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
-        batch_id_to_future_map: Dict[int, Future] = {}
+        batch_id_to_future_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
         user_id_maps = [{"userId": user_id} for user_id in user_ids]
         user_batches = create_batches(mailbox_setting_endpoint, user_id_maps, self.config.parallel_batches, True)
 
@@ -77,7 +77,7 @@ class EOGroupMailBoxEstimator(Estimator):
             
         granular_request_to_response_pairs = create_request_to_response_map(batch_id_to_batch_map, batch_id_to_responses_map)
 
-        group_mailbox_to_count = {}
+        group_mailbox_to_count: Dict[str, int] = {}
         for request_response_pair in granular_request_to_response_pairs:
             request = request_response_pair.request
             response = request_response_pair.response

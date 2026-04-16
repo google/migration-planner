@@ -156,7 +156,7 @@ def create_request_to_response_map(
         batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]], 
         batch_id_to_responses_map: Dict[int, List[Dict[str, Any]]]
     ) -> List[RequestResponsePair]:
-    request_to_response_map_list = []
+    request_to_response_map_list: List[RequestResponsePair] = []
 
     for batch_id, batch in batch_id_to_batch_map.items():
         batch_response = batch_id_to_responses_map[batch_id]
