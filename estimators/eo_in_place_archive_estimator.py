@@ -1,16 +1,13 @@
 from typing import Any, Callable, Dict, List, Optional
 
-import concurrent
 from estimators.estimator import Estimator
 from util.connectors import TokenManager
 from util.connectors import UrlInvoker
 from util.utils import ScanConfig, group_responses_by_key
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from util.utils import create_batches
 from util.atomic_int import AtomicInt
-import json
-import time
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
@@ -34,9 +31,8 @@ class EOInPlaceArchiveEstimator(Estimator):
         self.stop_event = stop_event
         self.archive_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
 
-    def calculate_migration_eta(self, data):
-        # Implementation for calculating migration ETA
-        pass
+    def calculate_migration_eta(self, data: Dict[str, Any]) -> Dict[str, int]:
+        return {}
 
     def get_resource_type(self):
         return "EO_IN_PLACE_ARCHIVE"
@@ -48,23 +44,23 @@ class EOInPlaceArchiveEstimator(Estimator):
         @param List of Dictionary of param name to its value
         @returns Dictionary of user id to in-place archived mail count
     """
-    def calculate_resource_count(self, data: List[Dict[str, Any]]) -> Dict[str, int]:
-        user_ids = [entry["user_id"] for entry in data]
+    def calculate_resource_count(self, data: Dict[str, Any]) -> Dict[str, int]:
+        user_ids = data["user_ids"]
         return self.get_in_place_archive_count(user_ids)
 
     def get_in_place_archive_count(self, user_ids: List[str]) -> Dict[str, int]:
         # Fetch the in-place archive mail box id for the user
         exchange_api = "users/{userId}/settings/exchange"
-        mail_box_ids = []
+        mail_box_ids: List[str] = []
         
         user_id_maps = [{"userId": user_id} for user_id in user_ids]
         user_batches = create_batches(exchange_api, user_id_maps, self.config.parallel_batches)
         
-        futures = []
+        futures: List[Future[List[Dict[str, Any]]]] = []
         for batch in user_batches:
             futures.append(self.archive_executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type()))
 
-        responses = []
+        responses: List[Dict[str, Any]] = []
         for future in futures:
             responses += future.result()
 
@@ -87,15 +83,20 @@ class EOInPlaceArchiveEstimator(Estimator):
         top_level_folders: Dict[str, List[Dict[str, Any]]] = {}      # Map of Mail box to top level folder list.
         mail_box_batches = create_batches(folder_api, mail_box_id_maps, self.config.parallel_batches, True)
 
-        futures = []
+        futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
+        batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
+        idx = 0
         for batch in mail_box_batches:
-            futures.append(self.archive_executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type()))
+            futures_map[idx] = self.archive_executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+            batch_id_to_batch_map[idx] = batch
+            idx += 1
+
+        response_map: Dict[int, List[Dict[str, Any]]] = {}
+        for batch_id, future in futures_map.items():
+            response_map[batch_id] = future.result()
         
-        response_list = []
-        for future in futures:
-            response_list.append(future.result())
-        
-        for responses in response_list:
+        for batch_id, responses in response_map.items():
+            batch = batch_id_to_batch_map[batch_id]
             group_responses_by_key(top_level_folders, batch, responses, "mailboxId")
 
         # Maintaining a global count of mails to avoid waiting for each thread
@@ -124,7 +125,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             with condition:
                 condition.wait()
 
-        mail_count = {}
+        mail_count: Dict[str, int] = {}
         for mail_box_id, count in archived_mail_count.items():
             mail_count[mail_box_id] = count.get_value()
 
@@ -139,7 +140,7 @@ class EOInPlaceArchiveEstimator(Estimator):
     ) -> None:
         child_folder_api = "admin/exchange/mailboxes/{mailBoxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount"
 
-        mail_box_id_to_folder_id = []
+        mail_box_id_to_folder_id: List[Dict[str, Any]] = []
         for mail_box_id, folder_list in folders.items():
             for folder in folder_list:
                 mail_box_id_to_folder_id.append({"mailBoxId": mail_box_id, "folderId": folder["id"]})
@@ -148,6 +149,7 @@ class EOInPlaceArchiveEstimator(Estimator):
 
         child_folders: Dict[str, List[Dict[str, Any]]] = {}
         
+        # Using sequential processing here as each batch would have 4 requests which is = throttling quota of same mailbox requests.
         for batch in batches:
             responses = self.url_invoker.invoke(GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
             group_responses_by_key(child_folders, batch, responses, "mailBoxId")
@@ -171,7 +173,7 @@ class EOInPlaceArchiveEstimator(Estimator):
         active_thread_count: AtomicInt
     ) -> None:
 
-        parseable_sub_folders = {}
+        parseable_sub_folders: Dict[str, List[Dict[str, Any]]] = {}
         for mail_box_id, sub_folders in child_folders.items():
             for sub_folder in sub_folders:
                 archived_mail_count[mail_box_id].increment(sub_folder["totalItemCount"]) if "totalItemCount" in sub_folder else None

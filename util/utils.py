@@ -29,8 +29,8 @@ def create_batches(
     batch_size: int,
     useIdentificationHeaders: bool = False
 ) -> List[List[Dict[str, Any]]]:
-    batches = []
-    batch_requests = []
+    batches: List[List[Dict[str, Any]]] = []
+    batch_requests: List[Dict[str, Any]] = []
     req_id = 0
 
     headers = {
@@ -69,7 +69,7 @@ def group_responses_by_key(
 
     batch_responses_map: Dict[int, Dict[str, Any]] = {int(response["id"]): response for response in batch_responses}
     id_to_request_mapping: Dict[str, Dict[str, Any]] = {}
-    id_to_response_mapping: Dict[str, Dict[str, Any]] = {}
+    id_to_response_mapping: Dict[str, List[Dict[str, Any]]] = {}
 
     for request in batch_requests:
         id_to_request_mapping[request["id"]] = request
