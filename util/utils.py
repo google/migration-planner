@@ -21,6 +21,12 @@ class ScanConfig:
   parallel_batches: int
   hierarchial_crawl_batch_limit: int = 4
 
+@dataclass
+class RequestResponsePair:
+    request: Dict[str, Any]
+    response: Dict[str, Any]
+
+
 RETRYABLE_ERROR_CODES = [429, 500, 502, 503, 504]
 
 def create_batches(
@@ -145,3 +151,18 @@ def process_pagination_responses(
                     next_items.append(next_item)
                     
     return next_items
+
+def create_request_to_response_map(
+        batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]], 
+        batch_id_to_responses_map: Dict[int, List[Dict[str, Any]]]
+    ) -> List[RequestResponsePair]:
+    request_to_response_map_list = []
+
+    for batch_id, batch in batch_id_to_batch_map.items():
+        batch_response = batch_id_to_responses_map[batch_id]
+        temp_request_id_to_response_map = {int(response["id"]): response for response in batch_response}
+
+        for request in batch:
+            request_to_response_map_list.append(RequestResponsePair(request=request, response=temp_request_id_to_response_map[request["id"]]))
+
+    return request_to_response_map_list
