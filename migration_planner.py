@@ -73,6 +73,11 @@ from requests.adapters import HTTPAdapter
 import urllib3
 from urllib3.util.retry import Retry
 
+from estimators.eo_in_place_archive_estimator import EOInPlaceArchiveEstimator
+from estimators.eo_group_mailbox_estimator import EOGroupMailBoxEstimator
+from util.connectors import TokenManager, UrlInvoker
+from util.utils import ScanConfig
+
 # =================================================================================
 # CONSTANTS
 # =================================================================================
@@ -140,26 +145,6 @@ ETA_CONTACT_BATCH_TIME = 25
 # CONFIGURATION
 # =================================================================================
 
-@dataclass
-class ScanConfig:
-  """Holds configuration for the current scan job."""
-
-  tenant_id: str
-  client_ids: List[str]
-  client_secrets: List[str]
-  user_source: str
-  csv_path: str
-  scan_email: bool
-  scan_contact: bool
-  scan_calendar: bool
-  concurrency: int
-  load_multiplier: int
-  retries: int
-  backoff: int
-  eta_max_users: int
-  parallel_batches: int
-
-
 # =================================================================================
 # BACKEND HELPERS
 # =================================================================================
@@ -207,182 +192,6 @@ class ResourceMonitor(threading.Thread):
     avg_ram = sum(self.ram_readings) / len(self.ram_readings)
     max_ram = max(self.ram_readings)
     return avg_cpu, max_cpu, avg_ram, max_ram
-
-
-class TokenManager:
-  """Manages Microsoft Graph API tokens with rotation and concurrency.
-
-  Handles authentication for multiple client applications to distribute
-  load and avoid rate limiting.
-  """
-
-  def __init__(
-      self,
-      tenant_id: str,
-      client_ids: List[str],
-      client_secrets: List[str],
-      concurrency: int,
-      retries: int,
-      backoff: int,
-  ):
-    self.tenant_id = tenant_id
-    self.apps = list(zip(client_ids, client_secrets))
-    self.concurrency = concurrency
-    self.retries = retries
-    self.backoff = backoff
-    self.token_queue: queue.Queue = queue.Queue()
-    self.session = self._create_retry_session()
-    self.tokens: List[Dict[str, Any]] = []
-
-  def _create_retry_session(self) -> requests.Session:
-    """Creates a requests session with retry logic."""
-    session = requests.Session()
-    session.verify = False
-    retries = Retry(
-        total=self.retries,
-        backoff_factor=self.backoff,
-        status_forcelist=[500, 502, 503, 504],
-        allowed_methods=["GET", "POST"],
-    )
-    total_pool_size = len(self.apps) * self.concurrency * 2 + 100
-    adapter = HTTPAdapter(
-        max_retries=retries,
-        pool_connections=total_pool_size,
-        pool_maxsize=total_pool_size,
-    )
-    session.mount("https://", adapter)
-    return session
-
-  def authenticate_all(
-      self,
-      logger: Callable[[str], None],
-      required_scopes: Optional[List[str]] = None,
-  ) -> None:
-    """Authenticates all configured applications and verifies permissions.
-
-    Args:
-        logger: Function to log messages.
-        required_scopes: List of permission scopes required (e.g.,
-          ['User.Read.All']).
-
-    Raises:
-        Exception: If authentication fails or required permissions are missing.
-    """
-    logger(f"Authenticating {len(self.apps)} apps...")
-    url = TOKEN_URL_TEMPLATE.format(self.tenant_id)
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
-    for client_id, client_secret in self.apps:
-      data = {
-          "client_id": client_id,
-          "scope": "https://graph.microsoft.com/.default",
-          "client_secret": client_secret,
-          "grant_type": "client_credentials",
-      }
-      try:
-        resp = self.session.post(url, headers=headers, data=data)
-        resp.raise_for_status()
-
-        token_resp = resp.json()
-        token = token_resp["access_token"]
-        expires_in = token_resp.get("expires_in", 3599)
-
-        token_data = {
-            "token": token,
-            "expires_at": time.time() + int(expires_in) - 900,
-            "client_id": client_id,
-            "client_secret": client_secret,
-        }
-
-        if required_scopes:
-          try:
-            # Decode JWT Payload (No signature verification needed for client-side check)
-            payload_part = token.split(".")[1]
-            payload_part += "=" * (-len(payload_part) % 4)
-            decoded_bytes = base64.urlsafe_b64decode(payload_part)
-            payload = json.loads(decoded_bytes)
-
-            granted_roles = set(payload.get("roles", []))
-            missing = [s for s in required_scopes if s not in granted_roles]
-            if missing:
-              raise Exception(
-                  f"Missing Required Permissions for App {client_id[:5]}...: "
-                  f"{', '.join(missing)}\n"
-                  f"Current Assigned Roles: {', '.join(granted_roles)}\n"
-                  "Please grant these Application permissions in Azure Portal."
-              )
-          except Exception as e:
-            logger(f"Token Verification Failed: {e}")
-            raise
-
-        self.tokens.append(token_data)
-        for _ in range(self.concurrency):
-          self.token_queue.put(token_data)
-        logger(f"App {client_id[:5]}... authenticated & verified.")
-
-      except requests.exceptions.RequestException as e:
-        error_text = ""
-        if e.response is not None:
-          error_text = f": {e.response.text}"
-        logger(f"Auth Failed for app {client_id}: {e}{error_text}")
-        raise Exception(
-            "Authentication Failed. Check Client ID/Secret/Tenant. Details:"
-            f" {error_text}"
-        )
-      except Exception as e:
-        logger(f"Error for app {client_id}: {e}")
-        raise
-
-  def refresh_token_data(
-      self, token_data: Dict[str, Any], logger: Callable[[str], None]
-  ) -> bool:
-    """Refreshes a specific token dictionary in-place."""
-    url = TOKEN_URL_TEMPLATE.format(self.tenant_id)
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    data = {
-        "client_id": token_data["client_id"],
-        "scope": "https://graph.microsoft.com/.default",
-        "client_secret": token_data["client_secret"],
-        "grant_type": "client_credentials",
-    }
-    try:
-      resp = self.session.post(url, headers=headers, data=data)
-      resp.raise_for_status()
-      token_resp = resp.json()
-
-      token_data["token"] = token_resp["access_token"]
-      expires_in = token_resp.get("expires_in", 3599)
-      token_data["expires_at"] = time.time() + int(expires_in) - 900
-      return True
-    except Exception as e:
-      logger(f"Failed to refresh token: {e}")
-      return False
-
-  def get_valid_token_slot(
-      self, logger: Callable[[str], None]
-  ) -> Dict[str, Any]:
-    """Retrieves an available token, refreshing it if nearing expiration."""
-    token_data = self.token_queue.get()
-
-    if time.time() > token_data["expires_at"]:
-      logger(
-          f"Token expiring soon for App {token_data['client_id'][:5]}...,"
-          " refreshing..."
-      )
-      if self.refresh_token_data(token_data, logger):
-        logger(
-            "Successfully refreshed token for App"
-            f" {token_data['client_id'][:5]}..."
-        )
-    return token_data
-
-  def return_token_slot(self, token_data: Dict[str, Any]) -> None:
-    """Returns a token data object to the queue after use."""
-    self.token_queue.put(token_data)
-
-  def get_session(self) -> requests.Session:
-    """Returns the shared requests session."""
-    return self.session
 
 
 def execute_batch_request(
@@ -803,6 +612,8 @@ class MigrationEstimatorTool(ctk.CTk):
     self.scan_email = ctk.BooleanVar(value=True)
     self.scan_contact = ctk.BooleanVar(value=True)
     self.scan_calendar = ctk.BooleanVar(value=True)
+    self.scan_in_place_archives = ctk.BooleanVar(value=True)
+    self.scan_group_mail_boxes = ctk.BooleanVar(value=True)
     self.concurrency = ctk.IntVar(value=10)
     self.load_multiplier = ctk.IntVar(value=1)
     self.retries = ctk.IntVar(value=MAX_RETRIES)
@@ -1061,7 +872,23 @@ class MigrationEstimatorTool(ctk.CTk):
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-        state="disabled",
+        # state="disabled",
+    ).pack(side="left", padx=10)
+    ctk.CTkCheckBox(
+        scan_options_frame,
+        text="In-Place Archives",
+        variable=self.scan_in_place_archives,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
+    ctk.CTkCheckBox(
+        scan_options_frame,
+        text="Group Mailboxes",
+        variable=self.scan_group_mail_boxes,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
     ).pack(side="left", padx=10)
     ctk.CTkLabel(
         self.adv_frame,
@@ -1278,6 +1105,12 @@ class MigrationEstimatorTool(ctk.CTk):
       )
       self.create_stat_card(
           card_frame, "Contacts", f"{data['total_contacts']:,}", "📞"
+      )
+      self.create_stat_card(
+          card_frame, "In-Place Archives", f"{data['total_in_place_archives']:,}", "📞"
+      )
+      self.create_stat_card(
+          card_frame, "Group Mailbox Mails", f"{data['total_group_mailboxes']:,}", "📞"
       )
 
       # Timeline
@@ -1896,9 +1729,11 @@ class MigrationEstimatorTool(ctk.CTk):
     emails_str = self.format_metric(batch["total_emails"])
     events_str = self.format_metric(batch["total_events"])
     contacts_str = self.format_metric(batch["total_contacts"])
+    in_place_archive_str = self.format_metric(batch["total_in_place_archives"])
+    group_mailbox_str = self.format_metric(batch["total_group_mailboxes"])
     info = (
         f"{batch['name']} - {users_str} 👥  |  {emails_str} 📩  |  {events_str}"
-        f" 📅  |  {contacts_str} 📞"
+        f" 📅  |  {contacts_str} 📞 |  {in_place_archive_str} A |  {group_mailbox_str} GM"
     )
     ctk.CTkLabel(
         f,
@@ -2158,6 +1993,15 @@ class MigrationEstimatorTool(ctk.CTk):
       self.create_progress_row(
           self.scan_container, "calendars", "Scanning Calendars"
       )
+    if self.scan_in_place_archives.get():
+      self.create_progress_row(
+          self.scan_container, "archives", "Scanning In-Place Archives"
+      )
+    if self.scan_group_mail_boxes.get():
+      self.create_progress_row(
+          self.scan_container, "group_mail_boxes", "Scanning Group Mailboxes"
+      )
+
     self.create_progress_row(
         self.scan_container, "plan_generation", "Generating Migration Plan"
     )
@@ -2231,6 +2075,8 @@ class MigrationEstimatorTool(ctk.CTk):
         scan_email=self.scan_email.get(),
         scan_contact=self.scan_contact.get(),
         scan_calendar=self.scan_calendar.get(),
+        scan_in_place_archives=self.scan_in_place_archives.get(),
+        scan_group_mail_boxes=self.scan_group_mail_boxes.get(),
         concurrency=self.concurrency.get(),
         load_multiplier=self.load_multiplier.get(),
         retries=self.retries.get(),
@@ -2267,6 +2113,8 @@ class MigrationEstimatorTool(ctk.CTk):
     have_email = False
     have_contact = False
     have_calendar = False
+    have_in_place_archives = False
+    have_group_mail_boxes = False
 
     # 1. Parse CSV if applicable
     if config.user_source == "csv":
@@ -2336,6 +2184,12 @@ class MigrationEstimatorTool(ctk.CTk):
         required_scopes.append("Contacts.Read")
       if config.scan_calendar and not have_calendar:
         required_scopes.append("Calendars.Read")
+      if config.scan_group_mail_boxes and not have_group_mail_boxes:
+        required_scopes.append("MailboxSettings.Read")
+        if not (config.scan_email and not have_email):          # If Email Scan is diabled then add Mail.Read as otherwise Mail.Read is alreay added
+          required_scopes.append("Mail.Read")
+      if config.scan_in_place_archives and not have_in_place_archives and not (config.scan_email and not have_email):
+        required_scopes.append("Mail.Read")
 
       manager.authenticate_all(self.log_msg, required_scopes=required_scopes)
     else:
@@ -2380,6 +2234,8 @@ class MigrationEstimatorTool(ctk.CTk):
     have_email = "Email Count" in sample
     have_contact = "Contact Count" in sample
     have_calendar = "Calendar Count" in sample and "Event Count" in sample
+    have_in_place_archives = "In Place Archive Count" in sample
+    have_group_mail_boxes = "Group Mail Count" in sample
 
     def safe_int(val):
       try:
@@ -2397,6 +2253,8 @@ class MigrationEstimatorTool(ctk.CTk):
           "Contact Count": 0,
           "Calendar Count": 0,
           "Event Count": 0,
+          "In Place Archive Count": 0,
+          "Group Mail Count": 0,
       }
       if key in existing_data:
         src = existing_data[key]
@@ -2414,6 +2272,8 @@ class MigrationEstimatorTool(ctk.CTk):
         "contacts": sum(r["Contact Count"] for r in csv_rows),
         "calendars": sum(r["Calendar Count"] for r in csv_rows),
         "events": sum(r["Event Count"] for r in csv_rows),
+        "in_place_archives": sum(r["In Place Archive Count"] for r in csv_rows),
+        "group_mail_boxes": sum(r["Group Mail Count"] for r in csv_rows),
     }
     return csv_rows, stats
 
@@ -2437,9 +2297,13 @@ class MigrationEstimatorTool(ctk.CTk):
     has_email_data = any(r["Email Count"] > 0 for r in csv_rows)
     has_contact_data = any(r["Contact Count"] > 0 for r in csv_rows)
     has_calendar_data = any(r["Calendar Count"] > 0 for r in csv_rows)
+    has_in_place_archives_data = any(r["In Place Archive Count"] > 0 for r in csv_rows)
+    has_group_mailboxes_data = any(r["Group Mail Count"] > 0 for r in csv_rows)
     failed_emails = []
     failed_contacts = []
     failed_calendars = []
+    failed_in_place_archives = []
+    failed_group_mailboxes = []
 
     can_scan = manager is not None
 
@@ -2507,6 +2371,63 @@ class MigrationEstimatorTool(ctk.CTk):
         )
         self.ui_update("phase_status", source="calendars", status="complete")
 
+    if config.scan_in_place_archives:
+      if can_scan and (not has_in_place_archives_data or config.user_source == "tenant"):
+        self.ui_update("phase_status", source="in_place_archives", status="running")
+        url_invoker = UrlInvoker(
+            manager,
+            config.retries,
+            config.backoff,
+            1,
+            0.5
+        )
+        in_place_archive_estimator: EOInPlaceArchiveEstimator = EOInPlaceArchiveEstimator(
+            manager,
+            config,
+            url_invoker
+        )
+
+        mail_id_to_in_place_archive_count = in_place_archive_estimator.calculate_resource_count({"user_ids" : [row["User ID"] for row in csv_rows]})
+        in_place_archive_estimator.shutdown()
+
+        # failed_emails = self.run_batch_phase_ui(
+        #     user_chunks, "in_place_archives", manager, workers, stats, total_users
+        # )
+        print(json.dumps(mail_id_to_in_place_archive_count, indent=4))
+        stats["in_place_archives"] += sum(mail_id_to_in_place_archive_count.values())
+        self.ui_update("phase_status", source="in_place_archives", status="complete")
+      else:
+        # To update for csv flow
+        pass
+
+    if config.scan_group_mail_boxes:
+      if can_scan and (not has_group_mailboxes_data or config.user_source == "tenant"):
+        self.ui_update("phase_status", source="group_mailboxes_data", status="running")
+        url_invoker = UrlInvoker(
+            manager,
+            config.retries,
+            config.backoff,
+            1,
+            0.5
+        )
+        group_mailbox_estimator: EOGroupMailBoxEstimator = EOGroupMailBoxEstimator(
+            manager,
+            config,
+            url_invoker
+        )
+
+        mail_id_to_mail_count = group_mailbox_estimator.calculate_resource_count({"user_ids" : [row["User ID"] for row in csv_rows]})
+        print(json.dumps(mail_id_to_in_place_archive_count, indent=4))
+        group_mailbox_estimator.shutdown()
+        # failed_emails = self.run_batch_phase_ui(
+        #     user_chunks, "group_mailboxes_data", manager, workers, stats, total_users
+        # )
+        stats["group_mail_boxes"] += sum(mail_id_to_mail_count.values())
+        self.ui_update("phase_status", source="group_mailboxes_data", status="complete")
+      else:
+        # To update for csv flow
+        pass
+
     # --- LOG FAILED USERS SUMMARY ---
     if failed_emails or failed_calendars or failed_contacts:
       self.log_msg("\n" + "=" * 40)
@@ -2528,6 +2449,9 @@ class MigrationEstimatorTool(ctk.CTk):
         for f in failed_contacts:
           self.log_msg(f"User: {f['user']} | Cause: {f['cause']}")
         self.log_msg("")  # Add blank line
+      
+      # TODO Add failure logging here too for in place archives and group mailboxes
+
       self.log_msg("=" * 40)
 
   def _generate_final_report(
@@ -2551,7 +2475,7 @@ class MigrationEstimatorTool(ctk.CTk):
     time.sleep(0.5)
 
     df = pd.DataFrame(csv_rows)
-    df, batches, total_eta, buckets = self.calculate_migration_batches(df)
+    df, batches, total_eta, buckets = self.calculate_migration_batches(df)      # TODO Check
 
     monitor.stop()
     monitor.join()
@@ -2566,6 +2490,8 @@ class MigrationEstimatorTool(ctk.CTk):
     self.log_msg(
         f"Emails: {stats['emails']} | Contacts: {stats['contacts']} |"
         f" Calendars: {stats['calendars']} | Events: {stats['events']}"
+        f" In Place Archives: {stats['in_place_archives']} |"
+        f" Group Mailboxes: {stats['group_mail_boxes']}"
     )
     self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
     self.log_msg(f"CPU Avg/Peak: {avg_cpu:.1f}% / {max_cpu:.1f}%")
@@ -2594,6 +2520,10 @@ class MigrationEstimatorTool(ctk.CTk):
       final_columns.append("Contact Count")
     if config.scan_calendar:
       final_columns.extend(["Calendar Count", "Calendar Event Count"])
+    if config.scan_in_place_archives:
+      final_columns.append("In Place Archive Count")
+    if config.scan_group_mail_boxes:
+      final_columns.append("Group Mail Count")
 
     final_columns = [c for c in final_columns if c in df_output.columns]
     df_output = df_output[final_columns]
@@ -2633,11 +2563,15 @@ class MigrationEstimatorTool(ctk.CTk):
         "total_contacts": stats["contacts"],
         "total_calendars": stats["calendars"],
         "total_events": stats["events"],
+        "total_in_place_archives": stats["in_place_archives"],
+        "total_group_mailboxes": stats["group_mail_boxes"],
         "total_items": (
             stats["emails"]
             + stats["contacts"]
             + stats["calendars"]
             + stats["events"]
+            + stats["in_place_archives"]
+            + stats["group_mail_boxes"]
         ),
         "total_eta": total_eta,
         "batches": batches,
@@ -2754,9 +2688,10 @@ class MigrationEstimatorTool(ctk.CTk):
 
     return phase_failures
 
+  # TODO Use In-Place archive numbers and group mailbox numbers to calculate
   def calculate_migration_batches(self, df):
     # Ensure numeric columns
-    target_cols = ["Email Count", "Contact Count", "Event Count"]
+    target_cols = ["Email Count", "Contact Count", "Event Count", "In-Place Archive Count", "Group Mailbox Count"]
     for col in target_cols:
       if col not in df.columns:
         df[col] = 0
@@ -2766,7 +2701,7 @@ class MigrationEstimatorTool(ctk.CTk):
     # 1. Sort Users (Descending - Heaviest first for optimal packing)
     df["SortMetric"] = df.apply(
         lambda x: max(
-            x["Email Count"], (x["Event Count"] + x["Contact Count"])
+            (x["Email Count"] + x["Group Mailbox Count"]), (x["Event Count"] + x["Contact Count"]), x["In-Place Archive Count"]
         ),
         axis=1,
     )
@@ -2808,6 +2743,7 @@ class MigrationEstimatorTool(ctk.CTk):
     fallback_plan = None
     min_batches_seen = float("inf")
 
+    # TODO Add support for eta from inplace archives and group mailboxes too
     # Helper: Calculate ETA for subset
     def get_batch_eta(subset_df):
       eta_email = 0.0
@@ -2889,6 +2825,8 @@ class MigrationEstimatorTool(ctk.CTk):
             "total_emails": int(final_subset["Email Count"].sum()),
             "total_contacts": int(final_subset["Contact Count"].sum()),
             "total_events": int(final_subset["Event Count"].sum()),
+            "total_in_place_archives": int(final_subset["In-Place Archive Count"].sum()),
+            "total_group_mailboxes": int(final_subset["Group Mailbox Count"].sum()),
             "eta": w_eta,
         })
         start_idx = end_idx

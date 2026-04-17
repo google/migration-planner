@@ -3,23 +3,25 @@ from typing import Any, Dict, List
 
 @dataclass
 class ScanConfig:
-  """Holds configuration for the current scan job."""
+    """Holds configuration for the current scan job."""
 
-  tenant_id: str
-  client_ids: List[str]
-  client_secrets: List[str]
-  user_source: str
-  csv_path: str
-  scan_email: bool
-  scan_contact: bool
-  scan_calendar: bool
-  concurrency: int
-  load_multiplier: int
-  retries: int
-  backoff: int
-  eta_max_users: int
-  parallel_batches: int
-  hierarchial_crawl_batch_limit: int = 4
+    tenant_id: str
+    client_ids: List[str]
+    client_secrets: List[str]
+    user_source: str
+    csv_path: str
+    scan_email: bool
+    scan_contact: bool
+    scan_calendar: bool
+    scan_in_place_archives: bool
+    scan_group_mail_boxes: bool
+    concurrency: int
+    load_multiplier: int
+    retries: int
+    backoff: int
+    eta_max_users: int
+    parallel_batches: int
+    hierarchial_crawl_batch_limit: int = 4
 
 @dataclass
 class RequestResponsePair:
