@@ -51,29 +51,42 @@ class EOInPlaceArchiveEstimator(Estimator):
     def get_in_place_archive_count(self, user_ids: List[str]) -> Dict[str, int]:
         # Fetch the in-place archive mail box id for the user
         exchange_api = "users/{userId}/settings/exchange"
-        mail_box_ids: List[str] = []
         
         user_id_maps = [{"userId": user_id} for user_id in user_ids]
-        user_batches = create_batches(exchange_api, user_id_maps, self.config.parallel_batches)
+        user_batches = create_batches(exchange_api, user_id_maps, self.config.parallel_batches, True)
         
-        futures: List[Future[List[Dict[str, Any]]]] = []
+        futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
+        batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
+        idx = 0
         for batch in user_batches:
-            futures.append(self.archive_executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type()))
+            futures_map[idx] = self.archive_executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+            batch_id_to_batch_map[idx] = batch
+            idx += 1
 
-        responses: List[Dict[str, Any]] = []
-        for future in futures:
-            responses += future.result()
+        response_map: Dict[int, List[Dict[str, Any]]] = {}
+        for batch_id, future in futures_map.items():
+            response_map[batch_id] = future.result()
 
-        for response in responses:
-            if "body" not in response:
-                continue
-            if "inPlaceArchiveMailboxId" not in response["body"]:
-                continue
+        user_to_mailbox: Dict[str, str] = {}
+        for batch_id, responses in response_map.items():
+            batch = batch_id_to_batch_map[batch_id]
+            batch_responses_map = {int(resp["id"]): resp for resp in responses}
+            for req in batch:
+                req_id = req["id"]
+                if req_id in batch_responses_map:
+                    resp = batch_responses_map[req_id]
+                    user_id = req["headers"]["userId"]
+                    if "body" in resp and "inPlaceArchiveMailboxId" in resp["body"]:
+                        user_to_mailbox[user_id] = resp["body"]["inPlaceArchiveMailboxId"]
+
+        mail_box_ids = list(set(user_to_mailbox.values()))
+        mail_box_to_count = self.parse_and_count_in_place_archive_mail_box(mail_box_ids)
+        
+        user_to_count = {user_id: 0 for user_id in user_ids}
+        for user_id, mail_box_id in user_to_mailbox.items():
+            user_to_count[user_id] = mail_box_to_count.get(mail_box_id, 0)
             
-            mail_box_ids.append(response["body"]["inPlaceArchiveMailboxId"])
-
-        # Start the BFS crawl
-        return self.parse_and_count_in_place_archive_mail_box(mail_box_ids)
+        return user_to_count
 
     def parse_and_count_in_place_archive_mail_box(self, mail_box_ids: List[str]) -> Dict[str, int]:
         # Extract all the top level folders. This is done separately as a different API is used for top level folders compared to child folders
@@ -291,4 +304,3 @@ class EOInPlaceArchiveEstimator(Estimator):
                 active_thread_count.decrement()
                 with condition:
                     condition.notify_all()
-
