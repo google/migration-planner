@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, List, Optional
 from estimators.estimator import Estimator
 from util.connectors import TokenManager
 from util.connectors import UrlInvoker
-from util.utils import ScanConfig, group_responses_by_key, process_pagination_responses
+from util.utils import ScanConfig, group_responses_by_key, process_pagination_responses, get_relative_url
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from util.utils import create_batches
@@ -103,15 +103,22 @@ class EOInPlaceArchiveEstimator(Estimator):
         for batch_id, responses in response_map.items():
             batch = batch_id_to_batch_map[batch_id]
             
-            # Initialize mapping
+            # Initialize mapping and check for next links manually
             batch_responses_map = {int(resp["id"]): resp for resp in responses}
             for req in batch:
                 req_id = req["id"]
                 if req_id in batch_responses_map:
-                    mailbox_to_resp_map[req["headers"]["mailboxId"]] = batch_responses_map[req_id]
-            
-            # Use utility to process responses and get next items
-            pending_next_items.extend(process_pagination_responses(batch, responses, mailbox_to_resp_map, "mailboxId", GRAPH_BETA_URL))
+                    resp = batch_responses_map[req_id]
+                    mailbox_id = req["headers"]["mailboxId"]
+                    mailbox_to_resp_map[mailbox_id] = resp
+                    
+                    if "body" in resp and "@odata.nextLink" in resp["body"]:
+                        next_url = resp["body"]["@odata.nextLink"]
+                        relative_url = get_relative_url(next_url, GRAPH_BETA_URL)
+                        pending_next_items.append({
+                            "mailboxId": mailbox_id,
+                            "url": relative_url
+                        })
                         
         while pending_next_items:
             batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
@@ -214,7 +221,21 @@ class EOInPlaceArchiveEstimator(Estimator):
         # Now check for next links
         pending_next_items = []
         for batch, responses in all_initial_responses:
-            pending_next_items.extend(process_pagination_responses(batch, responses, folder_context_map, "folderId", GRAPH_BETA_URL))
+            batch_responses_map = {int(resp["id"]): resp for resp in responses}
+            for req in batch:
+                req_id = req["id"]
+                if req_id in batch_responses_map:
+                    resp = batch_responses_map[req_id]
+                    folder_id = req["headers"]["folderId"]
+                    
+                    if "body" in resp and "@odata.nextLink" in resp["body"]:
+                        next_url = resp["body"]["@odata.nextLink"]
+                        relative_url = get_relative_url(next_url, GRAPH_BETA_URL)
+                        pending_next_items.append({
+                            "folderId": folder_id,
+                            "url": relative_url,
+                            "mailBoxId": req["headers"]["mailBoxId"]
+                        })
                 
         while pending_next_items:
             batches = create_batches("{url}", pending_next_items, self.config.hierarchial_crawl_batch_limit, True)
