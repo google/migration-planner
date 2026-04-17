@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, List, Optional
 from estimators.estimator import Estimator
 from util.connectors import TokenManager
 from util.connectors import UrlInvoker
-from util.utils import ScanConfig, group_responses_by_key
+from util.utils import ScanConfig, group_responses_by_key, process_pagination_responses
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from util.utils import create_batches
@@ -78,7 +78,7 @@ class EOInPlaceArchiveEstimator(Estimator):
     def parse_and_count_in_place_archive_mail_box(self, mail_box_ids: List[str]) -> Dict[str, int]:
         # Extract all the top level folders. This is done separately as a different API is used for top level folders compared to child folders
         mail_box_id_maps = [{"mailboxId": mail_box_id} for mail_box_id in mail_box_ids]
-        folder_api = "admin/exchange/mailboxes/{mailboxId}/folders?$select=id,childFolderCount,totalItemCount&$top=100"     # TODO Add support for a configurable page size
+        folder_api = "admin/exchange/mailboxes/{mailboxId}/folders?$select=id,childFolderCount,totalItemCount&$top=2"     # TODO Add support for a configurable page size
 
         top_level_folders: Dict[str, List[Dict[str, Any]]] = {}      # Map of Mail box to top level folder list.
         mail_box_batches = create_batches(folder_api, mail_box_id_maps, self.config.parallel_batches, True)
@@ -95,6 +95,49 @@ class EOInPlaceArchiveEstimator(Estimator):
         for batch_id, future in futures_map.items():
             response_map[batch_id] = future.result()
         
+        # Create a map of mailboxId -> original_response_object
+        # And identify next links
+        mailbox_to_resp_map: Dict[str, Dict[str, Any]] = {}
+        pending_next_items = []
+        
+        for batch_id, responses in response_map.items():
+            batch = batch_id_to_batch_map[batch_id]
+            
+            # Initialize mapping
+            batch_responses_map = {int(resp["id"]): resp for resp in responses}
+            for req in batch:
+                req_id = req["id"]
+                if req_id in batch_responses_map:
+                    mailbox_to_resp_map[req["headers"]["mailboxId"]] = batch_responses_map[req_id]
+            
+            # Use utility to process responses and get next items
+            pending_next_items.extend(process_pagination_responses(batch, responses, mailbox_to_resp_map, "mailboxId", GRAPH_BETA_URL))
+                        
+        while pending_next_items:
+            batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+            
+            next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
+            next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
+            idx = 0
+            for batch in batches:
+                next_futures_map[idx] = self.archive_executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+                next_batch_id_to_batch_map[idx] = batch
+                idx += 1
+                
+            next_response_map: Dict[int, List[Dict[str, Any]]] = {}
+            for batch_id, future in next_futures_map.items():
+                next_response_map[batch_id] = future.result()
+                
+            new_pending_next_items = []
+            
+            for batch_id, responses in next_response_map.items():
+                batch = next_batch_id_to_batch_map[batch_id]
+                new_pending_next_items.extend(process_pagination_responses(batch, responses, mailbox_to_resp_map, "mailboxId", GRAPH_BETA_URL))
+                
+            pending_next_items = new_pending_next_items
+            
+        # Now that all pages are fetched and merged into original objects,
+        # populate top_level_folders using original batch structure.
         for batch_id, responses in response_map.items():
             batch = batch_id_to_batch_map[batch_id]
             group_responses_by_key(top_level_folders, batch, responses, "mailboxId")
@@ -138,7 +181,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             archived_mail_count: Dict[str, AtomicInt], 
             active_thread_count: AtomicInt,
     ) -> None:
-        child_folder_api = "admin/exchange/mailboxes/{mailBoxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount"
+        child_folder_api = "admin/exchange/mailboxes/{mailBoxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount&$top=1"
 
         mail_box_id_to_folder_id: List[Dict[str, Any]] = []
         for mail_box_id, folder_list in folders.items():
@@ -149,9 +192,44 @@ class EOInPlaceArchiveEstimator(Estimator):
 
         child_folders: Dict[str, List[Dict[str, Any]]] = {}
         
+        all_initial_responses = []
+        folder_context_map = {}
+        
         # Using sequential processing here as each batch would have 4 requests which is = throttling quota of same mailbox requests.
         for batch in batches:
             responses = self.url_invoker.invoke(GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+            all_initial_responses.append((batch, responses))
+            
+            batch_responses_map = {int(resp["id"]): resp for resp in responses}
+            for req in batch:
+                req_id = req["id"]
+                if req_id in batch_responses_map:
+                    resp = batch_responses_map[req_id]
+                    folder_id = req["headers"]["folderId"]
+                    folder_context_map[folder_id] = {
+                        "resp": resp,
+                        "mailBoxId": req["headers"]["mailBoxId"]
+                    }
+                    
+        # Now check for next links
+        pending_next_items = []
+        for batch, responses in all_initial_responses:
+            pending_next_items.extend(process_pagination_responses(batch, responses, folder_context_map, "folderId", GRAPH_BETA_URL))
+                
+        while pending_next_items:
+            batches = create_batches("{url}", pending_next_items, self.config.hierarchial_crawl_batch_limit, True)
+            
+            new_pending_next_items = []
+            
+            # Execute batches SEQUENTIALLY for child folders
+            for batch in batches:
+                responses = self.url_invoker.invoke(GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+                new_pending_next_items.extend(process_pagination_responses(batch, responses, folder_context_map, "folderId", GRAPH_BETA_URL))
+                
+            pending_next_items = new_pending_next_items
+            
+        # Finally, group responses by key using original batches
+        for batch, responses in all_initial_responses:
             group_responses_by_key(child_folders, batch, responses, "mailBoxId")
 
         self.submit_child_folder_requests_to_executor (

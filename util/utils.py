@@ -93,3 +93,48 @@ def get_failed_responses(responses: Dict[str, Any]) -> List[Dict[str, Any]]:
 def get_failed_responses_that_can_be_retried(responses: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [response for response in responses.values() 
             if "body" in response and response["status"] in RETRYABLE_ERROR_CODES]
+
+
+def get_relative_url(url: str, base_url: str) -> str:
+    if url.startswith(base_url):
+        rel = url[len(base_url):]
+        if rel.startswith("/"):
+            rel = rel[1:]
+        return rel
+    elif url.startswith("https://graph.microsoft.com/beta/"):
+        return url[len("https://graph.microsoft.com/beta/"):]
+    return url
+
+def process_pagination_responses(
+    batch: List[Dict[str, Any]],
+    responses: List[Dict[str, Any]],
+    orig_map: Dict[str, Any],
+    grouping_key: str,
+    base_url: str
+) -> List[Dict[str, Any]]:
+    next_items = []
+    batch_responses_map = {int(resp["id"]): resp for resp in responses}
+    
+    for req in batch:
+        req_id = req["id"]
+        if req_id in batch_responses_map:
+            resp = batch_responses_map[req_id]
+            key = req["headers"][grouping_key]
+            
+            # Retrieve original response object
+            orig_entry = orig_map[key]
+            orig_resp = orig_entry["resp"] if isinstance(orig_entry, dict) and "resp" in orig_entry else orig_entry
+            
+            if "body" in resp and "value" in resp["body"]:
+                orig_resp["body"]["value"] += resp["body"]["value"]
+                
+                if "@odata.nextLink" in resp["body"]:
+                    next_url = resp["body"]["@odata.nextLink"]
+                    relative_url = get_relative_url(next_url, base_url)
+                    
+                    # Create next item with all original headers preserved
+                    next_item = dict(req["headers"])
+                    next_item["url"] = relative_url
+                    next_items.append(next_item)
+                    
+    return next_items

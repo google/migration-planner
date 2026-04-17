@@ -204,6 +204,7 @@ class UrlInvoker():
         self.initial_delay = initial_delay
         self.jitter = jitter
 
+    # Warning: Doesn't have support for paginated responses. They are handled in the callers themselvesß
     def invoke(
         self, 
         url: str, 
