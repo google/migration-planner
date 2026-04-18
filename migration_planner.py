@@ -1926,7 +1926,14 @@ class MigrationEstimatorTool(ctk.CTk):
                 text=msg.get("extra_text", "")
             )
           else:
-            label = "Emails" if source == "messages" else "Contacts"
+            if source == "messages":
+              label = "Emails"
+            elif source == "contacts":
+              label = "Contacts"
+            elif source == "in_place_archives":
+              label = "In-Place Archives"
+            elif source == "group_mail_boxes":
+              label = "Group Mailboxes"
             self.prog_widgets[source]["lbl"].configure(
                 text=(
                     f"Users: {users_proc - users_fail} succeeded , {users_fail}"
@@ -1995,7 +2002,7 @@ class MigrationEstimatorTool(ctk.CTk):
       )
     if self.scan_in_place_archives.get():
       self.create_progress_row(
-          self.scan_container, "archives", "Scanning In-Place Archives"
+          self.scan_container, "in_place_archives", "Scanning In-Place Archives"
       )
     if self.scan_group_mail_boxes.get():
       self.create_progress_row(
@@ -2277,6 +2284,75 @@ class MigrationEstimatorTool(ctk.CTk):
     }
     return csv_rows, stats
 
+  def run_batch_scan(
+    self, 
+    resource_type: str,
+    config: ScanConfig,
+    user_chunks: List[List[Dict[str, Any]]],
+    manager: Optional[TokenManager],
+    stats: Dict[str, int],
+    total_users: int
+  ): 
+    processed_users = 0
+    phase_total = 0
+    url_invoker = UrlInvoker(
+        manager,
+        config.retries,
+        config.backoff,
+        1,
+        0.5
+    )
+    executor = ThreadPoolExecutor(max_workers=config.concurrency)
+    estimator: Estimator = None
+    if resource_type == "in_place_archives":
+      estimator = EOInPlaceArchiveEstimator(
+        manager,
+        config,
+        url_invoker
+      )
+    elif resource_type == "group_mailboxes_data":
+      estimator = EOMailboxEstimator(
+        manager,
+        config,
+        url_invoker
+      )
+
+    future_to_chunk_map: Dict[Future, List] = {}
+    future_to_failures_map: Dict[Future, List[Dict[str, Any]]] = {}
+    for chunk in user_chunks:
+      # TODO Add logic to log failures too
+      failures = []
+      future = executor.submit(estimator.calculate_resource_count, 
+          {"user_ids" : [row["User ID"] for row in chunk]})
+      future_to_chunk_map[future] = chunk
+      future_to_failures_map[future] = failures
+
+    for f in as_completed(future_to_chunk_map):
+      chunk = future_to_chunk_map[f]
+      chunk_result = f.result()
+     
+      # Update Progress
+      processed_users += len(chunk)
+      phase_total += sum(value for user_id, value in chunk_result.items())
+      users_failed = len(future_to_failures_map[f])
+      prog = processed_users / total_users if total_users > 0 else 0
+      self.ui_update(
+        "scan_progress",
+        source=resource_type,
+        progress=prog,
+        cumulative=phase_total,
+        processed=processed_users,
+        failed=users_failed,
+        total=total_users,
+        extra_text="",
+      )
+
+      # Update stats
+      for user in chunk:
+        user["In Place Archive Count"] = chunk_result.get(user["User ID"], 0)
+      
+      stats[resource_type] += phase_total
+
   def _run_scan_phases(
       self,
       config: ScanConfig,
@@ -2374,27 +2450,11 @@ class MigrationEstimatorTool(ctk.CTk):
     if config.scan_in_place_archives:
       if can_scan and (not has_in_place_archives_data or config.user_source == "tenant"):
         self.ui_update("phase_status", source="in_place_archives", status="running")
-        url_invoker = UrlInvoker(
-            manager,
-            config.retries,
-            config.backoff,
-            1,
-            0.5
-        )
-        in_place_archive_estimator: EOInPlaceArchiveEstimator = EOInPlaceArchiveEstimator(
-            manager,
+        self.run_batch_scan(
+            "in_place_archives", 
             config,
-            url_invoker
+            user_chunks, manager, stats, total_users
         )
-
-        mail_id_to_in_place_archive_count = in_place_archive_estimator.calculate_resource_count({"user_ids" : [row["User ID"] for row in csv_rows]})
-        in_place_archive_estimator.shutdown()
-
-        # failed_emails = self.run_batch_phase_ui(
-        #     user_chunks, "in_place_archives", manager, workers, stats, total_users
-        # )
-        print(json.dumps(mail_id_to_in_place_archive_count, indent=4))
-        stats["in_place_archives"] += sum(mail_id_to_in_place_archive_count.values())
         self.ui_update("phase_status", source="in_place_archives", status="complete")
       else:
         # To update for csv flow
@@ -2402,28 +2462,13 @@ class MigrationEstimatorTool(ctk.CTk):
 
     if config.scan_group_mail_boxes:
       if can_scan and (not has_group_mailboxes_data or config.user_source == "tenant"):
-        self.ui_update("phase_status", source="group_mailboxes_data", status="running")
-        url_invoker = UrlInvoker(
-            manager,
-            config.retries,
-            config.backoff,
-            1,
-            0.5
-        )
-        group_mailbox_estimator: EOGroupMailBoxEstimator = EOGroupMailBoxEstimator(
-            manager,
+        self.ui_update("phase_status", source="group_mail_boxes", status="running")
+        self.run_batch_scan(
+            "group_mail_boxes", 
             config,
-            url_invoker
+            user_chunks, manager, stats, total_users
         )
-
-        mail_id_to_mail_count = group_mailbox_estimator.calculate_resource_count({"user_ids" : [row["User ID"] for row in csv_rows]})
-        print(json.dumps(mail_id_to_in_place_archive_count, indent=4))
-        group_mailbox_estimator.shutdown()
-        # failed_emails = self.run_batch_phase_ui(
-        #     user_chunks, "group_mailboxes_data", manager, workers, stats, total_users
-        # )
-        stats["group_mail_boxes"] += sum(mail_id_to_mail_count.values())
-        self.ui_update("phase_status", source="group_mailboxes_data", status="complete")
+        self.ui_update("phase_status", source="group_mail_boxes", status="complete")
       else:
         # To update for csv flow
         pass
@@ -2825,8 +2870,8 @@ class MigrationEstimatorTool(ctk.CTk):
             "total_emails": int(final_subset["Email Count"].sum()),
             "total_contacts": int(final_subset["Contact Count"].sum()),
             "total_events": int(final_subset["Event Count"].sum()),
-            "total_in_place_archives": int(final_subset["In-Place Archive Count"].sum()),
-            "total_group_mailboxes": int(final_subset["Group Mailbox Count"].sum()),
+            "total_in_place_archives": int(final_subset["In Place Archive Count"].sum()),
+            "total_group_mailboxes": int(final_subset["Group Mail Count"].sum()),
             "eta": w_eta,
         })
         start_idx = end_idx
