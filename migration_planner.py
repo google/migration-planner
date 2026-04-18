@@ -2333,7 +2333,8 @@ class MigrationEstimatorTool(ctk.CTk):
      
       # Update Progress
       processed_users += len(chunk)
-      phase_total += sum(value for user_id, value in chunk_result.items())
+      chunk_total = sum(value for user_id, value in chunk_result.items())
+      phase_total += chunk_total
       users_failed = len(future_to_failures_map[f])
       prog = processed_users / total_users if total_users > 0 else 0
       self.ui_update(
@@ -2351,7 +2352,7 @@ class MigrationEstimatorTool(ctk.CTk):
       for user in chunk:
         user["In Place Archive Count"] = chunk_result.get(user["User ID"], 0)
       
-      stats[resource_type] += phase_total
+      stats[resource_type] += chunk_total
 
   def _run_scan_phases(
       self,
