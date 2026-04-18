@@ -91,7 +91,7 @@ class EOInPlaceArchiveEstimator(Estimator):
     def parse_and_count_in_place_archive_mail_box(self, mail_box_ids: List[str]) -> Dict[str, int]:
         # Extract all the top level folders. This is done separately as a different API is used for top level folders compared to child folders
         mail_box_id_maps = [{"mailboxId": mail_box_id} for mail_box_id in mail_box_ids]
-        folder_api = "admin/exchange/mailboxes/{mailboxId}/folders?$select=id,childFolderCount,totalItemCount&$top=2"     # TODO Add support for a configurable page size
+        folder_api = "admin/exchange/mailboxes/{mailboxId}/folders?$select=id,childFolderCount,totalItemCount&$top=999"     # TODO Add support for a configurable page size
 
         top_level_folders: Dict[str, List[Dict[str, Any]]] = {}      # Map of Mail box to top level folder list.
         mail_box_batches = create_batches(folder_api, mail_box_id_maps, self.config.parallel_batches, True)
@@ -201,7 +201,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             archived_mail_count: Dict[str, AtomicInt], 
             active_thread_count: AtomicInt,
     ) -> None:
-        child_folder_api = "admin/exchange/mailboxes/{mailBoxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount&$top=1"
+        child_folder_api = "admin/exchange/mailboxes/{mailBoxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount&$top=999"
 
         mail_box_id_to_folder_id: List[Dict[str, Any]] = []
         for mail_box_id, folder_list in folders.items():
