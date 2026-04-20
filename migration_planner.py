@@ -2310,8 +2310,8 @@ class MigrationEstimatorTool(ctk.CTk):
         config,
         url_invoker
       )
-    elif resource_type == "group_mailboxes_data":
-      estimator = EOMailboxEstimator(
+    elif resource_type == "group_mail_boxes":
+      estimator = EOGroupMailBoxEstimator(
         manager,
         config,
         url_invoker
@@ -2350,7 +2350,10 @@ class MigrationEstimatorTool(ctk.CTk):
 
       # Update stats
       for user in chunk:
-        user["In Place Archive Count"] = chunk_result.get(user["User ID"], 0)
+        if resource_type == "in_place_archives":
+          user["In Place Archive Count"] = chunk_result.get(user["User ID"], 0)
+        elif resource_type == "group_mail_boxes":
+          user["Group Mail Count"] = chunk_result.get(user["User ID"], 0)
       
       stats[resource_type] += chunk_total
 
