@@ -25,6 +25,8 @@ class EOGroupMailBoxEstimator(Estimator):
 
     def calculate_resource_count(self, data: Dict[str, Any]) -> Dict[str, int]:
         user_ids: List[str] = data["user_ids"]
+        if not user_ids or None in user_ids:
+            raise Exception("Invalid user ids provided. Please check the list and ensure all the IDs are non-null.")
         mailbox_to_count = self.get_group_mail_box_count(user_ids)
         
         # Creating a new map to account for the fact that the user might not have a group mailbox. 
