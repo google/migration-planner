@@ -2195,6 +2195,8 @@ class MigrationEstimatorTool(ctk.CTk):
         (config.scan_email and not have_email)
         or (config.scan_contact and not have_contact)
         or (config.scan_calendar and not have_calendar)
+        or (config.scan_in_place_archives and not have_in_place_archives)
+        or (config.scan_group_mail_boxes and not have_group_mail_boxes)
     )
 
     # 3. Authenticate if required
@@ -2297,6 +2299,10 @@ class MigrationEstimatorTool(ctk.CTk):
         if have_calendar and config.scan_calendar:
           row["Calendar Count"] = safe_int(src.get("Calendar Count", 0))
           row["Event Count"] = safe_int(src.get("Event Count", 0))
+        if have_in_place_archives and config.scan_in_place_archives:
+          row["In Place Archive Count"] = safe_int(src.get("In Place Archive Count", 0))
+        if have_group_mail_boxes and config.scan_group_mail_boxes:
+          row["Group Mail Count"] = safe_int(src.get("Group Mail Count", 0))
       csv_rows.append(row)
 
     stats = {
@@ -2350,7 +2356,7 @@ class MigrationEstimatorTool(ctk.CTk):
       # TODO Add logic to log failures too
       failures = []
       future = executor.submit(estimator.calculate_resource_count, 
-          {"user_ids" : [row["User ID"] for row in chunk]})
+          {"user_ids" : [row["User ID"] if row["User ID"] is not None else row["User Principal Name"] for row in chunk]})
       future_to_chunk_map[future] = chunk
       future_to_failures_map[future] = failures
 
@@ -2377,10 +2383,13 @@ class MigrationEstimatorTool(ctk.CTk):
 
       # Update stats
       for user in chunk:
+        # Use the same key resolution logic as was used for submission
+        key = user["User ID"] if user["User ID"] is not None else user["User Principal Name"]
+        
         if resource_type == "in_place_archives":
-          user["In Place Archive Count"] = chunk_result.get(user["User ID"], 0)
+          user["In Place Archive Count"] = chunk_result.get(key, 0)
         elif resource_type == "group_mail_boxes":
-          user["Group Mail Count"] = chunk_result.get(user["User ID"], 0)
+          user["Group Mail Count"] = chunk_result.get(key, 0)
       
       stats[resource_type] += chunk_total
     
@@ -2491,8 +2500,17 @@ class MigrationEstimatorTool(ctk.CTk):
         )
         self.ui_update("phase_status", source="in_place_archives", status="complete")
       else:
-        # To update for csv flow
-        pass
+        self.log_msg("Skipping In Place Archive Scan (Data present or No Auth)")
+        self.ui_update("phase_status", source="in_place_archives", status="running")
+        self.ui_update(
+            "scan_progress",
+            source="in_place_archives",
+            progress=1.0,
+            cumulative=stats["in_place_archives"],
+            processed=total_users,
+            total=total_users,
+        )
+        self.ui_update("phase_status", source="in_place_archives", status="complete")
 
     if config.scan_group_mail_boxes:
       if can_scan and (not has_group_mailboxes_data or config.user_source == "tenant"):
@@ -2504,8 +2522,17 @@ class MigrationEstimatorTool(ctk.CTk):
         )
         self.ui_update("phase_status", source="group_mail_boxes", status="complete")
       else:
-        # To update for csv flow
-        pass
+        self.log_msg("Skipping Group Mail Box Scan (Data present or No Auth)")
+        self.ui_update("phase_status", source="group_mail_boxes", status="running")
+        self.ui_update(
+            "scan_progress",
+            source="group_mail_boxes",
+            progress=1.0,
+            cumulative=stats["group_mail_boxes"],
+            processed=total_users,
+            total=total_users,
+        )
+        self.ui_update("phase_status", source="group_mail_boxes", status="complete")
 
     # --- LOG FAILED USERS SUMMARY ---
     if failed_emails or failed_calendars or failed_contacts:
