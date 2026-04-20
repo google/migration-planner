@@ -47,3 +47,6 @@ class Estimator:
     def get_migration_type(self) -> str:
         raise NotImplementedError("Subclasses must implement the get_migration_type method")
     
+    def shutdown(self):
+        if self.archive_executor:
+            self.archive_executor.shutdown(wait=False)

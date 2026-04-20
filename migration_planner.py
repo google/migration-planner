@@ -2383,6 +2383,9 @@ class MigrationEstimatorTool(ctk.CTk):
           user["Group Mail Count"] = chunk_result.get(user["User ID"], 0)
       
       stats[resource_type] += chunk_total
+    
+    executor.shutdown()
+    estimator.shutdown()
 
   def _run_scan_phases(
       self,
@@ -2822,8 +2825,10 @@ class MigrationEstimatorTool(ctk.CTk):
     # TODO Add support for eta from inplace archives and group mailboxes too
     # Helper: Calculate ETA for subset
     config = self._get_scan_configuration()
-    in_place_archive_estimator = EOInPlaceArchiveEstimator(None, config, None)
-    group_mail_box_estimator = EOGroupMailBoxEstimator(None, config, None)
+    if ENABLE_IN_PLACE_ARCHIVE_ETA:
+      in_place_archive_estimator = EOInPlaceArchiveEstimator(None, config, None)
+    if ENABLE_GROUP_MAILBOX_ETA:
+      group_mail_box_estimator = EOGroupMailBoxEstimator(None, config, None)
 
     def get_batch_eta(subset_df):
       eta_email = 0.0
@@ -2875,6 +2880,12 @@ class MigrationEstimatorTool(ctk.CTk):
             "batch_time": ETA_EMAIL_BATCH_TIME,
           }
         )
+
+      if ENABLE_IN_PLACE_ARCHIVE_ETA:
+        in_place_archive_estimator.shutdown()
+      if ENABLE_GROUP_MAILBOX_ETA:
+        group_mail_box_estimator.shutdown()
+
       return max(eta_email, eta_calendar + eta_contact, eta_in_place_archive, eta_group_mail_box)
 
     # 2. Iterate through candidates
