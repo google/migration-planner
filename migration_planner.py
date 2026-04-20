@@ -141,6 +141,9 @@ ETA_CONTACT_USER_LIMIT = 1
 ETA_CONTACT_BATCH_SIZE = 10
 ETA_CONTACT_BATCH_TIME = 25
 
+ENABLE_IN_PLACE_ARCHIVE_ETA = True
+ENABLE_GROUP_MAILBOX_ETA = True
+
 # =================================================================================
 # CONFIGURATION
 # =================================================================================
@@ -1850,9 +1853,11 @@ class MigrationEstimatorTool(ctk.CTk):
     icon = self.spinner_chars[idx % len(self.spinner_chars)]
     self.spinner_indices[source] = idx + 1
     if source in self.prog_widgets:
-      self.prog_widgets[source]["icon"].configure(
-          text=icon, text_color=COLOR_PRIMARY
-      )
+      widget = self.prog_widgets[source]["icon"]
+      if widget.winfo_exists():  # <-- Add this check!
+        widget.configure(
+            text=icon, text_color=COLOR_PRIMARY
+        ) 
     self.after(80, lambda: self.animate_spinner(source))
 
   def update_progress(self, msg):
@@ -1866,21 +1871,27 @@ class MigrationEstimatorTool(ctk.CTk):
         count = msg.get("count", 0)
         status = msg.get("status", "Scanning...")
         if "users" in self.prog_widgets:
-          self.prog_widgets["users"]["lbl"].configure(
-              text=f"{count} users found"
-          )
+          widget = self.prog_widgets["users"]["lbl"]
+          if widget.winfo_exists():
+            widget.configure(
+                text=f"{count} users found"
+            )
           if not self.spinners_active.get("users"):
             self.spinners_active["users"] = True
             self.animate_spinner("users")
         if status == "Done":
           self.spinners_active["users"] = False
           if "users" in self.prog_widgets:
-            self.prog_widgets["users"]["icon"].configure(
-                text="✓", text_color=COLOR_SUCCESS
-            )
-            self.prog_widgets["users"]["bar"].stop()
-            self.prog_widgets["users"]["bar"].configure(mode="determinate")
-            self.prog_widgets["users"]["bar"].set(1.0)
+            widget_icon = self.prog_widgets["users"]["icon"]
+            if widget_icon.winfo_exists():
+              widget_icon.configure(
+                  text="✓", text_color=COLOR_SUCCESS
+              )
+            widget_bar = self.prog_widgets["users"]["bar"]
+            if widget_bar.winfo_exists():
+              widget_bar.stop()
+              widget_bar.configure(mode="determinate")
+              widget_bar.set(1.0)
       elif mtype == "phase_status":
         source = msg.get("source")
         status = msg.get("status")
@@ -1890,20 +1901,26 @@ class MigrationEstimatorTool(ctk.CTk):
         elif status == "complete":
           self.spinners_active[source] = False
           if source in self.prog_widgets:
-            self.prog_widgets[source]["icon"].configure(
-                text="✓", text_color=COLOR_SUCCESS
-            )
-            if self.prog_widgets[source]["bar"].cget("mode") == "indeterminate":
-              self.prog_widgets[source]["bar"].stop()
-              self.prog_widgets[source]["bar"].configure(mode="determinate")
-            self.prog_widgets[source]["bar"].set(1.0)
-            if source == "plan_generation":
-              self.prog_widgets[source]["lbl"].configure(
-                  text=(
-                      "Plan generated, please wait while we prepare the final"
-                      " dashboard..."
-                  )
+            widget_icon = self.prog_widgets[source]["icon"]
+            if widget_icon.winfo_exists():
+              widget_icon.configure(
+                  text="✓", text_color=COLOR_SUCCESS
               )
+            widget_bar = self.prog_widgets[source]["bar"]
+            if widget_bar.winfo_exists():
+              if widget_bar.cget("mode") == "indeterminate":
+                widget_bar.stop()
+                widget_bar.configure(mode="determinate")
+              widget_bar.set(1.0)
+            if source == "plan_generation":
+              widget_lbl = self.prog_widgets[source]["lbl"]
+              if widget_lbl.winfo_exists():
+                widget_lbl.configure(
+                    text=(
+                        "Plan generated, please wait while we prepare the final"
+                        " dashboard..."
+                    )
+                )
       elif mtype == "scan_progress":
         source = msg.get("source")
         val = msg.get("progress", 0.0)
@@ -1912,34 +1929,42 @@ class MigrationEstimatorTool(ctk.CTk):
         users_fail = msg.get("failed", 0)
         users_tot = msg.get("total", 0)
         if source in self.prog_widgets:
-          self.prog_widgets[source]["bar"].set(val)
+          widget = self.prog_widgets[source]["bar"]
+          if widget.winfo_exists():
+            widget.set(val)
           if source == "calendars":
             extra = msg.get("extra_text", "")
-            self.prog_widgets[source]["lbl"].configure(
-                text=(
-                    f"Users: {users_proc - users_fail} succeeded , {users_fail}"
-                    f" failed | {extra}"
-                )
-            )
+            widget_lbl = self.prog_widgets[source]["lbl"]
+            if widget_lbl.winfo_exists():
+              widget_lbl.configure(
+                  text=(
+                      f"Users: {users_proc - users_fail} succeeded , {users_fail}"
+                      f" failed | {extra}"
+                  )
+              )
           elif source == "plan_generation":
-            self.prog_widgets[source]["lbl"].configure(
-                text=msg.get("extra_text", "")
-            )
+            widget_lbl = self.prog_widgets[source]["lbl"]
+            if widget_lbl.winfo_exists():
+              widget_lbl.configure(
+                  text=msg.get("extra_text", "")
+              )
           else:
             if source == "messages":
               label = "Emails"
             elif source == "contacts":
               label = "Contacts"
             elif source == "in_place_archives":
-              label = "In-Place Archives"
+              label = "In Place Archive Count"
             elif source == "group_mail_boxes":
-              label = "Group Mailboxes"
-            self.prog_widgets[source]["lbl"].configure(
-                text=(
-                    f"Users: {users_proc - users_fail} succeeded , {users_fail}"
-                    f" failed | {label}: {cumulative:,}"
-                )
-            )
+              label = "Group Mail Count"
+            widget_lbl = self.prog_widgets[source]["lbl"]
+            if widget_lbl.winfo_exists():
+              widget_lbl.configure(
+                  text=(
+                      f"Users: {users_proc - users_fail} succeeded , {users_fail}"
+                      f" failed | {label}: {cumulative:,}"
+                  )
+              )
       elif mtype == "complete":
         self.show_results_content(msg["data"])
       elif mtype == "error":
@@ -2740,7 +2765,7 @@ class MigrationEstimatorTool(ctk.CTk):
   # TODO Use In-Place archive numbers and group mailbox numbers to calculate
   def calculate_migration_batches(self, df):
     # Ensure numeric columns
-    target_cols = ["Email Count", "Contact Count", "Event Count", "In-Place Archive Count", "Group Mailbox Count"]
+    target_cols = ["Email Count", "Contact Count", "Event Count", "In Place Archive Count", "Group Mail Count"]
     for col in target_cols:
       if col not in df.columns:
         df[col] = 0
@@ -2750,7 +2775,7 @@ class MigrationEstimatorTool(ctk.CTk):
     # 1. Sort Users (Descending - Heaviest first for optimal packing)
     df["SortMetric"] = df.apply(
         lambda x: max(
-            (x["Email Count"] + x["Group Mailbox Count"]), (x["Event Count"] + x["Contact Count"]), x["In-Place Archive Count"]
+            (x["Email Count"] + x["Group Mail Count"]), (x["Event Count"] + x["Contact Count"]), x["In Place Archive Count"]
         ),
         axis=1,
     )
@@ -2794,6 +2819,10 @@ class MigrationEstimatorTool(ctk.CTk):
 
     # TODO Add support for eta from inplace archives and group mailboxes too
     # Helper: Calculate ETA for subset
+    config = self._get_scan_configuration()
+    in_place_archive_estimator = EOInPlaceArchiveEstimator(None, config, None)
+    group_mail_box_estimator = EOGroupMailBoxEstimator(None, config, None)
+
     def get_batch_eta(subset_df):
       eta_email = 0.0
       if ENABLE_EMAIL_ETA:
@@ -2822,7 +2851,29 @@ class MigrationEstimatorTool(ctk.CTk):
             ETA_CONTACT_BATCH_SIZE,
             ETA_CONTACT_BATCH_TIME,
         )
-      return max(eta_email, eta_calendar + eta_contact)
+      eta_in_place_archive = 0.0
+      if ENABLE_IN_PLACE_ARCHIVE_ETA:
+        eta_in_place_archive = in_place_archive_estimator.calculate_migration_eta(
+          {
+            "item_counts": subset_df["In Place Archive Count"].tolist(),
+            "global_limit": ETA_EMAIL_GLOBAL_LIMIT,
+            "user_limit": ETA_EMAIL_USER_LIMIT,
+            "batch_size": ETA_EMAIL_BATCH_SIZE,
+            "batch_time": ETA_EMAIL_BATCH_TIME,
+          }
+        )
+      eta_group_mail_box = 0.0
+      if ENABLE_GROUP_MAILBOX_ETA:
+        eta_group_mail_box = group_mail_box_estimator.calculate_migration_eta(
+          {
+            "item_counts": subset_df["Group Mail Count"].tolist(),
+            "global_limit": ETA_EMAIL_GLOBAL_LIMIT,
+            "user_limit": ETA_EMAIL_USER_LIMIT,
+            "batch_size": ETA_EMAIL_BATCH_SIZE,
+            "batch_time": ETA_EMAIL_BATCH_TIME,
+          }
+        )
+      return max(eta_email, eta_calendar + eta_contact, eta_in_place_archive, eta_group_mail_box)
 
     # 2. Iterate through candidates
     for target_hours in candidate_hours:

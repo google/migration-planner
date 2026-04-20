@@ -31,8 +31,8 @@ class EOInPlaceArchiveEstimator(Estimator):
         self.stop_event = stop_event
         self.archive_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
 
-    def calculate_migration_eta(self, data: Dict[str, Any]) -> Dict[str, int]:
-        return {}
+    def calculate_migration_eta(self, data: Dict[str, Any]) -> float:
+        return super().calculate_migration_eta(data)
 
     def get_resource_type(self):
         return "EO_IN_PLACE_ARCHIVE"

@@ -36,7 +36,7 @@ class EOGroupMailBoxEstimator(Estimator):
             
         return user_to_count
 
-    def calculate_migration_eta(self, data: Dict[str, Any]) -> Dict[str, int]:
+    def calculate_migration_eta(self, data: Dict[str, Any]) -> float:
         return super().calculate_migration_eta(data)
     
     def get_resource_type(self):
