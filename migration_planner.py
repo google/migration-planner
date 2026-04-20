@@ -1110,10 +1110,10 @@ class MigrationEstimatorTool(ctk.CTk):
           card_frame, "Contacts", f"{data['total_contacts']:,}", "📞"
       )
       self.create_stat_card(
-          card_frame, "In-Place Archives", f"{data['total_in_place_archives']:,}", "📞"
+          card_frame, "In-Place Archives", f"{data['total_in_place_archives']:,}", "🗃️"
       )
       self.create_stat_card(
-          card_frame, "Group Mailbox Mails", f"{data['total_group_mailboxes']:,}", "📞"
+          card_frame, "Group Mailbox Mails", f"{data['total_group_mailboxes']:,}", "👥📧"
       )
 
       # Timeline
@@ -1736,7 +1736,7 @@ class MigrationEstimatorTool(ctk.CTk):
     group_mailbox_str = self.format_metric(batch["total_group_mailboxes"])
     info = (
         f"{batch['name']} - {users_str} 👥  |  {emails_str} 📩  |  {events_str}"
-        f" 📅  |  {contacts_str} 📞 |  {in_place_archive_str} A |  {group_mailbox_str} GM"
+        f" 📅  |  {contacts_str} 📞 |  {in_place_archive_str} 🗃️ |  {group_mailbox_str} 👥📧"
     )
     ctk.CTkLabel(
         f,
@@ -2333,13 +2333,15 @@ class MigrationEstimatorTool(ctk.CTk):
       estimator = EOInPlaceArchiveEstimator(
         manager,
         config,
-        url_invoker
+        url_invoker,
+        stop_event=self.stop_scan_event
       )
     elif resource_type == "group_mail_boxes":
       estimator = EOGroupMailBoxEstimator(
         manager,
         config,
-        url_invoker
+        url_invoker,
+        stop_event=self.stop_scan_event
       )
 
     future_to_chunk_map: Dict[Future, List] = {}
