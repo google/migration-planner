@@ -52,6 +52,8 @@ class EOInPlaceArchiveEstimator(Estimator):
     """
     def calculate_resource_count(self, data: Dict[str, Any]) -> Dict[str, int]:
         user_ids = data["user_ids"]
+        if not user_ids or None in user_ids:
+            raise Exception("Invalid user ids provided. Please check the list and ensure all the IDs are non-null.")
         return self.get_in_place_archive_count(user_ids)
 
     def get_in_place_archive_count(self, user_ids: List[str]) -> Dict[str, int]:
