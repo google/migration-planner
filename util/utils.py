@@ -73,7 +73,14 @@ def group_responses_by_key(
 
     for request in batch_requests:
         id_to_request_mapping[request["id"]] = request
-        id_to_response_mapping[request["id"]] = batch_responses_map[request["id"]]["body"]["value"]
+        if request["id"] not in batch_responses_map:
+            id_to_response_mapping[request["id"]] = []
+        elif "body" not in batch_responses_map[request["id"]]:
+            id_to_response_mapping[request["id"]] = []
+        elif "value" not in batch_responses_map[request["id"]]["body"]:
+            id_to_response_mapping[request["id"]] = []
+        else:
+            id_to_response_mapping[request["id"]] = batch_responses_map[request["id"]]["body"]["value"]
     
     for request_id, response in id_to_response_mapping.items():
         if id_to_request_mapping[request_id]["headers"][grouping_key] not in required_map:

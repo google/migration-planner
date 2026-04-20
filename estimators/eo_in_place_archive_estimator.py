@@ -40,6 +40,12 @@ class EOInPlaceArchiveEstimator(Estimator):
     def get_migration_type(self):
         return "EXCHANGE_ONLINE"
 
+    def is_hard_stop_requested(self):
+        if self.stop_event is None:
+            return False
+        
+        return self.stop_event.is_set()
+
     """
         @param List of Dictionary of param name to its value
         @returns Dictionary of user id to in-place archived mail count
@@ -89,6 +95,9 @@ class EOInPlaceArchiveEstimator(Estimator):
         return user_to_count
 
     def parse_and_count_in_place_archive_mail_box(self, mail_box_ids: List[str]) -> Dict[str, int]:
+        if self.is_hard_stop_requested():
+            return {mail_box_id: 0 for mail_box_id in mail_box_ids}
+
         # Extract all the top level folders. This is done separately as a different API is used for top level folders compared to child folders
         mail_box_id_maps = [{"mailboxId": mail_box_id} for mail_box_id in mail_box_ids]
         folder_api = "admin/exchange/mailboxes/{mailboxId}/folders?$select=id,childFolderCount,totalItemCount&$top=999"     # TODO Add support for a configurable page size
@@ -133,7 +142,7 @@ class EOInPlaceArchiveEstimator(Estimator):
                             "url": relative_url
                         })
                         
-        while pending_next_items:
+        while pending_next_items and not self.is_hard_stop_requested():
             batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
             
             next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -176,13 +185,14 @@ class EOInPlaceArchiveEstimator(Estimator):
 
         condition = threading.Condition()
         
-        self.submit_child_folder_requests_to_executor (
-            condition,
-            top_level_folders,
-            archived_mail_count,
-            active_thread_count
-        )
-
+        if not self.is_hard_stop_requested():
+            self.submit_child_folder_requests_to_executor (
+                condition,
+                top_level_folders,
+                archived_mail_count,
+                active_thread_count
+            )
+        
         # Non blocking wait to ensure that the parsing is complete before returning the result. Note that it is always expected to be non-zero unless the parsing is over as we increment the count before decrementing it sequentially for a particular folder.
         while active_thread_count.get_value() > 0:
             with condition:
@@ -273,7 +283,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             active_thread_count
         )
 
-        active_thread_count.decrement(1);
+        active_thread_count.decrement(1)
         with condition:
             condition.notify_all()
 
@@ -294,7 +304,7 @@ class EOInPlaceArchiveEstimator(Estimator):
                         parseable_sub_folders[mail_box_id] = []
                     parseable_sub_folders[mail_box_id].append(sub_folder)
 
-        if len(parseable_sub_folders) > 0:
+        if len(parseable_sub_folders) > 0 and not self.is_hard_stop_requested():
             try:
                 active_thread_count.increment()
 

@@ -214,6 +214,10 @@ class UrlInvoker():
         context: str = ""
     ) -> List[Dict[str, Any]]:
 
+        # Failsafe
+        if logger is None:
+            logger = lambda x: None
+
         token_data = self.token_manager.get_valid_token_slot(logger)
         session = self.token_manager.get_session()
 
