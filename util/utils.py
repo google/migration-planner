@@ -163,6 +163,10 @@ def create_request_to_response_map(
         temp_request_id_to_response_map = {int(response["id"]): response for response in batch_response}
 
         for request in batch:
+            if request["id"] not in temp_request_id_to_response_map:
+                continue        # TODO Check why and add logs for possible failure
+            if temp_request_id_to_response_map[request["id"]]["status"] >= 200 and temp_request_id_to_response_map[request["id"]]["status"] < 300:
+                continue        # TODO Add logic to log the failures
             request_to_response_map_list.append(RequestResponsePair(request=request, response=temp_request_id_to_response_map[request["id"]]))
 
     return request_to_response_map_list

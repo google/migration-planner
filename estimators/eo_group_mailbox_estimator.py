@@ -25,7 +25,14 @@ class EOGroupMailBoxEstimator(Estimator):
 
     def calculate_resource_count(self, data: Dict[str, Any]) -> Dict[str, int]:
         user_ids: List[str] = data["user_ids"]
-        return self.get_group_mail_box_count(user_ids)
+        mailbox_to_count = self.get_group_mail_box_count(user_ids)
+        
+        # Creating a new map to account for the fact that the user might not have a group mailbox. 
+        user_to_count = {user_id: 0 for user_id in user_ids}
+        for user_id, count in mailbox_to_count.items():
+            user_to_count[user_id] = count
+            
+        return user_to_count
 
     def calculate_migration_eta(self, data: Dict[str, Any]) -> Dict[str, int]:
         return super().calculate_migration_eta(data)
