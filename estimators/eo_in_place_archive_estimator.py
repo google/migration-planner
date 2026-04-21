@@ -8,6 +8,7 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from util.utils import create_batches
 from util.atomic_int import AtomicInt
+from util.enums import FailureType
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
@@ -50,13 +51,13 @@ class EOInPlaceArchiveEstimator(Estimator):
         @param List of Dictionary of param name to its value
         @returns Dictionary of user id to in-place archived mail count
     """
-    def calculate_resource_count(self, data: Dict[str, Any]) -> Dict[str, int]:
+    def calculate_resource_count(self, data: Dict[str, Any], failures: List[Dict[str, str]]) -> Dict[str, int]:
         user_ids = data["user_ids"]
         if not user_ids or None in user_ids:
             raise Exception("Invalid user ids provided. Please check the list and ensure all the IDs are non-null.")
-        return self.get_in_place_archive_count(user_ids)
+        return self.get_in_place_archive_count(user_ids, failures)
 
-    def get_in_place_archive_count(self, user_ids: List[str]) -> Dict[str, int]:
+    def get_in_place_archive_count(self, user_ids: List[str], failures: List[Dict[str, str]]) -> Dict[str, int]:
         # Fetch the in-place archive mail box id for the user
         exchange_api = "users/{userId}/settings/exchange"
         
@@ -86,6 +87,15 @@ class EOInPlaceArchiveEstimator(Estimator):
                     user_id = req["headers"]["userId"]
                     if "body" in resp and "inPlaceArchiveMailboxId" in resp["body"]:
                         user_to_mailbox[user_id] = resp["body"]["inPlaceArchiveMailboxId"]
+
+        for user_id in user_ids:
+            if user_id not in user_to_mailbox:
+                failures.append({
+                    "userId": user_id,
+                    "isPartial": False,
+                    "type": FailureType.NOT_FOUND,
+                    "message": "In-place archive mailbox not found for the user."
+                })
 
         mail_box_ids = list(set(user_to_mailbox.values()))
         mail_box_to_count = self.parse_and_count_in_place_archive_mail_box(mail_box_ids)

@@ -1,11 +1,11 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 import math
 
 class Estimator:
     def __init__(self):
         pass
 
-    def calculate_resource_count(self, data: Dict[str, Any]) -> Dict[str, int]:
+    def calculate_resource_count(self, data: Dict[str, Any], failures: List[Dict[str, str]]) -> Dict[str, int]:
         raise NotImplementedError("Subclasses must implement the estimate method")
     
     def calculate_migration_eta(self, data: Dict[str, Any]) -> float:
