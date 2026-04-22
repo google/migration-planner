@@ -125,7 +125,9 @@ def process_pagination_responses(
     responses: List[Dict[str, Any]],
     orig_map: Dict[str, Any],
     grouping_key: str,
-    base_url: str
+    base_url: str,
+    failures: Optional[List[Dict[str, Any]]] = None,
+    is_partial: bool = False
 ) -> List[Dict[str, Any]]:
     next_items = []
     batch_responses_map = {int(resp["id"]): resp for resp in responses}
@@ -151,6 +153,14 @@ def process_pagination_responses(
                     next_item = dict(req["headers"])
                     next_item["url"] = relative_url
                     next_items.append(next_item)
+            elif "body" in resp and "error" in resp["body"] and failures is not None:
+                failures.append({
+                    "mailboxId": key,
+                    "isPartial": is_partial,
+                    "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                    "statusCode" : resp["status"],
+                    "message": resp["body"]["error"]["message"]
+                })
                     
     return next_items
 
@@ -192,6 +202,7 @@ def create_request_to_response_map(
                         "userId": request["headers"]["userId"] if "userId" in request["headers"] else None,
                         "isPartial": False,
                         "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                        "statusCode" : temp_request_id_to_response_map[request["id"]]["status"],
                         "message": f"The request failed with status code {temp_request_id_to_response_map[request["id"]]["status"]} and error message: {error_message}"
                     })
                 continue

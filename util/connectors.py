@@ -260,7 +260,7 @@ class UrlInvoker():
 
         self.token_manager.return_token_slot(token_data)
 
-        return final_responses
+        return final_responses + failed_responses
 
     """
         @returns Map of the request ID in batch to the relevant response.

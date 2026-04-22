@@ -77,6 +77,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             response_map[batch_id] = future.result()
 
         user_to_mailbox: Dict[str, str] = {}
+        mailbox_to_user: Dict[str, str] = {}
         for batch_id, responses in response_map.items():
             batch = batch_id_to_batch_map[batch_id]
             batch_responses_map = {int(resp["id"]): resp for resp in responses}
@@ -87,26 +88,44 @@ class EOInPlaceArchiveEstimator(Estimator):
                     user_id = req["headers"]["userId"]
                     if "body" in resp and "inPlaceArchiveMailboxId" in resp["body"]:
                         user_to_mailbox[user_id] = resp["body"]["inPlaceArchiveMailboxId"]
-
-        for user_id in user_ids:
-            if user_id not in user_to_mailbox:
-                failures.append({
-                    "userId": user_id,
-                    "isPartial": False,
-                    "type": FailureType.NOT_FOUND,
-                    "message": "In-place archive mailbox not found for the user."
-                })
+                        mailbox_to_user[resp["body"]["inPlaceArchiveMailboxId"]] = user_id
+                    elif "body" in resp and "error" in resp["body"]:
+                        failures.append({
+                            "userId": user_id,
+                            "isPartial": False,
+                            "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                            "statusCode" : resp["status"],
+                            "message": resp["body"]["error"]["message"]
+                        })
+                else:
+                    failures.append({
+                        "userId": req["headers"]["userId"],
+                        "isPartial": False,
+                        "type": FailureType.NOT_FOUND,
+                        "statusCode": None,
+                        "message": "In-place archive mailbox not found for the user."
+                    })
 
         mail_box_ids = list(set(user_to_mailbox.values()))
-        mail_box_to_count = self.parse_and_count_in_place_archive_mail_box(mail_box_ids)
+        mailbox_failures = []
+        mail_box_to_count = self.parse_and_count_in_place_archive_mail_box(mail_box_ids, mailbox_failures)
         
         user_to_count = {user_id: 0 for user_id in user_ids}
         for user_id, mail_box_id in user_to_mailbox.items():
             user_to_count[user_id] = mail_box_to_count.get(mail_box_id, 0)
+
+        failures.extend([{
+            "userId": mailbox_to_user[mailbox_failure["mailboxId"]],
+            "isPartial": mailbox_failure["isPartial"],
+            "folderId": mailbox_failure["folderId"] if "folderId" in mailbox_failure else None,
+            "type": mailbox_failure["type"],
+            "statusCode": mailbox_failure["statusCode"],
+            "message": mailbox_failure["message"]
+        } for mailbox_failure in mailbox_failures])
             
         return user_to_count
 
-    def parse_and_count_in_place_archive_mail_box(self, mail_box_ids: List[str]) -> Dict[str, int]:
+    def parse_and_count_in_place_archive_mail_box(self, mail_box_ids: List[str], failures: List[Dict[str, str]]) -> Dict[str, int]:
         if self.is_hard_stop_requested():
             return {mail_box_id: 0 for mail_box_id in mail_box_ids}
 
@@ -153,6 +172,22 @@ class EOInPlaceArchiveEstimator(Estimator):
                             "mailboxId": mailbox_id,
                             "url": relative_url
                         })
+                    elif "body" in resp and "error" in resp["body"]:
+                        failures.append({
+                            "mailboxId": mailbox_id,
+                            "isPartial": False,                                                 # Call the /folders would not result in partial failure
+                            "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                            "statusCode": resp["status"],
+                            "message": resp["body"]["error"]["message"]
+                        })
+                else:
+                    failures.append({
+                        "mailboxId": req["headers"]["mailboxId"],
+                        "isPartial": False,
+                        "type": FailureType.NOT_FOUND,
+                        "statusCode": None,
+                        "message": "In-place archive mailbox not found for the user."
+                    })
                         
         while pending_next_items and not self.is_hard_stop_requested():
             batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
@@ -173,7 +208,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             
             for batch_id, responses in next_response_map.items():
                 batch = next_batch_id_to_batch_map[batch_id]
-                new_pending_next_items.extend(process_pagination_responses(batch, responses, mailbox_to_resp_map, "mailboxId", GRAPH_BETA_URL))
+                new_pending_next_items.extend(process_pagination_responses(batch, responses, mailbox_to_resp_map, "mailboxId", GRAPH_BETA_URL, failures, False))
                 
             pending_next_items = new_pending_next_items
             
@@ -192,9 +227,6 @@ class EOInPlaceArchiveEstimator(Estimator):
         
         # Maintaining this count to ensure that every child folder is parsed before returning the final count. 
         active_thread_count = AtomicInt(0)
-
-        # TODO Add support for a thread count per user for progress bars
-
         condition = threading.Condition()
         
         if not self.is_hard_stop_requested():
@@ -202,7 +234,8 @@ class EOInPlaceArchiveEstimator(Estimator):
                 condition,
                 top_level_folders,
                 archived_mail_count,
-                active_thread_count
+                active_thread_count,
+                failures
             )
         
         # Non blocking wait to ensure that the parsing is complete before returning the result. Note that it is always expected to be non-zero unless the parsing is over as we increment the count before decrementing it sequentially for a particular folder.
@@ -222,89 +255,111 @@ class EOInPlaceArchiveEstimator(Estimator):
             folders: Dict[str, List[Dict[str, Any]]], 
             archived_mail_count: Dict[str, AtomicInt], 
             active_thread_count: AtomicInt,
+            failures: List[Dict[str, Any]]
     ) -> None:
-        child_folder_api = "admin/exchange/mailboxes/{mailBoxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount&$top=999"
+        try:
+            child_folder_api = "admin/exchange/mailboxes/{mailBoxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount&$top=999"
 
-        mail_box_id_to_folder_id: List[Dict[str, Any]] = []
-        for mail_box_id, folder_list in folders.items():
-            for folder in folder_list:
-                mail_box_id_to_folder_id.append({"mailBoxId": mail_box_id, "folderId": folder["id"]})
-        
-        batches = create_batches(child_folder_api, mail_box_id_to_folder_id, self.config.hierarchial_crawl_batch_limit, True)
+            mail_box_id_to_folder_id: List[Dict[str, Any]] = []
+            for mail_box_id, folder_list in folders.items():
+                for folder in folder_list:
+                    mail_box_id_to_folder_id.append({"mailBoxId": mail_box_id, "folderId": folder["id"]})
+            
+            batches = create_batches(child_folder_api, mail_box_id_to_folder_id, self.config.hierarchial_crawl_batch_limit, True)
 
-        child_folders: Dict[str, List[Dict[str, Any]]] = {}
-        
-        all_initial_responses = []
-        folder_context_map = {}
-        
-        # Using sequential processing here as each batch would have 4 requests which is = throttling quota of same mailbox requests.
-        for batch in batches:
-            responses = self.url_invoker.invoke(GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
-            all_initial_responses.append((batch, responses))
+            child_folders: Dict[str, List[Dict[str, Any]]] = {}
             
-            batch_responses_map = {int(resp["id"]): resp for resp in responses}
-            for req in batch:
-                req_id = req["id"]
-                if req_id in batch_responses_map:
-                    resp = batch_responses_map[req_id]
-                    folder_id = req["headers"]["folderId"]
-                    folder_context_map[folder_id] = {
-                        "resp": resp,
-                        "mailBoxId": req["headers"]["mailBoxId"]
-                    }
-                    
-        # Now check for next links
-        pending_next_items = []
-        for batch, responses in all_initial_responses:
-            batch_responses_map = {int(resp["id"]): resp for resp in responses}
-            for req in batch:
-                req_id = req["id"]
-                if req_id in batch_responses_map:
-                    resp = batch_responses_map[req_id]
-                    folder_id = req["headers"]["folderId"]
-                    
-                    if "body" in resp and "@odata.nextLink" in resp["body"]:
-                        next_url = resp["body"]["@odata.nextLink"]
-                        relative_url = get_relative_url(next_url, GRAPH_BETA_URL)
-                        pending_next_items.append({
-                            "folderId": folder_id,
-                            "url": relative_url,
-                            "mailBoxId": req["headers"]["mailBoxId"]
-                        })
-                
-        while pending_next_items:
-            batches = create_batches("{url}", pending_next_items, self.config.hierarchial_crawl_batch_limit, True)
+            all_initial_responses = []
+            folder_context_map = {}
             
-            new_pending_next_items = []
-            
-            # Execute batches SEQUENTIALLY for child folders
+            # Using sequential processing here as each batch would have 4 requests which is = throttling quota of same mailbox requests.
             for batch in batches:
                 responses = self.url_invoker.invoke(GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
-                new_pending_next_items.extend(process_pagination_responses(batch, responses, folder_context_map, "folderId", GRAPH_BETA_URL))
+                all_initial_responses.append((batch, responses))
                 
-            pending_next_items = new_pending_next_items
-            
-        # Finally, group responses by key using original batches
-        for batch, responses in all_initial_responses:
-            group_responses_by_key(child_folders, batch, responses, "mailBoxId")
+                batch_responses_map = {int(resp["id"]): resp for resp in responses}
+                for req in batch:
+                    req_id = req["id"]
+                    if req_id in batch_responses_map and batch_responses_map[req_id]["status"] == 200:
+                        resp = batch_responses_map[req_id]
+                        folder_id = req["headers"]["folderId"]
+                        folder_context_map[folder_id] = {
+                            "resp": resp,
+                            "mailBoxId": req["headers"]["mailBoxId"]
+                        }
+                        
+            # Now check for next links
+            pending_next_items = []
+            for batch, responses in all_initial_responses:
+                batch_responses_map = {int(resp["id"]): resp for resp in responses}
+                for req in batch:
+                    req_id = req["id"]
+                    if req_id in batch_responses_map:
+                        resp = batch_responses_map[req_id]
+                        folder_id = req["headers"]["folderId"]
+                        
+                        if "body" in resp and "@odata.nextLink" in resp["body"]:
+                            next_url = resp["body"]["@odata.nextLink"]
+                            relative_url = get_relative_url(next_url, GRAPH_BETA_URL)
+                            pending_next_items.append({
+                                "folderId": folder_id,
+                                "url": relative_url,
+                                "mailBoxId": req["headers"]["mailBoxId"]
+                            })
+                        elif "body" in resp and "error" in resp["body"]:
+                            failures.append({
+                                "mailboxId": req["headers"]["mailBoxId"],
+                                "folderId": req["headers"]["folderId"],
+                                "isPartial": True,                   # As we can only reach this point if the top level folder scan is successful
+                                "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                                "statusCode": resp["status"],
+                                "message": resp["body"]["error"]["message"]
+                            })
+                    else:
+                        failures.append({
+                            "mailboxId": req["headers"]["mailBoxId"],
+                            "folderId": req["headers"]["folderId"],
+                            "isPartial": True,                   # As we can only reach this point if the top level folder scan is successful
+                            "type": FailureType.NOT_FOUND,
+                            "statusCode": None,
+                            "message": "Invalid response received for the child folder"
+                        })
+                    
+            while pending_next_items:
+                batches = create_batches("{url}", pending_next_items, self.config.hierarchial_crawl_batch_limit, True)
+                
+                new_pending_next_items = []
+                
+                # Execute batches SEQUENTIALLY for child folders
+                for batch in batches:
+                    responses = self.url_invoker.invoke(GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+                    new_pending_next_items.extend(process_pagination_responses(batch, responses, folder_context_map, "folderId", GRAPH_BETA_URL, True))
+                    
+                pending_next_items = new_pending_next_items
+                
+            # Finally, group responses by key using original batches
+            for batch, responses in all_initial_responses:
+                group_responses_by_key(child_folders, batch, responses, "mailBoxId")
 
-        self.submit_child_folder_requests_to_executor (
-            condition,
-            child_folders,
-            archived_mail_count,
-            active_thread_count
-        )
-
-        active_thread_count.decrement(1)
-        with condition:
-            condition.notify_all()
+            self.submit_child_folder_requests_to_executor (
+                condition,
+                child_folders,
+                archived_mail_count,
+                active_thread_count,
+                failures
+            )
+        finally:
+            active_thread_count.decrement(1)
+            with condition:
+                condition.notify_all()
 
     def submit_child_folder_requests_to_executor (
         self,
         condition: threading.Condition,
         child_folders: Dict[str, List[Dict[str, Any]]],
         archived_mail_count: Dict[str, AtomicInt],
-        active_thread_count: AtomicInt
+        active_thread_count: AtomicInt,
+        failures: List[Dict[str, Any]]
     ) -> None:
 
         parseable_sub_folders: Dict[str, List[Dict[str, Any]]] = {}
@@ -321,7 +376,7 @@ class EOInPlaceArchiveEstimator(Estimator):
                 active_thread_count.increment()
 
                 #TODO Use a retry template and failure callback instead of try, except
-                self.archive_executor.submit(self.parse_and_count_mails_in_child_folders, condition, parseable_sub_folders, archived_mail_count, active_thread_count)
+                self.archive_executor.submit(self.parse_and_count_mails_in_child_folders, condition, parseable_sub_folders, archived_mail_count, active_thread_count, failures)
             except:
                 active_thread_count.decrement()
                 with condition:

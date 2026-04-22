@@ -1927,6 +1927,7 @@ class MigrationEstimatorTool(ctk.CTk):
         cumulative = msg.get("cumulative", 0)
         users_proc = msg.get("processed", 0)
         users_fail = msg.get("failed", 0)
+        users_partially_failed = msg.get("partially_failed", 0)
         users_tot = msg.get("total", 0)
         if source in self.prog_widgets:
           widget = self.prog_widgets[source]["bar"]
@@ -1959,11 +1960,19 @@ class MigrationEstimatorTool(ctk.CTk):
               label = "Group Mail Count"
             widget_lbl = self.prog_widgets[source]["lbl"]
             if widget_lbl.winfo_exists():
+              text_parts = [
+                  f"Users: {users_proc - users_fail - users_partially_failed} succeeded",
+                  f"{users_fail} failed"
+              ]
+              
+              if users_partially_failed > 0:
+                  text_parts.append(f"{users_partially_failed} partially failed")
+                  
+              base_text = ", ".join(text_parts)
+              final_text = f"{base_text} | {label}: {cumulative:,}"
+              
               widget_lbl.configure(
-                  text=(
-                      f"Users: {users_proc - users_fail} succeeded , {users_fail}"
-                      f" failed | {label}: {cumulative:,}"
-                  )
+                  text=final_text
               )
       elif mtype == "complete":
         self.show_results_content(msg["data"])
@@ -2322,12 +2331,15 @@ class MigrationEstimatorTool(ctk.CTk):
     user_chunks: List[List[Dict[str, Any]]],
     manager: Optional[TokenManager],
     stats: Dict[str, int],
-    total_users: int
+    total_users: int,
+    log_freq: int = 10
   ) -> List[Dict[str, str]]: 
     self.log_msg(f"\n--- Starting {resource_type.upper()} Scan ---")
     processed_users = 0
     phase_total = 0
     users_failed = 0
+    users_partially_failed = 0
+
     url_invoker = UrlInvoker(
         manager,
         config.retries,
@@ -2355,8 +2367,10 @@ class MigrationEstimatorTool(ctk.CTk):
       )
     
     total_failures = []
+    partial_failures = []
 
     # Failsafe to avoid thread leak in case of unexpected failures
+    chunk_count = 0
     try:
       future_to_chunk_map: Dict[Future, List] = {}
       future_to_failures_map: Dict[Future, List[Dict[str, Any]]] = {}
@@ -2370,21 +2384,37 @@ class MigrationEstimatorTool(ctk.CTk):
       for f in as_completed(future_to_chunk_map):
         chunk = future_to_chunk_map[f]
         chunk_result = f.result()
+        chunk_count += 1
       
         processed_users += len(chunk)
         chunk_total = sum(value for user_id, value in chunk_result.items())
         phase_total += chunk_total
         complete_failures = [failure for failure in future_to_failures_map[f] if failure["isPartial"] == False]
-        total_failures += [{"user": failure["userId"], "cause": failure["message"]} for failure in complete_failures if failure["userId"] is not None]           # TODO Handle partial failures too
+        chunk_partial_failures = [failure for failure in future_to_failures_map[f] if failure["isPartial"] == True]
+        total_failures += [
+          {
+            "user": failure["userId"], 
+            "cause": f"[{failure["statusCode"] if "statusCode" in failure else None}] {failure['message']}", 
+          } for failure in complete_failures if failure["userId"] is not None] 
+        partial_failures += [
+          {
+            "user": failure["userId"], 
+            "cause": f"[{failure["statusCode"] if "statusCode" in failure else None}] {failure['message']}", 
+            "failed_resource": failure["folderId"] if "folderId" in failure else None
+          } for failure in chunk_partial_failures if failure["userId"] is not None]
         users_failed += len(
             set(failure["userId"] for failure in complete_failures if failure["userId"] is not None)
         )
+        users_partially_failed += len(
+            set(failure["userId"] for failure in chunk_partial_failures if failure["userId"] is not None)
+        )
 
         # Update Progress
-        self.log_msg(
-              f"Processed {processed_users}/{total_users} | Failed:"
-              f" {users_failed}/{total_users} | {resource_type}: {phase_total}"
-          )
+        if chunk_count % log_freq == 0:
+          self.log_msg(
+                f"Processed {processed_users}/{total_users} | Failed:"
+                f" {users_failed}/{total_users} | {resource_type}: {phase_total}"
+            )
         prog = processed_users / total_users if total_users > 0 else 0
         self.ui_update(
           "scan_progress",
@@ -2393,6 +2423,7 @@ class MigrationEstimatorTool(ctk.CTk):
           cumulative=phase_total,
           processed=processed_users,
           failed=users_failed,
+          partially_failed=users_partially_failed,
           total=total_users,
           extra_text="",
         )
@@ -2409,12 +2440,22 @@ class MigrationEstimatorTool(ctk.CTk):
         
         stats[resource_type] += chunk_total
     except Exception as e:
+      self.ui_update(
+        "scan_progress",
+        source=resource_type,
+        progress=1.0,
+        cumulative=phase_total,
+        processed=total_users,
+        failed=total_users - processed_users + users_failed,
+        total=total_users,
+        extra_text="",
+      )
       self.log_msg(f"Error in {resource_type} scan: {e}")
     finally:
       executor.shutdown(wait=False)
       estimator.shutdown()
 
-    return total_failures
+    return total_failures, partial_failures
 
   def _run_scan_phases(
       self,
@@ -2513,7 +2554,7 @@ class MigrationEstimatorTool(ctk.CTk):
     if config.scan_in_place_archives:
       if can_scan and (not has_in_place_archives_data or config.user_source == "tenant"):
         self.ui_update("phase_status", source="in_place_archives", status="running")
-        failed_in_place_archives = self.run_batch_scan(
+        failed_in_place_archives, partial_in_place_archive_failures = self.run_batch_scan(
             "in_place_archives", 
             config,
             user_chunks, manager, stats, total_users
@@ -2535,7 +2576,7 @@ class MigrationEstimatorTool(ctk.CTk):
     if config.scan_group_mail_boxes:
       if can_scan and (not has_group_mailboxes_data or config.user_source == "tenant"):
         self.ui_update("phase_status", source="group_mail_boxes", status="running")
-        failed_group_mailboxes = self.run_batch_scan(
+        failed_group_mailboxes, partial_group_mail_box_failures = self.run_batch_scan(
             "group_mail_boxes", 
             config,
             user_chunks, manager, stats, total_users
@@ -2586,6 +2627,21 @@ class MigrationEstimatorTool(ctk.CTk):
         self.log_msg("Group Mail Box Migration Failures")
         for f in failed_group_mailboxes:
           self.log_msg(f"User: {f['user']} | Cause: {f['cause']}")
+        self.log_msg("")  # Add blank line
+
+      self.log_msg("=" * 40)
+    
+    if partial_in_place_archive_failures or partial_group_mail_box_failures:
+      if partial_in_place_archive_failures:
+        self.log_msg("In Place Archive Migration Partial Failures")
+        for f in partial_in_place_archive_failures:
+          self.log_msg(f"User: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
+        self.log_msg("")  # Add blank line
+      
+      if partial_group_mail_box_failures:
+        self.log_msg("Group Mail Box Migration Partial Failures")
+        for f in partial_group_mail_box_failures:
+          self.log_msg(f"User: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
         self.log_msg("")  # Add blank line
 
       self.log_msg("=" * 40)
