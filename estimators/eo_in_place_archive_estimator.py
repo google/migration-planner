@@ -3,10 +3,9 @@ from typing import Any, Callable, Dict, List, Optional
 from estimators.estimator import Estimator
 from util.connectors import TokenManager
 from util.connectors import UrlInvoker
-from util.utils import ScanConfig, group_responses_by_key, process_pagination_responses, get_relative_url
+from util.utils import ScanConfig, group_responses_by_key, process_pagination_responses, get_relative_url, get_batch_responses_map, create_batches
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from util.utils import create_batches
 from util.atomic_int import AtomicInt
 from util.enums import FailureType
 
@@ -49,6 +48,7 @@ class EOInPlaceArchiveEstimator(Estimator):
 
     """
         @param List of Dictionary of param name to its value
+        @param List of failures (it will be updated in place)
         @returns Dictionary of user id to in-place archived mail count
     """
     def calculate_resource_count(self, data: Dict[str, Any], failures: List[Dict[str, str]]) -> Dict[str, int]:
@@ -80,7 +80,7 @@ class EOInPlaceArchiveEstimator(Estimator):
         mailbox_to_user: Dict[str, str] = {}
         for batch_id, responses in response_map.items():
             batch = batch_id_to_batch_map[batch_id]
-            batch_responses_map = {int(resp["id"]): resp for resp in responses}
+            batch_responses_map = get_batch_responses_map(responses, self.logger)
             for req in batch:
                 req_id = req["id"]
                 if req_id in batch_responses_map:
@@ -157,7 +157,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             batch = batch_id_to_batch_map[batch_id]
             
             # Initialize mapping and check for next links manually
-            batch_responses_map = {int(resp["id"]): resp for resp in responses}
+            batch_responses_map = get_batch_responses_map(responses, self.logger)
             for req in batch:
                 req_id = req["id"]
                 if req_id in batch_responses_map:
@@ -258,12 +258,12 @@ class EOInPlaceArchiveEstimator(Estimator):
             failures: List[Dict[str, Any]]
     ) -> None:
         try:
-            child_folder_api = "admin/exchange/mailboxes/{mailBoxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount&$top=999"
+            child_folder_api = "admin/exchange/mailboxes/{mailboxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount&$top=999"
 
             mail_box_id_to_folder_id: List[Dict[str, Any]] = []
             for mail_box_id, folder_list in folders.items():
                 for folder in folder_list:
-                    mail_box_id_to_folder_id.append({"mailBoxId": mail_box_id, "folderId": folder["id"]})
+                    mail_box_id_to_folder_id.append({"mailboxId": mail_box_id, "folderId": folder["id"]})
             
             batches = create_batches(child_folder_api, mail_box_id_to_folder_id, self.config.hierarchial_crawl_batch_limit, True)
 
@@ -277,7 +277,7 @@ class EOInPlaceArchiveEstimator(Estimator):
                 responses = self.url_invoker.invoke(GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
                 all_initial_responses.append((batch, responses))
                 
-                batch_responses_map = {int(resp["id"]): resp for resp in responses}
+                batch_responses_map = get_batch_responses_map(responses, self.logger)
                 for req in batch:
                     req_id = req["id"]
                     if req_id in batch_responses_map and batch_responses_map[req_id]["status"] == 200:
@@ -285,13 +285,13 @@ class EOInPlaceArchiveEstimator(Estimator):
                         folder_id = req["headers"]["folderId"]
                         folder_context_map[folder_id] = {
                             "resp": resp,
-                            "mailBoxId": req["headers"]["mailBoxId"]
+                            "mailboxId": req["headers"]["mailboxId"]
                         }
                         
             # Now check for next links
             pending_next_items = []
             for batch, responses in all_initial_responses:
-                batch_responses_map = {int(resp["id"]): resp for resp in responses}
+                batch_responses_map = get_batch_responses_map(responses, self.logger)
                 for req in batch:
                     req_id = req["id"]
                     if req_id in batch_responses_map:
@@ -304,11 +304,11 @@ class EOInPlaceArchiveEstimator(Estimator):
                             pending_next_items.append({
                                 "folderId": folder_id,
                                 "url": relative_url,
-                                "mailBoxId": req["headers"]["mailBoxId"]
+                                "mailboxId": req["headers"]["mailboxId"]
                             })
                         elif "body" in resp and "error" in resp["body"]:
                             failures.append({
-                                "mailboxId": req["headers"]["mailBoxId"],
+                                "mailboxId": req["headers"]["mailboxId"],
                                 "folderId": req["headers"]["folderId"],
                                 "isPartial": True,                   # As we can only reach this point if the top level folder scan is successful
                                 "type": FailureType.FAILURE_STATUS_CODE_ERROR,
@@ -317,7 +317,7 @@ class EOInPlaceArchiveEstimator(Estimator):
                             })
                     else:
                         failures.append({
-                            "mailboxId": req["headers"]["mailBoxId"],
+                            "mailboxId": req["headers"]["mailboxId"],
                             "folderId": req["headers"]["folderId"],
                             "isPartial": True,                   # As we can only reach this point if the top level folder scan is successful
                             "type": FailureType.NOT_FOUND,
@@ -339,7 +339,7 @@ class EOInPlaceArchiveEstimator(Estimator):
                 
             # Finally, group responses by key using original batches
             for batch, responses in all_initial_responses:
-                group_responses_by_key(child_folders, batch, responses, "mailBoxId")
+                group_responses_by_key(child_folders, batch, responses, "mailboxId")
 
             self.submit_child_folder_requests_to_executor (
                 condition,
@@ -365,8 +365,39 @@ class EOInPlaceArchiveEstimator(Estimator):
         parseable_sub_folders: Dict[str, List[Dict[str, Any]]] = {}
         for mail_box_id, sub_folders in child_folders.items():
             for sub_folder in sub_folders:
-                archived_mail_count[mail_box_id].increment(sub_folder["totalItemCount"]) if "totalItemCount" in sub_folder else None
-                if "childFolderCount" in sub_folder and sub_folder["childFolderCount"] is not None and sub_folder["childFolderCount"] > 0:
+                # 1. Safely handle totalItemCount
+                if "totalItemCount" in sub_folder:
+                    try:
+                        count = int(sub_folder["totalItemCount"])
+                        archived_mail_count[mail_box_id].increment(count)
+                    except (ValueError, TypeError):
+                        if self.logger:
+                            self.logger(f"Warning: Invalid totalItemCount '{sub_folder.get('totalItemCount')}' for mailbox {mail_box_id}. Skipping count.")
+                        failures.append({
+                            "mailboxId": mail_box_id,
+                            "isPartial": True,
+                            "type": FailureType.INVALID_DATA,
+                            "statusCode": None,
+                            "message": f"Invalid totalItemCount '{sub_folder.get('totalItemCount')}'"
+                        })
+                
+                # 2. Safely handle childFolderCount
+                child_count = 0
+                if "childFolderCount" in sub_folder and sub_folder["childFolderCount"] is not None:
+                    try:
+                        child_count = int(sub_folder["childFolderCount"])
+                    except (ValueError, TypeError):
+                        if self.logger:
+                            self.logger(f"Warning: Invalid childFolderCount '{sub_folder.get('childFolderCount')}' for mailbox {mail_box_id}. Assuming 0.")
+                        failures.append({
+                            "mailboxId": mail_box_id,
+                            "isPartial": True,
+                            "type": FailureType.INVALID_DATA,
+                            "statusCode": None,
+                            "message": f"Invalid childFolderCount '{sub_folder.get('childFolderCount')}'"
+                        })
+                
+                if child_count > 0:
                     if mail_box_id not in parseable_sub_folders:
                         parseable_sub_folders[mail_box_id] = []
                     parseable_sub_folders[mail_box_id].append(sub_folder)

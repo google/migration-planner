@@ -2,7 +2,7 @@ from enum import Enum, auto
 
 class FailureType(Enum):
   NOT_FOUND = 1
-  INVALID_DATA_STATE_ERROR = 2
+  INVALID_DATA = 2
   URL_INVOCATION_ERROR = 3
   FAILURE_STATUS_CODE_ERROR = 4
   RATE_LIMIT_ERROR = 5
