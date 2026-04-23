@@ -173,7 +173,6 @@ class TokenManager:
   ) -> Dict[str, Any]:
     """Retrieves an available token, refreshing it if nearing expiration."""
 
-    print(f"Token Queue Size: {self.token_queue.qsize()}")
     token_data = self.token_queue.get()
 
     if time.time() > token_data["expires_at"]:
@@ -230,7 +229,6 @@ class UrlInvoker():
 
         retry_count = 0
         while retry_count < self.batch_retry_count:
-            print(f"Retry Count: {retry_count} for url {curr_batch[0]['url']}")
             responses = self.execute_batch_request(
                     session,
                     batch_url,
