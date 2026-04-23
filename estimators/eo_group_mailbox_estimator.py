@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional
 from estimators.estimator import Estimator
 from util.connectors import TokenManager, UrlInvoker
 from util.utils import ScanConfig, create_batches, create_request_to_response_map
+from util.enums import FailureType
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
@@ -67,7 +68,18 @@ class EOGroupMailBoxEstimator(Estimator):
             batch_id_to_responses_map[batch_id] = future.result()
 
         granular_request_to_response_pairs = create_request_to_response_map(batch_id_to_batch_map, batch_id_to_responses_map, failures)
-        group_mail_box_ids = [request_response_pair.request["headers"]["userId"] for request_response_pair in granular_request_to_response_pairs if request_response_pair.response["body"]["value"] == "shared"]
+        group_mail_box_ids = []
+        for request_response_pair in granular_request_to_response_pairs:
+            if "body" in request_response_pair.response and "value" in request_response_pair.response["body"]:
+                if request_response_pair.response["body"]["value"] == "shared":
+                    group_mail_box_ids.append(request_response_pair.request["headers"]["userId"])
+            else:
+                failures.append({
+                    "userId": request_response_pair.request["headers"]["userId"],
+                    "type": FailureType.INVALID_DATA,
+                    "statusCode": 200,
+                    "message": "Invalid data - userPurpose not present in response"
+                })
 
         group_mail_count_endpoint = "/users/{userId}/messages?$count=true&$top=1&$select=id"
         group_mail_box_batches = create_batches(group_mail_count_endpoint, [{"userId": mail_id} for mail_id in group_mail_box_ids], self.config.parallel_batches, True)
@@ -90,7 +102,25 @@ class EOGroupMailBoxEstimator(Estimator):
         for request_response_pair in granular_request_to_response_pairs:
             request = request_response_pair.request
             response = request_response_pair.response
-            group_mailbox_to_count[request["headers"]["userId"]] = response["body"]["@odata.count"]
+            if "body" in response and "@odata.count" in response["body"]:
+                try:
+                    group_mailbox_to_count[request["headers"]["userId"]] = int(response["body"]["@odata.count"])
+                except Exception as e:
+                    failures.append({
+                        "userId": request["headers"]["userId"],
+                        "type": FailureType.INVALID_DATA,
+                        "statusCode": 200,
+                        "message": f"Invalid data - Unable to convert count to integer: {e}"
+                    })
+                    group_mailbox_to_count[request["headers"]["userId"]] = 0
+            else:
+                failures.append({
+                    "userId": request["headers"]["userId"],
+                    "type": FailureType.INVALID_DATA,
+                    "statusCode": 200,
+                    "message": "Invalid data - No count present in response"
+                })
+                group_mailbox_to_count[request["headers"]["userId"]] = 0
 
         return group_mailbox_to_count
         
