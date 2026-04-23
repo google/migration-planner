@@ -77,6 +77,7 @@ from estimators.eo_in_place_archive_estimator import EOInPlaceArchiveEstimator
 from estimators.eo_group_mailbox_estimator import EOGroupMailBoxEstimator
 from util.connectors import TokenManager, UrlInvoker
 from util.utils import ScanConfig
+from util.monitoring import ResourceMonitor
 
 # =================================================================================
 # CONSTANTS
@@ -145,221 +146,10 @@ ENABLE_IN_PLACE_ARCHIVE_ETA = True
 ENABLE_GROUP_MAILBOX_ETA = True
 
 # =================================================================================
-# CONFIGURATION
-# =================================================================================
-
-# =================================================================================
 # BACKEND HELPERS
 # =================================================================================
 
-
-class ResourceMonitor(threading.Thread):
-  """Monitors CPU and RAM usage in a separate thread.
-
-  Attributes:
-      interval: Time in seconds between measurements.
-      stop_event: Event to signal the thread to stop.
-      cpu_readings: List of CPU usage percentages.
-      ram_readings: List of RAM usage percentages.
-  """
-
-  def __init__(self, interval: float = 1.0):
-    super().__init__()
-    self.interval = interval
-    self.stop_event = threading.Event()
-    self.cpu_readings: List[float] = []
-    self.ram_readings: List[float] = []
-    self.daemon = True
-
-  def run(self) -> None:
-    """Continuously records system metrics until stopped."""
-    while not self.stop_event.is_set():
-      self.cpu_readings.append(psutil.cpu_percent(interval=None))
-      self.ram_readings.append(psutil.virtual_memory().percent)
-      time.sleep(self.interval)
-
-  def stop(self) -> None:
-    """Signals the monitor to stop recording."""
-    self.stop_event.set()
-
-  def get_stats(self) -> Tuple[float, float, float, float]:
-    """Calculates average and maximum CPU and RAM usage.
-
-    Returns:
-        A tuple containing (avg_cpu, max_cpu, avg_ram, max_ram).
-    """
-    if not self.cpu_readings:
-      return 0.0, 0.0, 0.0, 0.0
-    avg_cpu = sum(self.cpu_readings) / len(self.cpu_readings)
-    max_cpu = max(self.cpu_readings)
-    avg_ram = sum(self.ram_readings) / len(self.ram_readings)
-    max_ram = max(self.ram_readings)
-    return avg_cpu, max_cpu, avg_ram, max_ram
-
-
-def execute_batch_request(
-    session: requests.Session,
-    batch_url: str,
-    token_manager: TokenManager,
-    token_data: Dict[str, Any],
-    requests_payload: List[Dict[str, Any]],
-    logger: Callable[[str], None],
-    stop_event: Optional[threading.Event] = None,
-    context: str = "",
-) -> Dict[str, Any]:
-  """Executes a batch request against MS Graph with retry logic for throttling."""
-  successful_responses = {}
-  pending_requests = requests_payload
-  max_retries = token_manager.retries
-  current_try = 0
-
-  while pending_requests and current_try < max_retries:
-    if stop_event and stop_event.is_set():
-      break
-    current_try += 1
-
-    payload = {"requests": pending_requests}
-
-    # Build headers dynamically so they use the refreshed token if updated
-    headers = {
-        "Authorization": f"Bearer {token_data['token']}",
-        "Content-Type": "application/json",
-    }
-
-    try:
-      resp = session.post(batch_url, headers=headers, json=payload, timeout=180)
-      if resp.status_code == 200:
-        try:
-          batch_responses = resp.json().get("responses", [])
-        except ValueError:
-          logger(f"Invalid JSON response in batch. Retrying...")
-          time.sleep(2)
-          continue
-
-        current_batch_map = {r["id"]: r for r in pending_requests}
-        next_retry_requests = []
-        retry_after_delay = 0
-        needs_refresh = False
-
-        for response_item in batch_responses:
-          req_id = response_item.get("id")
-          status = response_item.get("status")
-          if status == 429:
-            headers_429 = response_item.get("headers", {})
-            try:
-              wait_sec = int(float(headers_429.get("Retry-After", 0)))
-            except (ValueError, TypeError):
-              wait_sec = 2
-            retry_after_delay = max(retry_after_delay, wait_sec)
-            if req_id in current_batch_map:
-              next_retry_requests.append(current_batch_map[req_id])
-          elif status == 401:
-            # Handle inner 401 (just in case single items fail authorization)
-            needs_refresh = True
-            if req_id in current_batch_map:
-              next_retry_requests.append(current_batch_map[req_id])
-              retry_after_delay = max(retry_after_delay, 2)
-          elif status in [500, 502, 503, 504]:
-            if req_id in current_batch_map:
-              next_retry_requests.append(current_batch_map[req_id])
-              retry_after_delay = max(retry_after_delay, 2)
-          else:
-            successful_responses[req_id] = response_item
-
-        if next_retry_requests:
-          if stop_event and stop_event.is_set():
-            break
-
-          if needs_refresh:
-            logger(
-                f"Individual items returned 401 in {context}. Refreshing token"
-                " inline..."
-            )
-            token_manager.refresh_token_data(token_data, logger)
-
-          # If we have a specific Retry-After delay (retry_after_delay > 0), use it directly.
-          # Otherwise, use exponential backoff.
-          if retry_after_delay > 0 and USE_MSFT_BACKOFF:
-            sleep_time = float(retry_after_delay)
-            # Add jitter (0-1000ms)
-            sleep_time += random.uniform(0, 1.0)
-          else:
-            sleep_time = BACKOFF ** (current_try - 1)
-
-          # Increased cap from 30s to 300s to handle severe throttling without dropping data
-          sleep_time = min(sleep_time, 300)
-
-          logger(
-              f"Batch partial failure: {len(next_retry_requests)} items failed "
-              f"(429/401/5xx). Retrying in {sleep_time:.1f}s..."
-          )
-          if stop_event and stop_event.is_set():
-            break
-
-          time.sleep(sleep_time)
-          pending_requests = next_retry_requests
-        else:
-          pending_requests = []
-      elif resp.status_code == 429:
-        if stop_event and stop_event.is_set():
-          break
-        try:
-          raw_wait = int(float(resp.headers.get("Retry-After", 5)))
-        except (ValueError, TypeError):
-          # Default backoff if no header
-          raw_wait = 5 * (current_try + 1)
-
-        wait = min(float(raw_wait), 300.0)
-        # Add jitter
-        wait += random.uniform(0, 1.0)
-
-        logger(
-            f"Batch 429 Throttled. Waiting {wait:.1f}s (Requested:"
-            f" {raw_wait}s)..."
-        )
-        time.sleep(wait)
-        continue
-      elif resp.status_code == 401:
-        # Handle outer batch 401 (entire batch rejected due to token expiry)
-        if stop_event and stop_event.is_set():
-          break
-        logger(
-            f"Batch 401 Unauthorized in {context}. Token expired. Refreshing"
-            " inline..."
-        )
-        if token_manager.refresh_token_data(token_data, logger):
-          logger("Successfully refreshed token after 401.")
-        else:
-          logger("Failed to refresh token after 401. Will retry anyway.")
-
-        # Decrement try counter so the expired token doesn't punish the retry limits
-        current_try -= 1
-        continue
-      else:
-        logger(f"Batch failed with {resp.status_code}: {resp.text[:100]}")
-        break
-    except Exception as e:
-      logger(
-          "Network Exception in batch (Attempt"
-          f" {current_try}/{max_retries}): {e}"
-      )
-      if current_try < max_retries:
-        if stop_event and stop_event.is_set():
-          break
-        time.sleep(min(2 * current_try, 30))
-        continue
-      else:
-        logger(f"Max retries reached for batch in {context}. Data lost.")
-        break
-
-  if pending_requests:
-    logger(
-        f"WARNING: Max retries ({max_retries}) reached in {context}."
-        f" {len(pending_requests)} items dropped permanently."
-    )
-
-  return successful_responses
-
+# TODO Move these to their dedicated estimators in later iterations
 
 def fetch_user_batch_data(
     user_chunk: List[Dict[str, Any]],
@@ -400,7 +190,11 @@ def fetch_user_batch_data(
     })
 
   try:
-    responses = execute_batch_request(
+    url_invoker = UrlInvoker(
+        token_manager,
+        None, None, None, None
+    )
+    responses = url_invoker.execute_batch_request(
         session,
         batch_url,
         token_manager,
@@ -524,7 +318,12 @@ def fetch_calendar_events(
           ),
           "headers": {"ConsistencyLevel": "eventual"},
       })
-    responses = execute_batch_request(
+    
+    url_invoker = UrlInvoker(
+        token_manager,
+        None, None, None, None
+    )
+    responses = url_invoker.execute_batch_request(
         session,
         batch_url,
         token_manager,
