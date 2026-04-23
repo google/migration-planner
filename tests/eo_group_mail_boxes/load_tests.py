@@ -130,8 +130,8 @@ class TestEOGroupMailboxesLoad(unittest.TestCase):
                     
             if self.track_quotas:
                 with self.active_requests_lock:
-                    for mid in mailbox_ids:
-                        self.active_requests[mid] -= 1
+                    for uid in user_ids:
+                        self.active_requests[uid] -= 1
                         
             return responses
 
