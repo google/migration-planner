@@ -18,7 +18,8 @@ def generate_data(
     data = {
         "users": [],
         "userPurpose": {},
-        "mailCount": {}
+        "mailCount": {},
+        "expected_result": {}
     }
     
     for i in range(num_users):
@@ -26,6 +27,7 @@ def generate_data(
         data["users"].append(user_id)
         data["userPurpose"][user_id] = random.choice(["shared", "user"])
         data["mailCount"][user_id] = random.randint(min_mail_count, max_mail_count)
+        data["expected_result"][user_id] = data["mailCount"][user_id] if data["userPurpose"][user_id] == "shared" else 0
         
     filename = f"state_{seed}.json" if seed is not None else "state.json"
     output_path = os.path.join(output_dir, filename)

@@ -24,9 +24,9 @@ def generate_data(
     data = {
         "users": {},
         "mailboxes": {},
-        "folders": {}
+        "folders": {},
+        "expected_result": {}
     }
-    
     folder_id_counter = 1
     
     for i in range(num_users):
@@ -36,6 +36,7 @@ def generate_data(
         data["mailboxes"][mailbox_id] = []
         
         target_mails = random.randint(min_mails, max_mails)
+        data["expected_result"][user_id] = target_mails
         remaining_mails = target_mails
         
         num_top_folders = random.randint(min_top_folders, max_top_folders)

@@ -208,6 +208,8 @@ class TestEOInPlaceArchiveLoad(unittest.TestCase):
             print(f"Max concurrent requests per mailbox observed: {self.max_concurrent_per_mailbox}")
         
         self.assertEqual(len(result), len(user_ids))
+        for user_id in user_ids:
+            self.assertEqual(result[user_id], self.test_data["expected_result"][user_id], f"Result mismatch for user {user_id}")
         
         if self.track_quotas:
             self.assertLessEqual(self.max_batch_size, 20, "Max batch size exceeded")

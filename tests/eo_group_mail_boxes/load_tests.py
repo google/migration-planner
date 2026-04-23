@@ -145,7 +145,7 @@ class TestEOGroupMailboxesLoad(unittest.TestCase):
         return result, failures
 
     def test_load_simulation(self):
-        user_ids = list(self.test_data["users"].keys())
+        user_ids = self.test_data["users"]
         print(f"Starting load test for {len(user_ids)} users (Simulate Failures: {self.simulate_failures}, Track Quotas: {self.track_quotas})...")
         
         start_time = time.time()
@@ -160,6 +160,8 @@ class TestEOGroupMailboxesLoad(unittest.TestCase):
             print(f"Max concurrent requests per mailbox observed: {self.max_concurrent_per_mailbox}")
         
         self.assertEqual(len(result), len(user_ids))
+        for user_id in user_ids:
+            self.assertEqual(result[user_id], self.test_data["expected_result"][user_id], f"Result mismatch for user {user_id}")
         
         if self.track_quotas:
             self.assertLessEqual(self.max_batch_size, 20, "Max batch size exceeded")
