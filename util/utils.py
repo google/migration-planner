@@ -26,7 +26,6 @@ class RequestResponsePair:
     request: Dict[str, Any]
     response: Dict[str, Any]
 
-
 RETRYABLE_ERROR_CODES = [429, 500, 502, 503, 504]
 
 def create_batches(
