@@ -2410,7 +2410,7 @@ class MigrationEstimatorTool(ctk.CTk):
         )
 
         # Update Progress
-        if chunk_count % log_freq == 0:
+        if chunk_count % log_freq == 0 or chunk_count == len(user_chunks):
           self.log_msg(
                 f"Processed {processed_users}/{total_users} | Failed:"
                 f" {users_failed}/{total_users} | {resource_type}: {phase_total}"

@@ -24,8 +24,7 @@ def generate_data(
     data = {
         "users": {},
         "mailboxes": {},
-        "folders": {},
-        "expected_result": {}
+        "folders": {}
     }
     folder_id_counter = 1
     
@@ -36,7 +35,6 @@ def generate_data(
         data["mailboxes"][mailbox_id] = []
         
         target_mails = random.randint(min_mails, max_mails)
-        data["expected_result"][user_id] = target_mails
         remaining_mails = target_mails
         
         num_top_folders = random.randint(min_top_folders, max_top_folders)
@@ -95,6 +93,30 @@ def generate_data(
         if remaining_mails > 0 and top_folders:
             data["folders"][top_folders[-1]]["totalItemCount"] += remaining_mails
             remaining_mails = 0
+
+    # Calculate expected results
+    data["expected_result"] = {}
+    data["expected_result_with_failures"] = {}
+    
+    def calculate_counts(folder_id, fail_simulation):
+        folder = data["folders"][folder_id]
+        count = folder["totalItemCount"]
+        
+        if fail_simulation and folder.get("fail", False):
+            return count
+            
+        for child_id in folder["childFolders"]:
+            count += calculate_counts(child_id, fail_simulation)
+        return count
+
+    for user_id, mailbox_id in data["users"].items():
+        ideal_count = 0
+        failure_count = 0
+        for folder_id in data["mailboxes"][mailbox_id]:
+            ideal_count += calculate_counts(folder_id, False)
+            failure_count += calculate_counts(folder_id, True)
+        data["expected_result"][user_id] = ideal_count
+        data["expected_result_with_failures"][user_id] = failure_count
 
     filename = f"state_{seed}.json" if seed is not None else "state.json"
     output_path = os.path.join(output_dir, filename)

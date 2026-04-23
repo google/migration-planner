@@ -209,7 +209,10 @@ class TestEOInPlaceArchiveLoad(unittest.TestCase):
         
         self.assertEqual(len(result), len(user_ids))
         for user_id in user_ids:
-            self.assertEqual(result[user_id], self.test_data["expected_result"][user_id], f"Result mismatch for user {user_id}")
+            if self.simulate_failures is False:
+                self.assertEqual(result[user_id], self.test_data["expected_result"][user_id], f"Result mismatch for user {user_id}")
+            else:
+                self.assertEqual(result[user_id], self.test_data["expected_result_with_failures"][user_id], f"Result mismatch for user {user_id}")
         
         if self.track_quotas:
             self.assertLessEqual(self.max_batch_size, 20, "Max batch size exceeded")
