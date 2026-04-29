@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from util.enums import FailureType
 
 
@@ -28,7 +28,8 @@ class ScanConfig:
   hierarchial_crawl_batch_limit: int = 4
   mode: str = "heuristics"
   sample_percentage: int = 10
-
+  bucket_ranges: List[Tuple[int, int]] = [(0,1000),(1001,10000),(10001,100000)],
+  large_resource_count_limit: int = 500000
 
 @dataclass
 class RequestResponsePair:

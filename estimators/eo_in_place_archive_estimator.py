@@ -5,7 +5,7 @@ from util.connectors import UrlInvoker
 from util.utils import ScanConfig, group_responses_by_key, process_pagination_responses, get_relative_url, get_batch_responses_map, create_batches
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from util.atomic_int import AtomicInt
+from util.thread_safe_ds import AtomicInt
 from util.enums import FailureType
 
 GRAPH_BETA_URL = "https://graph.microsoft.com/beta"
