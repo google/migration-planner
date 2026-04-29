@@ -10,5 +10,7 @@ class FailureType(Enum):
   UNKNOWN_ERROR = 7
 
 class ResourceType(Enum):
-  SITE = 1,
-  FOLDER = 2
+  SITE = "SITE"
+  FOLDER = "FOLDER"
+  DL = "DL"
+  FILE = "FILE"

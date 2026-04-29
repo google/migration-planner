@@ -6,7 +6,7 @@ from enum import Enum
 
 from estimators.estimator import Estimator
 from util.connectors import UrlInvoker
-from util.utils import ScanConfig, create_batches, create_request_to_response_map, get_batch_responses_map, get_relative_url, process_pagination_responses
+from util.utils import ScanConfig, Bucket, FileSizeDistribution, LargeResource, create_batches, create_request_to_response_map, get_batch_responses_map, get_relative_url, process_pagination_responses
 from util.enums import FailureType, ResourceType
 from util.thread_safe_ds import ThreadSafeMap, ThreadSafeSortedSet, AtomicInt
 
@@ -16,28 +16,6 @@ import json
 # TODO Support handling of None failures list
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
-
-class ResourceType(Enum):
-    SITE = "SITE"
-    FOLDER = "FOLDER"
-    DL = "DL"
-    FILE = "FILE"
-
-@dataclass
-class Bucket:
-    sizeRange: Tuple[int, int]  # (Low, High) in MBs
-    count: int
-
-@dataclass
-class FileSizeDistribution:
-    buckets: List[Bucket]
-
-@dataclass
-class LargeResource:
-    Type: ResourceType
-    Id: str
-    subTreeCount: int
-    Limit: int
 
 class FileEstimator(Estimator):
     def __init__(self,
@@ -129,14 +107,14 @@ class FileEstimator(Estimator):
         subsite_to_drives: Dict[str, List[Any]]
     ):
         for drive_metric in metrics["drive_metrics"].values():
+            metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], drive_metric["maxEffectiveDepth"])
             metrics["maxFolderDepth"] = max(metrics["maxFolderDepth"], drive_metric["maxEffectiveDepth"])
             metrics["shortcutCount"] += drive_metric.get("shortcutCount", 0)
         
         for subsite_id, drive_ids in subsite_to_drives.items():
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
             for drive_id in drive_ids:
-                metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + metrics["drive_metrics"][drive_id]["maxEffectiveDepth"])
-            
+                metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + metrics["drive_metrics"][drive_id]["maxEffectiveDepth"])  
 
     def _get_subsite_metrics_and_drives(
         self,
@@ -571,7 +549,7 @@ class FileEstimator(Estimator):
                         resource_id_to_details[file["id"]] = file
                         
                         if "parentReference" in file and "id" in file["parentReference"]:
-                            # print(json.dumps(file, indent=2))
+                            print(f"ID: {file["id"]} and Parent ID: {file["parentReference"]["id"]} | Name: {file["name"]} | driveId: {drive_id}")
                             parent_id = file["parentReference"]["id"]
                             if parent_id in adj_list[drive_id]:
                                 adj_list[drive_id][parent_id].append(file["id"])
@@ -628,6 +606,7 @@ class FileEstimator(Estimator):
 
             leaves = []
             for resource_id, count in resource_to_dependency_count.get_all().items():
+                print(f"Resource: {resource_id} and Count: {count}")
                 if count == 0:
                     leaves.append(resource_id)
                 else:
@@ -664,6 +643,7 @@ class FileEstimator(Estimator):
         active_thread_count: AtomicInt
     ):       
         try:
+            # TODO Handle the inconsistent results caused due to duplicate root IDS across different drives
             resource = resource_id_to_details[resource_id]
             drive_id = resource["parentReference"]["driveId"]
             is_resource_folder = "folder" in resource
@@ -681,6 +661,8 @@ class FileEstimator(Estimator):
             subtree_count += 1
             subtree_size += resource["size"]
 
+            print(f"Resource ID: {resource_id} | Stats: Subtree Size {subtree_size} and Subtree Count: {subtree_count} and Max Depth: {max_depth}")
+
             resource_metrics[resource["id"]] = {
                 "subTreeCount": subtree_count,
                 "subTreeSize": subtree_size,
@@ -689,19 +671,22 @@ class FileEstimator(Estimator):
 
             self._update_drive_metrics_from_resource(resource, resource_metrics[resource_id], drive_metrics[drive_id])
 
-            parent_resource_id = parent_references.get(resource_id)
+            parent_resource_id = parent_references[drive_id].get(resource_id)
+
+            print(f"Parent Resource ID: {parent_resource_id}")
 
             if not parent_resource_id:
-                active_thread_count.decrement()
-                with self.condition:
-                    self.condition.notify_all()
+                print(f"Parent Resource ID Not Found for {resource_id}")
                 return
 
-            with self.lock:
+            with self.condition:
                 dependency_count_of_par = resource_to_dependency_count.get(parent_resource_id, 0)
-                dependency_set.discard((dependency_count_of_par, parent_resource_id))
+                dependency_set.remove((dependency_count_of_par, parent_resource_id))
 
                 dependency_count_of_par -= 1
+                resource_to_dependency_count.update(parent_resource_id, dependency_count_of_par)
+
+                print(f"Updated Dependency Count for {parent_resource_id}: {dependency_count_of_par}")
                 if dependency_count_of_par > 0:
                     dependency_set.add((dependency_count_of_par, parent_resource_id))
                 else:
@@ -723,7 +708,7 @@ class FileEstimator(Estimator):
     ):
         with self.condition:
             # Update max depth
-            drive_metric["maxEffectiveDepth"] = max(drive_metric["maxEffectiveDepth"], resource_metric["maxDepth"] + 1)
+            drive_metric["maxEffectiveDepth"] = max(drive_metric["maxEffectiveDepth"], resource_metric["maxDepth"])
             
             # Update shortcut count
             if "remoteItem" in resource:
@@ -734,25 +719,20 @@ class FileEstimator(Estimator):
                 size_in_mb = resource.get("size", 0) / (1024 * 1024) # assuming size in bytes
                 for bucket in drive_metric["fileSizeDistribution"]["buckets"]:
                     low, high = bucket["sizeRange"]
-                    if low <= size_in_mb < high:
+                    if low <= size_in_mb and size_in_mb <= high:
                         bucket["count"] += 1
                         break
                         
             # Update large resources
             if resource_metric["subTreeCount"] >= self.config.large_resource_count_limit:
                 drive_metric["largeResources"].append({
-                    "type": ResourceType.FOLDER if "folder" in resource else ResourceType.FILE,
-                    "id": resource["id"],
+                    "type": ResourceType.FOLDER.value if "folder" in resource else ResourceType.FILE.value,
+                    "id": resource["name"],
                     "subTreeCount": resource_metric["subTreeCount"],
                     "Limit": self.config.large_resource_count_limit
                 })
 
     def _log_and_fail(self, message: str, e: Exception, failures: List[Dict[str, str]]):
-        # 1. Print the reason (the exception message)
-        print(f"Reason: {e}")
-        # 2. Print the full stack trace
-        print("Stack Trace:")
-        traceback.print_exception(e)
         if self.logger:
             self.logger(f"{message}: {e}")
         failures.append({

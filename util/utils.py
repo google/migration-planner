@@ -1,7 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from util.enums import FailureType
-
+from util.enums import FailureType, ResourceType
 
 @dataclass
 class ScanConfig:
@@ -36,6 +35,21 @@ class RequestResponsePair:
   request: Dict[str, Any]
   response: Dict[str, Any]
 
+@dataclass
+class Bucket:
+    sizeRange: Tuple[int, int]  # (Low, High) in MBs
+    count: int
+
+@dataclass
+class FileSizeDistribution:
+    buckets: List[Bucket]
+
+@dataclass
+class LargeResource:
+    Type: ResourceType
+    Id: str
+    subTreeCount: int
+    Limit: int
 
 RETRYABLE_ERROR_CODES = [429, 500, 502, 503, 504]
 
