@@ -22,7 +22,7 @@ class AtomicInt():
 class ThreadSafeSortedSet():
     def __init__(self):
         self.sorted_set = SortedSet()
-        self.lock = threading.lock()
+        self.lock = threading.Lock()
     
     def add(self, value):
         with self.lock:

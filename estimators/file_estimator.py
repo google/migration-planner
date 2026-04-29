@@ -10,6 +10,8 @@ from util.utils import ScanConfig, create_batches, create_request_to_response_ma
 from util.enums import FailureType, ResourceType
 from util.thread_safe_ds import ThreadSafeMap, ThreadSafeSortedSet, AtomicInt
 
+import traceback
+import json
 
 # TODO Support handling of None failures list
 
@@ -377,6 +379,8 @@ class FileEstimator(Estimator):
                         else:
                             drive_type_to_count["unknown"] += 1 
                     drives.extend(resp["body"]["value"])
+                    if site_id not in subsite_to_drives:
+                        subsite_to_drives[site_id] = []
                     subsite_to_drives[site_id].extend([drive["id"] for drive in resp["body"]["value"]])
 
             return drive_type_to_count
@@ -566,7 +570,8 @@ class FileEstimator(Estimator):
                     for file in resp["body"]["value"]:
                         resource_id_to_details[file["id"]] = file
                         
-                        if "parentReference" in file:
+                        if "parentReference" in file and "id" in file["parentReference"]:
+                            # print(json.dumps(file, indent=2))
                             parent_id = file["parentReference"]["id"]
                             if parent_id in adj_list[drive_id]:
                                 adj_list[drive_id][parent_id].append(file["id"])
@@ -601,7 +606,7 @@ class FileEstimator(Estimator):
                 "largeResources": []
             }
 
-            for size_range in self.config.file_size_ranges:
+            for size_range in self.config.bucket_ranges:
                 drive_metrics[drive_id]["fileSizeDistribution"]["buckets"].append({
                     "sizeRange": size_range,
                     "count": 0
@@ -671,7 +676,7 @@ class FileEstimator(Estimator):
                 for child_id in drive_id_to_adj_list[drive_id][resource["id"]]:
                     subtree_count += resource_metrics[child_id]["subTreeCount"]
                     subtree_size += resource_metrics[child_id]["subTreeSize"]
-                    max_depth = max(max_depth, resource_metrics[child_id]["maxDepth"])
+                    max_depth = max(max_depth, resource_metrics[child_id]["maxDepth"] + 1)
 
             subtree_count += 1
             subtree_size += resource["size"]
@@ -743,7 +748,11 @@ class FileEstimator(Estimator):
                 })
 
     def _log_and_fail(self, message: str, e: Exception, failures: List[Dict[str, str]]):
-        raise Exception(message) from e
+        # 1. Print the reason (the exception message)
+        print(f"Reason: {e}")
+        # 2. Print the full stack trace
+        print("Stack Trace:")
+        traceback.print_exception(e)
         if self.logger:
             self.logger(f"{message}: {e}")
         failures.append({
