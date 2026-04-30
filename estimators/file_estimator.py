@@ -13,8 +13,6 @@ from util.thread_safe_ds import ThreadSafeMap, ThreadSafeSortedSet, AtomicInt
 import traceback
 import json
 
-# TODO Support handling of None failures list
-
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
 class FileEstimator(Estimator):
@@ -55,6 +53,8 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ) -> Dict[str, Any]:
         try:
+            if failures is None:
+                failures = []
             drives = []
             subsite_to_drives = {}          # used to calculate effective max Depth
             metrics = { 
@@ -71,7 +71,9 @@ class FileEstimator(Estimator):
                     "personal": 0,
                     "business": 0,
                 },
-                "tenantLevelFileSizeDistribution": [],
+                "tenantLevelFileSizeDistribution": {
+                    "buckets": []
+                },
                 "tenantLevelLargeResources": []
             }
             if "drives" in data and len(data["drives"]) > 0:
@@ -116,6 +118,26 @@ class FileEstimator(Estimator):
             for drive_id in drive_ids:
                 metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + metrics["drive_metrics"][drive_id]["maxEffectiveDepth"])  
 
+        for size_range in self.config.bucket_ranges:
+            metrics["tenantLevelFileSizeDistribution"]["buckets"].append({
+                "sizeRange": size_range,
+                "count": 0
+            })
+
+        for tenant_bucket in metrics["tenantLevelFileSizeDistribution"]["buckets"]:
+            for metric in metrics["drive_metrics"].values():
+                if "fileSizeDistribution" in metric:
+                    for bucket in metric["fileSizeDistribution"]["buckets"]:
+                        if bucket["sizeRange"] == tenant_bucket["sizeRange"]:
+                            tenant_bucket["count"] += bucket["count"]
+                            break
+
+        for drive_id, metric in metrics["drive_metrics"].items():
+            for large_resource in metric["largeResources"]:
+                curr_dict = large_resource
+                curr_dict["drive"] = drive_id
+                metrics["tenantLevelLargeResources"].append(curr_dict)
+
     def _get_subsite_metrics_and_drives(
         self,
         tenant_metrics: Dict[str, Any],
@@ -134,14 +156,25 @@ class FileEstimator(Estimator):
             headers = {
                 "Authorization": f"Bearer {token}"
             }
-            try:
-                r = session.get(url, headers=headers)
-                if r.status_code != 200:
-                    raise Exception(f"Error in fetching root site : {r.status_code}")
-                root_site = r.json()
-            except Exception as e:
-                self._log_and_fail("Error in fetching root site", e, failures)
-                return
+
+            attempts = 0
+            max_attempts = self.config.retries + 1
+            while attempts < max_attempts:
+                try:
+                    r = session.get(url, headers=headers)
+                    if r.status_code != 200:
+                        raise Exception(f"Error in fetching root site : {r.status_code}")
+                    root_site = r.json()
+                    break
+                except Exception as e:
+                    attempts += 1
+                    if attempts == max_attempts:
+                        self._log_and_fail("Error in fetching root site", e, failures)
+                        return
+                    elif self.logger is not None:
+                        wait_time = min(10, max(2, self.config.backoff) ** (attempts - 1))
+                        self.logger(f"Error in fetching root site. Attempt count: {attempts} | Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
 
             root_id = root_site["id"]
             all_sites = [{"siteId": root_id, "siteLevel": 0}]
@@ -643,8 +676,11 @@ class FileEstimator(Estimator):
         active_thread_count: AtomicInt
     ):       
         try:
-            # TODO Handle the inconsistent results caused due to duplicate root IDS across different drives
             resource = resource_id_to_details[resource_id]
+            if "id" not in resource["parentReference"]:
+                # Root folder. Skipping it as it is an implicit folder added by default with common ID across multiple drives.
+                return
+
             drive_id = resource["parentReference"]["driveId"]
             is_resource_folder = "folder" in resource
 
