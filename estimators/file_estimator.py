@@ -81,10 +81,15 @@ class FileEstimator(Estimator):
                 drives = data["drives"]
             else:
                 # Sharepoint Flow
-                self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, failures)
+                self.progress_update_callback("site_discovery", status="Fetching...", count=0)
+                subsite_count = self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, failures)
+                print("Site Scanning is finished!!!!")
+                self.progress_update_callback("site_discovery", status="Done", count=subsite_count)
 
             # get adjacency lists and parent references for each drive
+            self.progress_update_callback("drive_discovery", status="Fetching...", count=0)
             drive_id_to_adj_list, parent_references, resource_id_to_details = self._create_in_memory_tree([drive["id"] for drive in drives], failures)
+            self.progress_update_callback("drive_discovery", status="Done", count=len(drives))
 
             # Calculate metrics for all drives
             drive_metrics = self._calculate_drive_metrics([drive["id"] for drive in drives], drive_id_to_adj_list, parent_references, resource_id_to_details, failures)
@@ -144,7 +149,7 @@ class FileEstimator(Estimator):
         drives: List[Any],
         subsite_to_drives: Dict[str, List[Any]],
         failures: List[Dict[str, str]]
-    ):
+    ) -> int:
         try:
             # Fetch the root first without batching
             manager = self.url_invoker.token_manager
@@ -189,6 +194,8 @@ class FileEstimator(Estimator):
                 }
             tenant_metrics["subsite_count"] = len(all_site_ids)
             self._append_tenant_level_metrics(all_site_ids, tenant_metrics, drives, subsite_to_drives, failures)
+
+            return len(all_sites)
 
         except Exception as e:
             self._log_and_fail("Error in _calculate_site_metrics", e, failures)
@@ -484,6 +491,8 @@ class FileEstimator(Estimator):
                     for site in resp["body"]["value"]:
                         all_sites.append({"siteId": site["id"], "siteLevel": level})
                         new_sub_site_ids.append(site["id"])
+                        print(site["id"])
+                        self.progress_update_callback("site_discovery", status="Scanning Subsites...", count=len(all_sites))
 
             if new_sub_site_ids:
                 self._get_subsites_in_site(new_sub_site_ids, all_sites, failures, level + 1)
@@ -496,6 +505,8 @@ class FileEstimator(Estimator):
         drive_ids: List[str], 
         failures: List[Dict[str, str]]
     ):
+        unique_drives = set()
+        folder_count = 0
         adj_list = {}
         parent_references: Dict[str, Dict[str, str]] = {}
         resource_id_to_details: Dict[str, Dict[str, Any]] = {}
@@ -536,6 +547,8 @@ class FileEstimator(Estimator):
                                 "driveId": drive_id,
                                 "url": relative_url
                             })
+                            unique_drives.add(drive_id)
+                            folder_count += len(resp["body"].get("value", []))
                         elif "body" in resp and "error" in resp["body"]:
                             failures.append({
                                 "type": FailureType.FAILURE_STATUS_CODE_ERROR,
@@ -548,6 +561,7 @@ class FileEstimator(Estimator):
                             "statusCode": None,
                             "message": f"No response found for delta API for drive {req['headers']['driveId']}."
                         })
+                self.progress_update_callback("drive_discovery", status="Scanning Drives...", count=len(unique_drives))
 
             while pending_next_items and not self.is_hard_stop_requested():
                 batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)

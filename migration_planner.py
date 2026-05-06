@@ -5,15 +5,7 @@ import os
 import subprocess
 import sys
 import customtkinter as ctk
-
-COLOR_BACKGROUND = "#F0F2F5"
-COLOR_SURFACE = "#FFFFFF"
-COLOR_PRIMARY = "#0B57D0"
-COLOR_PRIMARY_HOVER = "#0842a0"
-COLOR_TEXT_MAIN = "#1F1F1F"
-FONT_HEADER_LARGE = ("Roboto", 24, "bold")
-FONT_BODY_BOLD = ("Roboto", 14, "bold")
-
+from util.constants import *
 
 class SelectorApp(ctk.CTk):
   """Main application for workload selection."""
@@ -31,7 +23,7 @@ class SelectorApp(ctk.CTk):
         text_color=COLOR_TEXT_MAIN,
     ).pack(pady=(30, 20))
 
-    self.options = ["Exchange", "Chat"]
+    self.options = ["Exchange", "Chat", "Files"]
     self.combobox = ctk.CTkComboBox(
         self,
         values=self.options,
@@ -63,6 +55,8 @@ class SelectorApp(ctk.CTk):
       script_path = os.path.join(current_dir, "migration_planner_exchange.py")
     elif selection == "Chat":
       script_path = os.path.join(current_dir, "migration_planner_chat.py")
+    elif selection == "Files":
+      script_path = os.path.join(current_dir, "scripts/files.py")
     else:
       return
     subprocess.Popen([sys.executable, script_path])
