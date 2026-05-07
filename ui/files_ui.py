@@ -352,12 +352,45 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           # Sort drives by maxEffectiveDepth descending
           sorted_drives = sorted(data["drive_metrics"].items(), key=lambda item: item[1].get("maxEffectiveDepth", 0), reverse=True)
           top_10_drives = sorted_drives[:10]
+          print(f"DEBUG: drive_metrics count = {len(data['drive_metrics'])}")
+          print(f"DEBUG: top_10_drives count = {len(top_10_drives)}")
+          for d_id, _ in top_10_drives:
+              print(f"DEBUG: Top drive: {d_id}")
 
           for drive_id, drive_data in top_10_drives:
-              # Details frame (directly visible)
-              drive_details = ctk.CTkFrame(drives_scroll, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
-              drive_details.pack(fill="x", pady=5, padx=10)
+              # Header frame for toggle
+              drive_header = ctk.CTkFrame(drives_scroll, fg_color=COLOR_SURFACE_VARIANT, corner_radius=8)
+              drive_header.pack(fill="x", pady=2)
               
+              # Details frame (initially hidden)
+              drive_details = ctk.CTkFrame(drives_scroll, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
+              drive_details.is_expanded = False
+              
+              def toggle_drive(frame, btn, d_id, header):
+                  if frame.is_expanded:
+                      frame.pack_forget()
+                      frame.is_expanded = False
+                      if btn:
+                          btn.configure(text=f"Drive: {d_id[:15]}... ▼")
+                  else:
+                      frame.pack(fill="x", pady=2, padx=10, after=header)
+                      frame.is_expanded = True
+                      if btn:
+                          btn.configure(text=f"Drive: {d_id[:15]}... ▲")
+
+              btn_toggle = ctk.CTkButton(
+                  drive_header,
+                  text=f"Drive: {drive_id[:15]}... ▼",
+                  fg_color="transparent",
+                  text_color=COLOR_PRIMARY,
+                  hover=False,
+                  anchor="w",
+              )
+              btn_toggle.pack(fill="x", padx=5, pady=5)
+              
+              btn_toggle.configure(command=lambda f=drive_details, b=btn_toggle, d=drive_id, h=drive_header: toggle_drive(f, b, d, h))
+
+              # Fill details frame
               ctk.CTkLabel(drive_details, text=f"Drive: {drive_id}", font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(anchor="w", padx=10, pady=(5, 2))
               
               ctk.CTkLabel(drive_details, text=f"Max Effective Depth: {drive_data.get('maxEffectiveDepth', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
@@ -371,6 +404,38 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                       range_str = f"{range_vals[0]} - {range_vals[1]} KB"
                       count = bucket.get("count", 0)
                       ctk.CTkLabel(drive_details, text=f"  {range_str}: {count} files", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=20)
+
+      # Resources
+      ctk.CTkLabel(
+          self.view_results,
+          text="RESOURCES",
+          font=FONT_BODY_BOLD,
+          text_color=COLOR_TEXT_SUB,
+      ).pack(anchor="w", padx=10, pady=(10, 10))
+
+      res_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
+      res_frame.pack(fill="x", pady=0)
+      res_frame.grid_columnconfigure(0, weight=1)
+      res_frame.grid_columnconfigure(1, weight=1)
+
+      self.create_resource_card(
+          res_frame,
+          0,
+          "🚀",
+          "Data migration (New)",
+          "Our new migration platform for enterprise - totally free.",
+          "Learn more",
+          "https://support.google.com/a/answer/14012274?hl=en&ref_topic=14012345&sjid=3864823775656113447-NC",
+      )
+      self.create_resource_card(
+          res_frame,
+          1,
+          "☑️",
+          "Best Practices Guide",
+          "Essential tips for a smooth transition to Google Workspace.",
+          "Read guide",
+          "https://support.google.com/a/topic/14012345?hl=en&ref_topic=13002773&sjid=3864823775656113447-NC",
+      )
 
       self.view_results.pack(fill="both", expand=True)
 
