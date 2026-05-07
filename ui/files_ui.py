@@ -261,7 +261,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           self.create_stat_card(card_frame, "Folder File Size", f"{data['folder_file_size']:,} KB", "💾")
 
       # File Size Distribution
-      if "fileSizeDistribution" in data:
+      dist_data = data.get("tenantLevelFileSizeDistribution", data.get("fileSizeDistribution"))
+      if dist_data:
           ctk.CTkLabel(
               self.view_results,
               text="File Size Distribution",
@@ -272,7 +273,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           dist_frame = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
           dist_frame.pack(fill="x", padx=10, pady=5)
           
-          buckets = data["fileSizeDistribution"].get("Buckets", data["fileSizeDistribution"].get("buckets", []))
+          buckets = dist_data.get("Buckets", dist_data.get("buckets", []))
           for bucket in buckets:
               range_vals = bucket.get("sizeRange", (0, 0))
               range_str = f"{range_vals[0]} - {range_vals[1]} KB"
@@ -302,13 +303,74 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           res_container = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
           res_container.pack(fill="x", padx=10, pady=5)
           
-          for res in data["tenantLevelLargeResources"]:
-              res_str = f"Type: {res.get('Type', res.get('type'))} | ID: {res.get('Id', res.get('id'))} | Count: {res.get('subTreeCount')} | Limit: {res.get('Limit', res.get('limit'))}"
+          # Header row
+          header_row = ctk.CTkFrame(res_container, fg_color=COLOR_SURFACE_VARIANT, height=30)
+          header_row.pack(fill="x", padx=5, pady=5)
+          ctk.CTkLabel(header_row, text="Type", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+          ctk.CTkLabel(header_row, text="ID", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
+          ctk.CTkLabel(header_row, text="Count", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+          ctk.CTkLabel(header_row, text="Limit", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+
+          for i, res in enumerate(data["tenantLevelLargeResources"]):
+              bg_color = COLOR_SURFACE if i % 2 == 0 else COLOR_SURFACE_VARIANT
+              row_frame = ctk.CTkFrame(res_container, fg_color=bg_color, height=30)
+              row_frame.pack(fill="x", padx=5, pady=2)
               
-              row_frame = ctk.CTkFrame(res_container, fg_color="transparent")
-              row_frame.pack(fill="x", padx=15, pady=5)
+              ctk.CTkLabel(row_frame, text=str(res.get('Type', res.get('type'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+              ctk.CTkLabel(row_frame, text=str(res.get('Id', res.get('id'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
+              ctk.CTkLabel(row_frame, text=f"{res.get('subTreeCount', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+              ctk.CTkLabel(row_frame, text=f"{res.get('Limit', res.get('limit', 0)):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+
+      # Drive Details
+      if "drive_metrics" in data:
+          ctk.CTkLabel(
+              self.view_results,
+              text="Drive Details (Top 10)",
+              font=FONT_HEADER_SMALL,
+              text_color=COLOR_TEXT_MAIN,
+          ).pack(anchor="w", padx=10, pady=(20, 5))
+
+          drive_count = len(data["drive_metrics"])
+          if drive_count > 10:
+              ctk.CTkLabel(
+                  self.view_results,
+                  text="* There are more drives. Please export the full report to view their details.",
+                  font=FONT_BODY_SMALL,
+                  text_color=COLOR_TEXT_SUB,
+              ).pack(anchor="w", padx=10, pady=(0, 10))
+
+          # Scrollable frame for drives
+          drives_scroll = ctk.CTkScrollableFrame(
+              self.view_results,
+              fg_color="transparent",
+              height=300,
+              scrollbar_button_color="white",
+              scrollbar_button_hover_color=COLOR_SECONDARY_HOVER,
+          )
+          drives_scroll.pack(fill="x", padx=10, pady=5)
+
+          # Sort drives by maxEffectiveDepth descending
+          sorted_drives = sorted(data["drive_metrics"].items(), key=lambda item: item[1].get("maxEffectiveDepth", 0), reverse=True)
+          top_10_drives = sorted_drives[:10]
+
+          for drive_id, drive_data in top_10_drives:
+              # Details frame (directly visible)
+              drive_details = ctk.CTkFrame(drives_scroll, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
+              drive_details.pack(fill="x", pady=5, padx=10)
               
-              ctk.CTkLabel(row_frame, text=res_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w")
+              ctk.CTkLabel(drive_details, text=f"Drive: {drive_id}", font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(anchor="w", padx=10, pady=(5, 2))
+              
+              ctk.CTkLabel(drive_details, text=f"Max Effective Depth: {drive_data.get('maxEffectiveDepth', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+              ctk.CTkLabel(drive_details, text=f"Shortcut Count: {drive_data.get('shortcutCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+              
+              # Buckets inside drive
+              if "fileSizeDistribution" in drive_data:
+                  ctk.CTkLabel(drive_details, text="File Size Distribution:", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=(5, 2))
+                  for bucket in drive_data["fileSizeDistribution"].get("buckets", []):
+                      range_vals = bucket.get("sizeRange", (0, 0))
+                      range_str = f"{range_vals[0]} - {range_vals[1]} KB"
+                      count = bucket.get("count", 0)
+                      ctk.CTkLabel(drive_details, text=f"  {range_str}: {count} files", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=20)
 
       self.view_results.pack(fill="both", expand=True)
 
