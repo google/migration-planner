@@ -100,6 +100,7 @@ class FileEstimator(Estimator):
             processed = 0
             failed = 0
             success = 0
+            total_resource_count = 0
 
             idx = 0
             self.progress_update_callback("phase_status", source="drive_parsing", status="running")
@@ -112,10 +113,8 @@ class FileEstimator(Estimator):
                     processed += len(batch)
                     success += len(batch)
 
-                    total_resource_count = 0
                     for drive in batch:
                         total_resource_count += len(parent_references[drive["id"]]) + 1
-
                     prog = processed / total_drives if total_drives > 0 else 0
                     self.progress_update_callback(
                         "scan_progress",
@@ -125,16 +124,16 @@ class FileEstimator(Estimator):
                         processed=processed,
                         failed=failed,
                         success=success,
-                        entity_type="Folders / Files"
+                        entity_type="Drives"
                     )
-                    time.sleep(0.2)
+                    time.sleep(0.2)                     # TODO Just for testing if progress proceeds smoothly. Remove before merging
                 except Exception as e:
                     failed += len(batch)
                     processed += len(batch)
                     prog = processed / total_drives if total_drives > 0 else 0
-                    total_resource_count = 0
                     for drive in batch:
                         total_resource_count += len(parent_references[drive["id"]]) + 1
+                        
                     self.progress_update_callback(
                         "scan_progress",
                         source="drive_parsing",
@@ -143,7 +142,7 @@ class FileEstimator(Estimator):
                         processed=processed,
                         failed=failed,
                         success=success,
-                        entity_type="Folders / Files"
+                        entity_type="Drives"
                     )
                     self._log_and_fail(e, "_calculate_drive_metrics", failures)
 

@@ -144,41 +144,24 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           widget = self.prog_widgets[source]["bar"]
           if widget.winfo_exists():
             widget.set(val)
-          if source == "calendars":
-            extra = msg.get("extra_text", "")
-            widget_lbl = self.prog_widgets[source]["lbl"]
-            if widget_lbl.winfo_exists():
-              widget_lbl.configure(
-                  text=(
-                      f"{entity_type}: {users_proc - users_fail} succeeded , {users_fail}"
-                      f" failed | {extra}"
-                  )
-              )
-          elif source == "plan_generation":
-            widget_lbl = self.prog_widgets[source]["lbl"]
-            if widget_lbl.winfo_exists():
-              widget_lbl.configure(
-                  text=msg.get("extra_text", "")
-              )
-          else:
-            if source == "drive_parsing":
-              label = "Drives"
-            widget_lbl = self.prog_widgets[source]["lbl"]
-            if widget_lbl.winfo_exists():
-              text_parts = [
-                  f"{entity_type}: {users_proc - users_fail - users_partially_failed} succeeded",
-                  f"{users_fail} failed"
-              ]
-              
-              if users_partially_failed > 0:
-                  text_parts.append(f"{users_partially_failed} partially failed")
-                  
-              base_text = ", ".join(text_parts)
-              final_text = f"{base_text} | {label}: {cumulative:,}"
-              
-              widget_lbl.configure(
-                  text=final_text
-              )
+          if source == "drive_parsing":
+            label = "Files / Folders"
+          widget_lbl = self.prog_widgets[source]["lbl"]
+          if widget_lbl.winfo_exists():
+            text_parts = [
+                f"{entity_type}: {users_proc - users_fail - users_partially_failed} succeeded",
+                f"{users_fail} failed"
+            ]
+            
+            if users_partially_failed > 0:
+                text_parts.append(f"{users_partially_failed} partially failed")
+                
+            base_text = ", ".join(text_parts)
+            final_text = f"{base_text} | {label}: {cumulative:,}"
+            
+            widget_lbl.configure(
+                text=final_text
+            )
       elif mtype == "complete":
         self.show_results_content(msg["data"])
       elif mtype == "error":
