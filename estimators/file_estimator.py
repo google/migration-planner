@@ -1,5 +1,6 @@
 from concurrent.futures import Future, ThreadPoolExecutor
 import threading
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -92,9 +93,67 @@ class FileEstimator(Estimator):
             self.progress_update_callback("drive_discovery", status="Done", count=len(drives))
 
             # Calculate metrics for all drives
-            drive_metrics = self._calculate_drive_metrics([drive["id"] for drive in drives], drive_id_to_adj_list, parent_references, resource_id_to_details, failures)
+            drive_metrics = {}
+            
+            batch_size = max(1, self.config.concurrency // 10)
+            total_drives = len(drives)
+            processed = 0
+            failed = 0
+            success = 0
+
+            idx = 0
+            self.progress_update_callback("phase_status", source="drive_parsing", status="running")
+            while idx < total_drives:
+                batch = drives[idx: idx + batch_size]
+                idx += batch_size
+                try:
+                    batch_metrics = self._calculate_drive_metrics([drive["id"] for drive in batch], drive_id_to_adj_list, parent_references, resource_id_to_details, failures)
+                    drive_metrics.update(batch_metrics)
+                    processed += len(batch)
+                    success += len(batch)
+
+                    total_resource_count = 0
+                    for drive in batch:
+                        total_resource_count += len(parent_references[drive["id"]]) + 1
+
+                    prog = processed / total_drives if total_drives > 0 else 0
+                    self.progress_update_callback(
+                        "scan_progress",
+                        source="drive_parsing",
+                        progress=prog,
+                        cumulative=total_resource_count,
+                        processed=processed,
+                        failed=failed,
+                        success=success,
+                        entity_type="Folders / Files"
+                    )
+                    time.sleep(0.2)
+                except Exception as e:
+                    failed += len(batch)
+                    processed += len(batch)
+                    prog = processed / total_drives if total_drives > 0 else 0
+                    total_resource_count = 0
+                    for drive in batch:
+                        total_resource_count += len(parent_references[drive["id"]]) + 1
+                    self.progress_update_callback(
+                        "scan_progress",
+                        source="drive_parsing",
+                        progress=prog,
+                        cumulative=total_resource_count,
+                        processed=processed,
+                        failed=failed,
+                        success=success,
+                        entity_type="Folders / Files"
+                    )
+                    self._log_and_fail(e, "_calculate_drive_metrics", failures)
+
+            time.sleep(5)
+            self.progress_update_callback("phase_status", source="drive_parsing", status="complete")
+
+            self.progress_update_callback("phase_status", source="plan_generation", status="running")
             metrics["drive_metrics"] = drive_metrics
             self._update_tenant_metrics_from_drive_metrics(metrics, subsite_to_drives)
+            self.progress_update_callback("phase_status", source="plan_generation", status="complete")
 
             return metrics
             
@@ -113,6 +172,12 @@ class FileEstimator(Estimator):
         metrics: Dict[str, Any],
         subsite_to_drives: Dict[str, List[Any]]
     ):
+        self.progress_update_callback(
+            "scan_progress",
+            source="plan_generation",
+            progress=0.33,
+            extra_text="Calculating metrics...",
+        )
         for drive_metric in metrics["drive_metrics"].values():
             metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], drive_metric["maxEffectiveDepth"])
             metrics["maxFolderDepth"] = max(metrics["maxFolderDepth"], drive_metric["maxEffectiveDepth"])
@@ -128,6 +193,13 @@ class FileEstimator(Estimator):
                 "sizeRange": size_range,
                 "count": 0
             })
+        
+        self.progress_update_callback(
+            "scan_progress",
+            source="plan_generation",
+            progress=0.66,
+            extra_text="Calculating metrics...",
+        )
 
         for tenant_bucket in metrics["tenantLevelFileSizeDistribution"]["buckets"]:
             for metric in metrics["drive_metrics"].values():
@@ -142,6 +214,13 @@ class FileEstimator(Estimator):
                 curr_dict = large_resource
                 curr_dict["drive"] = drive_id
                 metrics["tenantLevelLargeResources"].append(curr_dict)
+        
+        self.progress_update_callback(
+            "scan_progress",
+            source="plan_generation",
+            progress=1,
+            extra_text="Calculated metrics for all drives...",
+        )
 
     def _get_subsite_metrics_and_drives(
         self,
@@ -643,12 +722,14 @@ class FileEstimator(Estimator):
             dependency_set = ThreadSafeSortedSet()
             resource_to_dependency_count = ThreadSafeMap()
 
-            for drive_id, edges in parent_references.items():
-                for resource_id, parent_id in edges.items():                    
-                    curr_value = resource_to_dependency_count.get(parent_id, 0)
-                    resource_to_dependency_count.update(parent_id, curr_value + 1)
-                    if not resource_to_dependency_count.contains(resource_id):
-                        resource_to_dependency_count.update(resource_id, 0)             # To ensure the map accounts for all the nodes in the tree
+            for drive_id in drive_ids:
+                if drive_id in parent_references:
+                    edges = parent_references[drive_id]
+                    for resource_id, parent_id in edges.items():
+                        curr_value = resource_to_dependency_count.get(parent_id, 0)
+                        resource_to_dependency_count.update(parent_id, curr_value + 1)
+                        if not resource_to_dependency_count.contains(resource_id):
+                            resource_to_dependency_count.update(resource_id, 0)             # To ensure the map accounts for all the nodes in the tree
             active_thread_count = AtomicInt(0)
 
             leaves = []

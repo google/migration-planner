@@ -139,6 +139,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         users_fail = msg.get("failed", 0)
         users_partially_failed = msg.get("partially_failed", 0)
         users_tot = msg.get("total", 0)
+        entity_type = msg.get("entity_type", "Drives")
         if source in self.prog_widgets:
           widget = self.prog_widgets[source]["bar"]
           if widget.winfo_exists():
@@ -149,7 +150,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             if widget_lbl.winfo_exists():
               widget_lbl.configure(
                   text=(
-                      f"Users: {users_proc - users_fail} succeeded , {users_fail}"
+                      f"{entity_type}: {users_proc - users_fail} succeeded , {users_fail}"
                       f" failed | {extra}"
                   )
               )
@@ -160,18 +161,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                   text=msg.get("extra_text", "")
               )
           else:
-            if source == "messages":
-              label = "Emails"
-            elif source == "contacts":
-              label = "Contacts"
-            elif source == "in_place_archives":
-              label = "In Place Archive Count"
-            elif source == "group_mail_boxes":
-              label = "Group Mail Count"
+            if source == "drive_parsing":
+              label = "Drives"
             widget_lbl = self.prog_widgets[source]["lbl"]
             if widget_lbl.winfo_exists():
               text_parts = [
-                  f"Users: {users_proc - users_fail - users_partially_failed} succeeded",
+                  f"{entity_type}: {users_proc - users_fail - users_partially_failed} succeeded",
                   f"{users_fail} failed"
               ]
               
@@ -268,107 +263,69 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           text_color=COLOR_TEXT_SUB,
       ).pack(anchor="w", padx=10, pady=(0, 10))
 
-      # Cards
+      # Cards for simple metrics
       card_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
       card_frame.pack(fill="x", pady=10)
 
-      self.create_stat_card(
-          card_frame, "Max Effective Depth", f"{data['maxEffectiveDepth']:,}", "👥"
-      )
-      self.create_stat_card(
-          card_frame, "Max Folder Depth", f"{data['maxFolderDepth']:,}", "📩"
-      )
-      self.create_stat_card(
-          card_frame, "Max Subsite Depth", f"{data['maxSubsiteDepth']:,}", "📞"
-      )
-      self.create_stat_card(
-          card_frame, "List Count", f"{data['listCount']:,}", "🗃️"
-      )
-      # self.create_stat_card(
-      #     card_frame, "Group Mailbox Mails", f"{data['total_group_mailboxes']:,}", "👥📧"
-      # )
+      self.create_stat_card(card_frame, "Max Effective Depth", f"{data.get('maxEffectiveDepth', 0):,}", "👥")
+      self.create_stat_card(card_frame, "Max Folder Depth", f"{data.get('maxFolderDepth', 0):,}", "📁")
+      self.create_stat_card(card_frame, "Max Subsite Depth", f"{data.get('maxSubsiteDepth', 0):,}", "🌐")
+      self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsite_count', data.get('subSiteCount', 0)):,}", "🏢")
+      self.create_stat_card(card_frame, "Shortcut Count", f"{data.get('shortcutCount', 0):,}", "🔗")
+      self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
+      
+      if "folder_file_size" in data:
+          self.create_stat_card(card_frame, "Folder File Size", f"{data['folder_file_size']:,} KB", "💾")
 
-      # # Timeline
-      # ctk.CTkLabel(
-      #     self.view_results,
-      #     text="Timeline Estimates",
-      #     font=FONT_HEADER_SMALL,
-      #     text_color=COLOR_TEXT_MAIN,
-      # ).pack(anchor="w", padx=10, pady=(20, 5))
-      # ctk.CTkLabel(
-      #     self.view_results,
-      #     text=(
-      #         "Projected migration timeline based on the proposed execution"
-      #         " plan."
-      #     ),
-      #     font=FONT_BODY_MEDIUM,
-      #     text_color=COLOR_TEXT_SUB,
-      # ).pack(anchor="w", padx=10, pady=(0, 10))
+      # File Size Distribution
+      if "fileSizeDistribution" in data:
+          ctk.CTkLabel(
+              self.view_results,
+              text="File Size Distribution",
+              font=FONT_HEADER_SMALL,
+              text_color=COLOR_TEXT_MAIN,
+          ).pack(anchor="w", padx=10, pady=(20, 5))
+          
+          dist_frame = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
+          dist_frame.pack(fill="x", padx=10, pady=5)
+          
+          buckets = data["fileSizeDistribution"].get("Buckets", data["fileSizeDistribution"].get("buckets", []))
+          for bucket in buckets:
+              range_vals = bucket.get("sizeRange", (0, 0))
+              range_str = f"{range_vals[0]} - {range_vals[1]} KB"
+              file_ids = bucket.get("fileIDs", [])
+              count = bucket.get("count", len(file_ids))
+              
+              row_frame = ctk.CTkFrame(dist_frame, fg_color="transparent")
+              row_frame.pack(fill="x", padx=15, pady=5)
+              
+              ctk.CTkLabel(row_frame, text=range_str, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=150, anchor="w").pack(side="left")
+              
+              if file_ids:
+                  files_str = ", ".join(file_ids)
+                  ctk.CTkLabel(row_frame, text=f"Files: {files_str}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=10)
+              else:
+                  ctk.CTkLabel(row_frame, text=f"Count: {count}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=10)
 
-      # # Total Footer
-      # foot = ctk.CTkFrame(self.view_results, fg_color="transparent")
-      # foot.pack(fill="x", pady=10)
-      # self.create_summary_box(
-      #     foot, self.format_eta(data["total_eta"]), "Estimated Time"
-      # )
-      # self.create_summary_box(foot, f"{data['total_items']:,}", "Total Items")
-
-      # --- NEW: Container for Paginated Content ---
-      self.paginated_frame = ctk.CTkFrame(
-          self.view_results, fg_color="transparent"
-      )
-      self.paginated_frame.pack(fill="x", expand=True)
-
-      # Disclaimer
-      disclaimer = (
-          "* The estimations provided by this tool are calculated projections"
-          " intended for preliminary planning only. Actual migration timelines"
-          " (ETAs) and batch execution may vary based on, for example,"
-          " real-time network conditions, source/target throttling policies,"
-          " migration configurations, and the volume of delta migrations. The"
-          " estimations do not constitute a performance guarantee or a binding"
-          " service level agreement (SLA)."
-      )
-      ctk.CTkLabel(
-          self.view_results,
-          text=disclaimer,
-          font=FONT_BODY_SMALL,
-          text_color=COLOR_TEXT_SUB,
-          wraplength=800,
-          justify="left",
-      ).pack(anchor="w", padx=10, pady=(10, 20))
-
-      # Resources
-      ctk.CTkLabel(
-          self.view_results,
-          text="RESOURCES",
-          font=FONT_BODY_BOLD,
-          text_color=COLOR_TEXT_SUB,
-      ).pack(anchor="w", padx=10, pady=(10, 10))
-
-      res_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
-      res_frame.pack(fill="x", pady=0)
-      res_frame.grid_columnconfigure(0, weight=1)
-      res_frame.grid_columnconfigure(1, weight=1)
-
-      self.create_resource_card(
-          res_frame,
-          0,
-          "🚀",
-          "Data migration (New)",
-          "Our new migration platform for enterprise - totally free.",
-          "Learn more",
-          "https://support.google.com/a/answer/14012274?hl=en&ref_topic=14012345&sjid=3864823775656113447-NC",
-      )
-      self.create_resource_card(
-          res_frame,
-          1,
-          "☑️",
-          "Best Practices Guide",
-          "Essential tips for a smooth transition to Google Workspace.",
-          "Read guide",
-          "https://support.google.com/a/topic/14012345?hl=en&ref_topic=13002773&sjid=3864823775656113447-NC",
-      )
+      # Large Resources
+      if "tenantLevelLargeResources" in data:
+          ctk.CTkLabel(
+              self.view_results,
+              text="Large Resources",
+              font=FONT_HEADER_SMALL,
+              text_color=COLOR_TEXT_MAIN,
+          ).pack(anchor="w", padx=10, pady=(20, 5))
+          
+          res_container = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
+          res_container.pack(fill="x", padx=10, pady=5)
+          
+          for res in data["tenantLevelLargeResources"]:
+              res_str = f"Type: {res.get('Type', res.get('type'))} | ID: {res.get('Id', res.get('id'))} | Count: {res.get('subTreeCount')} | Limit: {res.get('Limit', res.get('limit'))}"
+              
+              row_frame = ctk.CTkFrame(res_container, fg_color="transparent")
+              row_frame.pack(fill="x", padx=15, pady=5)
+              
+              ctk.CTkLabel(row_frame, text=res_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w")
 
       self.view_results.pack(fill="both", expand=True)
 
@@ -408,8 +365,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       )
       self.btn_action_secondary.pack(side="left", padx=(25, 0), pady=15)
 
-      self.selected_page_size = "50"
-      self.render_paginated_view(0)
+
     except Exception as e:
       print(f"ERROR in show_results_content: {e}")
       for w in self.view_results.winfo_children():
@@ -456,6 +412,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.create_progress_row(self.scan_container, "subsites", "Subsite Discovery", mode="indeterminate")
     self.create_progress_row(self.scan_container, "drives", "Drive Parsing and Tree Creation", mode="indeterminate")
     self.create_progress_row(self.scan_container, "drive_parsing", "Drive Tree Parsing", mode="determinate")
+    self.create_progress_row(self.scan_container, "plan_generation", "Generating Migration Plan", mode="determinate")
 
     import threading
     threading.Thread(target=self.execute_migration_scan, args=(config,)).start()
