@@ -259,6 +259,18 @@ def build_file_distribution_bucket_ranges(self, ctk):
     lower_var = ctk.StringVar(value=lower)
     upper_var = ctk.StringVar(value=upper)
 
+    def on_trace(var):
+        val = var.get()
+        if val.isdigit() or val == "INF" or val == "":
+            return
+        if "INF".startswith(val.upper()):
+            var.set(val.upper())
+        else:
+            var.set("".join(c for c in val if c.isdigit()))
+
+    lower_var.trace_add("write", lambda *args, v=lower_var: on_trace(v))
+    upper_var.trace_add("write", lambda *args, v=upper_var: on_trace(v))
+
     lower_entry = ctk.CTkEntry(row_frame, placeholder_text="0", textvariable=lower_var, width=100, font=FONT_BODY_MEDIUM)
     lower_entry.pack(side="left", padx=5)
     ctk.CTkLabel(row_frame, text="KB", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(side="left", padx=2)
@@ -302,8 +314,8 @@ def build_file_distribution_bucket_ranges(self, ctk):
   )
   btn_add.pack(anchor="w", padx=15, pady=(5, 15))
 
-def build_large_resource_limit_input(self, ctk):
-  """Builds input field for lower count limit for large resources."""
+def build_large_resource_limit_input(self, ctk, min_val=1000, max_val=100000, increment=100):
+  """Builds slider for lower count limit for large resources."""
   limit_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
   limit_frame.pack(fill="x", padx=15, pady=(15, 2))
 
@@ -314,10 +326,27 @@ def build_large_resource_limit_input(self, ctk):
       text_color=COLOR_TEXT_MAIN,
   ).pack(side="left", padx=5)
 
-  self.large_resource_limit_var = ctk.StringVar(value="")
+  self.large_resource_limit_var = ctk.IntVar(value=min_val)
   
-  limit_entry = ctk.CTkEntry(limit_frame, placeholder_text="e.g. 10000", textvariable=self.large_resource_limit_var, width=100, font=FONT_BODY_MEDIUM)
-  limit_entry.pack(side="left", padx=5)
+  steps = (max_val - min_val) // increment
+  
+  slider = ctk.CTkSlider(
+      limit_frame,
+      from_=min_val,
+      to=max_val,
+      number_of_steps=steps,
+      variable=self.large_resource_limit_var,
+      width=200
+  )
+  slider.pack(side="left", padx=5)
+
+  ctk.CTkLabel(
+      limit_frame,
+      textvariable=self.large_resource_limit_var,
+      font=FONT_BODY_MEDIUM,
+      text_color=COLOR_TEXT_MAIN,
+      width=50
+  ).pack(side="left", padx=5)
 
   ctk.CTkLabel(
       self.adv_frame,
