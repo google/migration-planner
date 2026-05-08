@@ -181,8 +181,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       start_time = time.time()
 
       # # 2. Authentication
-      if not self.factory:
-        self.factory = EstimatorFactory(config)
+      self.factory = EstimatorFactory(config)
       
       manager = self.factory.get_manager()
       manager.authenticate_all(self.log_msg, required_scopes=["Sites.Read.All", "Files.Read.All"])
@@ -194,22 +193,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
       print(json.dumps(file_metrics, indent=4))
       self.ui_update("complete", data=file_metrics)
-
-      # # 4. Build Batch List
-      # csv_rows, stats = self._prepare_batch_list(
-      #     config, all_users, existing_data
-      # )
-
-      # # 5. Execution
-      # self._run_scan_phases(config, manager, one_token_per_app_manager, csv_rows, stats)
-
+      
       # # 6. Analysis & Reporting
       # self._generate_final_report(config, csv_rows, stats, monitor, start_time)
 
     except Exception as e:
-      print(e)
-      # self.log_msg(f"Process failed: {e}")
-      raise e
+      self.log_msg(f"Process failed: {e}")
+      self.ui_update("error", message=str(e))
     
   # ==========================
   # VIEW: PROGRESS
