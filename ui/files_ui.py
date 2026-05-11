@@ -311,6 +311,34 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               ctk.CTkLabel(row_frame, text=f"{res.get('subTreeCount', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
               ctk.CTkLabel(row_frame, text=f"{res.get('Limit', res.get('limit', 0)):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
 
+      # License Metrics
+      if "licenseMetrics" in data:
+          ctk.CTkLabel(
+              self.view_results,
+              text="License Metrics",
+              font=FONT_HEADER_SMALL,
+              text_color=COLOR_TEXT_MAIN,
+          ).pack(anchor="w", padx=10, pady=(20, 5))
+          
+          license_frame = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
+          license_frame.pack(fill="x", padx=10, pady=5)
+          
+          metrics = data["licenseMetrics"]
+          
+          # Total License Count Row
+          row1 = ctk.CTkFrame(license_frame, fg_color="transparent")
+          row1.pack(fill="x", padx=15, pady=5)
+          ctk.CTkLabel(row1, text="Total License Count", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left")
+          ctk.CTkLabel(row1, text=f"User: {metrics.get('totalLicenseCount', {}).get('User', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
+          ctk.CTkLabel(row1, text=f"Company: {metrics.get('totalLicenseCount', {}).get('Company', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
+
+          # Consumed Units Row
+          row2 = ctk.CTkFrame(license_frame, fg_color="transparent")
+          row2.pack(fill="x", padx=15, pady=5)
+          ctk.CTkLabel(row2, text="Consumed Units", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left")
+          ctk.CTkLabel(row2, text=f"User: {metrics.get('consumedUnits', {}).get('User', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
+          ctk.CTkLabel(row2, text=f"Company: {metrics.get('consumedUnits', {}).get('Company', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
+
       # Drive Details
       if "drive_metrics" in data:
           ctk.CTkLabel(
@@ -476,6 +504,121 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           wraplength=700,
       ).pack(padx=20, pady=20)
       self.view_results.pack(fill="both", expand=True)
+
+
+  def export_current_report(self):
+    if not hasattr(self, "last_scan_data"):
+      return
+    
+    data = self.last_scan_data
+    
+    # Exclude complex structures for summary
+    summary_data = {k: v for k, v in data.items() if k not in ["drive_metrics", "licenseMetrics", "siteMetrics", "tenantLevelFileSizeDistribution", "tenantLevelLargeResources"]}
+    
+    from tkinter import filedialog
+    from datetime import datetime
+    import csv
+    import json
+    
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    f = filedialog.asksaveasfilename(
+        initialfile=f"migration_report_{ts}.csv", defaultextension=".csv"
+    )
+    
+    if not f:
+      return
+        
+    with open(f, "w", newline="", encoding="utf-8") as csvfile:
+      writer = csv.writer(csvfile)
+      
+      # Section 1: Summary Metrics
+      writer.writerow(["Summary Metrics", "Value"])
+      for k, v in summary_data.items():
+        if k == "driveCounts":
+          for sub_k, sub_v in v.items():
+            writer.writerow([f"DriveCount_{sub_k}", sub_v])
+        else:
+          writer.writerow([k, v])
+      
+      writer.writerow([]) # Blank line separator
+      
+      # Section 2: License Metrics
+      writer.writerow(["License Metrics", ""])
+      license_data = data.get("licenseMetrics", {})
+      writer.writerow(["Total License Count (User)", license_data.get("totalLicenseCount", {}).get("User", 0)])
+      writer.writerow(["Total License Count (Company)", license_data.get("totalLicenseCount", {}).get("Company", 0)])
+      writer.writerow(["Consumed Units (User)", license_data.get("consumedUnits", {}).get("User", 0)])
+      writer.writerow(["Consumed Units (Company)", license_data.get("consumedUnits", {}).get("Company", 0)])
+      
+      writer.writerow([]) # Blank line separator
+      
+      # Section 3: File Size Distribution
+      writer.writerow(["File Size Distribution", ""])
+      writer.writerow(["Range (KB)", "Count"])
+      dist_data = data.get("tenantLevelFileSizeDistribution", {})
+      buckets = dist_data.get("buckets", [])
+      for bucket in buckets:
+        range_vals = bucket.get("sizeRange", (0, 0))
+        range_str = f"{range_vals[0]} - {range_vals[1]}"
+        count = bucket.get("count", 0)
+        writer.writerow([range_str, count])
+        
+      writer.writerow([]) # Blank line separator
+      
+      # Section 4: Large Resources
+      writer.writerow(["Large Resources", ""])
+      writer.writerow(["Type", "ID", "SubTreeCount", "Limit", "Drive"])
+      large_resources = data.get("tenantLevelLargeResources", [])
+      for res in large_resources:
+        writer.writerow([
+            res.get("Type", res.get("type", "")),
+            res.get("Id", res.get("id", "")),
+            res.get("subTreeCount", 0),
+            res.get("Limit", res.get("limit", 0)),
+            res.get("drive", "")
+        ])
+        
+      writer.writerow([]) # Blank line separator
+      
+      # Section 5: Site Details
+      writer.writerow(["Site Details", ""])
+      writer.writerow(["Site ID", "Site Level"])
+      site_metrics = data.get("siteMetrics", {})
+      for site_id, s_data in site_metrics.items():
+        writer.writerow([site_id, s_data.get("siteLevel", 0)])
+        
+      writer.writerow([]) # Blank line separator
+      
+      # Section 6: Drive Details
+      writer.writerow(["Drive Details", ""])
+      
+      # Determine all unique bucket ranges across all drives to create columns
+      drive_metrics = data.get("drive_metrics", {})
+      all_buckets = set()
+      for d_data in drive_metrics.values():
+        for bucket in d_data.get("fileSizeDistribution", {}).get("buckets", []):
+            range_vals = bucket.get("sizeRange", (0, 0))
+            all_buckets.add(range_vals)
+            
+      sorted_buckets = sorted(list(all_buckets))
+      bucket_cols = [f"Bucket_{b[0]}_{b[1]}" for b in sorted_buckets]
+      
+      headers = ["Drive ID", "Max Effective Depth", "Shortcut Count"] + bucket_cols
+      writer.writerow(headers)
+      
+      for drive_id, d_data in drive_metrics.items():
+        row = [
+            drive_id,
+            d_data.get("maxEffectiveDepth", 0),
+            d_data.get("shortcutCount", 0)
+        ]
+        
+        # Add bucket counts
+        drive_buckets = {f"Bucket_{b.get('sizeRange', (0,0))[0]}_{b.get('sizeRange', (0,0))[1]}": b.get("count", 0) for b in d_data.get("fileSizeDistribution", {}).get("buckets", [])}
+        for b_col in bucket_cols:
+            row.append(drive_buckets.get(b_col, 0))
+            
+        writer.writerow(row)
 
 
   def start_scan(self):

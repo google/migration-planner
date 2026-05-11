@@ -67,6 +67,7 @@ class FileEstimator(Estimator):
                 "subsiteCount": 0,
                 "shortcutCount": 0,
                 "listCount": 0,
+                "licenseMetrics": {},
                 "driveCounts": {
                     "documentLibrary": 0,
                     "personal": 0,
@@ -289,6 +290,7 @@ class FileEstimator(Estimator):
     ):
         try:
             tenant_metrics["listCount"] = self._get_list_count(site_ids, failures)
+            tenant_metrics["licenseMetrics"] = self._get_license_metrics(failures)
             drive_type_to_count = self._get_drives(site_ids, drives, subsite_to_drives, failures)
             for key, value in drive_type_to_count.items():
                 if key not in tenant_metrics["driveCounts"]:
@@ -384,6 +386,61 @@ class FileEstimator(Estimator):
         except Exception as e:
             self._log_and_fail("Error in _get_list_count", e, failures)
             return 0
+
+    def _get_license_metrics(
+        self,
+        failures: List[Dict[str, str]]
+    ) -> Dict[str, Any]:
+        licenses = []
+        url = "https://graph.microsoft.com/v1.0/subscribedSkus?$select=consumedUnits,appliesTo"
+        token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
+        token = token_data["token"]
+        session = self.url_invoker.token_manager.get_session()
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            while url and not self.is_hard_stop_requested():
+                # Check mid-loop for extremely long tenant scans
+                if time.time() > token_data["expires_at"]:
+                    self.url_invoker.token_manager.return_token_slot(token_data)
+                    token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
+                    token = token_data["token"]
+                    headers = {"Authorization": f"Bearer {token}"}
+
+                r = session.get(url, headers=headers)
+                if r.status_code != 200:
+                    break
+                d = r.json()
+                licenses.extend(d.get("value", []))
+                url = d.get("@odata.nextLink")
+
+        except Exception as e:
+            self._log_and_fail("Error in _get_license_metrics", e, failures)
+            return {}
+        finally:
+            self.url_invoker.token_manager.return_token_slot(token_data)
+        
+        # TODO Check what all other metrics are required
+
+        license_metrics = {
+            "totalLicenseCount": {
+                "User": 0,
+                "Company": 0
+            },
+            "consumedUnits": {
+                "User": 0,
+                "Company": 0
+            }
+        }
+        for license in licenses:
+            applies_to = license.get("appliesTo", "")
+            if applies_to == "User":
+                license_metrics["totalLicenseCount"]["User"] += 1
+                license_metrics["consumedUnits"]["User"] += license.get("consumedUnits", 0)
+            elif applies_to == "Company":
+                license_metrics["totalLicenseCount"]["Company"] += 1
+                license_metrics["consumedUnits"]["Company"] += license.get("consumedUnits", 0)
+
+        return license_metrics
 
     def _get_drives(
         self,
