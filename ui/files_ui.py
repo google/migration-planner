@@ -174,14 +174,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     """Orchestrates the end-to-end migration estimation scan."""
     monitor = None
     try:
-      print("Reached Execute Migration Stage")
       self.log_msg("--- Starting Batch Scan ---")
       monitor = ResourceMonitor()
       monitor.start()
       start_time = time.time()
 
       # # 2. Authentication
-      self.factory = EstimatorFactory(config)
+      self.factory = EstimatorFactory(config, logger=self.log_msg, stop_event=self.stop_scan_event)
       
       manager = self.factory.get_manager()
       manager.authenticate_all(self.log_msg, required_scopes=["Sites.Read.All", "Files.Read.All", "LicenseAssignment.Read.All"])
@@ -190,6 +189,14 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       # Calculate resource metrics for the tenant. Progress update to be made directly in the backend.
       failures = []
       file_metrics = estimator.calculate_resource_metrics({}, failures)
+
+      self.log_msg("\n" + "=" * 60)
+      self.log_msg("📊 Failures and Warnings:")
+      for failure in failures:
+        prefix = "[WARNING] " if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR] "
+        self.log_msg(prefix + str(failure))
+
+      self.log_msg("=" * 60)
 
       print(json.dumps(file_metrics, indent=4))
       self.ui_update("complete", data=file_metrics)

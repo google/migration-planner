@@ -138,7 +138,7 @@ class EstimatorFactory:
       self.files_estimator = FileEstimator(
         self.config,
         url_invoker,
-        logger=print,         # TODO Change logger to log to file after testing
+        logger=self.logger,
         stop_event=self.stop_event,
         progress_update_callback=progress_update_callback
       )

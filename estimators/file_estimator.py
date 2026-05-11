@@ -56,6 +56,10 @@ class FileEstimator(Estimator):
         try:
             if failures is None:
                 failures = []
+            
+            if self.logger is None:
+                self.logger = lambda x: None
+            
             drives = []
             subsite_to_drives = {}          # used to calculate effective max Depth
             metrics = { 
@@ -85,7 +89,7 @@ class FileEstimator(Estimator):
                 # Sharepoint Flow
                 self.progress_update_callback("site_discovery", status="Fetching...", count=0)
                 subsite_count = self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, failures)
-                print("Site Scanning is finished!!!!")
+                self.logger("Site Scanning is finished!!!!")
                 self.progress_update_callback("site_discovery", status="Done", count=subsite_count)
 
             # get adjacency lists and parent references for each drive
@@ -626,7 +630,6 @@ class FileEstimator(Estimator):
                     for site in resp["body"]["value"]:
                         all_sites.append({"siteId": site["id"], "siteLevel": level})
                         new_sub_site_ids.append(site["id"])
-                        print(site["id"])
                         self.progress_update_callback("site_discovery", status="Scanning Subsites...", count=len(all_sites))
 
             if new_sub_site_ids:
@@ -731,7 +734,6 @@ class FileEstimator(Estimator):
                         resource_id_to_details[file["id"]] = file
                         
                         if "parentReference" in file and "id" in file["parentReference"]:
-                            print(f"ID: {file["id"]} and Parent ID: {file["parentReference"]["id"]} | Name: {file["name"]} | driveId: {drive_id}")
                             parent_id = file["parentReference"]["id"]
                             if parent_id in adj_list[drive_id]:
                                 adj_list[drive_id][parent_id].append(file["id"])
@@ -790,7 +792,6 @@ class FileEstimator(Estimator):
 
             leaves = []
             for resource_id, count in resource_to_dependency_count.get_all().items():
-                print(f"Resource: {resource_id} and Count: {count}")
                 if count == 0:
                     leaves.append(resource_id)
                 else:
@@ -848,8 +849,6 @@ class FileEstimator(Estimator):
             subtree_count += 1
             subtree_size += resource["size"]
 
-            print(f"Resource ID: {resource_id} | Stats: Subtree Size {subtree_size} and Subtree Count: {subtree_count} and Max Depth: {max_depth}")
-
             resource_metrics[resource["id"]] = {
                 "subTreeCount": subtree_count,
                 "subTreeSize": subtree_size,
@@ -860,10 +859,7 @@ class FileEstimator(Estimator):
 
             parent_resource_id = parent_references[drive_id].get(resource_id)
 
-            print(f"Parent Resource ID: {parent_resource_id}")
-
             if not parent_resource_id:
-                print(f"Parent Resource ID Not Found for {resource_id}")
                 return
 
             with self.condition:
@@ -873,7 +869,6 @@ class FileEstimator(Estimator):
                 dependency_count_of_par -= 1
                 resource_to_dependency_count.update(parent_resource_id, dependency_count_of_par)
 
-                print(f"Updated Dependency Count for {parent_resource_id}: {dependency_count_of_par}")
                 if dependency_count_of_par > 0:
                     dependency_set.add((dependency_count_of_par, parent_resource_id))
                 else:
