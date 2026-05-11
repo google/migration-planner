@@ -184,7 +184,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.factory = EstimatorFactory(config)
       
       manager = self.factory.get_manager()
-      manager.authenticate_all(self.log_msg, required_scopes=["Sites.Read.All", "Files.Read.All"])
+      manager.authenticate_all(self.log_msg, required_scopes=["Sites.Read.All", "Files.Read.All", "LicenseAssignment.Read.All"])
       estimator = self.factory.get_files_estimator(self.ui_update)
 
       # Calculate resource metrics for the tenant. Progress update to be made directly in the backend.
