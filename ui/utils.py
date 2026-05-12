@@ -113,6 +113,14 @@ def build_eo_resource_checkbox_list(self, ctk):
   ).pack(side="left", padx=10)
   ctk.CTkCheckBox(
       scan_options_frame,
+      text="Shared Mails",
+      variable=self.scan_shared_mail_boxes,
+      corner_radius=4,
+      fg_color=COLOR_PRIMARY,
+      border_color=COLOR_TEXT_SUB,
+  ).pack(side="left", padx=10)
+  ctk.CTkCheckBox(
+      scan_options_frame,
       text="Group Mailboxes",
       variable=self.scan_group_mail_boxes,
       corner_radius=4,

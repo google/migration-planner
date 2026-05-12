@@ -15,7 +15,10 @@ from util.connectors import TokenManager, UrlInvoker
 from util.monitoring import ResourceMonitor
 from util.utils import ScanConfig
 from util.constants import *
+from estimators.factory import EstimatorFactory
 import ui.utils as ui_utils
+from util.eo_utils import fetch_user_batch_data, fetch_calendar_events, calculate_batch_duration
+from util.enums import FailureType
 
 class MigrationEstimatorTool(ctk.CTk):
   """Main Application Class for Migration Planner."""
@@ -54,17 +57,18 @@ class MigrationEstimatorTool(ctk.CTk):
     self.scan_contact = ctk.BooleanVar(value=True)
     self.scan_calendar = ctk.BooleanVar(value=True)
     self.scan_in_place_archives = ctk.BooleanVar(value=True)
+    self.scan_shared_mail_boxes = ctk.BooleanVar(value=True)
     self.scan_group_mail_boxes = ctk.BooleanVar(value=True)
-    self.scan_shared_mail_boxes = ctk.BooleanVar(value=False)
     self.concurrency = ctk.IntVar(value=10)
     self.load_multiplier = ctk.IntVar(value=1)
     self.retries = ctk.IntVar(value=MAX_RETRIES)
     self.backoff = ctk.IntVar(value=BACKOFF)
-    self.eta_min_users = ctk.IntVar(value=200)
+    self.eta_min_users = ctk.IntVar(value=400)
     self.eta_max_users = ctk.IntVar(value=5000)
     self.eta_max_batches = ctk.IntVar(value=50)
     self.parallel_batches = ctk.IntVar(value=10)
     self.scan_result_csv_path = ctk.StringVar()
+    self.id_to_display_name = {}
 
   def create_widgets(self):
     """Creates the main UI layout."""
@@ -256,7 +260,7 @@ class MigrationEstimatorTool(ctk.CTk):
     self.scan_container.pack(fill="x", padx=25, pady=20)
 
     self.create_progress_row(
-        self.scan_container, "users", "Scanning Users", is_user=True
+        self.scan_container, "entities", "Scanning Entities", is_user=True
     )
     self.prog_widgets = {}
 
@@ -363,7 +367,14 @@ class MigrationEstimatorTool(ctk.CTk):
           card_frame, "In-Place Archives", f"{data['total_in_place_archives']:,}", "🗃️"
       )
       self.create_stat_card(
-          card_frame, "Group Mailbox Mails", f"{data['total_group_mailboxes']:,}", "👥📧"
+          card_frame, "Shared Mails", f"{data['total_shared_mails']:,}", "👥📧"
+      )
+      self.create_stat_card(
+          card_frame, 
+          "Group Mails", 
+          f"{data['total_group_mails']:,}",
+          "👥📧",
+          sub=f"({data['total_group_threads']:,} {'Group Thread' if data['total_group_threads'] == 1 else 'Group Threads'})",
       )
 
       # Timeline
@@ -888,7 +899,7 @@ class MigrationEstimatorTool(ctk.CTk):
         "lbl": lbl_status,
         "icon": lbl_icon,
     }
-    if key == "users":
+    if key in ["users", "entities"]:
       self.prog_user = bar
       self.lbl_user_status = lbl_status
 
@@ -981,10 +992,11 @@ class MigrationEstimatorTool(ctk.CTk):
     events_str = self.format_metric(batch["total_events"])
     contacts_str = self.format_metric(batch["total_contacts"])
     in_place_archive_str = self.format_metric(batch["total_in_place_archives"])
-    group_mailbox_str = self.format_metric(batch["total_group_mailboxes"])
+    shared_mailbox_str = self.format_metric(batch["total_shared_mails"])
+    group_mail_box_str = self.format_metric(batch["total_group_mails"])
     info = (
         f"{batch['name']} - {users_str} 👥  |  {emails_str} 📩  |  {events_str}"
-        f" 📅  |  {contacts_str} 📞 |  {in_place_archive_str} 🗃️ |  {group_mailbox_str} 👥📧"
+        f" 📅  |  {contacts_str} 📞 |  {in_place_archive_str} 🗃️ |  {shared_mailbox_str} 👥📧 | {group_mail_box_str} 👥📧"
     )
     ctk.CTkLabel(
         f,
@@ -1117,12 +1129,22 @@ class MigrationEstimatorTool(ctk.CTk):
         if not self.view_progress.winfo_viewable():
           self.show_progress_view()
         count = msg.get("count", 0)
+        user_count = msg.get("user_count", 0)
+        shared_mailbox_count = msg.get("shared_mailbox_count", 0)
+        group_count = msg.get("group_count", 0)
         status = msg.get("status", "Scanning...")
         if "users" in self.prog_widgets:
           widget = self.prog_widgets["users"]["lbl"]
           if widget.winfo_exists():
+            text = f"{count} entities (users / shared mailboxes / group mailboxes)"
+            if user_count > 0:
+              text += f" | {user_count} users" if user_count > 1 else f" | {user_count} user"
+            if shared_mailbox_count > 0:
+              text += f" | {shared_mailbox_count} shared mailboxes" if shared_mailbox_count > 1 else f" | {shared_mailbox_count} shared mailbox"
+            if group_count > 0:
+              text += f" | {group_count} groups" if group_count > 1 else f" | {group_count} group"
             widget.configure(
-                text=f"{count} users found"
+                text=text
             )
           if not self.spinners_active.get("users"):
             self.spinners_active["users"] = True
@@ -1175,8 +1197,11 @@ class MigrationEstimatorTool(ctk.CTk):
         cumulative = msg.get("cumulative", 0)
         users_proc = msg.get("processed", 0)
         users_fail = msg.get("failed", 0)
+        users_success = msg.get("success", users_proc - users_fail)
         users_partially_failed = msg.get("partially_failed", 0)
+        users_skipped = msg.get("skipped", 0)
         users_tot = msg.get("total", 0)
+        entity_type = msg.get("entity_type", "Users")
         if source in self.prog_widgets:
           widget = self.prog_widgets[source]["bar"]
           if widget.winfo_exists():
@@ -1187,7 +1212,7 @@ class MigrationEstimatorTool(ctk.CTk):
             if widget_lbl.winfo_exists():
               widget_lbl.configure(
                   text=(
-                      f"Users: {users_proc - users_fail} succeeded , {users_fail}"
+                      f"{entity_type}: {users_proc - users_fail} succeeded , {users_fail}"
                       f" failed | {extra}"
                   )
               )
@@ -1203,20 +1228,30 @@ class MigrationEstimatorTool(ctk.CTk):
             elif source == "contacts":
               label = "Contacts"
             elif source == "in_place_archives":
-              label = "In Place Archive Count"
-            elif source == "group_mail_boxes":
-              label = "Group Mail Count"
+              label = "Archived Emails"
+            elif source == "shared_mails":
+              label = "Emails"
+            elif source == "group_mails":
+              label = "Posts"
+            else:
+              label = source
+              
             widget_lbl = self.prog_widgets[source]["lbl"]
             if widget_lbl.winfo_exists():
               text_parts = [
-                  f"Users: {users_proc - users_fail - users_partially_failed} succeeded",
+                  f"{entity_type}: {users_proc - users_fail - users_partially_failed} succeeded",
                   f"{users_fail} failed"
               ]
               
               if users_partially_failed > 0:
                   text_parts.append(f"{users_partially_failed} partially failed")
-                  
+              if users_skipped > 0:
+                  text_parts.append(f"{users_skipped} skipped")
+              
               base_text = ", ".join(text_parts)
+              extra_text = msg.get("extra_text", None)    
+              if extra_text:
+                base_text += f" | {extra_text}"
               final_text = f"{base_text} | {label}: {cumulative:,}"
               
               widget_lbl.configure(
@@ -1267,7 +1302,7 @@ class MigrationEstimatorTool(ctk.CTk):
     self.prog_widgets = {}
 
     self.create_progress_row(
-        self.scan_container, "users", "Scanning Users", is_user=True
+        self.scan_container, "users", "Scanning Entities", is_user=True
     )
     self.prog_user.start()
     if self.scan_email.get():
@@ -1286,11 +1321,14 @@ class MigrationEstimatorTool(ctk.CTk):
       self.create_progress_row(
           self.scan_container, "in_place_archives", "Scanning In-Place Archives"
       )
+    if self.scan_shared_mail_boxes.get():
+      self.create_progress_row(
+          self.scan_container, "shared_mails", "Scanning Shared Mailboxes"
+      )
     if self.scan_group_mail_boxes.get():
       self.create_progress_row(
-          self.scan_container, "group_mail_boxes", "Scanning Group Mailboxes"
+          self.scan_container, "group_mails", "Scanning Group Mailboxes"
       )
-
     self.create_progress_row(
         self.scan_container, "plan_generation", "Generating Migration Plan"
     )
@@ -1329,20 +1367,28 @@ class MigrationEstimatorTool(ctk.CTk):
       one_token_per_app_manager = None
       if config.scan_in_place_archives:
         one_token_per_app_manager = self._authenticate_if_needed(config, use_single_app=True)
+      self.factory = EstimatorFactory(config, manager, self.log_msg, self.stop_scan_event, None)
       
       # 3. User Discovery
-      all_users, existing_data = self._resolve_target_users(config, manager, one_token_per_app_manager)
+      all_users, existing_data, groups, shared_mailboxes = self._resolve_target_users(config, manager, one_token_per_app_manager)
 
       # 4. Build Batch List
       csv_rows, stats = self._prepare_batch_list(
-          config, all_users, existing_data
+          config, all_users, existing_data, groups, shared_mailboxes
       )
 
-      # 5. Execution
-      self._run_scan_phases(config, manager, one_token_per_app_manager, csv_rows, stats)
+      for row in csv_rows:
+        self.id_to_display_name[row["User ID / Group ID"]] = row["User Principal Name / Group Mail"]
+
+      self.factory.set_id_to_display_name(self.id_to_display_name)
+      user_csv_rows = [row for row in csv_rows if row["Type"] == "User"]
+      shared_csv_rows = [row for row in csv_rows if row["Type"] == "Shared"]
+      group_mail_rows = [row for row in csv_rows if row["Type"] == "Group Mailbox"]
+
+      self._run_scan_phases(config, manager, one_token_per_app_manager, user_csv_rows, shared_csv_rows, group_mail_rows, stats)
 
       # 6. Analysis & Reporting
-      self._generate_final_report(config, csv_rows, stats, monitor, start_time)
+      self._generate_final_report(config, user_csv_rows, shared_csv_rows, group_mail_rows, stats, monitor, start_time)
 
     except Exception as e:
       self.log_msg(f"Process failed: {e}")
@@ -1368,16 +1414,16 @@ class MigrationEstimatorTool(ctk.CTk):
         scan_contact=self.scan_contact.get(),
         scan_calendar=self.scan_calendar.get(),
         scan_in_place_archives=self.scan_in_place_archives.get(),
-        scan_group_mail_boxes=self.scan_group_mail_boxes.get(),
         scan_shared_mail_boxes=self.scan_shared_mail_boxes.get(),
+        scan_group_mail_boxes=self.scan_group_mail_boxes.get(),
         concurrency=self.concurrency.get(),
         load_multiplier=self.load_multiplier.get(),
         retries=self.retries.get(),
         backoff=self.backoff.get(),
         eta_max_users=self.eta_max_users.get(),
         parallel_batches=self.parallel_batches.get(),
-        bucket_ranges=[(int(r[0].get()), float('inf') if r[1].get() == 'INF' else int(r[1].get())) for r in self.file_bucket_ranges],
-        large_resource_count_limit=self.large_resource_limit_var.get()
+        bucket_ranges=[(int(r[0].get()), float('inf') if r[1].get() == 'INF' else int(r[1].get())) for r in self.file_bucket_ranges] if hasattr(self, 'file_bucket_ranges') and self.file_bucket_ranges else [],
+        large_resource_count_limit=self.large_resource_limit_var.get() if hasattr(self, 'large_resource_limit_var') and self.large_resource_limit_var else 500
     )
 
   def _authenticate_if_needed(
@@ -1400,10 +1446,9 @@ class MigrationEstimatorTool(ctk.CTk):
       self, config: ScanConfig, manager: Optional[TokenManager], one_token_per_app_manager: Optional[TokenManager] = None
   ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Resolves the list of users to process, either from CSV or Tenant."""
-
-    print ("Reached Resolve Targets")
     existing_data = {}
     users_to_resolve = []
+    groups_to_resolve = []
     all_users = []
 
     # Flags to determine if we need to scan
@@ -1411,7 +1456,8 @@ class MigrationEstimatorTool(ctk.CTk):
     have_contact = False
     have_calendar = False
     have_in_place_archives = False
-    have_group_mail_boxes = False
+    have_shared_mails = False
+    have_group_mailboxes = False
 
     # 1. Parse CSV if applicable
     if config.user_source == "csv":
@@ -1444,10 +1490,24 @@ class MigrationEstimatorTool(ctk.CTk):
             and "Event Count" in df_input.columns
         ):
           have_calendar = True
+        if "Group Post Count" in df_input.columns:
+          have_group_mailboxes = True
+        if "Shared Mail Count" in df_input.columns:
+          have_shared_mails = True
+        if "In Place Archive Count" in df_input.columns:
+          have_in_place_archives = True
 
+        have_type_col = "Type" in df_input.columns
         for _, row in df_input.iterrows():
           upn = str(row[col]).lower().strip()
           existing_data[upn] = row.to_dict()
+          mail_type = row["Type"] if have_type_col else "User"
+          if mail_type not in ["User", "Shared", "Group Mailbox"]:
+            self.log_msg(f"Unknown mail type for {upn}: {mail_type}. Proceeding with the assumption it is a user!")
+            mail_type = "User"
+          
+          if mail_type == "Group Mailbox":
+            groups_to_resolve.append(row[col])
 
         users_to_resolve = df_input[col].dropna().unique().tolist()
       else:
@@ -1461,7 +1521,8 @@ class MigrationEstimatorTool(ctk.CTk):
         or (config.scan_contact and not have_contact)
         or (config.scan_calendar and not have_calendar)
         or (config.scan_in_place_archives and not have_in_place_archives)
-        or (config.scan_group_mail_boxes and not have_group_mail_boxes)
+        or (config.scan_shared_mail_boxes and not have_shared_mails)
+        or (config.scan_group_mail_boxes and not have_group_mailboxes)
     )
 
     # 3. Authenticate if required
@@ -1474,6 +1535,8 @@ class MigrationEstimatorTool(ctk.CTk):
           raise Exception(
               "Missing Credentials for Delta Scan (CSV missing some columns)."
           )
+      if not one_token_per_app_manager and config.scan_in_place_archives and not have_in_place_archives:
+        raise Exception("Missing Credentials for In Place Archive Scan.")
 
       # Determine scopes based on what is missing
       required_scopes = ["User.Read.All"]
@@ -1483,12 +1546,14 @@ class MigrationEstimatorTool(ctk.CTk):
         required_scopes.append("Contacts.Read")
       if config.scan_calendar and not have_calendar:
         required_scopes.append("Calendars.Read")
-      if config.scan_group_mail_boxes and not have_group_mail_boxes:
+      if config.scan_shared_mail_boxes and not have_shared_mails:
         required_scopes.append("MailboxSettings.Read")
         if not (config.scan_email and not have_email):          # If Email Scan is diabled then add Mail.Read as otherwise Mail.Read is alreay added
           required_scopes.append("Mail.Read")
       if config.scan_in_place_archives and not have_in_place_archives:
         required_scopes.append("MailboxFolder.Read.All")
+      if config.scan_group_mail_boxes and not have_group_mailboxes:
+        required_scopes.append("Group.Read.All")
 
       manager.authenticate_all(self.log_msg, required_scopes=required_scopes)
       if one_token_per_app_manager:
@@ -1505,7 +1570,7 @@ class MigrationEstimatorTool(ctk.CTk):
     if config.user_source == "csv":
       if scanning_required:
         self.log_msg("Delta Scan required. Resolving User IDs...")
-        all_users = self._resolve_users_from_csv(manager, users_to_resolve)
+        all_users = self._resolve_from_csv(manager, users_to_resolve)
       else:
         self.log_msg("Using CSV data directly...")
         all_users = [
@@ -1513,20 +1578,53 @@ class MigrationEstimatorTool(ctk.CTk):
         ]
     else:
       all_users = self._get_all_users_graph(manager)
+    
+    shared_mailboxes = []
+    if config.scan_shared_mail_boxes:
+      estimator = self.factory.get_shared_mailbox_estimator(hard_reset=True)
+      shared_mailbox_ids = estimator._get_shared_mail_boxes([user["id"] for user in all_users], [])
+      personal_users = [user for user in all_users if user["id"] not in shared_mailbox_ids]
+      shared_mailboxes = [user for user in all_users if user["id"] in shared_mailbox_ids]
+      all_users = personal_users
 
+    groups = []
+    if config.scan_group_mail_boxes:
+      estimator = self.factory.get_group_mailbox_estimator(hard_reset=True)
+      if config.user_source == "csv":
+        if not have_group_mailboxes:
+          self.log_msg("Delta Scan required. Resolving Group IDs...")
+          url = (
+              "{GRAPH_BASE_URL}/groups?$filter=mail eq"
+              " '{cln}'&$select=id,mail"
+          )
+          groups = self._resolve_from_csv(manager, groups_to_resolve, url)
+        else:
+          groups = [{"id": None, "mail": row} for row in groups_to_resolve]
+      else:
+        groups = estimator.get_group_id_to_mail_mapping()
+          
     # Apply Load Multiplier
     mult = max(1, config.load_multiplier)
     if mult > 1:
       all_users = all_users * mult
 
-    self.ui_update("user_discovery", status="Done", count=len(all_users))
-    return all_users, existing_data
+    self.ui_update(
+      "user_discovery", 
+      status="Done", 
+      count=len(all_users) + len(shared_mailboxes) + len(groups), 
+      user_count=len(all_users), 
+      shared_mailbox_count=len(shared_mailboxes), 
+      group_count=len(groups)
+    )
+    return all_users, existing_data, groups, shared_mailboxes
 
   def _prepare_batch_list(
       self,
       config: ScanConfig,
       all_users: List[Dict[str, Any]],
       existing_data: Dict[str, Any],
+      groups: List[Dict[str, Any]],
+      shared_mailboxes: List[Dict[str, Any]],
   ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     """Prepares the initial list of user rows and stats."""
     csv_rows = []
@@ -1537,7 +1635,8 @@ class MigrationEstimatorTool(ctk.CTk):
     have_contact = "Contact Count" in sample
     have_calendar = "Calendar Count" in sample and "Event Count" in sample
     have_in_place_archives = "In Place Archive Count" in sample
-    have_group_mail_boxes = "Group Mail Count" in sample
+    have_shared_mails = "Shared Mail Count" in sample
+    have_group_mails = "Group Post Count" in sample and "Group Thread Count" in sample
 
     def safe_int(val):
       try:
@@ -1549,14 +1648,17 @@ class MigrationEstimatorTool(ctk.CTk):
       upn = u["userPrincipalName"]
       key = str(upn).lower().strip()
       row = {
-          "User Principal Name": upn,
-          "User ID": u["id"],
+          "User Principal Name / Group Mail": upn,
+          "User ID / Group ID": u["id"],
+          "Type": "User",
           "Email Count": 0,
           "Contact Count": 0,
           "Calendar Count": 0,
           "Event Count": 0,
           "In Place Archive Count": 0,
-          "Group Mail Count": 0,
+          "Shared Mail Count": 0,
+          "Group Post Count": 0,
+          "Group Thread Count": 0
       }
       if key in existing_data:
         src = existing_data[key]
@@ -1569,8 +1671,52 @@ class MigrationEstimatorTool(ctk.CTk):
           row["Event Count"] = safe_int(src.get("Event Count", 0))
         if have_in_place_archives and config.scan_in_place_archives:
           row["In Place Archive Count"] = safe_int(src.get("In Place Archive Count", 0))
-        if have_group_mail_boxes and config.scan_group_mail_boxes:
-          row["Group Mail Count"] = safe_int(src.get("Group Mail Count", 0))
+        if have_shared_mails and config.scan_shared_mail_boxes:
+          row["Shared Mail Count"] = safe_int(src.get("Shared Mail Count", 0))
+      csv_rows.append(row)
+    
+    for u in groups:
+      mail_id = u["mail"]
+      key = str(mail_id).lower().strip()
+      row = {
+          "User Principal Name / Group Mail": mail_id,
+          "User ID / Group ID": u["id"],
+          "Type": "Group Mailbox",
+          "Email Count": 0,
+          "Contact Count": 0,
+          "Calendar Count": 0,
+          "Event Count": 0,
+          "In Place Archive Count": 0,
+          "Shared Mail Count": 0,
+          "Group Post Count": 0,
+          "Group Thread Count": 0
+      }
+      if key in existing_data:
+        src = existing_data[key]
+        if have_group_mails and config.scan_group_mail_boxes:
+          row["Group Post Count"] = safe_int(src.get("Group Post Count", 0))
+          row["Group Thread Count"] = safe_int(src.get("Group Thread Count", 0))
+      csv_rows.append(row)
+
+    for mailbox in shared_mailboxes:
+      row = {
+          "User Principal Name / Group Mail": mailbox["userPrincipalName"],
+          "User ID / Group ID": mailbox["id"],
+          "Type": "Shared",
+          "Email Count": 0,
+          "Contact Count": 0,
+          "Calendar Count": 0,
+          "Event Count": 0,
+          "In Place Archive Count": 0,
+          "Shared Mail Count": 0,
+          "Group Post Count": 0,
+          "Group Thread Count": 0
+      }
+      key = str(mailbox["userPrincipalName"]).lower().strip()
+      if key in existing_data:
+        src = existing_data[key]
+        if have_shared_mails and config.scan_shared_mail_boxes:
+          row["Shared Mail Count"] = safe_int(src.get("Shared Mail Count", 0))
       csv_rows.append(row)
 
     stats = {
@@ -1579,7 +1725,9 @@ class MigrationEstimatorTool(ctk.CTk):
         "calendars": sum(r["Calendar Count"] for r in csv_rows),
         "events": sum(r["Event Count"] for r in csv_rows),
         "in_place_archives": sum(r["In Place Archive Count"] for r in csv_rows),
-        "group_mail_boxes": sum(r["Group Mail Count"] for r in csv_rows),
+        "shared_mails": sum(r["Shared Mail Count"] for r in csv_rows),
+        "group_mails": sum(r["Group Post Count"] for r in csv_rows),
+        "group_threads": sum(r["Group Thread Count"] for r in csv_rows)
     }
     return csv_rows, stats
 
@@ -1600,38 +1748,12 @@ class MigrationEstimatorTool(ctk.CTk):
     users_failed = 0
     users_partially_failed = 0
 
-    url_invoker = UrlInvoker(
-        manager,
-        config.retries,
-        config.backoff,
-        1,
-        0.5
-    )
     executor = ThreadPoolExecutor(max_workers=config.concurrency)
     estimator: Estimator = None
     if resource_type == "in_place_archives":
-      child_folder_url_invoker = UrlInvoker(
-        one_token_per_app_manager,
-        config.retries,
-        config.backoff,
-        1,
-        0.5
-      )
-      estimator = EOInPlaceArchiveEstimator(
-        config,
-        url_invoker,
-        child_folder_url_invoker,
-        logger=self.log_msg,
-        stop_event=self.stop_scan_event,
-        use_delta_api=True
-      )
-    elif resource_type == "group_mail_boxes":
-      estimator = EOGroupMailBoxEstimator(
-        config,
-        url_invoker,
-        logger=self.log_msg,
-        stop_event=self.stop_scan_event
-      )
+      estimator = self.factory.get_in_place_archive_estimator(use_delta_api=True)
+    elif resource_type == "shared_mails":
+      estimator = self.factory.get_shared_mailbox_estimator()
     
     total_failures = []
     partial_failures = []
@@ -1644,11 +1766,14 @@ class MigrationEstimatorTool(ctk.CTk):
       for chunk in user_chunks:
         failures = []
         future = executor.submit(estimator.calculate_resource_count, 
-            {"user_ids" : [row["User ID"] if row["User ID"] is not None else row["User Principal Name"] for row in chunk]}, failures)
+            {"user_ids" : [row["User ID / Group ID"] if row["User ID / Group ID"] is not None else row["User Principal Name / Group Mail"] for row in chunk]}, failures)
         future_to_chunk_map[future] = chunk
         future_to_failures_map[future] = failures
 
       for f in as_completed(future_to_chunk_map):
+        if self.stop_scan_event.is_set():
+          break
+
         chunk = future_to_chunk_map[f]
         chunk_result = f.result()
         chunk_count += 1
@@ -1656,18 +1781,23 @@ class MigrationEstimatorTool(ctk.CTk):
         processed_users += len(chunk)
         chunk_total = sum(value for user_id, value in chunk_result.items())
         phase_total += chunk_total
+        
+        id_to_upn_map = {row["User ID / Group ID"]: row["User Principal Name / Group Mail"] for row in chunk if row.get("User ID / Group ID") is not None}
+        
         complete_failures = [failure for failure in future_to_failures_map[f] if failure["isPartial"] == False]
         chunk_partial_failures = [failure for failure in future_to_failures_map[f] if failure["isPartial"] == True]
         total_failures += [
           {
-            "user": failure["userId"], 
-            "cause": f"[{failure["statusCode"] if "statusCode" in failure else None}] {failure['message']}", 
+            "user": id_to_upn_map.get(failure["userId"], failure["userId"]), 
+            "cause": f"[{failure['statusCode'] if 'statusCode' in failure else None}] {failure['message']}", 
+            "type": failure.get("type")
           } for failure in complete_failures if failure["userId"] is not None] 
         partial_failures += [
           {
-            "user": failure["userId"], 
-            "cause": f"[{failure["statusCode"] if "statusCode" in failure else None}] {failure['message']}", 
-            "failed_resource": failure["folderId"] if "folderId" in failure else None
+            "user": id_to_upn_map.get(failure["userId"], failure["userId"]), 
+            "cause": f"[{failure['statusCode'] if 'statusCode' in failure else None}] {failure['message']}", 
+            "failed_resource": failure["folderId"] if "folderId" in failure else None,
+            "type": failure.get("type")
           } for failure in chunk_partial_failures if failure["userId"] is not None]
         users_failed += len(
             set(failure["userId"] for failure in complete_failures if failure["userId"] is not None)
@@ -1685,6 +1815,7 @@ class MigrationEstimatorTool(ctk.CTk):
         prog = processed_users / total_users if total_users > 0 else 0
         self.ui_update(
           "scan_progress",
+          entity_type="Users" if resource_type == "in_place_archives" else "Shared Mailboxes",
           source=resource_type,
           progress=prog,
           cumulative=phase_total,
@@ -1698,17 +1829,35 @@ class MigrationEstimatorTool(ctk.CTk):
         # Update stats
         for user in chunk:
           # Use the same key resolution logic as was used for submission
-          key = user["User ID"] if user["User ID"] is not None else user["User Principal Name"]
+          key = user["User ID / Group ID"] if user["User ID / Group ID"] is not None else user["User Principal Name / Group Mail"]
           
           if resource_type == "in_place_archives":
             user["In Place Archive Count"] = chunk_result.get(key, 0)
-          elif resource_type == "group_mail_boxes":
-            user["Group Mail Count"] = chunk_result.get(key, 0)
+          elif resource_type == "shared_mails":
+            user["Shared Mail Count"] = chunk_result.get(key, 0)
         
         stats[resource_type] += chunk_total
+        
+      if self.stop_scan_event.is_set():
+        pending_users_count = total_users - processed_users
+        self.ui_update(
+          "scan_progress",
+          entity_type="Users" if resource_type == "in_place_archives" else "Shared Mailboxes",
+          source=resource_type,
+          progress=1.0,
+          cumulative=phase_total,
+          processed=processed_users,
+          success=processed_users - users_failed,
+          failed=users_failed,
+          skipped=pending_users_count,
+          total=total_users,
+          extra_text="",
+        )
+        executor.shutdown(wait=False, cancel_futures=True)
     except Exception as e:
       self.ui_update(
         "scan_progress",
+        entity_type="Users" if resource_type == "in_place_archives" else "Shared Mailboxes",
         source=resource_type,
         progress=1.0,
         cumulative=phase_total,
@@ -1724,12 +1873,146 @@ class MigrationEstimatorTool(ctk.CTk):
 
     return total_failures, partial_failures
 
+  def _run_group_mail_phases(
+      self,
+      config: ScanConfig,
+      manager: Optional[TokenManager],
+      group_chunks: List[List[Dict[str, Any]]],
+      stats: Dict[str, int],
+      total_groups: int
+  ) -> None:
+    if self.stop_scan_event.is_set():
+      return
+    """Executes the data fetching phases for group mailboxes."""
+    self.log_msg("\n--- Starting GROUP MAIL BOX Scan ---")
+    processed_groups = 0
+    phase_total = 0
+    phase_threads = 0
+    groups_failed = 0
+    resource_type = "group_mails"
+    log_freq = 10
+
+    executor = ThreadPoolExecutor(max_workers=config.concurrency)
+    estimator = self.factory.get_group_mailbox_estimator(hard_reset=True)
+    
+    total_failures = []
+
+    # Failsafe to avoid thread leak in case of unexpected failures
+    chunk_count = 0
+    try:
+      future_to_chunk_map: Dict[Future, List] = {}
+      future_to_failures_map: Dict[Future, List[Dict[str, Any]]] = {}
+      for chunk in group_chunks:
+        failures = []
+        future = executor.submit(estimator.calculate_resource_count, 
+            {"group_ids" : [row["User ID / Group ID"] for row in chunk]}, failures)
+        future_to_chunk_map[future] = chunk
+        future_to_failures_map[future] = failures
+
+      for f in as_completed(future_to_chunk_map):
+        if self.stop_scan_event.is_set():
+          break
+
+        chunk = future_to_chunk_map[f]
+        chunk_result_posts, chunk_result_threads = f.result()
+        chunk_count += 1
+      
+        processed_groups += len(chunk)
+        chunk_posts = sum(value for user_id, value in chunk_result_posts.items())
+        chunk_threads = sum(value for user_id, value in chunk_result_threads.items())
+        phase_total += chunk_posts
+        phase_threads += chunk_threads
+        complete_failures = [failure for failure in future_to_failures_map[f] if failure["isPartial"] == False]
+
+        id_to_upn_map = {row["User ID / Group ID"]: row["User Principal Name / Group Mail"] for row in chunk if row.get("User ID / Group ID") is not None}
+
+        total_failures += [
+          {
+            "group": id_to_upn_map.get(failure["groupId"], failure["groupId"]), 
+            "cause": f"[{failure['statusCode'] if 'statusCode' in failure else None}] {failure['message']}", 
+            "type": failure.get("type")
+          } for failure in complete_failures if failure.get("groupId") is not None] 
+        
+        groups_failed += len(
+            set(failure["groupId"] for failure in complete_failures if failure.get("groupId") is not None)
+        )
+
+        # Update Progress
+        if chunk_count % log_freq == 0 or chunk_count == len(group_chunks):
+          self.log_msg(
+                f"Processed {processed_groups}/{total_groups} | Failed:"
+                f" {groups_failed}/{total_groups} | Threads: {phase_threads} | Posts: {phase_total}"
+            )
+        prog = processed_groups / total_groups if total_groups > 0 else 0
+        self.ui_update(
+          "scan_progress",
+          entity_type="Group Mailboxes",
+          source=resource_type,
+          progress=prog,
+          cumulative=phase_total,
+          processed=processed_groups,
+          failed=groups_failed,
+          total=total_groups,
+          extra_text=f"Threads: {phase_threads}",
+        )
+
+        # Update stats
+        for group in chunk:
+          key = group["User ID / Group ID"]
+          group["Group Post Count"] = chunk_result_posts.get(key, 0)
+          group["Group Thread Count"] = chunk_result_threads.get(key, 0)
+        
+        stats[resource_type] += chunk_posts
+        stats["group_threads"] += chunk_threads
+        
+      if self.stop_scan_event.is_set():
+        pending_groups_count = total_groups - processed_groups
+        self.log_msg(
+          f"Processed {processed_groups}/{total_groups} | Failed:"
+          f" {groups_failed}/{total_groups} | Skipped: {pending_groups_count}/{total_groups} | Threads: {phase_threads} | Posts: {phase_total}"
+        )
+        self.ui_update(
+          "scan_progress",
+          entity_type="Group Mailboxes",
+          source=resource_type,
+          progress=1.0,
+          cumulative=phase_total,
+          processed=processed_groups,
+          success=processed_groups - groups_failed,
+          failed=groups_failed,
+          skipped=pending_groups_count,
+          total=total_groups,
+          extra_text=f"Threads: {phase_threads}",
+        )
+        executor.shutdown(wait=False, cancel_futures=True)
+    except Exception as e:
+      self.ui_update(
+        "scan_progress",
+        entity_type="Group Mailboxes",
+        source=resource_type,
+        progress=1.0,
+        cumulative=phase_total,
+        processed=total_groups,
+        failed=total_groups - processed_groups + groups_failed,
+        total=total_groups,
+        extra_text=f"Threads: {phase_threads}",
+      )
+      self.log_msg(f"Error in group mail box scan: {e}")
+    finally:
+      executor.shutdown(wait=False)
+      estimator.shutdown()
+
+    return total_failures
+
+
   def _run_scan_phases(
       self,
       config: ScanConfig,
       manager: Optional[TokenManager],
       one_token_per_app_manager: Optional[TokenManager],
       csv_rows: List[Dict[str, Any]],
+      shared_csv_rows: List[Dict[str, Any]],
+      group_csv_rows: List[Dict[str, Any]],
       stats: Dict[str, int],
   ) -> None:
     """Executes the data fetching phases."""
@@ -1740,20 +2023,34 @@ class MigrationEstimatorTool(ctk.CTk):
         csv_rows[i : i + batch_size]
         for i in range(0, len(csv_rows), batch_size)
     ]
+
+    shared_chunks = [
+        shared_csv_rows[i : i + batch_size]
+        for i in range(0, len(shared_csv_rows), batch_size)
+    ]
+
+    group_chunks = [
+        group_csv_rows[i : i + batch_size]
+        for i in range(0, len(group_csv_rows), batch_size)
+    ]
     total_users = len(csv_rows)
+    total_shared = len(shared_csv_rows)
+    total_groups = len(group_csv_rows)
 
     has_email_data = any(r["Email Count"] > 0 for r in csv_rows)
     has_contact_data = any(r["Contact Count"] > 0 for r in csv_rows)
     has_calendar_data = any(r["Calendar Count"] > 0 for r in csv_rows)
     has_in_place_archives_data = any(r["In Place Archive Count"] > 0 for r in csv_rows)
-    has_group_mailboxes_data = any(r["Group Mail Count"] > 0 for r in csv_rows)
+    has_shared_mails_data = any(r["Shared Mail Count"] > 0 for r in shared_csv_rows)
+    has_group_mails_data = any(r["Group Post Count"] > 0 for r in group_csv_rows)
     failed_emails = []
     failed_contacts = []
     failed_calendars = []
     failed_in_place_archives = []
-    failed_group_mailboxes = []
+    failed_shared_mails = []
+    failed_group_mails = []
     partial_in_place_archive_failures = []
-    partial_group_mail_box_failures = []
+    partial_shared_mail_box_failures = []
 
     can_scan = manager is not None
 
@@ -1843,30 +2140,52 @@ class MigrationEstimatorTool(ctk.CTk):
         )
         self.ui_update("phase_status", source="in_place_archives", status="complete")
 
-    if config.scan_group_mail_boxes:
-      if can_scan and (not has_group_mailboxes_data or config.user_source == "tenant"):
-        self.ui_update("phase_status", source="group_mail_boxes", status="running")
-        failed_group_mailboxes, partial_group_mail_box_failures = self.run_batch_scan(
-            "group_mail_boxes", 
+    if config.scan_shared_mail_boxes:
+      if can_scan and (not has_shared_mails_data or config.user_source == "tenant"):
+        self.ui_update("phase_status", source="shared_mails", status="running")
+        failed_shared_mails, partial_shared_mail_box_failures = self.run_batch_scan(
+            "shared_mails", 
             config,
-            user_chunks, manager, None, stats, total_users
+            shared_chunks, manager, None, stats, total_shared
         )
-        self.ui_update("phase_status", source="group_mail_boxes", status="complete")
+        self.ui_update("phase_status", source="shared_mails", status="complete")
       else:
-        self.log_msg("Skipping Group Mail Box Scan (Data present or No Auth)")
-        self.ui_update("phase_status", source="group_mail_boxes", status="running")
+        self.log_msg("Skipping Shared Mail Box Scan (Data present or No Auth)")
+        self.ui_update("phase_status", source="shared_mails", status="running")
         self.ui_update(
             "scan_progress",
-            source="group_mail_boxes",
+            entity_type="Shared Mailboxes",
+            source="shared_mails",
             progress=1.0,
-            cumulative=stats["group_mail_boxes"],
-            processed=total_users,
-            total=total_users,
+            cumulative=stats["shared_mails"],
+            processed=total_shared,
+            total=total_shared,
         )
-        self.ui_update("phase_status", source="group_mail_boxes", status="complete")
+        self.ui_update("phase_status", source="shared_mails", status="complete")
+    
+    if config.scan_group_mail_boxes:
+      if can_scan and (not has_group_mails_data or config.user_source == "tenant"):
+        self.ui_update("phase_status", source="group_mails", status="running")
+        failed_group_mails = self._run_group_mail_phases(
+            config, manager, group_chunks, stats, total_groups
+        )
+        self.ui_update("phase_status", source="group_mails", status="complete")
+      else:
+        self.log_msg("Skipping Group Mail Box Scan (Data present or No Auth)")
+        self.ui_update("phase_status", source="group_mails", status="running")
+        self.ui_update(
+            "scan_progress",
+            entity_type="Group Mailboxes",
+            source="group_mails",
+            progress=1.0,
+            cumulative=stats["group_mails"],
+            processed=total_groups,
+            total=total_groups,
+        )
+        self.ui_update("phase_status", source="group_mails", status="complete")
 
     # --- LOG FAILED USERS SUMMARY ---
-    if failed_emails or failed_calendars or failed_contacts or failed_in_place_archives or failed_group_mailboxes:
+    if failed_emails or failed_calendars or failed_contacts or failed_in_place_archives or failed_shared_mails or failed_group_mails:
       self.log_msg("\n" + "=" * 40)
 
       if failed_emails:
@@ -1890,28 +2209,42 @@ class MigrationEstimatorTool(ctk.CTk):
       if failed_in_place_archives:
         self.log_msg("In Place Archive Migration Failures")
         for f in failed_in_place_archives:
-          self.log_msg(f"User: {f['user']} | Cause: {f['cause']}")
+          prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
+          user_upn = self.id_to_display_name[f["user"]] if f["user"] in self.id_to_display_name else f["user"]
+          self.log_msg(f"{prefix} User: {user_upn} | Cause: {f['cause']}")
         self.log_msg("")  # Add blank line
       
-      if failed_group_mailboxes:
+      if failed_shared_mails:
+        self.log_msg("Shared Mail Box Migration Failures")
+        for f in failed_shared_mails:
+          prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
+          shared_mailbox_upn = self.id_to_display_name[f["user"]] if f["user"] in self.id_to_display_name else f["user"]
+          self.log_msg(f"{prefix} Shared Mail Box: {shared_mailbox_upn} | Cause: {f['cause']}")
+        self.log_msg("")  # Add blank line
+      
+      if failed_group_mails:
         self.log_msg("Group Mail Box Migration Failures")
-        for f in failed_group_mailboxes:
-          self.log_msg(f"User: {f['user']} | Cause: {f['cause']}")
+        for f in failed_group_mails:
+          prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
+          group_name = self.id_to_display_name[f["group"]] if f["group"] in self.id_to_display_name else f["group"]
+          self.log_msg(f"{prefix} Group: {group_name} | Cause: {f['cause']}")
         self.log_msg("")  # Add blank line
 
       self.log_msg("=" * 40)
     
-    if partial_in_place_archive_failures or partial_group_mail_box_failures:
+    if partial_in_place_archive_failures or partial_shared_mail_box_failures:
       if partial_in_place_archive_failures:
         self.log_msg("In Place Archive Migration Partial Failures")
         for f in partial_in_place_archive_failures:
-          self.log_msg(f"User: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
+          prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
+          self.log_msg(f"{prefix} User: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
         self.log_msg("")  # Add blank line
       
-      if partial_group_mail_box_failures:
-        self.log_msg("Group Mail Box Migration Partial Failures")
-        for f in partial_group_mail_box_failures:
-          self.log_msg(f"User: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
+      if partial_shared_mail_box_failures:
+        self.log_msg("Shared Mail Box Migration Partial Failures")
+        for f in partial_shared_mail_box_failures:
+          prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
+          self.log_msg(f"{prefix} Shared Mail Box: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
         self.log_msg("")  # Add blank line
 
       self.log_msg("=" * 40)
@@ -1920,6 +2253,8 @@ class MigrationEstimatorTool(ctk.CTk):
       self,
       config: ScanConfig,
       csv_rows: List[Dict[str, Any]],
+      shared_csv_rows: List[Dict[str, Any]],
+      group_csv_rows: List[Dict[str, Any]],
       stats: Dict[str, int],
       monitor: ResourceMonitor,
       start_time: float,
@@ -1936,6 +2271,9 @@ class MigrationEstimatorTool(ctk.CTk):
     )
     time.sleep(0.5)
 
+    csv_rows.extend(shared_csv_rows)
+    csv_rows.extend(group_csv_rows)
+
     df = pd.DataFrame(csv_rows)
     df, batches, total_eta, buckets = self.calculate_migration_batches(df)      # TODO Check
 
@@ -1948,12 +2286,13 @@ class MigrationEstimatorTool(ctk.CTk):
 
     self.log_msg("\n" + "=" * 40)
     self.log_msg(f"TOTAL TIME: {elapsed}")
-    self.log_msg(f"Total Users: {len(csv_rows)}")
+    self.log_msg(f"Total Users / Groups: {len(csv_rows)}")
     self.log_msg(
         f"Emails: {stats['emails']} | Contacts: {stats['contacts']} |"
-        f" Calendars: {stats['calendars']} | Events: {stats['events']}"
+        f" Calendars: {stats['calendars']} | Events: {stats['events']} |"
         f" In Place Archives: {stats['in_place_archives']} |"
-        f" Group Mailboxes: {stats['group_mail_boxes']}"
+        f" Shared Mails: {stats['shared_mails']} |"
+        f" Group Mails: {stats['group_mails']} | Group Threads: {stats['group_threads']}"
     )
     self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
     self.log_msg(f"CPU Avg/Peak: {avg_cpu:.1f}% / {max_cpu:.1f}%")
@@ -1970,12 +2309,12 @@ class MigrationEstimatorTool(ctk.CTk):
 
     # Prepare Export
     output_map = {
-        "User Principal Name": "Email Id",
+        "User Principal Name / Group Mail": "Email Id",
         "Event Count": "Calendar Event Count",
     }
     df_output = df.rename(columns=output_map)
 
-    final_columns = ["Email Id", "Suggested Batch"]
+    final_columns = ["Email Id", "Suggested Batch", "Type"]
     if config.scan_email:
       final_columns.append("Email Count")
     if config.scan_contact:
@@ -1984,8 +2323,11 @@ class MigrationEstimatorTool(ctk.CTk):
       final_columns.extend(["Calendar Count", "Calendar Event Count"])
     if config.scan_in_place_archives:
       final_columns.append("In Place Archive Count")
+    if config.scan_shared_mail_boxes:
+      final_columns.append("Shared Mail Count")
     if config.scan_group_mail_boxes:
-      final_columns.append("Group Mail Count")
+      final_columns.append("Group Post Count")
+      final_columns.append("Group Thread Count")
 
     final_columns = [c for c in final_columns if c in df_output.columns]
     df_output = df_output[final_columns]
@@ -2026,14 +2368,18 @@ class MigrationEstimatorTool(ctk.CTk):
         "total_calendars": stats["calendars"],
         "total_events": stats["events"],
         "total_in_place_archives": stats["in_place_archives"],
-        "total_group_mailboxes": stats["group_mail_boxes"],
+        "total_shared_mails": stats["shared_mails"],
+        "total_group_mails": stats["group_mails"],
+        "total_group_threads": stats["group_threads"],
         "total_items": (
             stats["emails"]
             + stats["contacts"]
             + stats["calendars"]
             + stats["events"]
             + stats["in_place_archives"]
-            + stats["group_mail_boxes"]
+            + stats["shared_mails"]
+            + stats["group_mails"]
+            + stats["group_threads"]
         ),
         "total_eta": total_eta,
         "batches": batches,
@@ -2106,7 +2452,7 @@ class MigrationEstimatorTool(ctk.CTk):
           users_failed += len(chunk)
           for u in chunk:
             phase_failures.append({
-                "user": u["User Principal Name"],
+                "user": u["User Principal Name / Group Mail"],
                 "cause": f"Chunk failed: {e}",
             })
           pass
@@ -2150,10 +2496,9 @@ class MigrationEstimatorTool(ctk.CTk):
 
     return phase_failures
 
-  # TODO Use In-Place archive numbers and group mailbox numbers to calculate
   def calculate_migration_batches(self, df):
     # Ensure numeric columns
-    target_cols = ["Email Count", "Contact Count", "Event Count", "In Place Archive Count", "Group Mail Count"]
+    target_cols = ["Email Count", "Contact Count", "Event Count", "In Place Archive Count", "Shared Mail Count", "Group Post Count"]
     for col in target_cols:
       if col not in df.columns:
         df[col] = 0
@@ -2163,7 +2508,7 @@ class MigrationEstimatorTool(ctk.CTk):
     # 1. Sort Users (Descending - Heaviest first for optimal packing)
     df["SortMetric"] = df.apply(
         lambda x: max(
-            (x["Email Count"] + x["Group Mail Count"]), (x["Event Count"] + x["Contact Count"]), x["In Place Archive Count"]
+            (x["Email Count"] + x["Shared Mail Count"] + x["Group Post Count"]), (x["Event Count"] + x["Contact Count"]), x["In Place Archive Count"]
         ),
         axis=1,
     )
@@ -2209,9 +2554,11 @@ class MigrationEstimatorTool(ctk.CTk):
     # Helper: Calculate ETA for subset
     config = self._get_scan_configuration()
     if ENABLE_IN_PLACE_ARCHIVE_ETA:
-      in_place_archive_estimator = EOInPlaceArchiveEstimator(config, None, None)
+      in_place_archive_estimator = self.factory.get_in_place_archive_estimator(use_delta_api=True)
+    if ENABLE_SHARED_MAILBOX_ETA:
+      shared_mail_box_estimator = self.factory.get_shared_mailbox_estimator()
     if ENABLE_GROUP_MAILBOX_ETA:
-      group_mail_box_estimator = EOGroupMailBoxEstimator(config, None)
+      group_mail_box_estimator = self.factory.get_group_mailbox_estimator(hard_reset=True)
 
     def get_batch_eta(subset_df):
       eta_email = 0.0
@@ -2252,11 +2599,22 @@ class MigrationEstimatorTool(ctk.CTk):
             "batch_time": ETA_EMAIL_BATCH_TIME,
           }
         )
+      eta_shared_mail_box = 0.0
+      if ENABLE_SHARED_MAILBOX_ETA:
+        eta_shared_mail_box = shared_mail_box_estimator.calculate_migration_eta(
+          {
+            "item_counts": subset_df["Shared Mail Count"].tolist(),
+            "global_limit": ETA_EMAIL_GLOBAL_LIMIT,
+            "user_limit": ETA_EMAIL_USER_LIMIT,
+            "batch_size": ETA_EMAIL_BATCH_SIZE,
+            "batch_time": ETA_EMAIL_BATCH_TIME,
+          }
+        )
       eta_group_mail_box = 0.0
       if ENABLE_GROUP_MAILBOX_ETA:
         eta_group_mail_box = group_mail_box_estimator.calculate_migration_eta(
           {
-            "item_counts": subset_df["Group Mail Count"].tolist(),
+            "item_counts": subset_df["Group Post Count"].tolist(),
             "global_limit": ETA_EMAIL_GLOBAL_LIMIT,
             "user_limit": ETA_EMAIL_USER_LIMIT,
             "batch_size": ETA_EMAIL_BATCH_SIZE,
@@ -2266,10 +2624,12 @@ class MigrationEstimatorTool(ctk.CTk):
 
       if ENABLE_IN_PLACE_ARCHIVE_ETA:
         in_place_archive_estimator.shutdown()
+      if ENABLE_SHARED_MAILBOX_ETA:
+        shared_mail_box_estimator.shutdown()
       if ENABLE_GROUP_MAILBOX_ETA:
         group_mail_box_estimator.shutdown()
 
-      return max(eta_email, eta_calendar + eta_contact, eta_in_place_archive, eta_group_mail_box)
+      return max(eta_email, eta_calendar + eta_contact, eta_in_place_archive, eta_shared_mail_box, eta_group_mail_box)
 
     # 2. Iterate through candidates
     for target_hours in candidate_hours:
@@ -2322,7 +2682,9 @@ class MigrationEstimatorTool(ctk.CTk):
             "total_contacts": int(final_subset["Contact Count"].sum()),
             "total_events": int(final_subset["Event Count"].sum()),
             "total_in_place_archives": int(final_subset["In Place Archive Count"].sum()),
-            "total_group_mailboxes": int(final_subset["Group Mail Count"].sum()),
+            "total_shared_mails": int(final_subset["Shared Mail Count"].sum()),
+            "total_group_mails": int(final_subset["Group Post Count"].sum()),
+            "total_group_threads": int(final_subset["Group Thread Count"].sum()),
             "eta": w_eta,
         })
         start_idx = end_idx
@@ -2413,6 +2775,11 @@ class MigrationEstimatorTool(ctk.CTk):
           f" {self.format_eta(chunk['start_time'])}"
       )
 
+    if ENABLE_IN_PLACE_ARCHIVE_ETA:
+      in_place_archive_estimator.shutdown()
+    if ENABLE_SHARED_MAILBOX_ETA:
+      shared_mail_box_estimator.shutdown()
+
     return df_final, final_batches_list, total_eta, buckets
 
   def _get_all_users_graph(self, manager):
@@ -2444,8 +2811,14 @@ class MigrationEstimatorTool(ctk.CTk):
       manager.return_token_slot(token_data)
     return users
 
-  def _resolve_users_from_csv(self, manager, emails):
+  def _resolve_from_csv(self, manager, emails, url = None):
+    if not emails:
+      return []
     resolved = []
+    if url is None:
+      url = ("{GRAPH_BASE_URL}/users?$filter=userPrincipalName eq"
+              " '{cln}'&$select=id,userPrincipalName"
+            )
 
     def resolve_one(email):
       if self.stop_scan_event.is_set():
@@ -2456,10 +2829,7 @@ class MigrationEstimatorTool(ctk.CTk):
       h = {"Authorization": f"Bearer {t}", "ConsistencyLevel": "eventual"}
       try:
         cln = email.replace("'", "''")
-        u = (
-            f"{GRAPH_BASE_URL}/users?$filter=userPrincipalName eq"
-            f" '{cln}'&$select=id,userPrincipalName"
-        )
+        u = url.format(GRAPH_BASE_URL = GRAPH_BASE_URL, cln = cln)
         r = s.get(u, headers=h)
         if r.status_code == 200 and r.json().get("value"):
           return r.json()["value"][0]
