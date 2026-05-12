@@ -60,6 +60,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         status = msg.get("status", "Scanning...")
         if "subsites" in self.prog_widgets:
           widget = self.prog_widgets["subsites"]["lbl"]
+          bar = self.prog_widgets["subsites"]["bar"]
+          if status == "Fetching...":
+            bar.start()
           if widget.winfo_exists():
             text = f"Subsites: {count}"
             if drive_count > 0:
@@ -95,6 +98,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         status = msg.get("status", "Scanning...")
         if "drives" in self.prog_widgets:
           widget = self.prog_widgets["drives"]["lbl"]
+          bar = self.prog_widgets["drives"]["bar"]
+          if status == "Fetching...":
+            bar.start()
           text = f"Drives: {count}"
           if folder_count > 0:
             text += f" | Folders: {folder_count}"
@@ -629,7 +635,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             res.get("Id", res.get("id", "")),
             res.get("subTreeCount", 0),
             res.get("Limit", res.get("limit", 0)),
-            res.get("drive", "")
+            self._get_display_name(res.get("drive", ""))
         ])
         
       writer.writerow([]) # Blank line separator
