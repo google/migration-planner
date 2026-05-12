@@ -177,7 +177,7 @@ class FileEstimator(Estimator):
             if self.logger:
                 self.logger(f"Error in calculate_resource_metrics: {e}")
             failures.append({
-                "type": FailureType.UNKNOWN_ERROR,
+                "type": FailureType.UNKNOWN_ERROR.name,
                 "statusCode": 500,
                 "message": f"Exception in calculate_resource_metrics: {str(e)}"
             })
@@ -379,13 +379,13 @@ class FileEstimator(Estimator):
                             })
                         elif "body" in resp and "error" in resp["body"]:
                             failures.append({
-                                "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                                "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
                                 "statusCode": resp["status"],
                                 "message": f"Error in fetching lists for site {site_id}: {resp['body']['error']['message']}"
                             })
                     else:
                         failures.append({
-                            "type": FailureType.NOT_FOUND,
+                            "type": FailureType.NOT_FOUND.name,
                             "statusCode": None,
                             "message": f"No response found for lists API for site {req['headers']['siteId']}."
                         })
@@ -548,13 +548,13 @@ class FileEstimator(Estimator):
                             })
                         elif "body" in resp and "error" in resp["body"]:
                             failures.append({
-                                "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                                "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
                                 "statusCode": resp["status"],
                                 "message": f"Error in fetching drives for site {site_id}: {resp['body']['error']['message']}"
                             })
                     else:
                         failures.append({
-                            "type": FailureType.NOT_FOUND,
+                            "type": FailureType.NOT_FOUND.name,
                             "statusCode": None,
                             "message": f"No response found for drives API for site {req['headers']['siteId']}."
                         })
@@ -648,13 +648,13 @@ class FileEstimator(Estimator):
                             })
                         elif "body" in resp and "error" in resp["body"]:
                             failures.append({
-                                "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                                "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
                                 "statusCode": resp["status"],
                                 "message": f"Error in fetching subsites for site {site_id}: {resp['body']['error']['message']}"
                             })
                     else:
                         failures.append({
-                            "type": FailureType.NOT_FOUND,
+                            "type": FailureType.NOT_FOUND.name,
                             "statusCode": None,
                             "message": f"No response found for subsites API for site {req['headers']['siteId']}."
                         })
@@ -710,7 +710,7 @@ class FileEstimator(Estimator):
         resource_id_to_details: Dict[str, Dict[str, Any]] = {}
         try:
             # use delta api to fetch the folders
-            delta_api = "drives/{driveId}/root/delta"
+            delta_api = "/drives/{driveId}/root/delta"
             batches = create_batches(delta_api, [{"driveId": drive_id} for drive_id in drive_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -770,13 +770,13 @@ class FileEstimator(Estimator):
                             folder_count += len(resp["body"].get("value", []))
                         elif "body" in resp and "error" in resp["body"]:
                             failures.append({
-                                "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                                "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
                                 "statusCode": resp["status"],
                                 "message": f"Error in fetching delta for drive {drive_id}: {resp['body']['error']['message']}"
                             })
                     else:
                         failures.append({
-                            "type": FailureType.NOT_FOUND,
+                            "type": FailureType.NOT_FOUND.name,
                             "statusCode": None,
                             "message": f"No response found for delta API for drive {req['headers']['driveId']}."
                         })
@@ -820,7 +820,7 @@ class FileEstimator(Estimator):
                             else:
                                 adj_list[drive_id][parent_id] = [file["id"]]
                         
-                        if "parentReference" in file and "path" in file["parentReference"]:
+                        if "parentReference" in file and "id" in file["parentReference"]:
                             parent_id = file["parentReference"]["id"]
                             parent_references[drive_id][file["id"]] = parent_id
 
@@ -983,11 +983,12 @@ class FileEstimator(Estimator):
                 drive_metric["fileCount"] += 1
             
             # Update file size distribution if it's a file
+            # TODO Check if we need folders here as well
             if "folder" not in resource:
-                size_in_mb = resource.get("size", 0) / (1024 * 1024) # assuming size in bytes
+                size_in_kb = resource.get("size", 0) / 1024 # assuming size in bytes
                 for bucket in drive_metric["fileSizeDistribution"]["buckets"]:
                     low, high = bucket["sizeRange"]
-                    if low <= size_in_mb and size_in_mb <= high:
+                    if low <= size_in_kb and size_in_kb <= high:
                         bucket["count"] += 1
                         break
                         
@@ -1004,7 +1005,7 @@ class FileEstimator(Estimator):
         if self.logger:
             self.logger(f"{message}: {e}")
         failures.append({
-            "type": FailureType.UNKNOWN_ERROR,
+            "type": FailureType.UNKNOWN_ERROR.name,
             "statusCode": 500,
             "message": f"{message}: {str(e)}"
         })

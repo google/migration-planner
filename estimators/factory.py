@@ -3,12 +3,14 @@ from estimators.eo_group_mailbox_estimator import EOGroupMailBoxEstimator
 from estimators.eo_in_place_archive_estimator import EOInPlaceArchiveEstimator
 from estimators.eo_shared_mailbox_estimator import EOSharedMailBoxEstimator
 from estimators.file_estimator import FileEstimator
+from tests.files.mocks import MockUrlInvoker
 from util.auth_manager import TokenManager
 from util.connectors import UrlInvoker
 from util.utils import ScanConfig
+import json
+import os
 
 class EstimatorFactory:
-
   def __init__(
     self,
     config: ScanConfig,
@@ -28,6 +30,7 @@ class EstimatorFactory:
     self.files_estimator = None
     self.url_invoker = None
     self.chat_estimator = None
+    self.mock_url_invoker = None
   
   def isEmpty(self, data):
     return data is None or len(data) == 0
@@ -59,6 +62,22 @@ class EstimatorFactory:
       )
 
     return self.url_invoker
+
+  def get_mock_url_invoker(self, hard_reset=False, seed=None):
+    if self.mock_url_invoker is None or hard_reset:
+      data_path = "tests/files/test_data/state.json"
+      if seed is not None:
+        data_path = f"tests/files/test_data/state_{seed}.json"
+
+      if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Test data not found at {data_path}. Please run data_state_creator.py first.")
+          
+      with open(data_path, "r") as f:
+        test_data = json.load(f)
+
+      self.mock_url_invoker = MockUrlInvoker(test_data)
+
+    return self.mock_url_invoker
 
   def get_group_mailbox_estimator(self, hard_reset=False):
     if self.group_mail_box_estimator is None or hard_reset:
@@ -129,12 +148,15 @@ class EstimatorFactory:
       self.chat_estimator.set_id_to_display_name_map(self.id_to_display_name)
     return self.chat_estimator
 
-  def get_files_estimator(self, progress_update_callback=lambda x: None, hard_reset=False):
+  def get_files_estimator(self, progress_update_callback=lambda x: None, hard_reset=False, use_mocks=False, mock_seed=None):
     if self.files_estimator is None or hard_reset:
       if self.files_estimator is not None:
         self.files_estimator.shutdown()
       
-      url_invoker = self.get_url_invoker()
+      if not use_mocks:
+        url_invoker = self.get_url_invoker()
+      else:
+        url_invoker = self.get_mock_url_invoker(hard_reset=hard_reset, seed=mock_seed)
       self.files_estimator = FileEstimator(
         self.config,
         url_invoker,

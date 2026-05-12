@@ -233,7 +233,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       manager = self.factory.get_manager()
       manager.authenticate_all(self.log_msg, required_scopes=["Sites.Read.All", "Files.Read.All", "LicenseAssignment.Read.All"])
-      estimator = self.factory.get_files_estimator(self.ui_update)
+      estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
 
       # Calculate resource metrics for the tenant. Progress update to be made directly in the backend.
       failures = []
@@ -246,8 +246,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         self.log_msg(prefix + str(failure))
 
       self.log_msg("=" * 60)
-
-      print(json.dumps(file_metrics, indent=4))
       self.ui_update("complete", data=file_metrics)
       
       # # 6. Analysis & Reporting
@@ -343,10 +341,18 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if "tenantLevelLargeResources" in data:
           ctk.CTkLabel(
               self.view_results,
-              text="Large Resources",
+              text="Large Resources (10)",
               font=FONT_HEADER_SMALL,
               text_color=COLOR_TEXT_MAIN,
           ).pack(anchor="w", padx=10, pady=(20, 5))
+          
+          if len(data["tenantLevelLargeResources"]) > 10:
+              ctk.CTkLabel(
+                  self.view_results,
+                  text="* There are more large resources. Please export the full report to view their details.",
+                  font=FONT_BODY_SMALL,
+                  text_color=COLOR_TEXT_SUB,
+              ).pack(anchor="w", padx=10, pady=(0, 10))
           
           res_container = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
           res_container.pack(fill="x", padx=10, pady=5)
@@ -359,7 +365,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ctk.CTkLabel(header_row, text="Count", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
           ctk.CTkLabel(header_row, text="Limit", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
 
-          for i, res in enumerate(data["tenantLevelLargeResources"]):
+          for i, res in enumerate(data["tenantLevelLargeResources"][0:10]):         # only showing first 10 resources
               bg_color = COLOR_SURFACE if i % 2 == 0 else COLOR_SURFACE_VARIANT
               row_frame = ctk.CTkFrame(res_container, fg_color=bg_color, height=30)
               row_frame.pack(fill="x", padx=5, pady=2)
