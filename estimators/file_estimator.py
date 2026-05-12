@@ -70,6 +70,8 @@ class FileEstimator(Estimator):
                 "maxSubsiteDepth": 0,       # only includes depth of subsites
                 "subsiteCount": 0,
                 "shortcutCount": 0,
+                "folderCount": 0,
+                "fileCount": 0,
                 "listCount": 0,
                 "licenseMetrics": {},
                 "driveCounts": {
@@ -196,6 +198,8 @@ class FileEstimator(Estimator):
             metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], drive_metric["maxEffectiveDepth"])
             metrics["maxFolderDepth"] = max(metrics["maxFolderDepth"], drive_metric["maxEffectiveDepth"])
             metrics["shortcutCount"] += drive_metric.get("shortcutCount", 0)
+            metrics["folderCount"] += drive_metric.get("folderCount", 0)
+            metrics["fileCount"] += drive_metric.get("fileCount", 0)
         
         for subsite_id, drive_ids in subsite_to_drives.items():
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
@@ -839,6 +843,8 @@ class FileEstimator(Estimator):
         for drive_id in drive_ids:
             drive_metrics[drive_id] = {
                 "maxEffectiveDepth": 0,
+                "folderCount": 0,
+                "fileCount": 0,
                 "shortcutCount": 0,
                 "fileSizeDistribution": {"buckets": []},
                 "largeResources": []
@@ -971,6 +977,10 @@ class FileEstimator(Estimator):
             # Update shortcut count
             if "remoteItem" in resource:
                 drive_metric["shortcutCount"] += 1
+            elif "folder" in resource:
+                drive_metric["folderCount"] += 1
+            elif "file" in resource:
+                drive_metric["fileCount"] += 1
             
             # Update file size distribution if it's a file
             if "folder" not in resource:

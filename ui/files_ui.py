@@ -218,6 +218,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "personalDrive": "Personal Drive",
         "businessDrive": "Business Drive",
         "unknownDrive": "Unknown Drive",
+        "folderCount": "Folder Count",
+        "fileCount": "File Count",
       }
 
       self.id_to_display_name = id_to_display
@@ -294,6 +296,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsite_count', data.get('subSiteCount', 0)):,}", "🏢")
       self.create_stat_card(card_frame, "Shortcut Count", f"{data.get('shortcutCount', 0):,}", "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
+      self.create_stat_card(card_frame, "Folder Count", f"{data.get('folderCount', 0):,}", "📁")
+      self.create_stat_card(card_frame, "File Count", f"{data.get('fileCount', 0):,}", "📄")
       
       if "folder_file_size" in data:
           self.create_stat_card(card_frame, "Folder File Size", f"{data['folder_file_size']:,} KB", "💾")
@@ -461,6 +465,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               
               ctk.CTkLabel(drive_details, text=f"Max Effective Depth: {drive_data.get('maxEffectiveDepth', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
               ctk.CTkLabel(drive_details, text=f"Shortcut Count: {drive_data.get('shortcutCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+              ctk.CTkLabel(drive_details, text=f"Folder Count: {drive_data.get('folderCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+              ctk.CTkLabel(drive_details, text=f"File Count: {drive_data.get('fileCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
               
               # Buckets inside drive
               if "fileSizeDistribution" in drive_data:
@@ -651,13 +657,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       sorted_buckets = sorted(list(all_buckets))
       bucket_cols = [f"Bucket_{b[0]}_{b[1]}" for b in sorted_buckets]
       
-      headers = ["Drive Name", "Max Effective Depth", "Shortcut Count"] + bucket_cols
+      headers = ["Drive Name", "Max Effective Depth", "Folder Count", "File Count", "Shortcut Count"] + bucket_cols
       writer.writerow(headers)
       
       for drive_id, d_data in drive_metrics.items():
         row = [
             self._get_display_name(drive_id),
             d_data.get("maxEffectiveDepth", 0),
+            d_data.get("folderCount", 0),
+            d_data.get("fileCount", 0),
             d_data.get("shortcutCount", 0)
         ]
         
