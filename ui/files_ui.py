@@ -218,7 +218,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
       self.log_msg("=" * 60)
 
-      # print(json.dumps(file_metrics, indent=4))
+      print(json.dumps(file_metrics, indent=4))
       self.ui_update("complete", data=file_metrics)
       
       # # 6. Analysis & Reporting
@@ -293,7 +293,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           buckets = dist_data.get("Buckets", dist_data.get("buckets", []))
           for bucket in buckets:
               range_vals = bucket.get("sizeRange", (0, 0))
-              range_str = f"{range_vals[0]} - {range_vals[1]} KB"
+              range_str = f"{str(range_vals[0])} - {str(range_vals[1])} KB"
               file_ids = bucket.get("fileIDs", [])
               count = bucket.get("count", len(file_ids))
               
