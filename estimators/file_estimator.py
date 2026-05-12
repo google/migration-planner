@@ -87,15 +87,25 @@ class FileEstimator(Estimator):
                 drives = data["drives"]
             else:
                 # Sharepoint Flow
+                site_discovery_progress_metrics = {
+                    "listCount": 0,
+                    "licenseCount": 0,
+                    "driveCount": 0,
+                }
                 self.progress_update_callback("site_discovery", status="Fetching...", count=0)
-                subsite_count = self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, failures)
+                subsite_count = self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
                 self.logger("Site Scanning is finished!!!!")
-                self.progress_update_callback("site_discovery", status="Done", count=subsite_count)
+                self.progress_update_callback("site_discovery", status="Done", count=subsite_count, **site_discovery_progress_metrics)
 
             # get adjacency lists and parent references for each drive
             self.progress_update_callback("drive_discovery", status="Fetching...", count=0)
-            drive_id_to_adj_list, parent_references, resource_id_to_details = self._create_in_memory_tree([drive["id"] for drive in drives], failures)
-            self.progress_update_callback("drive_discovery", status="Done", count=len(drives))
+            drive_discovery_progress_metrics = {
+                "folderCount": 0,
+                "fileCount": 0,
+                "shortcutCount": 0
+            }
+            drive_id_to_adj_list, parent_references, resource_id_to_details = self._create_in_memory_tree([drive["id"] for drive in drives], drive_discovery_progress_metrics, failures)
+            self.progress_update_callback("drive_discovery", status="Done", count=len(drives), **drive_discovery_progress_metrics)
 
             # Calculate metrics for all drives
             drive_metrics = {}
@@ -231,6 +241,7 @@ class FileEstimator(Estimator):
         tenant_metrics: Dict[str, Any],
         drives: List[Any],
         subsite_to_drives: Dict[str, List[Any]],
+        site_discovery_progress_metrics: Dict[str, int],
         failures: List[Dict[str, str]]
     ) -> int:
         try:
@@ -276,7 +287,8 @@ class FileEstimator(Estimator):
                     "siteLevel": site_detail["siteLevel"]
                 }
             tenant_metrics["subsite_count"] = len(all_site_ids)
-            self._append_tenant_level_metrics(all_site_ids, tenant_metrics, drives, subsite_to_drives, failures)
+            site_discovery_progress_metrics["siteCount"] = len(all_site_ids)
+            self._append_tenant_level_metrics(all_site_ids, tenant_metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
 
             return len(all_sites)
 
@@ -290,12 +302,13 @@ class FileEstimator(Estimator):
         tenant_metrics: Dict[str, Any],
         drives: List[Any],
         subsite_to_drives: Dict[str, List[Any]],
+        site_discovery_progress_metrics: Dict[str, int],
         failures: List[Dict[str, str]]
     ):
         try:
-            tenant_metrics["listCount"] = self._get_list_count(site_ids, failures)
-            tenant_metrics["licenseMetrics"] = self._get_license_metrics(failures)
-            drive_type_to_count = self._get_drives(site_ids, drives, subsite_to_drives, failures)
+            tenant_metrics["listCount"] = self._get_list_count(site_ids, site_discovery_progress_metrics, failures)
+            tenant_metrics["licenseMetrics"] = self._get_license_metrics(site_discovery_progress_metrics, failures)
+            drive_type_to_count = self._get_drives(site_ids, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
             for key, value in drive_type_to_count.items():
                 if key not in tenant_metrics["driveCounts"]:
                     tenant_metrics["driveCounts"][key] = 0
@@ -307,6 +320,7 @@ class FileEstimator(Estimator):
     def _get_list_count(
         self,
         site_ids: List[str],
+        site_discovery_progress_metrics: Dict[str, int],
         failures: List[Dict[str, str]]
     ) -> int:
         try:
@@ -337,6 +351,16 @@ class FileEstimator(Estimator):
                         resp = batch_responses_map[req_id]
                         site_id = req["headers"]["siteId"]
                         site_to_resp_map[site_id] = resp
+
+                        if "body" in resp and "value" in resp["body"]:
+                            site_discovery_progress_metrics["listCount"] += len(resp["body"]["value"])
+                            self.progress_update_callback(
+                                "site_discovery",
+                                count=site_discovery_progress_metrics.get("siteCount", 0),
+                                list_count=site_discovery_progress_metrics.get("listCount", 0),
+                                drive_count=site_discovery_progress_metrics.get("driveCount", 0),
+                                license_count=site_discovery_progress_metrics.get("licenseCount", 0)
+                            )
 
                         if "body" in resp and "@odata.nextLink" in resp["body"]:
                             next_url = resp["body"]["@odata.nextLink"]
@@ -393,6 +417,7 @@ class FileEstimator(Estimator):
 
     def _get_license_metrics(
         self,
+        site_discovery_progress_metrics: Dict[str, int],
         failures: List[Dict[str, str]]
     ) -> Dict[str, Any]:
         licenses = []
@@ -414,6 +439,16 @@ class FileEstimator(Estimator):
                 if r.status_code != 200:
                     break
                 d = r.json()
+
+                site_discovery_progress_metrics["licenseCount"] += len(d.get("value", []))
+                self.progress_update_callback(
+                    "site_discovery",
+                    count=site_discovery_progress_metrics.get("siteCount", 0),
+                    list_count=site_discovery_progress_metrics.get("listCount", 0),
+                    drive_count=site_discovery_progress_metrics.get("driveCount", 0),
+                    license_count=site_discovery_progress_metrics.get("licenseCount", 0)
+                )
+
                 licenses.extend(d.get("value", []))
                 url = d.get("@odata.nextLink")
 
@@ -451,6 +486,7 @@ class FileEstimator(Estimator):
         site_ids: List[str],
         drives: List[Any],
         subsite_to_drives: Dict[str, List[Any]],
+        site_discovery_progress_metrics: Dict[str, int],
         failures: List[Dict[str, str]]
     ) -> Dict[str, int]:
         try:
@@ -472,6 +508,16 @@ class FileEstimator(Estimator):
             site_to_resp_map: Dict[str, Dict[str, Any]] = {}
             pending_next_items = []
 
+            def local_progress_callback(responses: List):
+                site_discovery_progress_metrics["driveCount"] += len(responses)
+                self.progress_update_callback(
+                    "site_discovery",
+                    count=site_discovery_progress_metrics.get("siteCount", 0),
+                    list_count=site_discovery_progress_metrics.get("listCount", 0),
+                    drive_count=site_discovery_progress_metrics.get("driveCount", 0),
+                    license_count=site_discovery_progress_metrics.get("licenseCount", 0)
+                )
+
             for batch_id, responses in response_map.items():
                 batch = batch_id_to_batch_map[batch_id]
                 batch_responses_map = get_batch_responses_map(responses, self.logger)
@@ -481,6 +527,9 @@ class FileEstimator(Estimator):
                         resp = batch_responses_map[req_id]
                         site_id = req["headers"]["siteId"]
                         site_to_resp_map[site_id] = resp
+
+                        if "body" in resp and "value" in resp["body"]:
+                            local_progress_callback(resp["body"]["value"])
 
                         if "body" in resp and "@odata.nextLink" in resp["body"]:
                             next_url = resp["body"]["@odata.nextLink"]
@@ -521,7 +570,7 @@ class FileEstimator(Estimator):
                 
                 for batch_id, responses in next_response_map.items():
                     batch = next_batch_id_to_batch_map[batch_id]
-                    new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BASE_URL, failures, False))
+                    new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BASE_URL, failures, False, local_progress_callback))
                     
                 pending_next_items = new_pending_next_items
 
@@ -641,6 +690,7 @@ class FileEstimator(Estimator):
     def _create_in_memory_tree(
         self, 
         drive_ids: List[str], 
+        drive_discovery_progress_metrics: Dict[str, int],
         failures: List[Dict[str, str]]
     ):
         unique_drives = set()
@@ -668,6 +718,24 @@ class FileEstimator(Estimator):
             drive_to_resp_map: Dict[str, Dict[str, Any]] = {}
             pending_next_items = []
 
+            def local_progress_callback(responses):
+                for curr_response in responses:
+                    if "folder" in curr_response:
+                        drive_discovery_progress_metrics["folderCount"] += 1
+                    elif "file" in curr_response:
+                        drive_discovery_progress_metrics["fileCount"] += 1
+                    elif "remoteItem" in curr_response:
+                        drive_discovery_progress_metrics["shortcutCount"] += 1
+                
+
+                self.progress_update_callback(
+                    "drive_discovery",
+                    count=len(unique_drives),
+                    fileCount=drive_discovery_progress_metrics.get("fileCount", 0),
+                    folderCount=drive_discovery_progress_metrics.get("folderCount", 0),
+                    shortcutCount=drive_discovery_progress_metrics.get("shortcutCount", 0)
+                )
+
             for batch_id, responses in response_map.items():
                 batch = batch_id_to_batch_map[batch_id]
                 batch_responses_map = get_batch_responses_map(responses, self.logger)
@@ -678,6 +746,10 @@ class FileEstimator(Estimator):
                         drive_id = req["headers"]["driveId"]
                         drive_to_resp_map[drive_id] = resp
 
+                        if "body" in resp and "value" in resp["body"]:
+                            unique_drives.add(drive_id)
+                            local_progress_callback(resp["body"]["value"])
+
                         if "body" in resp and "@odata.nextLink" in resp["body"]:
                             next_url = resp["body"]["@odata.nextLink"]
                             relative_url = get_relative_url(next_url, GRAPH_BASE_URL)
@@ -685,7 +757,6 @@ class FileEstimator(Estimator):
                                 "driveId": drive_id,
                                 "url": relative_url
                             })
-                            unique_drives.add(drive_id)
                             folder_count += len(resp["body"].get("value", []))
                         elif "body" in resp and "error" in resp["body"]:
                             failures.append({
@@ -699,7 +770,6 @@ class FileEstimator(Estimator):
                             "statusCode": None,
                             "message": f"No response found for delta API for drive {req['headers']['driveId']}."
                         })
-                self.progress_update_callback("drive_discovery", status="Scanning Drives...", count=len(unique_drives))
 
             while pending_next_items and not self.is_hard_stop_requested():
                 batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
@@ -720,7 +790,7 @@ class FileEstimator(Estimator):
                 
                 for batch_id, responses in next_response_map.items():
                     batch = next_batch_id_to_batch_map[batch_id]
-                    new_pending_next_items.extend(process_pagination_responses(batch, responses, drive_to_resp_map, "driveId", GRAPH_BASE_URL, failures, False))
+                    new_pending_next_items.extend(process_pagination_responses(batch, responses, drive_to_resp_map, "driveId", GRAPH_BASE_URL, failures, False, local_progress_callback))
                     
                 pending_next_items = new_pending_next_items
 

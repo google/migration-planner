@@ -54,12 +54,22 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         if not self.view_progress.winfo_viewable():
           self.show_progress_view()
         count = msg.get("count", 0)
+        list_count = msg.get("listCount", 0)
+        drive_count = msg.get("driveCount", 0)
+        license_count = msg.get("licenseCount", 0)
         status = msg.get("status", "Scanning...")
         if "subsites" in self.prog_widgets:
           widget = self.prog_widgets["subsites"]["lbl"]
           if widget.winfo_exists():
+            text = f"Subsites: {count}"
+            if drive_count > 0:
+              text += f" | Drives: {drive_count}"
+            if license_count > 0:
+              text += f" | Licenses: {license_count}"
+            if list_count > 0:
+              text += f" | Lists: {list_count}"
             widget.configure(
-                text=f"{count} subsites found"
+                text=text
             )
           if not self.spinners_active.get("subsites"):
             self.spinners_active["subsites"] = True
@@ -79,12 +89,22 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               widget_bar.set(1.0)
       elif mtype == "drive_discovery":
         count = msg.get("count", 0)
+        folder_count = msg.get("folderCount", 0)
+        file_count = msg.get("fileCount", 0)
+        shortcut_count = msg.get("shortcutCount", 0)
         status = msg.get("status", "Scanning...")
         if "drives" in self.prog_widgets:
           widget = self.prog_widgets["drives"]["lbl"]
+          text = f"Drives: {count}"
+          if folder_count > 0:
+            text += f" | Folders: {folder_count}"
+          if file_count > 0:
+            text += f" | Files: {file_count}"
+          if shortcut_count > 0:
+            text += f" | Shortcuts: {shortcut_count}"
           if widget.winfo_exists():
             widget.configure(
-                text=f"{count} drives found"
+                text=text
             )
           if not self.spinners_active.get("drives"):
             self.spinners_active["drives"] = True
@@ -198,7 +218,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
       self.log_msg("=" * 60)
 
-      print(json.dumps(file_metrics, indent=4))
+      # print(json.dumps(file_metrics, indent=4))
       self.ui_update("complete", data=file_metrics)
       
       # # 6. Analysis & Reporting

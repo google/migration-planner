@@ -181,52 +181,44 @@ def process_pagination_responses(
     base_url: str,
     failures: Optional[List[Dict[str, Any]]] = None,
     is_partial: bool = False,
+    progress_callback: Optional[Callable[[List], None]] = None
 ) -> List[Dict[str, Any]]:
-  next_items = []
-  batch_responses_map = {
-      int(response["id"]): response for response in responses
-  }
-
-  for request in batch:
-    request_id = request["id"]
-    if request_id in batch_responses_map:
-      response = batch_responses_map[request_id]
-      key = request["headers"][grouping_key]
-
-      # Retrieve original response object
-      orig_entry = orig_map[key]
-      orig_resp = (
-          orig_entry["resp"]
-          if isinstance(orig_entry, dict) and "resp" in orig_entry
-          else orig_entry
-      )
-
-      if "body" in response and "value" in response["body"]:
-        orig_resp["body"]["value"] += response["body"]["value"]
-
-        if "@odata.nextLink" in response["body"]:
-          next_url = response["body"]["@odata.nextLink"]
-          relative_url = get_relative_url(next_url, base_url)
-
-          # Create next item with all original headers preserved
-          next_item = dict(request["headers"])
-          next_item["url"] = relative_url
-          next_items.append(next_item)
-      elif (
-          "body" in response
-          and "error" in response["body"]
-          and failures is not None
-      ):
-        failures.append({
-            "mailboxId": key,
-            "isPartial": is_partial,
-            "type": FailureType.FAILURE_STATUS_CODE_ERROR,
-            "statusCode": response["status"],
-            "message": response["body"]["error"]["message"],
-        })
-
-  return next_items
-
+    next_items = []
+    batch_responses_map = {int(resp["id"]): resp for resp in responses}
+    
+    for req in batch:
+        req_id = req["id"]
+        if req_id in batch_responses_map:
+            resp = batch_responses_map[req_id]
+            key = req["headers"][grouping_key]
+            
+            # Retrieve original response object
+            orig_entry = orig_map[key]
+            orig_resp = orig_entry["resp"] if isinstance(orig_entry, dict) and "resp" in orig_entry else orig_entry
+            
+            if "body" in resp and "value" in resp["body"]:
+                orig_resp["body"]["value"] += resp["body"]["value"]
+                if progress_callback is not None:
+                    progress_callback(resp["body"]["value"])
+                
+                if "@odata.nextLink" in resp["body"]:
+                    next_url = resp["body"]["@odata.nextLink"]
+                    relative_url = get_relative_url(next_url, base_url)
+                    
+                    # Create next item with all original headers preserved
+                    next_item = dict(req["headers"])
+                    next_item["url"] = relative_url
+                    next_items.append(next_item)
+            elif "body" in resp and "error" in resp["body"] and failures is not None:
+                failures.append({
+                    "mailboxId": key,
+                    "isPartial": is_partial,
+                    "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                    "statusCode" : resp["status"],
+                    "message": resp["body"]["error"]["message"]
+                })
+                    
+    return next_items
 
 def create_request_to_response_map(
     batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]],
