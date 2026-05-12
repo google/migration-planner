@@ -63,7 +63,7 @@ class FileEstimator(Estimator):
             drives = []
             subsite_to_drives = {}          # used to calculate effective max Depth
             metrics = { 
-                "drive_metrics": {},
+                "driveMetrics": {},
                 "siteMetrics": {},
                 "maxEffectiveDepth": 0,
                 "maxFolderDepth": 0,        # only includes depth from folders in drives
@@ -165,7 +165,7 @@ class FileEstimator(Estimator):
             self.progress_update_callback("phase_status", source="drive_parsing", status="complete")
 
             self.progress_update_callback("phase_status", source="plan_generation", status="running")
-            metrics["drive_metrics"] = drive_metrics
+            metrics["driveMetrics"] = drive_metrics
             self._update_tenant_metrics_from_drive_metrics(metrics, subsite_to_drives)
             self.progress_update_callback("phase_status", source="plan_generation", status="complete")
 
@@ -192,7 +192,7 @@ class FileEstimator(Estimator):
             progress=0.33,
             extra_text="Calculating metrics...",
         )
-        for drive_metric in metrics["drive_metrics"].values():
+        for drive_metric in metrics["driveMetrics"].values():
             metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], drive_metric["maxEffectiveDepth"])
             metrics["maxFolderDepth"] = max(metrics["maxFolderDepth"], drive_metric["maxEffectiveDepth"])
             metrics["shortcutCount"] += drive_metric.get("shortcutCount", 0)
@@ -200,7 +200,7 @@ class FileEstimator(Estimator):
         for subsite_id, drive_ids in subsite_to_drives.items():
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
             for drive_id in drive_ids:
-                metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + metrics["drive_metrics"][drive_id]["maxEffectiveDepth"])  
+                metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + metrics["driveMetrics"][drive_id]["maxEffectiveDepth"])  
 
         for size_range in self.config.bucket_ranges:
             metrics["tenantLevelFileSizeDistribution"]["buckets"].append({
@@ -216,14 +216,14 @@ class FileEstimator(Estimator):
         )
 
         for tenant_bucket in metrics["tenantLevelFileSizeDistribution"]["buckets"]:
-            for metric in metrics["drive_metrics"].values():
+            for metric in metrics["driveMetrics"].values():
                 if "fileSizeDistribution" in metric:
                     for bucket in metric["fileSizeDistribution"]["buckets"]:
                         if bucket["sizeRange"] == tenant_bucket["sizeRange"]:
                             tenant_bucket["count"] += bucket["count"]
                             break
 
-        for drive_id, metric in metrics["drive_metrics"].items():
+        for drive_id, metric in metrics["driveMetrics"].items():
             for large_resource in metric["largeResources"]:
                 curr_dict = large_resource
                 curr_dict["drive"] = drive_id

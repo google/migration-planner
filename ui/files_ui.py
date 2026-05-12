@@ -367,7 +367,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ctk.CTkLabel(row2, text=f"Company: {metrics.get('consumedUnits', {}).get('Company', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
 
       # Drive Details
-      if "drive_metrics" in data:
+      if "driveMetrics" in data:
           ctk.CTkLabel(
               self.view_results,
               text="Drive Details (Top 10)",
@@ -375,7 +375,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               text_color=COLOR_TEXT_MAIN,
           ).pack(anchor="w", padx=10, pady=(20, 5))
 
-          drive_count = len(data["drive_metrics"])
+          drive_count = len(data["driveMetrics"])
           if drive_count > 10:
               ctk.CTkLabel(
                   self.view_results,
@@ -395,9 +395,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           drives_scroll.pack(fill="x", padx=10, pady=5)
 
           # Sort drives by maxEffectiveDepth descending
-          sorted_drives = sorted(data["drive_metrics"].items(), key=lambda item: item[1].get("maxEffectiveDepth", 0), reverse=True)
+          sorted_drives = sorted(data["driveMetrics"].items(), key=lambda item: item[1].get("maxEffectiveDepth", 0), reverse=True)
           top_10_drives = sorted_drives[:10]
-          print(f"DEBUG: drive_metrics count = {len(data['drive_metrics'])}")
+          print(f"DEBUG: driveMetrics count = {len(data['driveMetrics'])}")
           print(f"DEBUG: top_10_drives count = {len(top_10_drives)}")
           for d_id, _ in top_10_drives:
               print(f"DEBUG: Top drive: {d_id}")
@@ -540,7 +540,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     data = self.last_scan_data
     
     # Exclude complex structures for summary
-    summary_data = {k: v for k, v in data.items() if k not in ["drive_metrics", "licenseMetrics", "siteMetrics", "tenantLevelFileSizeDistribution", "tenantLevelLargeResources"]}
+    summary_data = {k: v for k, v in data.items() if k not in ["driveMetrics", "licenseMetrics", "siteMetrics", "tenantLevelFileSizeDistribution", "tenantLevelLargeResources"]}
     
     from tkinter import filedialog
     from datetime import datetime
@@ -620,7 +620,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       writer.writerow(["Drive Details", ""])
       
       # Determine all unique bucket ranges across all drives to create columns
-      drive_metrics = data.get("drive_metrics", {})
+      drive_metrics = data.get("driveMetrics", {})
       all_buckets = set()
       for d_data in drive_metrics.values():
         for bucket in d_data.get("fileSizeDistribution", {}).get("buckets", []):
