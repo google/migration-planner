@@ -276,6 +276,7 @@ class FileEstimator(Estimator):
                         time.sleep(wait_time)
 
             root_id = root_site["id"]
+            self.id_to_display[root_id] = root_site["displayName"]
             all_sites = [{"siteId": root_id, "siteLevel": 0}]
             
             # Crawl all the subsites and collect them
@@ -324,7 +325,7 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ) -> int:
         try:
-            list_url = "/sites/{siteId}/lists"
+            list_url = "/sites/{siteId}/lists?$select=id,"
             batches = create_batches(list_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -493,7 +494,7 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ) -> Dict[str, int]:
         try:
-            drive_url = "/sites/{siteId}/drives?$select=id,driveType"
+            drive_url = "/sites/{siteId}/drives?$select=id,driveType,name"
             batches = create_batches(drive_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -581,6 +582,7 @@ class FileEstimator(Estimator):
             for site_id, resp in site_to_resp_map.items():
                 if "body" in resp and "value" in resp["body"]:
                     for entry in resp["body"]["value"]:
+                        self.id_to_display[entry["id"]] = entry["name"]
                         if "driveType" in entry:
                             if entry["driveType"] not in drive_type_to_count:
                                 drive_type_to_count[entry["driveType"]] = 0
@@ -680,6 +682,7 @@ class FileEstimator(Estimator):
             for site_id, resp in site_to_resp_map.items():
                 if "body" in resp and "value" in resp["body"]:
                     for site in resp["body"]["value"]:
+                        self.id_to_display[site["id"]] = site["displayName"]
                         all_sites.append({"siteId": site["id"], "siteLevel": level})
                         new_sub_site_ids.append(site["id"])
                         self.progress_update_callback("site_discovery", status="Scanning Subsites...", count=len(all_sites))

@@ -190,6 +190,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         )
         self.show_config_view()
 
+  def _get_display_name(
+    self,
+    id
+  ):
+    return self.id_to_display_name.get(id, id)
+
   def execute_migration_scan(self, config):
     """Orchestrates the end-to-end migration estimation scan."""
     monitor = None
@@ -200,7 +206,22 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       start_time = time.time()
 
       # # 2. Authentication
-      self.factory = EstimatorFactory(config, logger=self.log_msg, stop_event=self.stop_scan_event)
+      id_to_display = {
+        "maxEffectiveDepth": "Max Effective Depth",
+        "maxFolderDepth": "Max Folder Depth",
+        "maxSubsiteDepth": "Max Subsite Depth",
+        "subsiteCount": "Subsite Count",
+        "shortcutCount": "Shortcut Count",
+        "listCount": "List Count",
+        "subsite_count": "Subsite Count",
+        "documentLibrary": "Document Library",
+        "personalDrive": "Personal Drive",
+        "businessDrive": "Business Drive",
+        "unknownDrive": "Unknown Drive",
+      }
+
+      self.id_to_display_name = id_to_display
+      self.factory = EstimatorFactory(config, logger=self.log_msg, stop_event=self.stop_scan_event, id_to_display_name=id_to_display)
       
       manager = self.factory.get_manager()
       manager.authenticate_all(self.log_msg, required_scopes=["Sites.Read.All", "Files.Read.All", "LicenseAssignment.Read.All"])
@@ -388,7 +409,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           drives_scroll = ctk.CTkScrollableFrame(
               self.view_results,
               fg_color="transparent",
-              height=300,
+              height=500,
               scrollbar_button_color="white",
               scrollbar_button_hover_color=COLOR_SECONDARY_HOVER,
           )
@@ -416,16 +437,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                       frame.pack_forget()
                       frame.is_expanded = False
                       if btn:
-                          btn.configure(text=f"Drive: {d_id[:15]}... ▼")
+                          btn.configure(text=f"Drive: {self._get_display_name(d_id)}... ▼")
                   else:
                       frame.pack(fill="x", pady=2, padx=10, after=header)
                       frame.is_expanded = True
                       if btn:
-                          btn.configure(text=f"Drive: {d_id[:15]}... ▲")
+                          btn.configure(text=f"Drive: {self._get_display_name(d_id)}... ▲")
 
               btn_toggle = ctk.CTkButton(
                   drive_header,
-                  text=f"Drive: {drive_id[:15]}... ▼",
+                  text=f"Drive: {self._get_display_name(drive_id)}... ▼",
                   fg_color="transparent",
                   text_color=COLOR_PRIMARY,
                   hover=False,
@@ -436,7 +457,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               btn_toggle.configure(command=lambda f=drive_details, b=btn_toggle, d=drive_id, h=drive_header: toggle_drive(f, b, d, h))
 
               # Fill details frame
-              ctk.CTkLabel(drive_details, text=f"Drive: {drive_id}", font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(anchor="w", padx=10, pady=(5, 2))
+              ctk.CTkLabel(drive_details, text=f"Drive: {self._get_display_name(drive_id)}", font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(anchor="w", padx=10, pady=(5, 2))
               
               ctk.CTkLabel(drive_details, text=f"Max Effective Depth: {drive_data.get('maxEffectiveDepth', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
               ctk.CTkLabel(drive_details, text=f"Shortcut Count: {drive_data.get('shortcutCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
@@ -563,9 +584,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       for k, v in summary_data.items():
         if k == "driveCounts":
           for sub_k, sub_v in v.items():
-            writer.writerow([f"DriveCount_{sub_k}", sub_v])
+            writer.writerow([f"DriveCount {self._get_display_name(sub_k)}", sub_v])
         else:
-          writer.writerow([k, v])
+          writer.writerow([self._get_display_name(k), v])
       
       writer.writerow([]) # Blank line separator
       
@@ -609,10 +630,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Section 5: Site Details
       writer.writerow(["Site Details", ""])
-      writer.writerow(["Site ID", "Site Level"])
+      writer.writerow(["Site Name", "Site Level"])
       site_metrics = data.get("siteMetrics", {})
       for site_id, s_data in site_metrics.items():
-        writer.writerow([site_id, s_data.get("siteLevel", 0)])
+        writer.writerow([self._get_display_name(site_id), s_data.get("siteLevel", 0)])
         
       writer.writerow([]) # Blank line separator
       
@@ -630,12 +651,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       sorted_buckets = sorted(list(all_buckets))
       bucket_cols = [f"Bucket_{b[0]}_{b[1]}" for b in sorted_buckets]
       
-      headers = ["Drive ID", "Max Effective Depth", "Shortcut Count"] + bucket_cols
+      headers = ["Drive Name", "Max Effective Depth", "Shortcut Count"] + bucket_cols
       writer.writerow(headers)
       
       for drive_id, d_data in drive_metrics.items():
         row = [
-            drive_id,
+            self._get_display_name(drive_id),
             d_data.get("maxEffectiveDepth", 0),
             d_data.get("shortcutCount", 0)
         ]
@@ -680,8 +701,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.prog_widgets = {}
 
     self.create_progress_row(self.scan_container, "subsites", "Subsite Discovery", mode="indeterminate")
-    self.create_progress_row(self.scan_container, "drives", "Drive Parsing and Tree Creation", mode="indeterminate")
-    self.create_progress_row(self.scan_container, "drive_parsing", "Drive Tree Parsing", mode="determinate")
+    self.create_progress_row(self.scan_container, "drives", "Drive Discovery", mode="indeterminate")
+    self.create_progress_row(self.scan_container, "drive_parsing", "Drive Scan", mode="determinate")
     self.create_progress_row(self.scan_container, "plan_generation", "Generating Migration Plan", mode="determinate")
 
     import threading

@@ -314,7 +314,7 @@ def build_file_distribution_bucket_ranges(self, ctk):
   )
   btn_add.pack(anchor="w", padx=15, pady=(5, 15))
 
-def build_large_resource_limit_input(self, ctk, min_val=1000, max_val=100000, increment=100):
+def build_large_resource_limit_input(self, ctk, min_val=2, max_val=10, increment=1):
   """Builds slider for lower count limit for large resources."""
   limit_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
   limit_frame.pack(fill="x", padx=15, pady=(15, 2))
