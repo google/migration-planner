@@ -274,10 +274,10 @@ def generate_data(
                 # File size distribution
                 for sub_item in metrics["items"]:
                     if "file" in sub_item:
-                        size_in_mb = sub_item.get("size", 0) / (1024 * 1024)
+                        size_in_kb = sub_item.get("size", 0) / 1024
                         for bucket in drive_metrics["fileSizeDistribution"]["buckets"]:
                             low, high = bucket["sizeRange"]
-                            if low <= size_in_mb and size_in_mb <= high:
+                            if low <= size_in_kb and size_in_kb <= high:
                                 bucket["count"] += 1
                                 break
                                 
@@ -285,12 +285,12 @@ def generate_data(
                 for sub_item in metrics["items"]:
                     if "folder" in sub_item and sub_item["id"] != item_id: # Skip root
                         f_metrics = folder_to_metrics.get(sub_item["id"])
-                        if f_metrics and f_metrics["subTreeCount"] >= 2: # Using default limit 2
+                        if f_metrics and f_metrics["subTreeCount"] >= 50: # Using limit 50
                             drive_metrics["largeResources"].append({
                                 "type": "FOLDER",
                                 "id": sub_item["name"],
                                 "subTreeCount": f_metrics["subTreeCount"],
-                                "Limit": 2,
+                                "Limit": 50,
                                 "drive": drive_id
                             })
                             expected["tenantLevelLargeResources"].append(drive_metrics["largeResources"][-1])

@@ -49,7 +49,9 @@ class TestFileEstimatorLoad(unittest.TestCase):
             retries=1,
             backoff=1,
             eta_max_users=5,
-            parallel_batches=5
+            parallel_batches=5,
+            large_resource_count_limit=50,
+            bucket_ranges=[(0, 1000), (1001, 10000), (10001, 100000)]
         )
         
         self.stop_event = threading.Event()
