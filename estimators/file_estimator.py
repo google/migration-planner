@@ -429,7 +429,7 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ) -> Dict[str, Any]:
         licenses = []
-        url = "https://graph.microsoft.com/v1.0/subscribedSkus?$select=consumedUnits,appliesTo"
+        url = "https://graph.microsoft.com/v1.0/subscribedSkus?$select=prepaidUnits,consumedUnits,servicePlans,appliesTo"
         token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
         token = token_data["token"]
         session = self.url_invoker.token_manager.get_session()
@@ -448,7 +448,13 @@ class FileEstimator(Estimator):
                     break
                 d = r.json()
 
-                site_discovery_progress_metrics["licenseCount"] += len(d.get("value", []))
+                all_licenses = d.get("value", [])
+                sharepoint_licenses = [
+                    l for l in all_licenses 
+                    if any(sp.get("servicePlanType", "").lower() == "sharepoint" for sp in l.get("servicePlans", []))
+                ]
+
+                site_discovery_progress_metrics["licenseCount"] += len(sharepoint_licenses)
                 self.progress_update_callback(
                     "site_discovery",
                     count=site_discovery_progress_metrics.get("siteCount", 0),
@@ -457,7 +463,7 @@ class FileEstimator(Estimator):
                     licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
                 )
 
-                licenses.extend(d.get("value", []))
+                licenses.extend(sharepoint_licenses)
                 url = d.get("@odata.nextLink")
 
         except Exception as e:
@@ -466,10 +472,12 @@ class FileEstimator(Estimator):
         finally:
             self.url_invoker.token_manager.return_token_slot(token_data)
         
-        # TODO Check what all other metrics are required
-
         license_metrics = {
             "totalLicenseCount": {
+                "User": 0,
+                "Company": 0
+            },
+            "totalAllotedUnits": {
                 "User": 0,
                 "Company": 0
             },
@@ -483,9 +491,11 @@ class FileEstimator(Estimator):
             if applies_to == "User":
                 license_metrics["totalLicenseCount"]["User"] += 1
                 license_metrics["consumedUnits"]["User"] += license.get("consumedUnits", 0)
+                license_metrics["totalAllotedUnits"]["User"] += license.get("prepaidUnits", {}).get("enabled", 0)
             elif applies_to == "Company":
                 license_metrics["totalLicenseCount"]["Company"] += 1
                 license_metrics["consumedUnits"]["Company"] += license.get("consumedUnits", 0)
+                license_metrics["totalAllotedUnits"]["Company"] += license.get("prepaidUnits", {}).get("enabled", 0)
 
         return license_metrics
 

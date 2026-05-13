@@ -6,6 +6,7 @@ import time
 from tkinter import messagebox
 from util.monitoring import ResourceMonitor
 from estimators.factory import EstimatorFactory
+from util.enums import FailureType
 
 import json
 
@@ -242,7 +243,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.log_msg("\n" + "=" * 60)
       self.log_msg("📊 Failures and Warnings:")
       for failure in failures:
-        prefix = "[WARNING] " if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR] "
+        prefix = "[WARNING] " if failure.get("type", None) == FailureType.NOT_FOUND else "[ERROR] "
         self.log_msg(prefix + str(failure))
 
       self.log_msg("=" * 60)
@@ -402,6 +403,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ctk.CTkLabel(row2, text="Consumed Units", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left")
           ctk.CTkLabel(row2, text=f"User: {metrics.get('consumedUnits', {}).get('User', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
           ctk.CTkLabel(row2, text=f"Company: {metrics.get('consumedUnits', {}).get('Company', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
+
+          # Alloted Units Row
+          row3 = ctk.CTkFrame(license_frame, fg_color="transparent")
+          row3.pack(fill="x", padx=15, pady=5)
+          ctk.CTkLabel(row3, text="Alloted Units", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left")
+          ctk.CTkLabel(row3, text=f"User: {metrics.get('totalAllotedUnits', {}).get('User', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
+          ctk.CTkLabel(row3, text=f"Company: {metrics.get('totalAllotedUnits', {}).get('Company', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
 
       # Drive Details
       if "driveMetrics" in data:
@@ -615,6 +623,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       writer.writerow(["Total License Count (Company)", license_data.get("totalLicenseCount", {}).get("Company", 0)])
       writer.writerow(["Consumed Units (User)", license_data.get("consumedUnits", {}).get("User", 0)])
       writer.writerow(["Consumed Units (Company)", license_data.get("consumedUnits", {}).get("Company", 0)])
+      writer.writerow(["Alloted Units (User)", license_data.get("totalAllotedUnits", {}).get("User", 0)])
+      writer.writerow(["Alloted Units (Company)", license_data.get("totalAllotedUnits", {}).get("Company", 0)])
       
       writer.writerow([]) # Blank line separator
       
