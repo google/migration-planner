@@ -84,20 +84,26 @@ class FileEstimator(Estimator):
                 },
                 "tenantLevelLargeResources": []
             }
+
             if "drives" in data and len(data["drives"]) > 0:
                 # One Drive Flow
                 drives = data["drives"]
             else:
                 # Sharepoint Flow
                 site_discovery_progress_metrics = {
+                    "siteCount": 0,
+                    "personalSiteCount": 0,
+                    "teamSiteCount": 0,
                     "listCount": 0,
                     "licenseCount": 0,
                     "driveCount": 0,
                 }
-                self.progress_update_callback("site_discovery", status="Fetching...", count=0)
-                subsite_count = self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
+                metrics["licenseMetrics"] = self._get_license_metrics(site_discovery_progress_metrics, failures)
+
+                self._configure_executor_from_license_counts(metrics["licenseMetrics"])
+
+                self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
                 self.logger("Site Scanning is finished!!!!")
-                self.progress_update_callback("site_discovery", status="Done", count=subsite_count, **site_discovery_progress_metrics)
 
             # get adjacency lists and parent references for each drive
             self.progress_update_callback("drive_discovery", status="Fetching...", count=0)
@@ -106,6 +112,8 @@ class FileEstimator(Estimator):
                 "fileCount": 0,
                 "shortcutCount": 0
             }
+
+            print(f"Drive Count: {len(drives)}")
             drive_id_to_adj_list, parent_references, resource_id_to_details = self._create_in_memory_tree([drive["id"] for drive in drives], drive_discovery_progress_metrics, failures)
             self.progress_update_callback("drive_discovery", status="Done", count=len(drives), **drive_discovery_progress_metrics)
 
@@ -182,6 +190,25 @@ class FileEstimator(Estimator):
                 "message": f"Exception in calculate_resource_metrics: {str(e)}"
             })
             return {}
+    
+
+    def _configure_executor_from_license_counts(self, license_metrics: Dict[str, Any]):
+        total_license_count = license_metrics.get("totalAllotedUnits", {}).get("User", 0) 
+        total_license_count += license_metrics.get("totalAllotedUnits", {}).get("Company", 0)
+
+        # Source: https://learn.microsoft.com/en-us/sharepoint/dev/general-development/how-to-avoid-getting-throttled-or-blocked-in-sharepoint-online
+        # TODO Need to optimize this
+        if self.executor:
+            self.executor.shutdown(wait=False)
+        if total_license_count <= 1000:
+            self.executor = ThreadPoolExecutor(max_workers=2)
+        elif total_license_count <= 5000:
+            self.executor = ThreadPoolExecutor(max_workers=3)
+        elif total_license_count <= 15000:
+            self.executor = ThreadPoolExecutor(max_workers=4)
+        else:
+            self.executor = ThreadPoolExecutor(max_workers=5)
+        
 
     def _update_tenant_metrics_from_drive_metrics(
         self,
@@ -245,61 +272,127 @@ class FileEstimator(Estimator):
         tenant_metrics: Dict[str, Any],
         drives: List[Any],
         subsite_to_drives: Dict[str, List[Any]],
-        site_discovery_progress_metrics: Dict[str, int],
+        site_discovery_progress_metrics: Dict[str, Any],
         failures: List[Dict[str, str]]
-    ) -> int:
+    ):
         try:
-            # Fetch the root first without batching
-            manager = self.url_invoker.token_manager
-
-            url = f"{GRAPH_BASE_URL}/sites/root"
-            token_data = manager.get_valid_token_slot(self.logger)
+            self.progress_update_callback("site_discovery", status="Fetching...", count=0)
+            sites = []
+            url = f"{GRAPH_BASE_URL}/sites/delta?$select=id,webUrl,isPersonalSite,parentReference&$top=999"
+            token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
             token = token_data["token"]
-            session = manager.get_session()
-            headers = {
-                "Authorization": f"Bearer {token}"
-            }
+            session = self.url_invoker.token_manager.get_session()
+            headers = {"Authorization": f"Bearer {token}"}
+            try:
+                while url and not self.is_hard_stop_requested():
+                    # Check mid-loop for extremely long tenant scans
+                    if time.time() > token_data["expires_at"]:
+                        self.url_invoker.token_manager.return_token_slot(token_data)
+                        token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
+                        token = token_data["token"]
+                        headers = {"Authorization": f"Bearer {token}"}
 
-            attempts = 0
-            max_attempts = self.config.retries + 1
-            while attempts < max_attempts:
-                try:
-                    r = session.get(url, headers=headers)
-                    if r.status_code != 200:
-                        raise Exception(f"Error in fetching root site : {r.status_code}")
-                    root_site = r.json()
-                    break
-                except Exception as e:
-                    attempts += 1
-                    if attempts == max_attempts:
-                        self._log_and_fail("Error in fetching root site", e, failures)
-                        return
-                    elif self.logger is not None:
-                        wait_time = min(10, max(2, self.config.backoff) ** (attempts - 1))
-                        self.logger(f"Error in fetching root site. Attempt count: {attempts} | Retrying in {wait_time} seconds...")
-                        time.sleep(wait_time)
+                    attempts = 0
+                    max_attempts = self.config.retries + 1
+                    while attempts < max_attempts and not self.is_hard_stop_requested():
+                        try:
+                            r = session.get(url, headers=headers)
+                            if r.status_code != 200:
+                                raise Exception(f"Error in fetching root site : {r.status_code}")
+                            d = r.json()
+                            break
+                        except Exception as e:
+                            attempts += 1
+                            if attempts == max_attempts:
+                                self._log_and_fail("Error in fetching root site", e, failures)
+                                break
+                            elif self.logger is not None:
+                                wait_time = min(10, max(2, self.config.backoff) ** (attempts - 1))
+                                self.logger(f"Error in fetching root site. Attempt count: {attempts} | Retrying in {wait_time} seconds...")
+                                time.sleep(wait_time)
 
-            root_id = root_site["id"]
-            self.id_to_display[root_id] = root_site["displayName"]
-            all_sites = [{"siteId": root_id, "siteLevel": 0}]
+                    local_all_sites = d.get("value", [])
+                    personal_sites = [site for site in local_all_sites if site["isPersonalSite"]]
+                    team_sites = [site for site in local_all_sites if not site["isPersonalSite"]]
+
+                    site_discovery_progress_metrics["siteCount"] += len(local_all_sites)
+                    if self.config.includePersonalSites:
+                        site_discovery_progress_metrics["personalSiteCount"] += len(personal_sites)
+                    if self.config.includeTeamSites:
+                        site_discovery_progress_metrics["teamSiteCount"] += len(team_sites)
+                    
+                    self.progress_update_callback(
+                        "site_discovery",
+                        count=site_discovery_progress_metrics.get("siteCount", 0),
+                        personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                        teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                    )
+
+                    sites.extend(d.get("value", []))
+                    url = d.get("@odata.nextLink")
+                
+            except Exception as e:
+                self._log_and_fail("Error in _get_license_metrics", e, failures)
+            finally:
+                self.url_invoker.token_manager.return_token_slot(token_data)
             
-            # Crawl all the subsites and collect them
-            self._get_subsites_in_site([root_id], all_sites, failures)
+            for site in sites:
+                self.id_to_display[site["id"]] = site["webUrl"]
 
+            # Crawl all the subsites and collect them
+
+            site_id_to_level = self._get_site_id_to_level(sites, failures)
+            all_sites = [{"siteId": siteId, "siteLevel": level} for siteId, level in site_id_to_level.items()]
             all_site_ids = [site["siteId"] for site in all_sites]
             for site_detail in all_sites:
                 tenant_metrics["siteMetrics"][site_detail["siteId"]] = {
                     "siteLevel": site_detail["siteLevel"]
                 }
             tenant_metrics["subsite_count"] = len(all_site_ids)
-            site_discovery_progress_metrics["siteCount"] = len(all_site_ids)
             self._append_tenant_level_metrics(all_site_ids, tenant_metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
 
-            return len(all_sites)
+            self.progress_update_callback(
+                "site_discovery", 
+                status="Done", 
+                count=site_discovery_progress_metrics.get("siteCount", 0), 
+                personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
+                listCount=site_discovery_progress_metrics.get("listCount", 0), 
+                licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
+            )
 
         except Exception as e:
             self._log_and_fail("Error in _calculate_site_metrics", e, failures)
 
+    def _get_site_id_to_level(self, sites: List[Dict[str, Any]], failures: List[Dict[str, str]]):
+        site_id_to_level = {}
+        parent_map = {}
+        
+        for site in sites:
+            site_id = site["id"]
+            parent_ref = site.get("parentReference")
+            if parent_ref and "siteId" in parent_ref:
+                parent_map[site_id] = parent_ref["siteId"]
+                
+        def get_level(site_id):
+            if site_id in site_id_to_level:
+                return site_id_to_level[site_id]
+            
+            parent_id = parent_map.get(site_id)
+            if not parent_id:
+                level = 0
+            else:
+                # If parent is not in our list, assume parent is level 0
+                level = get_level(parent_id) + 1
+                
+            site_id_to_level[site_id] = level
+            return level
+            
+        for site in sites:
+            get_level(site["id"])
+            
+        return site_id_to_level
     
     def _append_tenant_level_metrics(
         self,
@@ -311,8 +404,7 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ):
         try:
-            tenant_metrics["listCount"] = self._get_list_count(site_ids, site_discovery_progress_metrics, failures)
-            tenant_metrics["licenseMetrics"] = self._get_license_metrics(site_discovery_progress_metrics, failures)
+            # tenant_metrics["listCount"] = self._get_list_count(site_ids, site_discovery_progress_metrics, failures)
             drive_type_to_count = self._get_drives(site_ids, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
             for key, value in drive_type_to_count.items():
                 if key not in tenant_metrics["driveCounts"]:
@@ -329,7 +421,7 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ) -> int:
         try:
-            list_url = "/sites/{siteId}/lists?$select=id,"
+            list_url = "/sites/{siteId}/lists?$select=id&$top=999"
             batches = create_batches(list_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -340,24 +432,27 @@ class FileEstimator(Estimator):
                 batch_id_to_batch_map[idx] = batch
                 idx += 1
 
-            response_map: Dict[int, List[Dict[str, Any]]] = {}
-            for batch_id, future in futures_map.items():
-                response_map[batch_id] = future.result()
+            from concurrent.futures import as_completed
+            future_to_batch_id = {future: bid for bid, future in futures_map.items()}
 
             site_to_resp_map: Dict[str, Dict[str, Any]] = {}
             pending_next_items = []
 
-            def local_progress_callback(responses: List):
+            def local_progress_callback(responses: List, has_next=False):
                 site_discovery_progress_metrics["listCount"] += len(responses)
                 self.progress_update_callback(
-                    "site_discovery",
-                    count=site_discovery_progress_metrics.get("siteCount", 0),
-                    listCount=site_discovery_progress_metrics.get("listCount", 0),
-                    driveCount=site_discovery_progress_metrics.get("driveCount", 0),
+                    "site_discovery", 
+                    count=site_discovery_progress_metrics.get("siteCount", 0), 
+                    personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                    teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                    driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
+                    listCount=site_discovery_progress_metrics.get("listCount", 0), 
                     licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
                 )
 
-            for batch_id, responses in response_map.items():
+            for future in as_completed(futures_map.values()):
+                batch_id = future_to_batch_id[future]
+                responses = future.result()
                 batch = batch_id_to_batch_map[batch_id]
                 batch_responses_map = get_batch_responses_map(responses, self.logger)
                 for req in batch:
@@ -401,13 +496,14 @@ class FileEstimator(Estimator):
                     next_batch_id_to_batch_map[idx] = batch
                     idx += 1
                     
-                next_response_map: Dict[int, List[Dict[str, Any]]] = {}
-                for batch_id, future in next_futures_map.items():
-                    next_response_map[batch_id] = future.result()
-                    
+                from concurrent.futures import as_completed
+                
+                future_to_batch_id = {future: bid for bid, future in next_futures_map.items()}
                 new_pending_next_items = []
                 
-                for batch_id, responses in next_response_map.items():
+                for future in as_completed(next_futures_map.values()):
+                    batch_id = future_to_batch_id[future]
+                    responses = future.result()
                     batch = next_batch_id_to_batch_map[batch_id]
                     new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BASE_URL, failures, False, local_progress_callback))
                     
@@ -443,7 +539,7 @@ class FileEstimator(Estimator):
                     token = token_data["token"]
                     headers = {"Authorization": f"Bearer {token}"}
 
-                r = session.get(url, headers=headers)
+                r = session.get(url, headers=headers)               # TODO Add retries
                 if r.status_code != 200:
                     break
                 d = r.json()
@@ -456,10 +552,12 @@ class FileEstimator(Estimator):
 
                 site_discovery_progress_metrics["licenseCount"] += len(sharepoint_licenses)
                 self.progress_update_callback(
-                    "site_discovery",
-                    count=site_discovery_progress_metrics.get("siteCount", 0),
-                    listCount=site_discovery_progress_metrics.get("listCount", 0),
-                    driveCount=site_discovery_progress_metrics.get("driveCount", 0),
+                    "site_discovery", 
+                    count=site_discovery_progress_metrics.get("siteCount", 0), 
+                    personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                    teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                    driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
+                    listCount=site_discovery_progress_metrics.get("listCount", 0), 
                     licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
                 )
 
@@ -508,7 +606,7 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ) -> Dict[str, int]:
         try:
-            drive_url = "/sites/{siteId}/drives?$select=id,driveType,name"
+            drive_url = "/sites/{siteId}/drives?$select=id,driveType,name&$top=999"
             batches = create_batches(drive_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -519,24 +617,27 @@ class FileEstimator(Estimator):
                 batch_id_to_batch_map[idx] = batch
                 idx += 1
 
-            response_map: Dict[int, List[Dict[str, Any]]] = {}
-            for batch_id, future in futures_map.items():
-                response_map[batch_id] = future.result()
+            from concurrent.futures import as_completed
+            future_to_batch_id = {future: bid for bid, future in futures_map.items()}
 
             site_to_resp_map: Dict[str, Dict[str, Any]] = {}
             pending_next_items = []
 
-            def local_progress_callback(responses: List):
+            def local_progress_callback(responses: List, has_next=False):
                 site_discovery_progress_metrics["driveCount"] += len(responses)
                 self.progress_update_callback(
-                    "site_discovery",
-                    count=site_discovery_progress_metrics.get("siteCount", 0),
-                    listCount=site_discovery_progress_metrics.get("listCount", 0),
-                    driveCount=site_discovery_progress_metrics.get("driveCount", 0),
+                    "site_discovery", 
+                    count=site_discovery_progress_metrics.get("siteCount", 0), 
+                    personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                    teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                    driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
+                    listCount=site_discovery_progress_metrics.get("listCount", 0), 
                     licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
                 )
 
-            for batch_id, responses in response_map.items():
+            for future in as_completed(futures_map.values()):
+                batch_id = future_to_batch_id[future]
+                responses = future.result()
                 batch = batch_id_to_batch_map[batch_id]
                 batch_responses_map = get_batch_responses_map(responses, self.logger)
                 for req in batch:
@@ -580,13 +681,14 @@ class FileEstimator(Estimator):
                     next_batch_id_to_batch_map[idx] = batch
                     idx += 1
                     
-                next_response_map: Dict[int, List[Dict[str, Any]]] = {}
-                for batch_id, future in next_futures_map.items():
-                    next_response_map[batch_id] = future.result()
+                from concurrent.futures import as_completed
+                future_to_batch_id = {future: bid for bid, future in next_futures_map.items()}
                     
                 new_pending_next_items = []
                 
-                for batch_id, responses in next_response_map.items():
+                for future in as_completed(next_futures_map.values()):
+                    batch_id = future_to_batch_id[future]
+                    responses = future.result()
                     batch = next_batch_id_to_batch_map[batch_id]
                     new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BASE_URL, failures, False, local_progress_callback))
                     
@@ -613,111 +715,22 @@ class FileEstimator(Estimator):
             self._log_and_fail("Error in _get_drives", e, failures)
             return 0, 0
 
-    def _get_subsites_in_site(
-        self,
-        site_ids: List[str],
-        all_sites: List[Dict[str, Any]],
-        failures: List[Dict[str, str]],
-        level: int = 1
-    ):
-        try:
-            site_url = "/sites/{siteId}/sites"
-            batches = create_batches(site_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
-
-            futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
-            batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
-            idx = 0
-            for batch in batches:
-                futures_map[idx] = self.executor.submit(self.url_invoker.invoke, GRAPH_BASE_URL, batch, self.logger, self.stop_event, self.get_resource_type())
-                batch_id_to_batch_map[idx] = batch
-                idx += 1
-
-            response_map: Dict[int, List[Dict[str, Any]]] = {}
-            for batch_id, future in futures_map.items():
-                response_map[batch_id] = future.result()
-
-            site_to_resp_map: Dict[str, Dict[str, Any]] = {}
-            pending_next_items = []
-
-            for batch_id, responses in response_map.items():
-                batch = batch_id_to_batch_map[batch_id]
-                batch_responses_map = get_batch_responses_map(responses, self.logger)
-                for req in batch:
-                    req_id = req["id"]
-                    if req_id in batch_responses_map:
-                        resp = batch_responses_map[req_id]
-                        site_id = req["headers"]["siteId"]
-                        site_to_resp_map[site_id] = resp
-
-                        if "body" in resp and "@odata.nextLink" in resp["body"]:
-                            next_url = resp["body"]["@odata.nextLink"]
-                            relative_url = get_relative_url(next_url, GRAPH_BASE_URL)
-                            pending_next_items.append({
-                                "siteId": site_id,
-                                "url": relative_url
-                            })
-                        elif "body" in resp and "error" in resp["body"]:
-                            failures.append({
-                                "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
-                                "statusCode": resp["status"],
-                                "message": f"Error in fetching subsites for site {site_id}: {resp['body']['error']['message']}"
-                            })
-                    else:
-                        failures.append({
-                            "type": FailureType.NOT_FOUND.name,
-                            "statusCode": None,
-                            "message": f"No response found for subsites API for site {req['headers']['siteId']}."
-                        })
-
-            while pending_next_items and not self.is_hard_stop_requested():
-                batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
-                
-                next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
-                next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
-                idx = 0
-                for batch in batches:
-                    next_futures_map[idx] = self.executor.submit(self.url_invoker.invoke, GRAPH_BASE_URL, batch, self.logger, self.stop_event, self.get_resource_type())
-                    next_batch_id_to_batch_map[idx] = batch
-                    idx += 1
-                    
-                next_response_map: Dict[int, List[Dict[str, Any]]] = {}
-                for batch_id, future in next_futures_map.items():
-                    next_response_map[batch_id] = future.result()
-                    
-                new_pending_next_items = []
-                
-                for batch_id, responses in next_response_map.items():
-                    batch = next_batch_id_to_batch_map[batch_id]
-                    new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BASE_URL, failures, False))
-                    
-                pending_next_items = new_pending_next_items
-
-            new_sub_site_ids = []
-            for site_id, resp in site_to_resp_map.items():
-                if "body" in resp and "value" in resp["body"]:
-                    for site in resp["body"]["value"]:
-                        self.id_to_display[site["id"]] = site["displayName"]
-                        all_sites.append({"siteId": site["id"], "siteLevel": level})
-                        new_sub_site_ids.append(site["id"])
-                        self.progress_update_callback("site_discovery", status="Scanning Subsites...", count=len(all_sites))
-
-            if new_sub_site_ids:
-                self._get_subsites_in_site(new_sub_site_ids, all_sites, failures, level + 1)
-
-        except Exception as e:
-            self._log_and_fail("Error in _get_subsites_in_site", e, failures)
-
     def _create_in_memory_tree(
         self, 
         drive_ids: List[str], 
         drive_discovery_progress_metrics: Dict[str, int],
         failures: List[Dict[str, str]]
     ):
-        unique_drives = set()
+        completed_drives = 0
+        total_drives = len(drive_ids)
         folder_count = 0
         adj_list = {}
         parent_references: Dict[str, Dict[str, str]] = {}
         resource_id_to_details: Dict[str, Dict[str, Any]] = {}
+        
+        for drive_id in drive_ids:
+            adj_list[drive_id] = {}
+            parent_references[drive_id] = {}
         try:
             # use delta api to fetch the folders
             delta_api = "/drives/{driveId}/root/delta"
@@ -731,14 +744,16 @@ class FileEstimator(Estimator):
                 batch_id_to_batch_map[idx] = batch
                 idx += 1
 
-            response_map: Dict[int, List[Dict[str, Any]]] = {}
-            for batch_id, future in futures_map.items():
-                response_map[batch_id] = future.result()
+            from concurrent.futures import as_completed
+            future_to_batch_id = {future: bid for bid, future in futures_map.items()}
 
             drive_to_resp_map: Dict[str, Dict[str, Any]] = {}
             pending_next_items = []
 
-            def local_progress_callback(responses):
+            def local_progress_callback(responses: List, has_next=False):
+                nonlocal completed_drives
+                if not has_next:
+                    completed_drives += 1
                 for curr_response in responses:
                     if "folder" in curr_response:
                         drive_discovery_progress_metrics["folderCount"] += 1
@@ -750,13 +765,16 @@ class FileEstimator(Estimator):
 
                 self.progress_update_callback(
                     "drive_discovery",
-                    count=len(unique_drives),
+                    count=completed_drives,
+                    total_drives=total_drives,
                     fileCount=drive_discovery_progress_metrics.get("fileCount", 0),
                     folderCount=drive_discovery_progress_metrics.get("folderCount", 0),
                     shortcutCount=drive_discovery_progress_metrics.get("shortcutCount", 0)
                 )
 
-            for batch_id, responses in response_map.items():
+            for future in as_completed(futures_map.values()):
+                batch_id = future_to_batch_id[future]
+                responses = future.result()
                 batch = batch_id_to_batch_map[batch_id]
                 batch_responses_map = get_batch_responses_map(responses, self.logger)
                 for req in batch:
@@ -767,8 +785,8 @@ class FileEstimator(Estimator):
                         drive_to_resp_map[drive_id] = resp
 
                         if "body" in resp and "value" in resp["body"]:
-                            unique_drives.add(drive_id)
-                            local_progress_callback(resp["body"]["value"])
+                            has_next = "@odata.nextLink" in resp["body"]
+                            local_progress_callback(resp["body"]["value"], has_next)
 
                         if "body" in resp and "@odata.nextLink" in resp["body"]:
                             next_url = resp["body"]["@odata.nextLink"]
@@ -802,13 +820,14 @@ class FileEstimator(Estimator):
                     next_batch_id_to_batch_map[idx] = batch
                     idx += 1
                     
-                next_response_map: Dict[int, List[Dict[str, Any]]] = {}
-                for batch_id, future in next_futures_map.items():
-                    next_response_map[batch_id] = future.result()
+                from concurrent.futures import as_completed
+                future_to_batch_id = {future: bid for bid, future in next_futures_map.items()}
                     
                 new_pending_next_items = []
                 
-                for batch_id, responses in next_response_map.items():
+                for future in as_completed(next_futures_map.values()):
+                    batch_id = future_to_batch_id[future]
+                    responses = future.result()
                     batch = next_batch_id_to_batch_map[batch_id]
                     new_pending_next_items.extend(process_pagination_responses(batch, responses, drive_to_resp_map, "driveId", GRAPH_BASE_URL, failures, False, local_progress_callback))
                     
@@ -816,9 +835,6 @@ class FileEstimator(Estimator):
 
             # Now process all merged responses to build the tree
             for drive_id, resp in drive_to_resp_map.items():
-                adj_list[drive_id] = {}
-                parent_references[drive_id] = {}
-                
                 if "body" in resp and "value" in resp["body"]:
                     for file in resp["body"]["value"]:
                         resource_id_to_details[file["id"]] = file

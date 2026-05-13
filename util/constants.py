@@ -21,7 +21,7 @@ TOKEN_URL_TEMPLATE: str = (
 MAX_RETRIES: int = 10
 BACKOFF: int = 2
 SHOW_LOAD_MULTIPLIER = False
-USE_MSFT_BACKOFF = False
+USE_MSFT_BACKOFF = True
 
 # Chat Estimation Cost Weights (Seconds)
 BLENDED_MSG_COST_SEC: float = 0.75

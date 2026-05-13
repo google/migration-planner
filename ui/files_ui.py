@@ -55,38 +55,44 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         if not self.view_progress.winfo_viewable():
           self.show_progress_view()
         count = msg.get("count", 0)
+        team_site_count = msg.get("teamSiteCount", 0)
+        personal_site_count = msg.get("personalSiteCount", 0)
         list_count = msg.get("listCount", 0)
         drive_count = msg.get("driveCount", 0)
         license_count = msg.get("licenseCount", 0)
         status = msg.get("status", "Scanning...")
-        if "subsites" in self.prog_widgets:
-          widget = self.prog_widgets["subsites"]["lbl"]
-          bar = self.prog_widgets["subsites"]["bar"]
+        if "sites" in self.prog_widgets:
+          widget = self.prog_widgets["sites"]["lbl"]
+          bar = self.prog_widgets["sites"]["bar"]
           if status == "Fetching...":
             bar.start()
           if widget.winfo_exists():
-            text = f"Subsites: {count}"
+            text = f"Sites: {count}"
+            if team_site_count > 0:
+              text += f" | Team Sites: {team_site_count}"
+            if personal_site_count > 0:
+              text += f" | Personal Sites: {personal_site_count}"
+            if list_count > 0:
+              text += f" | Lists: {list_count}"
             if drive_count > 0:
               text += f" | Drives: {drive_count}"
             if license_count > 0:
               text += f" | Licenses: {license_count}"
-            if list_count > 0:
-              text += f" | Lists: {list_count}"
             widget.configure(
                 text=text
             )
-          if not self.spinners_active.get("subsites"):
-            self.spinners_active["subsites"] = True
-            self.animate_spinner("subsites")
+          if not self.spinners_active.get("sites"):
+            self.spinners_active["sites"] = True
+            self.animate_spinner("sites")
         if status == "Done":
-          self.spinners_active["subsites"] = False
-          if "subsites" in self.prog_widgets:
-            widget_icon = self.prog_widgets["subsites"]["icon"]
+          self.spinners_active["sites"] = False
+          if "sites" in self.prog_widgets:
+            widget_icon = self.prog_widgets["sites"]["icon"]
             if widget_icon.winfo_exists():
               widget_icon.configure(
                   text="✓", text_color=COLOR_SUCCESS
               )
-            widget_bar = self.prog_widgets["subsites"]["bar"]
+            widget_bar = self.prog_widgets["sites"]["bar"]
             if widget_bar.winfo_exists():
               widget_bar.stop()
               widget_bar.configure(mode="determinate")
@@ -730,7 +736,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
     self.prog_widgets = {}
 
-    self.create_progress_row(self.scan_container, "subsites", "Subsite Discovery", mode="indeterminate")
+    self.create_progress_row(self.scan_container, "sites", "Site Discovery", mode="indeterminate")
     self.create_progress_row(self.scan_container, "drives", "Drive Discovery", mode="indeterminate")
     self.create_progress_row(self.scan_container, "drive_parsing", "Drive Scan", mode="determinate")
     self.create_progress_row(self.scan_container, "plan_generation", "Generating Migration Plan", mode="determinate")
