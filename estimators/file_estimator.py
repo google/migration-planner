@@ -887,8 +887,8 @@ class FileEstimator(Estimator):
                     active_thread_count.decrement()
                     self._log_and_fail(f"Error while submitting to executor in _calculate_drive_metrics", e, failures)
             
-            while active_thread_count.get_value() > 0:
-                with self.condition:
+            with self.condition:
+                while active_thread_count.get_value() > 0:
                     self.condition.wait()
             
             return drive_metrics

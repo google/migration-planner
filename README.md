@@ -13,9 +13,28 @@
 #### UX change to support new features
 - When starting the estimations, the first progress bar now would display the text `Scanning Entities` instead of `Scanning Users` to indicate that we are scanning for both users and groups. Also the count subtext would now show the split of number of users and group mailboxes.
 - When using the CSV based flow, script users should specify a new column in the CSV called `Type` to distinguish users from group mailboxes. Note that this is not needed if group mailbox estimations are not required or if the Full scan mode is being used. Compatible values for this column are `User` and `Group Mailbox`.
+Support for Sharepoint metrics for a tenant have been added. Users will now be able to generate various metrics for the Sharepoint resources (like sites, drives, etc.) for their specific tenant.
+
+#### UX change to support new features
+- To launch the Sharepoint estimator tool (in contrast to the default Exchange Online estimator tool), users would need to set an environment variable **MIGRATION_TOOL_TYPE** to `files`. To be more specific users would now be required to run the command `MIGRATION_TOOL_TYPE=files python3 migration_plannner.py` for launching Sharepoint Estimator.
+- The input screen for Sharepoint Estimator will take two additional inputs namely the following
+  - **File Distribution Bucket Ranges**: This will specify the bucket ranges to group the files by their sizes.
+  - **Lower count limit for Large Resources**: This will take in a number and all the resources (namely folders) whose subtree size is > the provided value will be reported. Note that keeping this very low can lead to very huge outputs.
+- The progress screen would have three progress bars:
+  - **Subsite Discovery**: This progress bar will report the progress while scanning all the subsites in the tenant under the root site.
+  - **Drive Discovery**: This progress bar will report the progress while scanning all the folders in the drives found in the subsite scan.
+  - **Drive Scan**: This will show the progress of the metrics (like max depth, folder count, file distributions, etc.) for the drives.
+- The report screen would display:
+  - **Summary Metrics**: This will display the summary metrics for the entire tenant.
+  - **Drive Details**: This will display the drive details for each drive. Only 10 drives will be included in the UI report (Export the CSV for complete details).
+  - **Large Resources**: This will display the large resources (namely folders) whose subtree size is > the provided value.
+  - **File Size Distribution**: This will display the distribution of files based on their sizes as per the bucket ranges provided in the input screen.
+  - **License Metrics**: This will display the license metrics for the tenant.
 
 #### System behaviour changes
-- While the concurrency numbers set in the `Advanced Settings` is still linearly proportional to the number of actual active threads, it won't represent the **EXACT** number of threads being spawned for estimating resources like `In-Place Archives` and `Group Mailboxes`. This is by design and is done to balance latency with resource usage.
+- **Subsite Discovery** and **Drive Discovery** phases in the progress screen would have indeterminate progress bars as the total number of subsites/folders/files are not known during those phases.
+- However the **Drive Scan** phase would be determinate and show proper progress.
+- The logs and CSV report would only be available through the export option and not under the outputs/ directory to minimize report creation latency in case of huge reports.
 
 ## DISCLAIMER
 
@@ -87,7 +106,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 3.  **Install Dependencies**: Run the following command:
     ```cmd
-    pip install customtkinter requests pandas psutil Pillow urllib3 aiohttp certifi
+    pip install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi
     ```
 
 #### macOS
@@ -103,7 +122,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 4.  **Install Dependencies**:
     ```bash
-    pip3 install customtkinter requests pandas psutil Pillow urllib3 aiohttp certifi
+    pip3 install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi
     ```
 
 #### Linux (Ubuntu/Debian)
@@ -118,7 +137,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 3.  **Install Dependencies**:
     ```bash
-    pip3 install customtkinter requests pandas psutil Pillow urllib3 aiohttp certifi
+    pip3 install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi
     ```
 
 ### 3. Setting up a Virtual Environment (Optional / Corp Policy)
@@ -174,8 +193,13 @@ In your new app, go to **API permissions > Add a permission > Microsoft Graph > 
 *   `TeamMember.Read.All` (To read team memberships)
 *   `Group.Read.All` (To list teams)
 
-4.  Click **Add permissions**.
-5.  **Crucial Step**: Click **"Grant admin consent for [Your Organization]"** and confirm "Yes". All status icons should turn green.
+### Files Planner Specific Persmissions
+*   `Sites.Read.All` (To list sites)
+*   `Files.Read.All` (To count files)
+*   `LicenseAssignment.Read.All` (To check license information)
+
+5.  Click **Add permissions**.
+6.  **Crucial Step**: Click **"Grant admin consent for [Your Organization]"** and confirm "Yes". All status icons should turn green.
 
 ### 3. Get Credentials
 You will need three values for the tool:
@@ -198,6 +222,11 @@ You will need three values for the tool:
 3.  Run the script:
     *   Windows: `python migration_planner.py`
     *   Mac/Linux: `python3 migration_planner.py`
+
+    For Sharepoint Estimator run the following command instead:
+    *   Windows: `MIGRATION_TOOL_TYPE=files python migration_planner.py`
+    *   Mac/Linux: `MIGRATION_TOOL_TYPE=files python3 migration_planner.py`
+
     *(Ensure you are in your virtual environment if you created one).*
 
 ### Process Decoupling Mechanics
@@ -225,6 +254,9 @@ Click **"Show Advanced Settings"** to tune the performance:
 *   **Concurrency**: Controls how many parallel threads the tool runs.
     *   **Recommendation**: For a standard machine (8 Core, 16GB+ RAM), set this to **30**. Setting it too high may cause more frequent throttling errors from Microsoft and consume more resources from your system.
 *   **Max Batches**: Defines the upper cap for the number of batches to be generated by the migration plan. In case of very large corpuses, it might not be possible to adhere to this number.
+*   **File Distribution Bucket Ranges**: Provides the buckets to group files in the tenant by their sizes.
+*   **Lower count limit for Large Resources**: Provides the lower count limit for resources that are considered large. Any resource (namely folder) with count greater than this limit will be reported.
+
 
 #### 3. Starting the Scan (Exchange)
 Click **"Get Migration Estimates"**.
@@ -273,14 +305,31 @@ Once started, you will see a real-time progress screen:
 
 ## Understanding the Results
 
-### Workflow A Results: Exchange Online Planner
+### 1. Top Level Metrics
 
-#### 1. Top Level Metrics (Exchange)
-The top cards display the total scope of the Exchange migration:
+#### Exchange Online
+The top cards display the total scope of the migration:
 *   **Users**: Total distinct users identified/scanned.
 *   **Emails / Events / Contacts / In-Place Archives / Group Mailboxes**: The aggregate sum of items across all users.
 
-#### 2. Timeline Estimates & Parallel Batches (Exchange)
+#### Sharepoint
+
+For sharepoint we show the following metrics in the report.
+*   **Subsite Count**: Total distinct subsites identified/scanned.
+*   **Max Effective Depth**: Maximum effective depth for the tenant. As in the maximum depth of a resource (file, folder, etc.) from the root of the tenant.
+*   **Max Subsite Depth**: Maximum depth of a subsite from root site.
+*   **Max Folder Depth**: Maximum depth of a folder from its drive root.
+*   **Folder Count**: Total distinct folders identified/scanned.
+*   **File Count**: Total distinct files identified/scanned.
+*   **Shortcut Count**: Total distinct shortcuts identified/scanned.
+*   **List Count**: Total distinct lists identified/scanned.
+*   **File Size Distribution**: Distribution of files by size as per the buckets provided in input.
+*   **Large Resources**: Resources that are larger than the specified limit.
+*   **Drive Details**: Details of each drive in the tenant.
+
+*Note that we don't show drive count as the Exported Report has the details for each drive anyways. So the count is omitted to avoid redundancy.
+
+### 2. Timeline Estimates & Parallel Batches (*Only for Exchange Online)
 The tool calculates an Estimated Completion Time (ETA) based on the email corpus using a heuristic based logic:
 *   **User Ordering**: Users are sorted in Ascending Order (Lightest users -> Heaviest users). The lightest users are packed into Batch 1, while the heaviest users usually end up in the final batches.
 *   Max(Emails , (Calendar Events + Contacts), In-Place Archives, Group Mails) determines the sorting logic.
