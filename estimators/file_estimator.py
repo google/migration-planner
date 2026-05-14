@@ -271,9 +271,18 @@ class FileEstimator(Estimator):
         
         for subsite_id, drive_ids in subsite_to_drives.items():
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
+
+            metrics["siteMetrics"][subsite_id]["folderCount"] = 0
+            metrics["siteMetrics"][subsite_id]["fileCount"] = 0
+            
             for drive_id in drive_ids:
                 if drive_id in metrics["driveMetrics"]:
-                    metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + metrics["driveMetrics"][drive_id]["maxEffectiveDepth"])  
+                    drive_metric = metrics["driveMetrics"][drive_id]
+                    metrics["siteMetrics"][subsite_id]["folderCount"] += drive_metric.get("folderCount", 0)
+                    metrics["siteMetrics"][subsite_id]["fileCount"] += drive_metric.get("fileCount", 0)
+                    metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + drive_metric["maxEffectiveDepth"])  
+                    
+            metrics["siteMetrics"][subsite_id]["resourceCount"] = metrics["siteMetrics"][subsite_id]["folderCount"] + metrics["siteMetrics"][subsite_id]["fileCount"]
 
         for size_range in self.config.bucket_ranges:
             metrics["tenantLevelFileSizeDistribution"]["buckets"].append({
@@ -1098,7 +1107,7 @@ class FileEstimator(Estimator):
     ):       
         try:
             resource = resource_id_to_details[resource_id]
-            
+
             # Root folder. Skipping it as it is an implicit folder added by default with common ID across multiple drives.
             if "id" not in resource["parentReference"]:
                 with self.condition:

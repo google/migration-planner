@@ -704,10 +704,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Section 5: Site Details
       writer.writerow(["Site Details", ""])
-      writer.writerow(["Site Name", "Site Level"])
+      writer.writerow(["Site Name", "Site Level", "Folder Count", "File Count", "Resource Count"])
       site_metrics = data.get("siteMetrics", {})
       for site_id, s_data in site_metrics.items():
-        writer.writerow([self._get_display_name(site_id), s_data.get("siteLevel", 0)])
+        writer.writerow([
+            self._get_display_name(site_id), 
+            s_data.get("siteLevel", 0),
+            s_data.get("folderCount", 0),
+            s_data.get("fileCount", 0),
+            s_data.get("resourceCount", 0)
+        ])
         
       writer.writerow([]) # Blank line separator
       
