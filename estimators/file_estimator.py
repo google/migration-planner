@@ -788,7 +788,7 @@ class FileEstimator(Estimator):
             parent_references[drive_id] = {}
         try:
             # use delta api to fetch the folders
-            delta_api = "/drives/{driveId}/root/delta?$select=id,parentReference,folder,file,remoteItem,size"
+            delta_api = "/drives/{driveId}/root/delta?$select=id,parentReference,name,folder,file,remoteItem,size"
             batches = create_batches(delta_api, [{"driveId": drive_id} for drive_id in drive_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -893,20 +893,21 @@ class FileEstimator(Estimator):
                     
                 pending_next_items = new_pending_next_items
 
-            # Now process all merged responses to build the tree
+            # 1. First populate resource details and parent references
             for drive_id, resp in drive_to_resp_map.items():
                 if "body" in resp and "value" in resp["body"]:
                     for file in resp["body"]["value"]:
                         resource_id_to_details[file["id"]] = file
                         
                         if "parentReference" in file and "id" in file["parentReference"]:
-                            parent_id = file["parentReference"]["id"]
-                            if parent_id in adj_list[drive_id]:
-                                if file["id"] not in adj_list[drive_id][parent_id]:
-                                    adj_list[drive_id][parent_id].append(file["id"])
-                            else:
-                                adj_list[drive_id][parent_id] = [file["id"]]
-                            parent_references[drive_id][file["id"]] = parent_id
+                            parent_references[drive_id][file["id"]] = file["parentReference"]["id"]
+                            
+            # 2. Now build adj_list from parent_references to guarantee a true tree!
+            for drive_id in drive_ids:
+                for child_id, parent_id in parent_references[drive_id].items():
+                    if parent_id not in adj_list[drive_id]:
+                        adj_list[drive_id][parent_id] = []
+                    adj_list[drive_id][parent_id].append(child_id)
 
             return adj_list, parent_references, resource_id_to_details
         except Exception as e:

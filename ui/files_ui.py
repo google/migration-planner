@@ -222,8 +222,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                 text_parts.append(f"Max Depth: {max_depth}")
             
             if folder_exceeding > 0 or file_exceeding > 0:
-                text_parts.append(f"Folders > Limit: {folder_exceeding}")
-                text_parts.append(f"Files > Limit: {file_exceeding}")
+                text_parts.append(f"Folders with Depth > Limit: {folder_exceeding}")
+                text_parts.append(f"Files with Depth > Limit: {file_exceeding}")
                 
             skipped_folders = msg.get("skippedFolderCount", 0)
             if skipped_folders > 0:
@@ -262,10 +262,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "maxEffectiveDepth": "Max Effective Depth",
         "maxFolderDepth": "Max Folder Depth",
         "maxSubsiteDepth": "Max Subsite Depth",
-        "subsiteCount": "Subsite Count",
+        "subsiteCount": "Site/Subsite Count",
         "shortcutCount": "Shortcut Count",
         "listCount": "List Count",
-        "subsite_count": "Subsite Count",
+        "subsite_count": "Site/Subsite Count",
         "documentLibrary": "Document Library",
         "personalDrive": "Personal Drive",
         "businessDrive": "Business Drive",
@@ -341,7 +341,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       card_frame.pack(fill="x", pady=10)
 
       self.create_stat_card(card_frame, "Max Effective Depth", f"{data.get('maxEffectiveDepth', 0):,}", "👥")
-      self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsite_count', data.get('subSiteCount', 0)):,}", "🏢")
+      self.create_stat_card(card_frame, "Site/Subsite Count", f"{data.get('subsite_count', data.get('subSiteCount', 0)):,}", "🏢")
       self.create_stat_card(card_frame, "Shortcut Count", f"{data.get('shortcutCount', 0):,}", "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
       self.create_stat_card(card_frame, "Folder Count", f"{data.get('folderCount', 0):,}", "📁")
@@ -534,7 +534,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ctk.CTkLabel(header_row, text="Type", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
           ctk.CTkLabel(header_row, text="ID", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
           ctk.CTkLabel(header_row, text="Count", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
-          ctk.CTkLabel(header_row, text="Limit", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
 
           for i, res in enumerate(data["tenantLevelLargeResources"][0:10]):         # only showing first 10 resources
               bg_color = COLOR_SURFACE if i % 2 == 0 else COLOR_SURFACE_VARIANT
@@ -544,8 +543,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               ctk.CTkLabel(row_frame, text=str(res.get('Type', res.get('type'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
               ctk.CTkLabel(row_frame, text=str(res.get('Id', res.get('id'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
               ctk.CTkLabel(row_frame, text=f"{res.get('subTreeCount', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
-              ctk.CTkLabel(row_frame, text=f"{res.get('Limit', res.get('limit', 0)):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
-
 
       # Resources
       ctk.CTkLabel(
@@ -693,14 +690,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Section 4: Large Resources
       writer.writerow(["Large Resources", ""])
-      writer.writerow(["Type", "ID", "SubTreeCount", "Limit", "Drive"])
+      writer.writerow(["Type", "ID", "SubTreeCount", "Drive"])
       large_resources = data.get("tenantLevelLargeResources", [])
       for res in large_resources:
         writer.writerow([
             res.get("Type", res.get("type", "")),
             res.get("Id", res.get("id", "")),
             res.get("subTreeCount", 0),
-            res.get("Limit", res.get("limit", 0)),
             self._get_display_name(res.get("drive", ""))
         ])
         

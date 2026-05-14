@@ -1422,8 +1422,6 @@ class MigrationEstimatorTool(ctk.CTk):
         backoff=self.backoff.get(),
         eta_max_users=self.eta_max_users.get(),
         parallel_batches=self.parallel_batches.get(),
-        bucket_ranges=[(int(r[0].get()), float('inf') if r[1].get() == 'INF' else int(r[1].get())) for r in self.file_bucket_ranges] if hasattr(self, 'file_bucket_ranges') and self.file_bucket_ranges else [],
-        large_resource_count_limit=self.large_resource_limit_var.get() if hasattr(self, 'large_resource_limit_var') and self.large_resource_limit_var else 500
     )
 
   def _authenticate_if_needed(
