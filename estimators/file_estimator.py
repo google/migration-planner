@@ -49,6 +49,22 @@ class FileEstimator(Estimator):
     def calculate_resource_count(self, data: Dict[str, Any], failures: List[Dict[str, str]]) -> Dict[str, int]:
         raise NotImplementedError("calculate_resource_count is not required for SharePointEstimator")
 
+    def calculate_migration_eta(self, data: Dict[str, Any]) -> float:
+        """Calculates duration in HOURS based on batching throughput constraints."""
+        items = data.get("items", {})
+        batch_corpus_size = sum(item["size"] for item in items)
+        batch_resource_count = sum(item["files"] + item["folders"] + item["shortcuts"] for item in items)
+        
+        global_count_limit = data.get("FILES_GLOBAL_COUNT_LIMIT")
+        global_corpus_size_limit = data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT")
+        
+        # Since there is no per site throttling limit using the min of the global limits by count, corpus
+        seconds_by_count = batch_resource_count / global_count_limit
+        seconds_by_size = batch_corpus_size / global_corpus_size_limit
+
+        total_seconds = max(seconds_by_count, seconds_by_size)
+        return total_seconds / 3600.0
+
     def calculate_resource_metrics(
         self, 
         data: Dict[str, Any], 
@@ -125,7 +141,7 @@ class FileEstimator(Estimator):
             }
 
             # print(f"Drive Count: {len(drives)}")
-            drive_id_to_adj_list, parent_references, resource_id_to_details = self._create_in_memory_tree([drive["id"] for drive in drives], drive_discovery_progress_metrics, failures)
+            drive_id_to_adj_list, parent_references, resource_id_to_details, drive_id_to_total_size = self._create_in_memory_tree([drive["id"] for drive in drives], drive_discovery_progress_metrics, failures)
             self.progress_update_callback("drive_discovery", status="Done", count=len(drives), **drive_discovery_progress_metrics)
 
             # Calculate metrics for all drives
@@ -215,7 +231,7 @@ class FileEstimator(Estimator):
 
             self.progress_update_callback("phase_status", source="plan_generation", status="running")
             metrics["driveMetrics"] = drive_metrics
-            self._update_tenant_metrics_from_drive_metrics(metrics, subsite_to_drives)
+            self._update_tenant_metrics_from_drive_metrics(metrics, subsite_to_drives, drive_id_to_total_size)
             self.progress_update_callback("phase_status", source="plan_generation", status="complete")
 
             return metrics
@@ -252,7 +268,8 @@ class FileEstimator(Estimator):
     def _update_tenant_metrics_from_drive_metrics(
         self,
         metrics: Dict[str, Any],
-        subsite_to_drives: Dict[str, List[Any]]
+        subsite_to_drives: Dict[str, List[Any]],
+        drive_id_to_total_size: Dict[str, int]
     ):
         self.progress_update_callback(
             "scan_progress",
@@ -274,12 +291,14 @@ class FileEstimator(Estimator):
 
             metrics["siteMetrics"][subsite_id]["folderCount"] = 0
             metrics["siteMetrics"][subsite_id]["fileCount"] = 0
+            metrics["siteMetrics"][subsite_id]["totalSize"] = 0
             
             for drive_id in drive_ids:
                 if drive_id in metrics["driveMetrics"]:
                     drive_metric = metrics["driveMetrics"][drive_id]
                     metrics["siteMetrics"][subsite_id]["folderCount"] += drive_metric.get("folderCount", 0)
                     metrics["siteMetrics"][subsite_id]["fileCount"] += drive_metric.get("fileCount", 0)
+                    metrics["siteMetrics"][subsite_id]["totalSize"] += drive_id_to_total_size.get(drive_id, 0)
                     metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + drive_metric["maxEffectiveDepth"])  
                     
             metrics["siteMetrics"][subsite_id]["resourceCount"] = metrics["siteMetrics"][subsite_id]["folderCount"] + metrics["siteMetrics"][subsite_id]["fileCount"]
@@ -815,6 +834,7 @@ class FileEstimator(Estimator):
             pending_next_items = []
 
             seen_ids = set()
+            drive_id_to_total_size = {}
 
             def local_progress_callback(responses: List, has_next=False):
                 nonlocal completed_drives
@@ -829,6 +849,8 @@ class FileEstimator(Estimator):
                         drive_discovery_progress_metrics["folderCount"] += 1
                     elif "file" in curr_response:
                         drive_discovery_progress_metrics["fileCount"] += 1
+                        drive_id = curr_response["parentReference"]["driveId"]
+                        drive_id_to_total_size[drive_id] = drive_id_to_total_size.get(drive_id, 0) + curr_response.get("size", 0)
                     elif "remoteItem" in curr_response:
                         drive_discovery_progress_metrics["shortcutCount"] += 1
                 
@@ -918,7 +940,7 @@ class FileEstimator(Estimator):
                         adj_list[drive_id][parent_id] = []
                     adj_list[drive_id][parent_id].append(child_id)
 
-            return adj_list, parent_references, resource_id_to_details
+            return adj_list, parent_references, resource_id_to_details, drive_id_to_total_size
         except Exception as e:
             self._log_and_fail(f"Error in _create_in_memory_tree", e, failures)
             return {}, {}, {}
@@ -1117,7 +1139,6 @@ class FileEstimator(Estimator):
             drive_id = resource["parentReference"]["driveId"]
             is_resource_folder = "folder" in resource
 
-            subtree_size = 0
             subtree_count = 0
             max_depth = 0
 
@@ -1126,15 +1147,12 @@ class FileEstimator(Estimator):
                     child_metrics = resource_metrics.get(child_id, None)
                     if child_metrics:
                         subtree_count += child_metrics["subTreeCount"]
-                        subtree_size += child_metrics["subTreeSize"]
                         max_depth = max(max_depth, child_metrics["maxDepth"] + 1)
 
             subtree_count += 1
-            subtree_size += resource["size"]
 
             resource_metrics.update(resource["id"], {
                 "subTreeCount": subtree_count,
-                "subTreeSize": subtree_size,
                 "maxDepth": max_depth
             })
 

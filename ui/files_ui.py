@@ -7,8 +7,9 @@ from tkinter import messagebox
 from util.monitoring import ResourceMonitor
 from estimators.factory import EstimatorFactory
 from util.enums import FailureType
-
 import json
+import pandas as pd
+import math
 
 class FileMigrationEstimatorTool(MigrationEstimatorTool):
   def __init__(self):
@@ -292,6 +293,29 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         self.log_msg(prefix + str(failure))
 
       self.log_msg("=" * 60)
+      self.ui_update("scan_progress", source="plan_generation", progress=0.5, status="running", extra_text="Calculating migration batches...")
+      
+      # Extract siteMetrics and build DataFrame
+      site_metrics = file_metrics.get("siteMetrics", {})
+      site_data = []
+      for site_id, s_data in site_metrics.items():
+        site_data.append({
+            "Site Id": site_id,
+            "Resource Count": s_data.get("resourceCount", 0),
+            "Folder Count": s_data.get("folderCount", 0),
+            "File Count": s_data.get("fileCount", 0),
+            "Shortcut Count": s_data.get("shortcutCount", 0),
+            "Corpus Size": s_data.get("totalSize", 0)
+        })
+      df = pd.DataFrame(site_data)
+      
+      df_final, batches_list, total_eta, buckets = self.calculate_migration_batches(df)
+      
+      file_metrics["batches"] = batches_list
+      file_metrics["buckets"] = buckets
+      file_metrics["total_eta"] = total_eta
+      file_metrics["df"] = df_final
+      
       self.ui_update("complete", data=file_metrics)
       
       # # 6. Analysis & Reporting
@@ -312,6 +336,223 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
   # ==========================
   def build_results_view(self):
     super().build_results_view()
+
+  def calculate_migration_batches(self, df):
+    # Ensure numeric columns
+    if "Resource Count" not in df.columns:
+      df["Resource Count"] = 0
+    else:
+      df["Resource Count"] = pd.to_numeric(df["Resource Count"], errors="coerce").fillna(0)
+
+    # 1. Sort Sites (Descending - Heaviest first)
+    df_sorted_base = df.sort_values(by="Resource Count", ascending=False).copy()
+
+    user_min_limit = self.eta_min_users.get()
+    user_max_limit = self.eta_max_users.get()
+    num_parallel = min(4, max(1, self.parallel_batches.get()))
+    max_allowed_batches = self.eta_max_batches.get()
+
+    candidate_hours = [3, 6, 12, 18, 24, 36, 48, 72, 120, 168, 240, 360, 480, 720, 1080, 1440]
+
+    best_total_eta = float("inf")
+    best_plan = None
+    fallback_plan = None
+    min_batches_seen = float("inf")
+
+    def get_batch_eta(subset_df):
+      estimator = self.factory.get_files_estimator()
+      items = []
+      for _, row in subset_df.iterrows():
+        items.append({
+            "size": row.get("Corpus Size", 0),
+            "files": int(row.get("File Count", 0)),
+            "folders": int(row.get("Folder Count", 0)),
+            "shortcuts": int(row.get("Shortcut Count", 0))
+        })
+        
+      data = {
+        "items": items,
+        "FILES_GLOBAL_COUNT_LIMIT": FILES_GLOBAL_COUNT_LIMIT,
+        "FILES_GLOBAL_CORPUS_SIZE_LIMIT": FILES_GLOBAL_CORPUS_SIZE_LIMIT,
+      }
+      return estimator.calculate_migration_eta(data)
+
+    # Iterate through candidates
+    for target_hours in candidate_hours:
+      df_sorted = df_sorted_base.copy()
+      df_sorted["Suggested Batch"] = ""
+
+      total_users = len(df_sorted)
+      start_idx = 0
+      raw_chunks = []
+
+      # Partitioning Loop
+      while start_idx < total_users:
+        remaining_users = total_users - start_idx
+        current_max = min(remaining_users, user_max_limit)
+        current_min = min(user_min_limit, remaining_users)
+
+        # Binary Search for Optimal Size
+        min_subset = df_sorted.iloc[start_idx : start_idx + current_min]
+        if get_batch_eta(min_subset) > target_hours:
+          chosen_size = current_min
+        else:
+          max_subset = df_sorted.iloc[start_idx : start_idx + current_max]
+          if get_batch_eta(max_subset) <= target_hours:
+            chosen_size = current_max
+          else:
+            low = current_min
+            high = current_max
+            chosen_size = high
+            while low <= high:
+              mid = (low + high) // 2
+              subset = df_sorted.iloc[start_idx : start_idx + mid]
+              eta = get_batch_eta(subset)
+
+              if eta > target_hours:
+                chosen_size = mid
+                high = mid - 1
+              else:
+                low = mid + 1
+
+        end_idx = start_idx + chosen_size
+        final_subset = df_sorted.iloc[start_idx:end_idx]
+        w_eta = get_batch_eta(final_subset)
+
+        # Store the chunk data
+        raw_chunks.append({
+            "start_idx": start_idx,
+            "end_idx": end_idx,
+            "sites": len(final_subset),
+            "resource_count": int(final_subset["Resource Count"].sum()),
+            "folder_count": int(final_subset["Folder Count"].sum()) if "Folder Count" in final_subset.columns else 0,
+            "file_count": int(final_subset["File Count"].sum()) if "File Count" in final_subset.columns else 0,
+            "shortcut_count": int(final_subset["Shortcut Count"].sum()) if "Shortcut Count" in final_subset.columns else 0,
+            "corpus_size": float(final_subset["Corpus Size"].sum()) if "Corpus Size" in final_subset.columns else 0.0,
+            "eta": w_eta,
+        })
+        start_idx = end_idx
+
+      # Schedule Chunks into Buckets
+      num_buckets = min(num_parallel, len(raw_chunks))
+
+      if num_buckets == 0:
+        total_eta = 0
+        buckets = []
+        final_batches_list = []
+      else:
+        buckets = [
+            {"id": i + 1, "total": 0.0, "batches": []}
+            for i in range(num_buckets)
+        ]
+        for chunk in raw_chunks:
+          target = min(buckets, key=lambda b: b["total"])
+          target["batches"].append(chunk)
+          target["total"] += chunk["eta"]
+
+        total_eta = max(b["total"] for b in buckets)
+
+        # Reverse and Name
+        all_chunks_with_time = []
+        buckets.reverse()
+
+        for b_idx, b in enumerate(buckets):
+          batches_list = b["batches"]
+          if isinstance(batches_list, list):
+            batches_list.reverse()
+          current_time = 0.0
+          for chunk in batches_list:
+            chunk["start_time"] = current_time
+            chunk["bucket_idx"] = b_idx
+            current_time += chunk["eta"]
+            all_chunks_with_time.append(chunk)
+
+        all_chunks_with_time.sort(
+            key=lambda x: (x["start_time"], x["bucket_idx"])
+        )
+
+        final_batches_list = []
+        for i, chunk in enumerate(all_chunks_with_time):
+          batch_name = f"Batch {i+1}"
+          chunk["name"] = batch_name
+          final_batches_list.append(chunk)
+          col_idx = df_sorted.columns.get_loc("Suggested Batch")
+          df_sorted.iloc[chunk["start_idx"] : chunk["end_idx"], col_idx] = (
+              batch_name
+          )
+
+      num_batches = len(final_batches_list)
+      self.log_msg(
+          f"Evaluated Target {target_hours}h: Generated {num_batches} batches |"
+          f" Total ETA: {self.format_eta(total_eta)}"
+      )
+
+      # Selection Logic
+      if num_batches <= max_allowed_batches:
+        if total_eta < best_total_eta:
+          best_total_eta = total_eta
+          best_plan = (df_sorted, final_batches_list, total_eta, buckets)
+
+      if num_batches < min_batches_seen:
+        min_batches_seen = num_batches
+        fallback_plan = (df_sorted, final_batches_list, total_eta, buckets)
+
+    if best_plan is not None:
+      df_final, final_batches_list, total_eta, buckets = best_plan
+    else:
+      df_final, final_batches_list, total_eta, buckets = fallback_plan
+
+    return df_final, final_batches_list, total_eta, buckets
+
+  def format_size(self, size_in_bytes):
+    if size_in_bytes >= 1024**3:
+      return f"{size_in_bytes / (1024**3):.2f} GB"
+    elif size_in_bytes >= 1024**2:
+      return f"{size_in_bytes / (1024**2):.2f} MB"
+    elif size_in_bytes >= 1024:
+      return f"{size_in_bytes / 1024:.2f} KB"
+    else:
+      return f"{size_in_bytes} Bytes"
+
+  def create_batch_bar(self, parent, batch, max_eta):
+    f = ctk.CTkFrame(parent, fg_color="transparent")
+    f.pack(fill="x", padx=20, pady=8)
+    
+    sites_str = self.format_metric(batch.get("sites", 0))
+    folders_str = self.format_metric(batch.get("folder_count", 0))
+    files_str = self.format_metric(batch.get("file_count", 0))
+    shortcuts_str = self.format_metric(batch.get("shortcut_count", 0))
+    size_str = self.format_size(batch.get("corpus_size", 0))
+    
+    info = (
+        f"{batch['name']} - {sites_str} 🏢  |  {folders_str} 📁  |  {files_str} 📄  |  {shortcuts_str} 🔗  |  {size_str} 💾"
+    )
+    ctk.CTkLabel(
+        f,
+        text=info,
+        width=350,
+        anchor="w",
+        font=FONT_BODY_MEDIUM,
+        text_color=COLOR_TEXT_MAIN,
+    ).pack(side="left")
+
+    if max_eta > 0:
+      pixel_width = int((batch["eta"] / max_eta) * 350)
+    else:
+      pixel_width = 0
+
+    w_width = max(20, pixel_width)
+
+    bar = ctk.CTkFrame(
+        f, width=w_width, height=16, fg_color=COLOR_BATCH_BAR, corner_radius=8
+    )
+    bar.pack(side="left", padx=10)
+    ctk.CTkLabel(
+        f,
+        text=self.format_eta(batch["eta"]),
+        font=FONT_BODY_BOLD,
+        text_color=COLOR_TEXT_MAIN,
+    ).pack(side="left")
 
   def show_results_content(self, data):
     try:
@@ -389,93 +630,99 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ctk.CTkLabel(row3, text=f"User: {metrics.get('totalAllotedUnits', {}).get('User', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
           ctk.CTkLabel(row3, text=f"Company: {metrics.get('totalAllotedUnits', {}).get('Company', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
 
+      # Container for Paginated Content
+      self.paginated_frame = ctk.CTkFrame(
+          self.view_results, fg_color="transparent"
+      )
+      self.paginated_frame.pack(fill="x", expand=True)
+
       # Drive Details
-      if "driveMetrics" in data:
-          ctk.CTkLabel(
-              self.view_results,
-              text="Drive Details (Top 10)",
-              font=FONT_HEADER_SMALL,
-              text_color=COLOR_TEXT_MAIN,
-          ).pack(anchor="w", padx=10, pady=(20, 5))
+      # if "driveMetrics" in data:
+      #     ctk.CTkLabel(
+      #         self.view_results,
+      #         text="Drive Details (Top 10)",
+      #         font=FONT_HEADER_SMALL,
+      #         text_color=COLOR_TEXT_MAIN,
+      #     ).pack(anchor="w", padx=10, pady=(20, 5))
 
-          drive_count = len(data["driveMetrics"])
-          if drive_count > 10:
-              ctk.CTkLabel(
-                  self.view_results,
-                  text="* There are more drives. Please export the full report to view their details.",
-                  font=FONT_BODY_SMALL,
-                  text_color=COLOR_TEXT_SUB,
-              ).pack(anchor="w", padx=10, pady=(0, 10))
+      #     drive_count = len(data["driveMetrics"])
+      #     if drive_count > 10:
+      #         ctk.CTkLabel(
+      #             self.view_results,
+      #             text="* There are more drives. Please export the full report to view their details.",
+      #             font=FONT_BODY_SMALL,
+      #             text_color=COLOR_TEXT_SUB,
+      #         ).pack(anchor="w", padx=10, pady=(0, 10))
 
-          # Scrollable frame for drives
-          drives_scroll = ctk.CTkScrollableFrame(
-              self.view_results,
-              fg_color="transparent",
-              height=500,
-              scrollbar_button_color="white",
-              scrollbar_button_hover_color=COLOR_SECONDARY_HOVER,
-          )
-          drives_scroll.pack(fill="x", padx=10, pady=5)
+      #     # Scrollable frame for drives
+      #     drives_scroll = ctk.CTkScrollableFrame(
+      #         self.view_results,
+      #         fg_color="transparent",
+      #         height=500,
+      #         scrollbar_button_color="white",
+      #         scrollbar_button_hover_color=COLOR_SECONDARY_HOVER,
+      #     )
+      #     drives_scroll.pack(fill="x", padx=10, pady=5)
 
-          # Sort drives by maxEffectiveDepth descending
-          sorted_drives = sorted(data["driveMetrics"].items(), key=lambda item: item[1].get("maxEffectiveDepth", 0), reverse=True)
-          top_10_drives = sorted_drives[:10]
-          print(f"DEBUG: driveMetrics count = {len(data['driveMetrics'])}")
-          print(f"DEBUG: top_10_drives count = {len(top_10_drives)}")
-          for d_id, _ in top_10_drives:
-              print(f"DEBUG: Top drive: {d_id}")
+      #     # Sort drives by maxEffectiveDepth descending
+      #     sorted_drives = sorted(data["driveMetrics"].items(), key=lambda item: item[1].get("maxEffectiveDepth", 0), reverse=True)
+      #     top_10_drives = sorted_drives[:10]
+      #     print(f"DEBUG: driveMetrics count = {len(data['driveMetrics'])}")
+      #     print(f"DEBUG: top_10_drives count = {len(top_10_drives)}")
+      #     for d_id, _ in top_10_drives:
+      #         print(f"DEBUG: Top drive: {d_id}")
 
-          for drive_id, drive_data in top_10_drives:
-              # Header frame for toggle
-              drive_header = ctk.CTkFrame(drives_scroll, fg_color=COLOR_SURFACE_VARIANT, corner_radius=8)
-              drive_header.pack(fill="x", pady=2)
+      #     for drive_id, drive_data in top_10_drives:
+      #         # Header frame for toggle
+      #         drive_header = ctk.CTkFrame(drives_scroll, fg_color=COLOR_SURFACE_VARIANT, corner_radius=8)
+      #         drive_header.pack(fill="x", pady=2)
               
-              # Details frame (initially hidden)
-              drive_details = ctk.CTkFrame(drives_scroll, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
-              drive_details.is_expanded = False
+      #         # Details frame (initially hidden)
+      #         drive_details = ctk.CTkFrame(drives_scroll, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
+      #         drive_details.is_expanded = False
               
-              def toggle_drive(frame, btn, d_id, header):
-                  if frame.is_expanded:
-                      frame.pack_forget()
-                      frame.is_expanded = False
-                      if btn:
-                          btn.configure(text=f"Drive: {self._get_display_name(d_id)}... ▼")
-                  else:
-                      frame.pack(fill="x", pady=2, padx=10, after=header)
-                      frame.is_expanded = True
-                      if btn:
-                          btn.configure(text=f"Drive: {self._get_display_name(d_id)}... ▲")
+      #         def toggle_drive(frame, btn, d_id, header):
+      #             if frame.is_expanded:
+      #                 frame.pack_forget()
+      #                 frame.is_expanded = False
+      #                 if btn:
+      #                     btn.configure(text=f"Drive: {self._get_display_name(d_id)}... ▼")
+      #             else:
+      #                 frame.pack(fill="x", pady=2, padx=10, after=header)
+      #                 frame.is_expanded = True
+      #                 if btn:
+      #                     btn.configure(text=f"Drive: {self._get_display_name(d_id)}... ▲")
 
-              btn_toggle = ctk.CTkButton(
-                  drive_header,
-                  text=f"Drive: {self._get_display_name(drive_id)}... ▼",
-                  fg_color="transparent",
-                  text_color=COLOR_PRIMARY,
-                  hover=False,
-                  anchor="w",
-              )
-              btn_toggle.pack(fill="x", padx=5, pady=5)
+      #         btn_toggle = ctk.CTkButton(
+      #             drive_header,
+      #             text=f"Drive: {self._get_display_name(drive_id)}... ▼",
+      #             fg_color="transparent",
+      #             text_color=COLOR_PRIMARY,
+      #             hover=False,
+      #             anchor="w",
+      #         )
+      #         btn_toggle.pack(fill="x", padx=5, pady=5)
               
-              btn_toggle.configure(command=lambda f=drive_details, b=btn_toggle, d=drive_id, h=drive_header: toggle_drive(f, b, d, h))
+      #         btn_toggle.configure(command=lambda f=drive_details, b=btn_toggle, d=drive_id, h=drive_header: toggle_drive(f, b, d, h))
 
-              # Fill details frame
-              ctk.CTkLabel(drive_details, text=f"Drive: {self._get_display_name(drive_id)}", font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(anchor="w", padx=10, pady=(5, 2))
+      #         # Fill details frame
+      #         ctk.CTkLabel(drive_details, text=f"Drive: {self._get_display_name(drive_id)}", font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(anchor="w", padx=10, pady=(5, 2))
               
-              ctk.CTkLabel(drive_details, text=f"Max Effective Depth: {drive_data.get('maxEffectiveDepth', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
-              ctk.CTkLabel(drive_details, text=f"Shortcut Count: {drive_data.get('shortcutCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
-              ctk.CTkLabel(drive_details, text=f"Folder Count: {drive_data.get('folderCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
-              ctk.CTkLabel(drive_details, text=f"File Count: {drive_data.get('fileCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
-              ctk.CTkLabel(drive_details, text=f"Folder Count (exceeding depth limit): {drive_data.get('folderCountExceedingDepthLimit', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
-              ctk.CTkLabel(drive_details, text=f"File Count (exceeding depth limit): {drive_data.get('fileCountExceedingDepthLimit', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+      #         ctk.CTkLabel(drive_details, text=f"Max Effective Depth: {drive_data.get('maxEffectiveDepth', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+      #         ctk.CTkLabel(drive_details, text=f"Shortcut Count: {drive_data.get('shortcutCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+      #         ctk.CTkLabel(drive_details, text=f"Folder Count: {drive_data.get('folderCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+      #         ctk.CTkLabel(drive_details, text=f"File Count: {drive_data.get('fileCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+      #         ctk.CTkLabel(drive_details, text=f"Folder Count (exceeding depth limit): {drive_data.get('folderCountExceedingDepthLimit', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+      #         ctk.CTkLabel(drive_details, text=f"File Count (exceeding depth limit): {drive_data.get('fileCountExceedingDepthLimit', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
               
-              # Buckets inside drive
-              if "fileSizeDistribution" in drive_data:
-                  ctk.CTkLabel(drive_details, text="File Size Distribution:", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=(5, 2))
-                  for bucket in drive_data["fileSizeDistribution"].get("buckets", []):
-                      range_vals = bucket.get("sizeRange", (0, 0))
-                      range_str = f"{range_vals[0]} - {range_vals[1]} KB"
-                      count = bucket.get("count", 0)
-                      ctk.CTkLabel(drive_details, text=f"  {range_str}: {count} files", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=20)
+      #         # Buckets inside drive
+      #         if "fileSizeDistribution" in drive_data:
+      #             ctk.CTkLabel(drive_details, text="File Size Distribution:", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=(5, 2))
+      #             for bucket in drive_data["fileSizeDistribution"].get("buckets", []):
+      #                 range_vals = bucket.get("sizeRange", (0, 0))
+      #                 range_str = f"{range_vals[0]} - {range_vals[1]} KB"
+      #                 count = bucket.get("count", 0)
+      #                 ctk.CTkLabel(drive_details, text=f"  {range_str}: {count} files", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=20)
 
       # File Size Distribution
       dist_data = data.get("tenantLevelFileSizeDistribution", data.get("fileSizeDistribution"))
@@ -509,40 +756,40 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                   ctk.CTkLabel(row_frame, text=f"Count: {count}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=10)
 
       # Large Resources
-      if "tenantLevelLargeResources" in data:
-          ctk.CTkLabel(
-              self.view_results,
-              text="Large Resources (10)",
-              font=FONT_HEADER_SMALL,
-              text_color=COLOR_TEXT_MAIN,
-          ).pack(anchor="w", padx=10, pady=(20, 5))
+      # if "tenantLevelLargeResources" in data:
+      #     ctk.CTkLabel(
+      #         self.view_results,
+      #         text="Large Resources (10)",
+      #         font=FONT_HEADER_SMALL,
+      #         text_color=COLOR_TEXT_MAIN,
+      #     ).pack(anchor="w", padx=10, pady=(20, 5))
           
-          if len(data["tenantLevelLargeResources"]) > 10:
-              ctk.CTkLabel(
-                  self.view_results,
-                  text="* There are more large resources. Please export the full report to view their details.",
-                  font=FONT_BODY_SMALL,
-                  text_color=COLOR_TEXT_SUB,
-              ).pack(anchor="w", padx=10, pady=(0, 10))
+      #     if len(data["tenantLevelLargeResources"]) > 10:
+      #         ctk.CTkLabel(
+      #             self.view_results,
+      #             text="* There are more large resources. Please export the full report to view their details.",
+      #             font=FONT_BODY_SMALL,
+      #             text_color=COLOR_TEXT_SUB,
+      #         ).pack(anchor="w", padx=10, pady=(0, 10))
           
-          res_container = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
-          res_container.pack(fill="x", padx=10, pady=5)
+      #     res_container = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
+      #     res_container.pack(fill="x", padx=10, pady=5)
           
-          # Header row
-          header_row = ctk.CTkFrame(res_container, fg_color=COLOR_SURFACE_VARIANT, height=30)
-          header_row.pack(fill="x", padx=5, pady=5)
-          ctk.CTkLabel(header_row, text="Type", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
-          ctk.CTkLabel(header_row, text="ID", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
-          ctk.CTkLabel(header_row, text="Count", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+      #     # Header row
+      #     header_row = ctk.CTkFrame(res_container, fg_color=COLOR_SURFACE_VARIANT, height=30)
+      #     header_row.pack(fill="x", padx=5, pady=5)
+      #     ctk.CTkLabel(header_row, text="Type", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+      #     ctk.CTkLabel(header_row, text="ID", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
+      #     ctk.CTkLabel(header_row, text="Count", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
 
-          for i, res in enumerate(data["tenantLevelLargeResources"][0:10]):         # only showing first 10 resources
-              bg_color = COLOR_SURFACE if i % 2 == 0 else COLOR_SURFACE_VARIANT
-              row_frame = ctk.CTkFrame(res_container, fg_color=bg_color, height=30)
-              row_frame.pack(fill="x", padx=5, pady=2)
+      #     for i, res in enumerate(data["tenantLevelLargeResources"][0:10]):         # only showing first 10 resources
+      #         bg_color = COLOR_SURFACE if i % 2 == 0 else COLOR_SURFACE_VARIANT
+      #         row_frame = ctk.CTkFrame(res_container, fg_color=bg_color, height=30)
+      #         row_frame.pack(fill="x", padx=5, pady=2)
               
-              ctk.CTkLabel(row_frame, text=str(res.get('Type', res.get('type'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
-              ctk.CTkLabel(row_frame, text=str(res.get('Id', res.get('id'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
-              ctk.CTkLabel(row_frame, text=f"{res.get('subTreeCount', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+      #         ctk.CTkLabel(row_frame, text=str(res.get('Type', res.get('type'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+      #         ctk.CTkLabel(row_frame, text=str(res.get('Id', res.get('id'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
+      #         ctk.CTkLabel(row_frame, text=f"{res.get('subTreeCount', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
 
       # Resources
       ctk.CTkLabel(
@@ -614,6 +861,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       )
       self.btn_action_secondary.pack(side="left", padx=(25, 0), pady=15)
 
+      self.selected_page_size = "50"
+      self.render_paginated_view(0)
 
     except Exception as e:
       print(f"ERROR in show_results_content: {e}")
@@ -634,7 +883,21 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     data = self.last_scan_data
     
     # Exclude complex structures for summary
-    summary_data = {k: v for k, v in data.items() if k not in ["driveMetrics", "licenseMetrics", "siteMetrics", "tenantLevelFileSizeDistribution", "tenantLevelLargeResources"]}
+    summary_data = {k: v for k, v in data.items() if k not in [
+        "driveMetrics", 
+        "licenseMetrics", 
+        "siteMetrics", 
+        "tenantLevelFileSizeDistribution", 
+        "tenantLevelLargeResources",
+        "maxFolderDepth",
+        "maxSubsiteDepth",
+        "subsiteCount",
+        "batches",
+        "buckets",
+        "total_eta",
+        "df"
+      ]
+    }
     
     from tkinter import filedialog
     from datetime import datetime
@@ -704,15 +967,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Section 5: Site Details
       writer.writerow(["Site Details", ""])
-      writer.writerow(["Site Name", "Site Level", "Folder Count", "File Count", "Resource Count"])
+      writer.writerow(["Site Name", "Site Level", "Folder Count", "File Count", "Resource Count", "Corpus Size", "Suggested Batch"])
       site_metrics = data.get("siteMetrics", {})
+      df = data.get("df")
+      
       for site_id, s_data in site_metrics.items():
+        batch_name = ""
+        if df is not None:
+            match = df[df["Site Id"] == site_id]
+            if not match.empty:
+                batch_name = match["Suggested Batch"].iloc[0]
+                
         writer.writerow([
             self._get_display_name(site_id), 
             s_data.get("siteLevel", 0),
             s_data.get("folderCount", 0),
             s_data.get("fileCount", 0),
-            s_data.get("resourceCount", 0)
+            s_data.get("resourceCount", 0),
+            self.format_size(s_data.get("totalSize", 0)),
+            batch_name
         ])
         
       writer.writerow([]) # Blank line separator
