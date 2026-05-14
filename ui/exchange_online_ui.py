@@ -1580,7 +1580,7 @@ class MigrationEstimatorTool(ctk.CTk):
       all_users = self._get_all_users_graph(manager)
     
     shared_mailboxes = []
-    if config.scan_shared_mail_boxes:
+    if config.scan_shared_mail_boxes and scanning_required:
       estimator = self.factory.get_shared_mailbox_estimator(hard_reset=True)
       shared_mailbox_ids = estimator._get_shared_mail_boxes([user["id"] for user in all_users], [])
       personal_users = [user for user in all_users if user["id"] not in shared_mailbox_ids]

@@ -30,6 +30,7 @@ class FileEstimator(Estimator):
         self.logger = logger
         self.stop_event = stop_event
         self.executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
+        self.tree_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
         self.progress_update_callback = progress_update_callback
         self.condition = threading.Condition()
 
@@ -59,6 +60,13 @@ class FileEstimator(Estimator):
             
             if self.logger is None:
                 self.logger = lambda x: None
+            self.global_folder_count = 0
+            self.global_file_count = 0
+            self.global_shortcut_count = 0
+            self.global_max_depth = 0
+            self.global_folder_exceeding_depth_limit = 0
+            self.global_file_exceeding_depth_limit = 0
+            self.global_skipped_folders_count = 0
             
             drives = []
             subsite_to_drives = {}          # used to calculate effective max Depth
@@ -72,6 +80,8 @@ class FileEstimator(Estimator):
                 "shortcutCount": 0,
                 "folderCount": 0,
                 "fileCount": 0,
+                "folderCountExceedingDepthLimit": 0,
+                "fileCountExceedingDepthLimit": 0,
                 "listCount": 0,
                 "licenseMetrics": {},
                 "driveCounts": {
@@ -82,7 +92,8 @@ class FileEstimator(Estimator):
                 "tenantLevelFileSizeDistribution": {
                     "buckets": []
                 },
-                "tenantLevelLargeResources": []
+                "tenantLevelLargeResources": [],
+                "tenantLevelLargeResourceCount": 0
             }
 
             if "drives" in data and len(data["drives"]) > 0:
@@ -113,7 +124,7 @@ class FileEstimator(Estimator):
                 "shortcutCount": 0
             }
 
-            print(f"Drive Count: {len(drives)}")
+            # print(f"Drive Count: {len(drives)}")
             drive_id_to_adj_list, parent_references, resource_id_to_details = self._create_in_memory_tree([drive["id"] for drive in drives], drive_discovery_progress_metrics, failures)
             self.progress_update_callback("drive_discovery", status="Done", count=len(drives), **drive_discovery_progress_metrics)
 
@@ -138,20 +149,42 @@ class FileEstimator(Estimator):
                     processed += len(batch)
                     success += len(batch)
 
-                    for drive in batch:
-                        total_resource_count += len(parent_references[drive["id"]]) + 1
-                    prog = processed / total_drives if total_drives > 0 else 0
+                    for d_id, d_metric in batch_metrics.items():
+                        # print("Inside Batch metrics!!!!!!!!!")
+                        self.global_folder_count += d_metric.get("folderCount", 0)
+                        self.global_file_count += d_metric.get("fileCount", 0)
+                        self.global_shortcut_count += d_metric.get("shortcutCount", 0)
+                        self.global_max_depth = max(self.global_max_depth, d_metric.get("maxEffectiveDepth", 0))
+                        self.global_folder_exceeding_depth_limit += d_metric.get("folderCountExceedingDepthLimit", 0)
+                        self.global_file_exceeding_depth_limit += d_metric.get("fileCountExceedingDepthLimit", 0)
+
+                    # print("Batch Finished!!!!")
+                    # print("Folder Count: ", self.global_folder_count)
+                    # print("File Count: ", self.global_file_count)
+                    # print("Shortcut Count: ", self.global_shortcut_count)
+                    # print("Max Depth: ", self.global_max_depth)
+                    # print("Folder Count Exceeding Depth Limit: ", self.global_folder_exceeding_depth_limit)
+                    # print("File Count Exceeding Depth Limit: ", self.global_file_exceeding_depth_limit)
+                    # print("Processed: ", processed)
+                    # print("Failed: ", failed)
+                    # print("Success: ", success)
                     self.progress_update_callback(
                         "scan_progress",
                         source="drive_parsing",
-                        progress=prog,
-                        cumulative=total_resource_count,
+                        progress=processed / total_drives if total_drives > 0 else 0,
+                        cumulative=self.global_file_count + self.global_folder_count,
+                        folderCount=self.global_folder_count,
+                        fileCount=self.global_file_count,
+                        maxDepth=self.global_max_depth,
+                        folderCountExceedingDepthLimit=self.global_folder_exceeding_depth_limit,
+                        fileCountExceedingDepthLimit=self.global_file_exceeding_depth_limit,
+                        skippedFolderCount=self.global_skipped_folders_count,
                         processed=processed,
                         failed=failed,
                         success=success,
                         entity_type="Drives"
                     )
-                    time.sleep(0.2)                     # TODO Just for testing if progress proceeds smoothly. Remove before merging
+                    time.sleep(0.2)
                 except Exception as e:
                     failed += len(batch)
                     processed += len(batch)
@@ -159,11 +192,17 @@ class FileEstimator(Estimator):
                     for drive in batch:
                         total_resource_count += len(parent_references[drive["id"]]) + 1
                         
+                    # print("Batch Failed!!!!")
                     self.progress_update_callback(
                         "scan_progress",
                         source="drive_parsing",
                         progress=prog,
                         cumulative=total_resource_count,
+                        folderCount=self.global_folder_count,
+                        fileCount=self.global_file_count,
+                        maxDepth=self.global_max_depth,
+                        folderCountExceedingDepthLimit=self.global_folder_exceeding_depth_limit,
+                        fileCountExceedingDepthLimit=self.global_file_exceeding_depth_limit,
                         processed=processed,
                         failed=failed,
                         success=success,
@@ -227,11 +266,14 @@ class FileEstimator(Estimator):
             metrics["shortcutCount"] += drive_metric.get("shortcutCount", 0)
             metrics["folderCount"] += drive_metric.get("folderCount", 0)
             metrics["fileCount"] += drive_metric.get("fileCount", 0)
+            metrics["folderCountExceedingDepthLimit"] += drive_metric.get("folderCountExceedingDepthLimit", 0)
+            metrics["fileCountExceedingDepthLimit"] += drive_metric.get("fileCountExceedingDepthLimit", 0)
         
         for subsite_id, drive_ids in subsite_to_drives.items():
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
             for drive_id in drive_ids:
-                metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + metrics["driveMetrics"][drive_id]["maxEffectiveDepth"])  
+                if drive_id in metrics["driveMetrics"]:
+                    metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + metrics["driveMetrics"][drive_id]["maxEffectiveDepth"])  
 
         for size_range in self.config.bucket_ranges:
             metrics["tenantLevelFileSizeDistribution"]["buckets"].append({
@@ -260,6 +302,8 @@ class FileEstimator(Estimator):
                 curr_dict["drive"] = drive_id
                 metrics["tenantLevelLargeResources"].append(curr_dict)
         
+        metrics["tenantLevelLargeResourceCount"] = len(metrics["tenantLevelLargeResources"])
+        
         self.progress_update_callback(
             "scan_progress",
             source="plan_generation",
@@ -275,10 +319,19 @@ class FileEstimator(Estimator):
         site_discovery_progress_metrics: Dict[str, Any],
         failures: List[Dict[str, str]]
     ):
+        def _get_filter():
+            if self.config.includePersonalSites and self.config.includeTeamSites:
+                return ""
+            
+            if self.config.includePersonalSites:
+                return "&filter=isPersonalSite eq true"
+            else:
+                return "&filter=isPersonalSite eq false"
+
         try:
             self.progress_update_callback("site_discovery", status="Fetching...", count=0)
             sites = []
-            url = f"{GRAPH_BASE_URL}/sites/delta?$select=id,webUrl,isPersonalSite,parentReference&$top=999"
+            url = f"{GRAPH_BASE_URL}/sites/delta?$select=id,webUrl,isPersonalSite,parentReference&$top=999{_get_filter()}"
             token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
             token = token_data["token"]
             session = self.url_invoker.token_manager.get_session()
@@ -302,6 +355,7 @@ class FileEstimator(Estimator):
                             d = r.json()
                             break
                         except Exception as e:
+                            # print(e)
                             attempts += 1
                             if attempts == max_attempts:
                                 self._log_and_fail("Error in fetching root site", e, failures)
@@ -312,6 +366,7 @@ class FileEstimator(Estimator):
                                 time.sleep(wait_time)
 
                     local_all_sites = d.get("value", [])
+                    # print(len(local_all_sites))
                     personal_sites = [site for site in local_all_sites if site["isPersonalSite"]]
                     team_sites = [site for site in local_all_sites if not site["isPersonalSite"]]
 
@@ -545,10 +600,12 @@ class FileEstimator(Estimator):
                 d = r.json()
 
                 all_licenses = d.get("value", [])
+                # print("Licenses: " + str(len(all_licenses)))
                 sharepoint_licenses = [
                     l for l in all_licenses 
                     if any(sp.get("servicePlanType", "").lower() == "sharepoint" for sp in l.get("servicePlans", []))
                 ]
+                # print("Sharepoint Licenses: " + str(len(sharepoint_licenses)))
 
                 site_discovery_progress_metrics["licenseCount"] += len(sharepoint_licenses)
                 self.progress_update_callback(
@@ -566,7 +623,6 @@ class FileEstimator(Estimator):
 
         except Exception as e:
             self._log_and_fail("Error in _get_license_metrics", e, failures)
-            return {}
         finally:
             self.url_invoker.token_manager.return_token_slot(token_data)
         
@@ -606,7 +662,7 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ) -> Dict[str, int]:
         try:
-            drive_url = "/sites/{siteId}/drives?$select=id,driveType,name&$top=999"
+            drive_url = "/sites/{siteId}/drives?$select=id,driveType,webUrl&$top=999"
             batches = create_batches(drive_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -698,7 +754,7 @@ class FileEstimator(Estimator):
             for site_id, resp in site_to_resp_map.items():
                 if "body" in resp and "value" in resp["body"]:
                     for entry in resp["body"]["value"]:
-                        self.id_to_display[entry["id"]] = entry["name"]
+                        self.id_to_display[entry["id"]] = entry["webUrl"]
                         if "driveType" in entry:
                             if entry["driveType"] not in drive_type_to_count:
                                 drive_type_to_count[entry["driveType"]] = 0
@@ -723,7 +779,6 @@ class FileEstimator(Estimator):
     ):
         completed_drives = 0
         total_drives = len(drive_ids)
-        folder_count = 0
         adj_list = {}
         parent_references: Dict[str, Dict[str, str]] = {}
         resource_id_to_details: Dict[str, Dict[str, Any]] = {}
@@ -733,7 +788,7 @@ class FileEstimator(Estimator):
             parent_references[drive_id] = {}
         try:
             # use delta api to fetch the folders
-            delta_api = "/drives/{driveId}/root/delta"
+            delta_api = "/drives/{driveId}/root/delta?$select=id,parentReference,folder,file,remoteItem,size"
             batches = create_batches(delta_api, [{"driveId": drive_id} for drive_id in drive_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -750,11 +805,17 @@ class FileEstimator(Estimator):
             drive_to_resp_map: Dict[str, Dict[str, Any]] = {}
             pending_next_items = []
 
+            seen_ids = set()
+
             def local_progress_callback(responses: List, has_next=False):
                 nonlocal completed_drives
                 if not has_next:
                     completed_drives += 1
                 for curr_response in responses:
+                    if curr_response["id"] in seen_ids:
+                        continue
+                    seen_ids.add(curr_response["id"])
+                    
                     if "folder" in curr_response:
                         drive_discovery_progress_metrics["folderCount"] += 1
                     elif "file" in curr_response:
@@ -795,7 +856,6 @@ class FileEstimator(Estimator):
                                 "driveId": drive_id,
                                 "url": relative_url
                             })
-                            folder_count += len(resp["body"].get("value", []))
                         elif "body" in resp and "error" in resp["body"]:
                             failures.append({
                                 "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
@@ -842,12 +902,10 @@ class FileEstimator(Estimator):
                         if "parentReference" in file and "id" in file["parentReference"]:
                             parent_id = file["parentReference"]["id"]
                             if parent_id in adj_list[drive_id]:
-                                adj_list[drive_id][parent_id].append(file["id"])
+                                if file["id"] not in adj_list[drive_id][parent_id]:
+                                    adj_list[drive_id][parent_id].append(file["id"])
                             else:
                                 adj_list[drive_id][parent_id] = [file["id"]]
-                        
-                        if "parentReference" in file and "id" in file["parentReference"]:
-                            parent_id = file["parentReference"]["id"]
                             parent_references[drive_id][file["id"]] = parent_id
 
             return adj_list, parent_references, resource_id_to_details
@@ -864,8 +922,109 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ) -> Dict[str, Any]:
 
-        drive_metrics = {}
+        drive_metrics = self._calculate_metrics_using_upside_down_parsing(
+            drive_ids,
+            drive_id_to_adj_list,
+            parent_references,
+            resource_id_to_details,
+            failures
+        )
+
+        additional_metrics = self._calculate_metrics_using_regular_parsing(
+            drive_ids,
+            drive_id_to_adj_list,
+            parent_references,
+            resource_id_to_details,
+            failures
+        )
+
+        for drive_id, metrics in additional_metrics.items():
+            if drive_id not in drive_metrics:
+                drive_metrics[drive_id] = metrics
+            else:
+                drive_metrics[drive_id].update(metrics)
         
+        return drive_metrics
+
+    def _calculate_metrics_using_regular_parsing(
+        self, 
+        drive_ids: List[str], 
+        drive_id_to_adj_list: Dict[str, List[str]], 
+        parent_references: Dict[str, Dict[str, str]], 
+        resource_id_to_details: Dict[str, Dict[str, Any]],
+        failures: List[Dict[str, str]]
+    ) -> Dict[str, Any]:
+        roots = {}
+
+        def _is_root(drive_id, node):
+            if node not in parent_references[drive_id].keys():
+                return False                # We want to avoid implicit roots due to duplicate key issues
+            
+            parent = parent_references[drive_id][node]
+            parent_resource = resource_id_to_details.get(parent, {})
+            return "id" not in parent_resource.get("parentReference", {})
+
+        for drive_id in drive_ids:
+            for node1, node2 in parent_references[drive_id].items():
+                if _is_root(drive_id, node1):
+                    if drive_id not in roots:
+                        roots[drive_id] = []
+
+                    roots[drive_id].append(node1)
+
+        active_thread_count = AtomicInt(0)
+        additional_metrics = {}
+        for drive_id in drive_ids:
+            additional_metrics[drive_id] = {
+                "folderCountExceedingDepthLimit": AtomicInt(0),
+                "fileCountExceedingDepthLimit": AtomicInt(0)
+            }
+        
+        def _dfs(drive_id, node, current_depth = 1):
+            try:
+                if current_depth > self.config.max_allowed_depth:
+                    resource_details = resource_id_to_details[node]
+                    if "folder" in resource_details:
+                        additional_metrics[drive_id]["folderCountExceedingDepthLimit"].increment()
+                    else:
+                        additional_metrics[drive_id]["fileCountExceedingDepthLimit"].increment()
+                        
+                children = set(drive_id_to_adj_list[drive_id].get(node, []))
+                for child in children:
+                    active_thread_count.increment()
+                    self.tree_executor.submit(_dfs, drive_id, child, current_depth + 1)
+            finally:
+                active_thread_count.decrement()
+                with self.condition:
+                    self.condition.notify_all()
+        
+        for drive_id in drive_ids:
+            for root in roots.get(drive_id, []):
+                active_thread_count.increment()
+                self.tree_executor.submit(_dfs, drive_id, root)
+
+        
+        while active_thread_count.get_value() > 0:
+            with self.condition:
+                self.condition.wait()
+
+        for drive_id in additional_metrics:
+            additional_metrics[drive_id]["folderCountExceedingDepthLimit"] = additional_metrics[drive_id]["folderCountExceedingDepthLimit"].get_value()
+            additional_metrics[drive_id]["fileCountExceedingDepthLimit"] = additional_metrics[drive_id]["fileCountExceedingDepthLimit"].get_value()
+
+        return additional_metrics
+
+    def _calculate_metrics_using_upside_down_parsing(
+        self, 
+        drive_ids: List[str], 
+        drive_id_to_adj_list: Dict[str, List[str]], 
+        parent_references: Dict[str, Dict[str, str]], 
+        resource_id_to_details: Dict[str, Dict[str, Any]],
+        failures: List[Dict[str, str]]
+    ) -> Dict[str, Any]:
+
+        # print("Inside _calculate_metrics_using_upside_down_parsing")
+        drive_metrics = {}
         for drive_id in drive_ids:
             drive_metrics[drive_id] = {
                 "maxEffectiveDepth": 0,
@@ -905,10 +1064,11 @@ class FileEstimator(Estimator):
                 else:
                     dependency_set.add((count, resource_id))
 
+            # print(f"Leaf Size: {len(leaves)}")
             for leaf_id in leaves:
                 try:
                     active_thread_count.increment()
-                    self.executor.submit(self._extract_metrics_from_subtrees, leaf_id, drive_id_to_adj_list, parent_references, resource_id_to_details, dependency_set, resource_to_dependency_count, resource_metrics, drive_metrics, active_thread_count)
+                    self.tree_executor.submit(self._extract_metrics_from_subtrees, leaf_id, drive_id_to_adj_list, parent_references, resource_id_to_details, dependency_set, resource_to_dependency_count, resource_metrics, drive_metrics, active_thread_count)
                 except Exception as e:
                     active_thread_count.decrement()
                     self._log_and_fail(f"Error while submitting to executor in _calculate_drive_metrics", e, failures)
@@ -939,6 +1099,8 @@ class FileEstimator(Estimator):
             resource = resource_id_to_details[resource_id]
             if "id" not in resource["parentReference"]:
                 # Root folder. Skipping it as it is an implicit folder added by default with common ID across multiple drives.
+                with self.condition:
+                    self.global_skipped_folders_count += 1
                 return
 
             drive_id = resource["parentReference"]["driveId"]
@@ -963,6 +1125,7 @@ class FileEstimator(Estimator):
                 "maxDepth": max_depth
             }
 
+            # print("HEREeee")
             self._update_drive_metrics_from_resource(resource, resource_metrics[resource_id], drive_metrics[drive_id])
 
             parent_resource_id = parent_references[drive_id].get(resource_id)
@@ -980,7 +1143,7 @@ class FileEstimator(Estimator):
                 if dependency_count_of_par > 0:
                     dependency_set.add((dependency_count_of_par, parent_resource_id))
                 else:
-                    self.executor.submit(self._extract_metrics_from_subtrees, parent_resource_id, drive_id_to_adj_list, parent_references, resource_id_to_details, dependency_set, resource_to_dependency_count, resource_metrics, drive_metrics, active_thread_count)
+                    self.tree_executor.submit(self._extract_metrics_from_subtrees, parent_resource_id, drive_id_to_adj_list, parent_references, resource_id_to_details, dependency_set, resource_to_dependency_count, resource_metrics, drive_metrics, active_thread_count)
                     active_thread_count.increment()
 
         except Exception as e:
@@ -1038,5 +1201,6 @@ class FileEstimator(Estimator):
 
     def shutdown(self):
         self.executor.shutdown(wait=False)
+        self.tree_executor.shutdown(wait=False)
         for level, exec in self.level_to_executor.items():
             exec.shutdown(wait=False)

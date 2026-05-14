@@ -20,6 +20,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
   # ==========================
   def build_config_view(self):
     # """Builds the Configuration View."""
+    self.include_personal_sites = ctk.BooleanVar(value=True)
+    self.include_team_sites = ctk.BooleanVar(value=True)
+    
     ui_utils.build_configuration_view(self, ctk)
 
     # Header
@@ -34,17 +37,40 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     # Advanced Settings
     ui_utils.build_advanced_settings_frame(self, ctk)
     
+    # Site Options
+    ctk.CTkLabel(
+        self.adv_frame,
+        text="Site Types to Scan",
+        font=FONT_BODY_BOLD,
+        text_color=COLOR_TEXT_MAIN,
+    ).pack(anchor="w", padx=15, pady=(10, 5))
+    
+    site_options_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
+    site_options_frame.pack(fill="x", padx=15)
+    
+    ctk.CTkCheckBox(
+        site_options_frame,
+        text="Personal Sites (OneDrive)",
+        variable=self.include_personal_sites,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
+    
+    ctk.CTkCheckBox(
+        site_options_frame,
+        text="Team Sites",
+        variable=self.include_team_sites,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
+    
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
 
     # Migration Plan Options
     ui_utils.build_migration_plan_options(self, ctk)
-
-    # Prepare a bucket ranges UI element
-    ui_utils.build_file_distribution_bucket_ranges(self, ctk)
-
-    # Input for lower count limit for large resources
-    ui_utils.build_large_resource_limit_input(self, ctk)
 
   def update_progress(self, msg):
     if isinstance(msg, str):
@@ -173,28 +199,41 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         users_partially_failed = msg.get("partially_failed", 0)
         users_tot = msg.get("total", 0)
         entity_type = msg.get("entity_type", "Drives")
+        main_part = [
+            f"{entity_type}: {users_proc - users_fail - users_partially_failed} succeeded",
+            f"{users_fail} failed"
+        ]
+
         if source in self.prog_widgets:
           widget = self.prog_widgets[source]["bar"]
           if widget.winfo_exists():
             widget.set(val)
           if source == "drive_parsing":
-            label = "Files / Folders"
-          widget_lbl = self.prog_widgets[source]["lbl"]
-          if widget_lbl.winfo_exists():
-            text_parts = [
-                f"{entity_type}: {users_proc - users_fail - users_partially_failed} succeeded",
-                f"{users_fail} failed"
-            ]
+            folder_count = msg.get("folderCount", 0)
+            file_count = msg.get("fileCount", 0)
+            max_depth = msg.get("maxDepth", 0)
+            folder_exceeding = msg.get("folderCountExceedingDepthLimit", 0)
+            file_exceeding = msg.get("fileCountExceedingDepthLimit", 0)
             
-            if users_partially_failed > 0:
-                text_parts.append(f"{users_partially_failed} partially failed")
+            text_parts = []
+            if folder_count > 0 or file_count > 0:
+                text_parts.append(f"Folders: {folder_count}")
+                text_parts.append(f"Files: {file_count}")
+                text_parts.append(f"Max Depth: {max_depth}")
+            
+            if folder_exceeding > 0 or file_exceeding > 0:
+                text_parts.append(f"Folders > Limit: {folder_exceeding}")
+                text_parts.append(f"Files > Limit: {file_exceeding}")
                 
-            base_text = ", ".join(text_parts)
-            final_text = f"{base_text} | {label}: {cumulative:,}"
-            
-            widget_lbl.configure(
-                text=final_text
-            )
+            skipped_folders = msg.get("skippedFolderCount", 0)
+            if skipped_folders > 0:
+                text_parts.append(f"Skipped Roots: {skipped_folders}")
+                
+            final_text = " | ".join(main_part + text_parts)
+            widget_lbl = self.prog_widgets[source]["lbl"]
+            if widget_lbl.winfo_exists():
+                widget_lbl.configure(text=final_text)
+
       elif mtype == "complete":
         self.show_results_content(msg["data"])
       elif mtype == "error":
@@ -302,85 +341,18 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       card_frame.pack(fill="x", pady=10)
 
       self.create_stat_card(card_frame, "Max Effective Depth", f"{data.get('maxEffectiveDepth', 0):,}", "👥")
-      self.create_stat_card(card_frame, "Max Folder Depth", f"{data.get('maxFolderDepth', 0):,}", "📁")
-      self.create_stat_card(card_frame, "Max Subsite Depth", f"{data.get('maxSubsiteDepth', 0):,}", "🌐")
       self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsite_count', data.get('subSiteCount', 0)):,}", "🏢")
       self.create_stat_card(card_frame, "Shortcut Count", f"{data.get('shortcutCount', 0):,}", "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
       self.create_stat_card(card_frame, "Folder Count", f"{data.get('folderCount', 0):,}", "📁")
       self.create_stat_card(card_frame, "File Count", f"{data.get('fileCount', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Document Library Count", f"{data.get('driveCounts', {}).get("documentLibrary"):,}", "📁")
+      self.create_stat_card(card_frame, "Folder Count (exceeding depth limit)", f"{data.get('folderCountExceedingDepthLimit', 0):,}", "📁")
+      self.create_stat_card(card_frame, "File Count (exceeding depth limit)", f"{data.get('fileCountExceedingDepthLimit', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Large Resource Count", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
       
       if "folder_file_size" in data:
           self.create_stat_card(card_frame, "Folder File Size", f"{data['folder_file_size']:,} KB", "💾")
-
-      # File Size Distribution
-      dist_data = data.get("tenantLevelFileSizeDistribution", data.get("fileSizeDistribution"))
-      if dist_data:
-          ctk.CTkLabel(
-              self.view_results,
-              text="File Size Distribution",
-              font=FONT_HEADER_SMALL,
-              text_color=COLOR_TEXT_MAIN,
-          ).pack(anchor="w", padx=10, pady=(20, 5))
-          
-          dist_frame = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
-          dist_frame.pack(fill="x", padx=10, pady=5)
-          
-          buckets = dist_data.get("Buckets", dist_data.get("buckets", []))
-          for bucket in buckets:
-              range_vals = bucket.get("sizeRange", (0, 0))
-              range_str = f"{str(range_vals[0])} - {str(range_vals[1])} KB"
-              file_ids = bucket.get("fileIDs", [])
-              count = bucket.get("count", len(file_ids))
-              
-              row_frame = ctk.CTkFrame(dist_frame, fg_color="transparent")
-              row_frame.pack(fill="x", padx=15, pady=5)
-              
-              ctk.CTkLabel(row_frame, text=range_str, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=150, anchor="w").pack(side="left")
-              
-              if file_ids:
-                  files_str = ", ".join(file_ids)
-                  ctk.CTkLabel(row_frame, text=f"Files: {files_str}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=10)
-              else:
-                  ctk.CTkLabel(row_frame, text=f"Count: {count}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=10)
-
-      # Large Resources
-      if "tenantLevelLargeResources" in data:
-          ctk.CTkLabel(
-              self.view_results,
-              text="Large Resources (10)",
-              font=FONT_HEADER_SMALL,
-              text_color=COLOR_TEXT_MAIN,
-          ).pack(anchor="w", padx=10, pady=(20, 5))
-          
-          if len(data["tenantLevelLargeResources"]) > 10:
-              ctk.CTkLabel(
-                  self.view_results,
-                  text="* There are more large resources. Please export the full report to view their details.",
-                  font=FONT_BODY_SMALL,
-                  text_color=COLOR_TEXT_SUB,
-              ).pack(anchor="w", padx=10, pady=(0, 10))
-          
-          res_container = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
-          res_container.pack(fill="x", padx=10, pady=5)
-          
-          # Header row
-          header_row = ctk.CTkFrame(res_container, fg_color=COLOR_SURFACE_VARIANT, height=30)
-          header_row.pack(fill="x", padx=5, pady=5)
-          ctk.CTkLabel(header_row, text="Type", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
-          ctk.CTkLabel(header_row, text="ID", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
-          ctk.CTkLabel(header_row, text="Count", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
-          ctk.CTkLabel(header_row, text="Limit", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
-
-          for i, res in enumerate(data["tenantLevelLargeResources"][0:10]):         # only showing first 10 resources
-              bg_color = COLOR_SURFACE if i % 2 == 0 else COLOR_SURFACE_VARIANT
-              row_frame = ctk.CTkFrame(res_container, fg_color=bg_color, height=30)
-              row_frame.pack(fill="x", padx=5, pady=2)
-              
-              ctk.CTkLabel(row_frame, text=str(res.get('Type', res.get('type'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
-              ctk.CTkLabel(row_frame, text=str(res.get('Id', res.get('id'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
-              ctk.CTkLabel(row_frame, text=f"{res.get('subTreeCount', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
-              ctk.CTkLabel(row_frame, text=f"{res.get('Limit', res.get('limit', 0)):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
 
       # License Metrics
       if "licenseMetrics" in data:
@@ -493,6 +465,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               ctk.CTkLabel(drive_details, text=f"Shortcut Count: {drive_data.get('shortcutCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
               ctk.CTkLabel(drive_details, text=f"Folder Count: {drive_data.get('folderCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
               ctk.CTkLabel(drive_details, text=f"File Count: {drive_data.get('fileCount', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+              ctk.CTkLabel(drive_details, text=f"Folder Count (exceeding depth limit): {drive_data.get('folderCountExceedingDepthLimit', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
+              ctk.CTkLabel(drive_details, text=f"File Count (exceeding depth limit): {drive_data.get('fileCountExceedingDepthLimit', 0)}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", padx=10, pady=2)
               
               # Buckets inside drive
               if "fileSizeDistribution" in drive_data:
@@ -502,6 +476,76 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                       range_str = f"{range_vals[0]} - {range_vals[1]} KB"
                       count = bucket.get("count", 0)
                       ctk.CTkLabel(drive_details, text=f"  {range_str}: {count} files", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=20)
+
+      # File Size Distribution
+      dist_data = data.get("tenantLevelFileSizeDistribution", data.get("fileSizeDistribution"))
+      if dist_data:
+          ctk.CTkLabel(
+              self.view_results,
+              text="File Size Distribution",
+              font=FONT_HEADER_SMALL,
+              text_color=COLOR_TEXT_MAIN,
+          ).pack(anchor="w", padx=10, pady=(20, 5))
+          
+          dist_frame = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
+          dist_frame.pack(fill="x", padx=10, pady=5)
+          
+          buckets = dist_data.get("Buckets", dist_data.get("buckets", []))
+          for bucket in buckets:
+              range_vals = bucket.get("sizeRange", (0, 0))
+              range_str = f"{str(range_vals[0])} - {str(range_vals[1])} KB"
+              file_ids = bucket.get("fileIDs", [])
+              count = bucket.get("count", len(file_ids))
+              
+              row_frame = ctk.CTkFrame(dist_frame, fg_color="transparent")
+              row_frame.pack(fill="x", padx=15, pady=5)
+              
+              ctk.CTkLabel(row_frame, text=range_str, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=150, anchor="w").pack(side="left")
+              
+              if file_ids:
+                  files_str = ", ".join(file_ids)
+                  ctk.CTkLabel(row_frame, text=f"Files: {files_str}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=10)
+              else:
+                  ctk.CTkLabel(row_frame, text=f"Count: {count}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=10)
+
+      # Large Resources
+      if "tenantLevelLargeResources" in data:
+          ctk.CTkLabel(
+              self.view_results,
+              text="Large Resources (10)",
+              font=FONT_HEADER_SMALL,
+              text_color=COLOR_TEXT_MAIN,
+          ).pack(anchor="w", padx=10, pady=(20, 5))
+          
+          if len(data["tenantLevelLargeResources"]) > 10:
+              ctk.CTkLabel(
+                  self.view_results,
+                  text="* There are more large resources. Please export the full report to view their details.",
+                  font=FONT_BODY_SMALL,
+                  text_color=COLOR_TEXT_SUB,
+              ).pack(anchor="w", padx=10, pady=(0, 10))
+          
+          res_container = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
+          res_container.pack(fill="x", padx=10, pady=5)
+          
+          # Header row
+          header_row = ctk.CTkFrame(res_container, fg_color=COLOR_SURFACE_VARIANT, height=30)
+          header_row.pack(fill="x", padx=5, pady=5)
+          ctk.CTkLabel(header_row, text="Type", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+          ctk.CTkLabel(header_row, text="ID", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
+          ctk.CTkLabel(header_row, text="Count", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+          ctk.CTkLabel(header_row, text="Limit", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+
+          for i, res in enumerate(data["tenantLevelLargeResources"][0:10]):         # only showing first 10 resources
+              bg_color = COLOR_SURFACE if i % 2 == 0 else COLOR_SURFACE_VARIANT
+              row_frame = ctk.CTkFrame(res_container, fg_color=bg_color, height=30)
+              row_frame.pack(fill="x", padx=5, pady=2)
+              
+              ctk.CTkLabel(row_frame, text=str(res.get('Type', res.get('type'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+              ctk.CTkLabel(row_frame, text=str(res.get('Id', res.get('id'))), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left", padx=10)
+              ctk.CTkLabel(row_frame, text=f"{res.get('subTreeCount', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+              ctk.CTkLabel(row_frame, text=f"{res.get('Limit', res.get('limit', 0)):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, width=100, anchor="w").pack(side="left", padx=10)
+
 
       # Resources
       ctk.CTkLabel(
@@ -705,8 +749,23 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         writer.writerow(row)
 
 
+  def _get_scan_configuration(self):
+    config = super()._get_scan_configuration()
+    config.includePersonalSites = self.val_include_personal_sites
+    config.includeTeamSites = self.val_include_team_sites
+    return config
+
   def start_scan(self):
     print("Invoked Start Scan")
+    
+    if not self.include_personal_sites.get() and not self.include_team_sites.get():
+      messagebox.showerror("Validation Error", "At least one site type (Personal or Team) must be selected!")
+      return
+      
+    # Save values to regular variables to avoid thread-safety issues in Tkinter
+    self.val_include_personal_sites = self.include_personal_sites.get()
+    self.val_include_team_sites = self.include_team_sites.get()
+      
     disclaimer_text = (
         "The estimations provided by this tool are calculated projections"
         " intended for preliminary planning only. Actual migration timelines"
@@ -738,7 +797,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     self.create_progress_row(self.scan_container, "sites", "Site Discovery", mode="indeterminate")
     self.create_progress_row(self.scan_container, "drives", "Drive Discovery", mode="indeterminate")
-    self.create_progress_row(self.scan_container, "drive_parsing", "Drive Scan", mode="determinate")
+    self.create_progress_row(self.scan_container, "drive_parsing", "Metrics Calculation", mode="determinate")
     self.create_progress_row(self.scan_container, "plan_generation", "Generating Migration Plan", mode="determinate")
 
     import threading
