@@ -81,7 +81,10 @@ class TestFileEstimatorLoad(unittest.TestCase):
             print("Failures:")
             print(json.dumps(failures, indent=2))
         
-        expected = self.test_data["expected_result"]
+        if os.environ.get("SIMULATE_FAILURES", "False").lower() == "true":
+            expected = self.test_data.get("expected_result_with_failures", self.test_data["expected_result"])
+        else:
+            expected = self.test_data["expected_result"]
         
         # Verify results
         self.assertEqual(result.get("subsite_count", result.get("subsiteCount", 0)), expected.get("subsiteCount", 0))

@@ -4,6 +4,7 @@ import time
 import random
 from typing import List, Dict, Any, Optional
 import threading
+import os
 
 class MockResponse:
     def __init__(self, status_code: int, body: Dict[str, Any]):
@@ -25,6 +26,10 @@ class MockSession:
             root_id = self.test_data.get("root_site", "root")
             root_site = self.test_data["sites"].get(root_id, {"id": root_id, "displayName": "Root Site"})
             return MockResponse(200, root_site)
+            
+        elif "sites/delta" in path:
+            all_sites = self.test_data.get("all_sites", [])
+            return MockResponse(200, {"value": all_sites})
             
         elif "subscribedSkus" in path:
             licenses = self.test_data.get("licenses", [])
@@ -67,8 +72,21 @@ class MockUrlInvoker:
             
             parts = path.split("/")
             
+            # Handle /sites/delta
+            if path == "/sites/delta":
+                all_sites = self.test_data.get("all_sites", [])
+                # Pagination
+                skip = int(query_params.get("$skip", [0])[0])
+                sliced_sites = all_sites[skip : skip + self.page_size]
+                
+                body = {"value": sliced_sites}
+                if skip + self.page_size < len(all_sites):
+                    body["@odata.nextLink"] = f"{base_url}{path}?$skip={skip + self.page_size}"
+                    
+                responses.append({"id": req_id, "status": 200, "body": body})
+                
             # Handle /sites/{siteId}/sites
-            if len(parts) >= 3 and parts[-1] == "sites" and parts[-3] == "sites":
+            elif len(parts) >= 3 and parts[-1] == "sites" and parts[-3] == "sites":
                 site_id = parts[-2]
                 subsite_ids = self.test_data["sites"].get(site_id, {}).get("subsites", [])
                 
@@ -115,10 +133,24 @@ class MockUrlInvoker:
             elif len(parts) >= 4 and parts[-1] == "delta" and parts[-2] == "root" and parts[-4] == "drives":
                 drive_id = parts[-3]
                 
+                def is_ancestor_failed(item_id):
+                    curr_id = item_id
+                    while curr_id:
+                        item = self.test_data["items"].get(curr_id)
+                        if not item:
+                            break
+                        if item.get("fail", False):
+                            return True
+                        curr_id = item["parentReference"].get("id")
+                    return False
+
                 # Find all items for this drive
                 drive_items = []
                 for item in self.test_data["items"].values():
                     if item["parentReference"]["driveId"] == drive_id:
+                        if os.environ.get("SIMULATE_FAILURES", "False").lower() == "true":
+                            if is_ancestor_failed(item["id"]):
+                                continue
                         drive_items.append(item)
                         
                 # Pagination

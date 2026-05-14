@@ -459,7 +459,7 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ):
         try:
-            # tenant_metrics["listCount"] = self._get_list_count(site_ids, site_discovery_progress_metrics, failures)
+            tenant_metrics["listCount"] = self._get_list_count(site_ids, site_discovery_progress_metrics, failures)
             drive_type_to_count = self._get_drives(site_ids, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
             for key, value in drive_type_to_count.items():
                 if key not in tenant_metrics["driveCounts"]:
@@ -1042,7 +1042,7 @@ class FileEstimator(Estimator):
                     "count": 0
                 })
         
-        resource_metrics = {}
+        resource_metrics = ThreadSafeMap()
 
         try:
             dependency_set = ThreadSafeSortedSet()
@@ -1098,8 +1098,9 @@ class FileEstimator(Estimator):
     ):       
         try:
             resource = resource_id_to_details[resource_id]
+            
+            # Root folder. Skipping it as it is an implicit folder added by default with common ID across multiple drives.
             if "id" not in resource["parentReference"]:
-                # Root folder. Skipping it as it is an implicit folder added by default with common ID across multiple drives.
                 with self.condition:
                     self.global_skipped_folders_count += 1
                 return
@@ -1113,21 +1114,22 @@ class FileEstimator(Estimator):
 
             if is_resource_folder and resource["id"] in drive_id_to_adj_list[drive_id]:             # Check for empty folders
                 for child_id in drive_id_to_adj_list[drive_id][resource["id"]]:
-                    subtree_count += resource_metrics[child_id]["subTreeCount"]
-                    subtree_size += resource_metrics[child_id]["subTreeSize"]
-                    max_depth = max(max_depth, resource_metrics[child_id]["maxDepth"] + 1)
+                    child_metrics = resource_metrics.get(child_id, None)
+                    if child_metrics:
+                        subtree_count += child_metrics["subTreeCount"]
+                        subtree_size += child_metrics["subTreeSize"]
+                        max_depth = max(max_depth, child_metrics["maxDepth"] + 1)
 
             subtree_count += 1
             subtree_size += resource["size"]
 
-            resource_metrics[resource["id"]] = {
+            resource_metrics.update(resource["id"], {
                 "subTreeCount": subtree_count,
                 "subTreeSize": subtree_size,
                 "maxDepth": max_depth
-            }
+            })
 
-            # print("HEREeee")
-            self._update_drive_metrics_from_resource(resource, resource_metrics[resource_id], drive_metrics[drive_id])
+            self._update_drive_metrics_from_resource(resource, resource_metrics.get(resource_id, {}), drive_metrics[drive_id])
 
             parent_resource_id = parent_references[drive_id].get(resource_id)
 
