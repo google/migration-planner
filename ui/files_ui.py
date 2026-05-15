@@ -273,6 +273,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "unknownDrive": "Unknown Drive",
         "folderCount": "Folder Count",
         "fileCount": "File Count",
+        "folderCountExceedingDepthLimit": "Folder Count > Depth Limit",
+        "fileCountExceedingDepthLimit": "File Count > Depth Limit",
+        "tenantLevelLargeResourceCount": "Tenant Level Large Resource Count"
       }
 
       self.id_to_display_name = id_to_display
@@ -344,8 +347,19 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     else:
       df["Resource Count"] = pd.to_numeric(df["Resource Count"], errors="coerce").fillna(0)
 
+    if "Corpus Size" not in df.columns:
+      df["Corpus Size"] = 0
+    else:
+      df["Corpus Size"] = pd.to_numeric(df["Corpus Size"], errors="coerce").fillna(0)
+
+    df["SortMetric"] = df.apply(
+      lambda x: max(
+          (x["Corpus Size"] / FILES_GLOBAL_CORPUS_SIZE_LIMIT), (x["Resource Count"] / FILES_GLOBAL_COUNT_LIMIT)
+      ),
+      axis=1,
+    )
     # 1. Sort Sites (Descending - Heaviest first)
-    df_sorted_base = df.sort_values(by="Resource Count", ascending=False).copy()
+    df_sorted_base = df.sort_values(by="SortMetric", ascending=False).copy()
 
     user_min_limit = self.eta_min_users.get()
     user_max_limit = self.eta_max_users.get()
@@ -379,123 +393,126 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     # Iterate through candidates
     for target_hours in candidate_hours:
-      df_sorted = df_sorted_base.copy()
-      df_sorted["Suggested Batch"] = ""
+      for current_parallel in range(1, num_parallel + 1):
+        df_sorted = df_sorted_base.copy()
+        df_sorted["Suggested Batch"] = ""
 
-      total_users = len(df_sorted)
-      start_idx = 0
-      raw_chunks = []
+        # 2. Greedy Lane Assignment
+        lanes = [{"total_time": 0.0, "sites": []} for _ in range(current_parallel)]
+        
+        for _, row in df_sorted.iterrows():
+          # Calculate time for this single site
+          site_df = pd.DataFrame([row])
+          site_time = get_batch_eta(site_df)
+          
+          # Find lane with min total time
+          target_lane = min(lanes, key=lambda l: l["total_time"])
+          target_lane["sites"].append(row)
+          target_lane["total_time"] += site_time
 
-      # Partitioning Loop
-      while start_idx < total_users:
-        remaining_users = total_users - start_idx
-        current_max = min(remaining_users, user_max_limit)
-        current_min = min(user_min_limit, remaining_users)
+        # 3. Per-Lane Batching (Binary Search)
+        final_buckets = []
+        
+        for lane_idx, lane in enumerate(lanes):
+          lane_df = pd.DataFrame(lane["sites"])
+          if lane_df.empty:
+            continue
+            
+          total_users = len(lane_df)
+          start_idx = 0
+          raw_chunks = []
 
-        # Binary Search for Optimal Size
-        min_subset = df_sorted.iloc[start_idx : start_idx + current_min]
-        if get_batch_eta(min_subset) > target_hours:
-          chosen_size = current_min
-        else:
-          max_subset = df_sorted.iloc[start_idx : start_idx + current_max]
-          if get_batch_eta(max_subset) <= target_hours:
-            chosen_size = current_max
-          else:
-            low = current_min
-            high = current_max
-            chosen_size = high
-            while low <= high:
-              mid = (low + high) // 2
-              subset = df_sorted.iloc[start_idx : start_idx + mid]
-              eta = get_batch_eta(subset)
+          # Partitioning Loop (Same as original but within lane)
+          while start_idx < total_users:
+            remaining_users = total_users - start_idx
+            current_max = min(remaining_users, user_max_limit)
+            current_min = min(user_min_limit, remaining_users)
 
-              if eta > target_hours:
-                chosen_size = mid
-                high = mid - 1
+            # Binary Search for Optimal Size
+            min_subset = lane_df.iloc[start_idx : start_idx + current_min]
+            if get_batch_eta(min_subset) > target_hours:
+              chosen_size = current_min
+            else:
+              max_subset = lane_df.iloc[start_idx : start_idx + current_max]
+              if get_batch_eta(max_subset) <= target_hours:
+                chosen_size = current_max
               else:
-                low = mid + 1
+                low = current_min
+                high = current_max
+                chosen_size = high
+                while low <= high:
+                  mid = (low + high) // 2
+                  subset = lane_df.iloc[start_idx : start_idx + mid]
+                  eta = get_batch_eta(subset)
 
-        end_idx = start_idx + chosen_size
-        final_subset = df_sorted.iloc[start_idx:end_idx]
-        w_eta = get_batch_eta(final_subset)
+                  if eta > target_hours:
+                    chosen_size = mid
+                    high = mid - 1
+                  else:
+                    low = mid + 1
 
-        # Store the chunk data
-        raw_chunks.append({
-            "start_idx": start_idx,
-            "end_idx": end_idx,
-            "sites": len(final_subset),
-            "resource_count": int(final_subset["Resource Count"].sum()),
-            "folder_count": int(final_subset["Folder Count"].sum()) if "Folder Count" in final_subset.columns else 0,
-            "file_count": int(final_subset["File Count"].sum()) if "File Count" in final_subset.columns else 0,
-            "shortcut_count": int(final_subset["Shortcut Count"].sum()) if "Shortcut Count" in final_subset.columns else 0,
-            "corpus_size": float(final_subset["Corpus Size"].sum()) if "Corpus Size" in final_subset.columns else 0.0,
-            "eta": w_eta,
-        })
-        start_idx = end_idx
+            end_idx = start_idx + chosen_size
+            final_subset = lane_df.iloc[start_idx:end_idx]
+            w_eta = get_batch_eta(final_subset)
 
-      # Schedule Chunks into Buckets
-      num_buckets = min(num_parallel, len(raw_chunks))
+            raw_chunks.append({
+                "start_idx": start_idx,
+                "end_idx": end_idx,
+                "sites": len(final_subset),
+                "resource_count": int(final_subset["Resource Count"].sum()),
+                "folder_count": int(final_subset["Folder Count"].sum()) if "Folder Count" in final_subset.columns else 0,
+                "file_count": int(final_subset["File Count"].sum()) if "File Count" in final_subset.columns else 0,
+                "shortcut_count": int(final_subset["Shortcut Count"].sum()) if "Shortcut Count" in final_subset.columns else 0,
+                "corpus_size": float(final_subset["Corpus Size"].sum()) if "Corpus Size" in final_subset.columns else 0.0,
+                "eta": w_eta,
+                "df_subset": final_subset
+            })
+            start_idx = end_idx
 
-      if num_buckets == 0:
-        total_eta = 0
-        buckets = []
-        final_batches_list = []
-      else:
-        buckets = [
-            {"id": i + 1, "total": 0.0, "batches": []}
-            for i in range(num_buckets)
-        ]
-        for chunk in raw_chunks:
-          target = min(buckets, key=lambda b: b["total"])
-          target["batches"].append(chunk)
-          target["total"] += chunk["eta"]
+          final_buckets.append({
+              "id": lane_idx + 1,
+              "total": sum(c["eta"] for c in raw_chunks),
+              "batches": raw_chunks
+          })
 
-        total_eta = max(b["total"] for b in buckets)
-
-        # Reverse and Name
+        # 4. Consolidation & Naming
+        total_eta = max(b["total"] for b in final_buckets) if final_buckets else 0
+        
         all_chunks_with_time = []
-        buckets.reverse()
-
-        for b_idx, b in enumerate(buckets):
-          batches_list = b["batches"]
-          if isinstance(batches_list, list):
-            batches_list.reverse()
+        for b_idx, b in enumerate(final_buckets):
           current_time = 0.0
-          for chunk in batches_list:
+          for chunk in b["batches"]:
             chunk["start_time"] = current_time
             chunk["bucket_idx"] = b_idx
             current_time += chunk["eta"]
             all_chunks_with_time.append(chunk)
 
-        all_chunks_with_time.sort(
-            key=lambda x: (x["start_time"], x["bucket_idx"])
-        )
+        all_chunks_with_time.sort(key=lambda x: (x["start_time"], x["bucket_idx"]))
 
         final_batches_list = []
         for i, chunk in enumerate(all_chunks_with_time):
           batch_name = f"Batch {i+1}"
           chunk["name"] = batch_name
           final_batches_list.append(chunk)
-          col_idx = df_sorted.columns.get_loc("Suggested Batch")
-          df_sorted.iloc[chunk["start_idx"] : chunk["end_idx"], col_idx] = (
-              batch_name
-          )
+          
+          for _, row in chunk["df_subset"].iterrows():
+              site_id = row["Site Id"]
+              df_sorted.loc[df_sorted["Site Id"] == site_id, "Suggested Batch"] = batch_name
 
-      num_batches = len(final_batches_list)
-      self.log_msg(
-          f"Evaluated Target {target_hours}h: Generated {num_batches} batches |"
-          f" Total ETA: {self.format_eta(total_eta)}"
-      )
+        num_batches = len(final_batches_list)
+        self.log_msg(
+            f"Evaluated Target {target_hours}h with {current_parallel} lanes: Generated {num_batches} batches | Total ETA: {self.format_eta(total_eta)}"
+        )
 
-      # Selection Logic
-      if num_batches <= max_allowed_batches:
-        if total_eta < best_total_eta:
-          best_total_eta = total_eta
-          best_plan = (df_sorted, final_batches_list, total_eta, buckets)
+        # 5. Selection Logic
+        if num_batches <= max_allowed_batches:
+          if total_eta < best_total_eta:
+            best_total_eta = total_eta
+            best_plan = (df_sorted, final_batches_list, total_eta, final_buckets)
 
-      if num_batches < min_batches_seen:
-        min_batches_seen = num_batches
-        fallback_plan = (df_sorted, final_batches_list, total_eta, buckets)
+        if num_batches < min_batches_seen:
+          min_batches_seen = num_batches
+          fallback_plan = (df_sorted, final_batches_list, total_eta, final_buckets)
 
     if best_plan is not None:
       df_final, final_batches_list, total_eta, buckets = best_plan
