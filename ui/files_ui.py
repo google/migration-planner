@@ -1,8 +1,10 @@
 from ui.exchange_online_ui import MigrationEstimatorTool
 from ui import utils as ui_utils
 from util.constants import *
+from datetime import timedelta
 import customtkinter as ctk
 import time
+import psutil
 from tkinter import messagebox
 from util.monitoring import ResourceMonitor
 from estimators.factory import EstimatorFactory
@@ -22,7 +24,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
   def build_config_view(self):
     # """Builds the Configuration View."""
     self.include_personal_sites = ctk.BooleanVar(value=True)
-    self.include_team_sites = ctk.BooleanVar(value=True)
+    self.include_team_sites = ctk.BooleanVar(value=False)
     
     ui_utils.build_configuration_view(self, ctk)
 
@@ -321,12 +323,32 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       self.ui_update("complete", data=file_metrics)
       
-      # # 6. Analysis & Reporting
-      # self._generate_final_report(config, csv_rows, stats, monitor, start_time)
+      monitor.stop()
+      monitor.join()
+      elapsed = str(timedelta(seconds=int(time.time() - start_time)))
+      avg_cpu, max_cpu, avg_ram, max_ram = monitor.get_stats()
+      total_ram_gb = psutil.virtual_memory().total / (1024**3)
+      total_cpu_cores = psutil.cpu_count(logical=True)
+
+      self.log_msg("\n" + "=" * 40)
+      self.log_msg(f"TOTAL TIME: {elapsed}")
+      self.log_msg(f"Total Sites / Subsites: {file_metrics.get('subSiteCount', 0)}")
+      self.log_msg(
+          f"Folders: {file_metrics.get('folderCount', 0):,} | Files: {file_metrics.get('fileCount', 0):,} |"
+          f" Shortcuts: {file_metrics.get('shortcutCount', 0):,} | Lists: {file_metrics.get('listCount', 0):,}"
+      )
+      self.log_msg(f"Total Size: {self.format_size(file_metrics.get('totalSize', 0))}")
+      self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
+      self.log_msg(f"CPU Avg/Peak: {avg_cpu:.1f}% / {max_cpu:.1f}%")
+      self.log_msg(f"RAM Avg/Peak: {avg_ram:.1f}% / {max_ram:.1f}%")
+      self.log_msg("=" * 40)
 
     except Exception as e:
       self.log_msg(f"Process failed: {e}")
       self.ui_update("error", message=str(e))
+    finally:
+      if monitor is not None:
+        monitor.stop()
     
   # ==========================
   # VIEW: PROGRESS
