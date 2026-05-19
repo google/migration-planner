@@ -847,12 +847,15 @@ class FileEstimator(Estimator):
             seen_ids = set()
             drive_id_to_total_size = {}
 
+            def _is_root(resource):
+                return "id" not in resource["parentReference"] and resource["name"] == "root"
+
             def local_progress_callback(responses: List, has_next=False):
                 nonlocal completed_drives
                 if not has_next:
                     completed_drives += 1
                 for curr_response in responses:
-                    if curr_response["id"] in seen_ids:
+                    if curr_response["id"] in seen_ids or _is_root(curr_response):
                         continue
                     seen_ids.add(curr_response["id"])
                     
@@ -1143,8 +1146,6 @@ class FileEstimator(Estimator):
 
             # Root folder. Skipping it as it is an implicit folder added by default with common ID across multiple drives.
             if "id" not in resource["parentReference"]:
-                with self.condition:
-                    self.global_skipped_folders_count += 1
                 return
 
             drive_id = resource["parentReference"]["driveId"]
