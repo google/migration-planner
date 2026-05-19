@@ -14,6 +14,33 @@ import json
 import pandas as pd
 import math
 
+def format_range(low, high):
+  def format_boundary(kb_val):
+    if kb_val >= 1024 * 1024:
+      gb = kb_val / (1024 * 1024)
+      if gb.is_integer():
+        return f"{int(gb)} GB"
+      return f"{gb:.2f} GB"
+    elif kb_val >= 1024:
+      mb = kb_val / 1024
+      if mb.is_integer():
+        return f"{int(mb)} MB"
+      return f"{mb:.2f} MB"
+    else:
+      return f"{kb_val} KB"
+
+  if low == 0:
+    return f"< {format_boundary(high)}"
+  elif high == float("inf"):
+    return f">= {format_boundary(low)}"
+  else:
+    adjusted_low = low - 1 if low % 1024 == 1 else low
+    return f"{format_boundary(adjusted_low)} - {format_boundary(high)}"
+
+def get_bucket_column_header(low, high):
+  return f"Files {format_range(low, high)}"
+
+
 class FileMigrationEstimatorTool(MigrationEstimatorTool):
   def __init__(self):
     super().__init__()
@@ -95,6 +122,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           widget = self.prog_widgets["sites"]["lbl"]
           bar = self.prog_widgets["sites"]["bar"]
           if status == "Fetching...":
+            bar.configure(mode="indeterminate")
             bar.start()
           if widget.winfo_exists():
             text = f"Sites: {count}"
@@ -137,6 +165,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           widget = self.prog_widgets["drives"]["lbl"]
           bar = self.prog_widgets["drives"]["bar"]
           if status == "Fetching...":
+            bar.configure(mode="indeterminate")
             bar.start()
           text = f"Drives: {count}"
           if folder_count > 0:
@@ -266,10 +295,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "maxEffectiveDepth": "Max Effective Depth",
         "maxFolderDepth": "Max Folder Depth",
         "maxSubsiteDepth": "Max Subsite Depth",
-        "subsiteCount": "Site/Subsite Count",
+        "subsiteCount": "Subsite Count",
         "shortcutCount": "Shortcut Count",
         "listCount": "List Count",
-        "subsite_count": "Site/Subsite Count",
+        "siteCount": "Site Collection Count",
         "documentLibrary": "Document Library",
         "personalDrive": "Personal Drive",
         "businessDrive": "Business Drive",
@@ -303,24 +332,35 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Extract siteMetrics and build DataFrame
       site_metrics = file_metrics.get("siteMetrics", {})
+      if not site_metrics:
+        raise Exception("No sites were scanned successfully. Please check Azure app permissions or organization access policies.")
       site_data = []
       for site_id, s_data in site_metrics.items():
         site_data.append({
             "Site Id": site_id,
+            "DL Count": len(s_data.get("driveMetrics", {}).keys()),
+            "List Count": s_data.get("listCount", 0),
+            "Subsite Count": s_data.get("subsiteCount", 0),
             "Resource Count": s_data.get("resourceCount", 0),
             "Folder Count": s_data.get("folderCount", 0),
             "File Count": s_data.get("fileCount", 0),
             "Shortcut Count": s_data.get("shortcutCount", 0),
+            "Folder Count > Depth Limit 100": s_data.get("folderCountExceedingDepthLimit", 0),
+            "File Count > Depth Limit 100": s_data.get("fileCountExceedingDepthLimit", 0),
             "Corpus Size": s_data.get("totalSize", 0)
         })
       df = pd.DataFrame(site_data)
       
-      df_final, batches_list, total_eta, buckets = self.calculate_migration_batches(df)
-      
-      file_metrics["batches"] = batches_list
-      file_metrics["buckets"] = buckets
-      file_metrics["total_eta"] = total_eta
-      file_metrics["df"] = df_final
+      if self.show_eta:
+        df_final, batches_list, total_eta, buckets = self.calculate_migration_batches(df)
+        
+        file_metrics["batches"] = batches_list
+        file_metrics["buckets"] = buckets
+        file_metrics["total_eta"] = total_eta
+        file_metrics["df"] = df_final
+        base_df = df_final
+      else:
+        base_df = df
 
       self.ui_update(
           "scan_progress",
@@ -347,7 +387,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       total_corpus = sum([s_data.get("totalSize", 0) for s_data in site_metrics.values()])
       self.log_msg("\n" + "=" * 40)
       self.log_msg(f"TOTAL TIME: {elapsed}")
-      self.log_msg(f"Total Sites / Subsites: {file_metrics.get('subsite_count', 0)}")
+      self.log_msg(f"Total Sites Collection: {file_metrics.get('siteCount', 0)}")
       self.log_msg(
           f"Folders: {file_metrics.get('folderCount', 0):,} | Files: {file_metrics.get('fileCount', 0):,} |"
           f" Shortcuts: {file_metrics.get('shortcutCount', 0):,} | Lists: {file_metrics.get('listCount', 0):,}"
@@ -359,7 +399,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.log_msg("=" * 40)
       
       # Create resolved copy of DataFrame for export to CSV and batches
-      df_output = df_final.copy()
+      df_output = base_df.copy()
       df_output["Site Id"] = df_output["Site Id"].apply(self._get_display_name)
       df_output["Corpus Size"] = df_output["Corpus Size"].apply(self.format_size)
       df_output.rename(columns={"Site Id": "Site URL/Name"}, inplace=True)
@@ -371,17 +411,18 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       batches_dir = os.path.join(output_dir, "suggested batches")
       os.makedirs(batches_dir, exist_ok=True)
       
-      unique_batches = df_output["Suggested Batch"].unique()
-      for batch in unique_batches:
-        if not batch:
-          continue
-        batch_data = df_output[df_output["Suggested Batch"] == batch].copy()
-        batch_export = batch_data[["Site URL/Name"]].rename(
-            columns={"Site URL/Name": "Source SharePoint Site ID/URL"}
-        )
-        safe_name = batch.replace(" ", "")
-        batch_path = os.path.join(batches_dir, f"{safe_name}.csv")
-        batch_export.to_csv(batch_path, index=False)
+      if self.show_eta:
+        unique_batches = df_output["Suggested Batch"].unique()
+        for batch in unique_batches:
+          if not batch:
+            continue
+          batch_data = df_output[df_output["Suggested Batch"] == batch].copy()
+          batch_export = batch_data[["Site URL/Name"]].rename(
+              columns={"Site URL/Name": "Source SharePoint Site ID/URL"}
+          )
+          safe_name = batch.replace(" ", "")
+          batch_path = os.path.join(batches_dir, f"{safe_name}.csv")
+          batch_export.to_csv(batch_path, index=False)
         
       with self.log_lock:
         log_content = "\n".join(self.log_buffer)
@@ -530,6 +571,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                 "start_idx": start_idx,
                 "end_idx": end_idx,
                 "sites": len(final_subset),
+                "dl_count": int(final_subset["DL Count"].sum()) if "DL Count" in final_subset.columns else 0,
                 "resource_count": int(final_subset["Resource Count"].sum()),
                 "folder_count": int(final_subset["Folder Count"].sum()) if "Folder Count" in final_subset.columns else 0,
                 "file_count": int(final_subset["File Count"].sum()) if "File Count" in final_subset.columns else 0,
@@ -607,13 +649,14 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     f.pack(fill="x", padx=20, pady=8)
     
     sites_str = self.format_metric(batch.get("sites", 0))
+    dl_count = self.format_metric(batch.get("dl_count", 0))
     folders_str = self.format_metric(batch.get("folder_count", 0))
     files_str = self.format_metric(batch.get("file_count", 0))
     shortcuts_str = self.format_metric(batch.get("shortcut_count", 0))
     size_str = self.format_size(batch.get("corpus_size", 0))
     
     info = (
-        f"{batch['name']} - {sites_str} 🏢  |  {folders_str} 📁  |  {files_str} 📄  |  {shortcuts_str} 🔗  |  {size_str} 💾"
+        f"{batch['name']} - {sites_str} 🏢  |  {dl_count} 📦  |  {folders_str} 📁  |  {files_str} 📄  |  {shortcuts_str} 🔗  |  {size_str} 💾"
     )
     ctk.CTkLabel(
         f,
@@ -669,78 +712,42 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       card_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
       card_frame.pack(fill="x", pady=10)
 
-      self.create_stat_card(card_frame, "Max Effective Depth", f"{data.get('maxEffectiveDepth', 0):,}", "👥")
-      self.create_stat_card(card_frame, "Site/Subsite Count", f"{data.get('subsite_count', data.get('subSiteCount', 0)):,}", "🏢")
-      self.create_stat_card(card_frame, "Shortcut Count", f"{data.get('shortcutCount', 0):,}", "🔗")
-      self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
+      self.create_stat_card(card_frame, "Total Corpus Size", f"{self.format_size(sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🏢")
+      self.create_stat_card(card_frame, "Site Collection Count", f"{data.get("siteCount"):,}", "🏢")
+      self.create_stat_card(card_frame, "Subsite Count", f"{data.get("subsiteCount"):,}", "🏢")
+      self.create_stat_card(card_frame, "Document Library Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
       self.create_stat_card(card_frame, "Folder Count", f"{data.get('folderCount', 0):,}", "📁")
       self.create_stat_card(card_frame, "File Count", f"{data.get('fileCount', 0):,}", "📄")
-      self.create_stat_card(card_frame, "Document Library Count", f"{data.get('driveCounts', {}).get("documentLibrary"):,}", "📁")
-      self.create_stat_card(card_frame, "Folder Count (exceeding depth limit)", f"{data.get('folderCountExceedingDepthLimit', 0):,}", "📁")
-      self.create_stat_card(card_frame, "File Count (exceeding depth limit)", f"{data.get('fileCountExceedingDepthLimit', 0):,}", "📄")
-      self.create_stat_card(card_frame, "Large Resource Count", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
-      
-      if "folder_file_size" in data:
-          self.create_stat_card(card_frame, "Folder File Size", f"{data['folder_file_size']:,} KB", "💾")
+      self.create_stat_card(card_frame, "Shortcut Count", f"{data.get('shortcutCount', 0):,}", "🔗")
+      self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
+      self.create_stat_card(card_frame, "Folder count beyond depth limit 100", f"{data.get('folderCountExceedingDepthLimit', 0):,}", "📁")
+      self.create_stat_card(card_frame, "File count beyond depth limit 100", f"{data.get('fileCountExceedingDepthLimit', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Large Resource Count (Folders with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
 
-      # Timeline
-      ctk.CTkLabel(
-          self.view_results,
-          text="Timeline Estimates",
-          font=FONT_HEADER_SMALL,
-          text_color=COLOR_TEXT_MAIN,
-      ).pack(anchor="w", padx=10, pady=(20, 5))
-      ctk.CTkLabel(
-          self.view_results,
-          text=(
-              "Projected migration timeline based on the proposed execution"
-              " plan."
-          ),
-          font=FONT_BODY_MEDIUM,
-          text_color=COLOR_TEXT_SUB,
-      ).pack(anchor="w", padx=10, pady=(0, 10))
+      if self.show_eta:
+        # Timeline
+        ctk.CTkLabel(
+            self.view_results,
+            text="Timeline Estimates",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN,
+        ).pack(anchor="w", padx=10, pady=(20, 5))
+        ctk.CTkLabel(
+            self.view_results,
+            text=(
+                "Projected migration timeline based on the proposed execution"
+                " plan."
+            ),
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_SUB,
+        ).pack(anchor="w", padx=10, pady=(0, 10))
 
-      # Total Footer
-      foot = ctk.CTkFrame(self.view_results, fg_color="transparent")
-      foot.pack(fill="x", pady=10)
-      self.create_summary_box(
-          foot, self.format_eta(data["total_eta"]), "Estimated Time"
-      )
-
-      # License Metrics
-      if "licenseMetrics" in data:
-          ctk.CTkLabel(
-              self.view_results,
-              text="License Metrics",
-              font=FONT_HEADER_SMALL,
-              text_color=COLOR_TEXT_MAIN,
-          ).pack(anchor="w", padx=10, pady=(20, 5))
-          
-          license_frame = ctk.CTkFrame(self.view_results, fg_color=COLOR_SURFACE, corner_radius=12, border_color=COLOR_OUTLINE_LIGHT, border_width=1)
-          license_frame.pack(fill="x", padx=10, pady=5)
-          
-          metrics = data["licenseMetrics"]
-          
-          # Total License Count Row
-          row1 = ctk.CTkFrame(license_frame, fg_color="transparent")
-          row1.pack(fill="x", padx=15, pady=5)
-          ctk.CTkLabel(row1, text="Total License Count", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left")
-          ctk.CTkLabel(row1, text=f"User: {metrics.get('totalLicenseCount', {}).get('User', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
-          ctk.CTkLabel(row1, text=f"Company: {metrics.get('totalLicenseCount', {}).get('Company', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
-
-          # Consumed Units Row
-          row2 = ctk.CTkFrame(license_frame, fg_color="transparent")
-          row2.pack(fill="x", padx=15, pady=5)
-          ctk.CTkLabel(row2, text="Consumed Units", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left")
-          ctk.CTkLabel(row2, text=f"User: {metrics.get('consumedUnits', {}).get('User', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
-          ctk.CTkLabel(row2, text=f"Company: {metrics.get('consumedUnits', {}).get('Company', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
-
-          # Alloted Units Row
-          row3 = ctk.CTkFrame(license_frame, fg_color="transparent")
-          row3.pack(fill="x", padx=15, pady=5)
-          ctk.CTkLabel(row3, text="Alloted Units", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left")
-          ctk.CTkLabel(row3, text=f"User: {metrics.get('totalAllotedUnits', {}).get('User', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
-          ctk.CTkLabel(row3, text=f"Company: {metrics.get('totalAllotedUnits', {}).get('Company', 0):,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
+        # Total Footer
+        foot = ctk.CTkFrame(self.view_results, fg_color="transparent")
+        foot.pack(fill="x", pady=10)
+        self.create_summary_box(
+            foot, self.format_eta(data["total_eta"]), "Estimated Time"
+        )
 
       # Container for Paginated Content
       self.paginated_frame = ctk.CTkFrame(
@@ -762,22 +769,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           dist_frame.pack(fill="x", padx=10, pady=5)
           
           buckets = dist_data.get("Buckets", dist_data.get("buckets", []))
+          
+          # Header Row
+          header_frame = ctk.CTkFrame(dist_frame, fg_color="transparent")
+          header_frame.pack(fill="x", padx=15, pady=(10, 5))
+          ctk.CTkLabel(header_frame, text="Range", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=200, anchor="w").pack(side="left")
+          ctk.CTkLabel(header_frame, text="Count", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=150, anchor="w").pack(side="left")
+          
+          # Data Rows
           for bucket in buckets:
               range_vals = bucket.get("sizeRange", (0, 0))
-              range_str = f"{str(range_vals[0])} - {str(range_vals[1])} KB"
+              range_str = format_range(range_vals[0], range_vals[1])
               file_ids = bucket.get("fileIDs", [])
               count = bucket.get("count", len(file_ids))
               
               row_frame = ctk.CTkFrame(dist_frame, fg_color="transparent")
-              row_frame.pack(fill="x", padx=15, pady=5)
+              row_frame.pack(fill="x", padx=15, pady=3)
               
-              ctk.CTkLabel(row_frame, text=range_str, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, width=150, anchor="w").pack(side="left")
-              
-              if file_ids:
-                  files_str = ", ".join(file_ids)
-                  ctk.CTkLabel(row_frame, text=f"Files: {files_str}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=10)
-              else:
-                  ctk.CTkLabel(row_frame, text=f"Count: {count}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=10)
+              ctk.CTkLabel(row_frame, text=range_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=200, anchor="w").pack(side="left")
+              ctk.CTkLabel(row_frame, text=f"{count:,}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, width=150, anchor="w").pack(side="left")
 
       # Resources
       ctk.CTkLabel(
@@ -791,6 +801,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       res_frame.pack(fill="x", pady=0)
       res_frame.grid_columnconfigure(0, weight=1)
       res_frame.grid_columnconfigure(1, weight=1)
+
+      # Disclaimer
+      disclaimer = (
+          "* The estimations provided by this tool are calculated projections"
+          " intended for preliminary planning only. Actual migration timelines"
+          " (ETAs) and batch execution may vary based on, for example,"
+          " real-time network conditions, source/target throttling policies,"
+          " migration configurations, and the volume of delta migrations. The"
+          " estimations do not constitute a performance guarantee or a binding"
+          " service level agreement (SLA)."
+      )
+      ctk.CTkLabel(
+          self.view_results,
+          text=disclaimer,
+          font=FONT_BODY_SMALL,
+          text_color=COLOR_TEXT_SUB,
+          wraplength=800,
+          justify="left",
+      ).pack(anchor="w", padx=10, pady=(10, 20))
 
       self.create_resource_card(
           res_frame,
@@ -849,8 +878,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       )
       self.btn_action_secondary.pack(side="left", padx=(25, 0), pady=15)
 
-      self.selected_page_size = "50"
-      self.render_paginated_view(0)
+      if self.show_eta:
+        self.selected_page_size = "50"
+        self.render_paginated_view(0)
 
     except Exception as e:
       print(f"ERROR in show_results_content: {e}")
@@ -905,112 +935,100 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Section 1: Summary Metrics
       writer.writerow(["Summary Metrics", "Value"])
-      for k, v in summary_data.items():
-        if k == "driveCounts":
-          for sub_k, sub_v in v.items():
-            writer.writerow([f"DriveCount {self._get_display_name(sub_k)}", sub_v])
-        else:
-          writer.writerow([self._get_display_name(k), v])
+      
+      summary_rows = [
+          ("Site Collection Count", data.get("siteCount", 0)),
+          ("Subsite Count", data.get("subsiteCount", 0)),
+          ("Personal Site Collection Count", data.get("personalSiteCount", 0)),
+          ("Team Site Collection Count", data.get("teamSiteCount", 0)),
+          ("DL Count", sum(data.get("driveCounts", {}).values())),
+          ("Personal DL Count", data.get("personalSiteDLCount", 0)),
+          ("Team DL Count", data.get("teamSiteDLCount", 0)),
+          ("List Count", data.get("listCount", 0)),
+          ("Folder Count", data.get("folderCount", 0)),
+          ("File Count", data.get("fileCount", 0)),
+          ("Shortcut Count", data.get("shortcutCount", 0)),
+          ("Folder count beyond depth limit 100", data.get("folderCountExceedingDepthLimit", 0)),
+          ("File count beyond depth limit 100", data.get("fileCountExceedingDepthLimit", 0)),
+          ("Large Resource Count (Folders with >500k items)", data.get("tenantLevelLargeResourceCount", 0))
+      ]
+      
+      for label, val in summary_rows:
+          writer.writerow([label, val])
       
       writer.writerow([]) # Blank line separator
       
       # Section 2: License Metrics
-      writer.writerow(["License Metrics", ""])
       license_data = data.get("licenseMetrics", {})
-      writer.writerow(["Total License Count (User)", license_data.get("totalLicenseCount", {}).get("User", 0)])
-      writer.writerow(["Total License Count (Company)", license_data.get("totalLicenseCount", {}).get("Company", 0)])
-      writer.writerow(["Consumed Units (User)", license_data.get("consumedUnits", {}).get("User", 0)])
-      writer.writerow(["Consumed Units (Company)", license_data.get("consumedUnits", {}).get("Company", 0)])
-      writer.writerow(["Alloted Units (User)", license_data.get("totalAllotedUnits", {}).get("User", 0)])
-      writer.writerow(["Alloted Units (Company)", license_data.get("totalAllotedUnits", {}).get("Company", 0)])
+      writer.writerow(["Total License Count", license_data.get("totalAllotedUnits", {}).get("User", 0) + license_data.get("totalAllotedUnits", {}).get("Company", 0)])
       
       writer.writerow([]) # Blank line separator
       
       # Section 3: File Size Distribution
       writer.writerow(["File Size Distribution", ""])
-      writer.writerow(["Range (KB)", "Count"])
+      writer.writerow(["Range", "Count"])
       dist_data = data.get("tenantLevelFileSizeDistribution", {})
       buckets = dist_data.get("buckets", [])
       for bucket in buckets:
         range_vals = bucket.get("sizeRange", (0, 0))
-        range_str = f"{range_vals[0]} - {range_vals[1]}"
+        range_str = format_range(range_vals[0], range_vals[1])
         count = bucket.get("count", 0)
         writer.writerow([range_str, count])
         
       writer.writerow([]) # Blank line separator
       
       # Section 4: Large Resources
-      writer.writerow(["Large Resources", ""])
-      writer.writerow(["Type", "ID", "SubTreeCount", "Drive"])
-      large_resources = data.get("tenantLevelLargeResources", [])
-      for res in large_resources:
-        writer.writerow([
+      if len(data.get("tenantLevelLargeResources", [])) > 0:
+        writer.writerow(["Large Resources", ""])
+        writer.writerow(["Type", "ID", "SubTreeCount", "Drive"])
+        large_resources = data.get("tenantLevelLargeResources", [])
+        for res in large_resources:
+          writer.writerow([
             res.get("Type", res.get("type", "")),
             res.get("Id", res.get("id", "")),
             res.get("subTreeCount", 0),
             self._get_display_name(res.get("drive", ""))
         ])
         
-      writer.writerow([]) # Blank line separator
+        writer.writerow([]) # Blank line separator
       
-      # Section 5: Site Details
-      writer.writerow(["Site Details", ""])
-      writer.writerow(["Site Name", "Site Level", "Folder Count", "File Count", "Resource Count", "Corpus Size", "Suggested Batch"])
-      site_metrics = data.get("siteMetrics", {})
-      df = data.get("df")
-      
-      for site_id, s_data in site_metrics.items():
-        batch_name = ""
-        if df is not None:
-            match = df[df["Site Id"] == site_id]
-            if not match.empty:
-                batch_name = match["Suggested Batch"].iloc[0]
-                
-        writer.writerow([
-            self._get_display_name(site_id), 
-            s_data.get("siteLevel", 0),
-            s_data.get("folderCount", 0),
-            s_data.get("fileCount", 0),
-            s_data.get("resourceCount", 0),
-            self.format_size(s_data.get("totalSize", 0)),
-            batch_name
-        ])
-        
-      writer.writerow([]) # Blank line separator
-      
-      # Section 6: Drive Details
-      writer.writerow(["Drive Details", ""])
-      
-      # Determine all unique bucket ranges across all drives to create columns
-      drive_metrics = data.get("driveMetrics", {})
-      all_buckets = set()
-      for d_data in drive_metrics.values():
-        for bucket in d_data.get("fileSizeDistribution", {}).get("buckets", []):
-            range_vals = bucket.get("sizeRange", (0, 0))
-            all_buckets.add(range_vals)
-            
-      sorted_buckets = sorted(list(all_buckets))
-      bucket_cols = [f"Bucket_{b[0]}_{b[1]}" for b in sorted_buckets]
-      
-      headers = ["Drive Name", "Max Effective Depth", "Folder Count", "File Count", "Shortcut Count"] + bucket_cols
-      writer.writerow(headers)
-      
-      for drive_id, d_data in drive_metrics.items():
-        row = [
-            self._get_display_name(drive_id),
-            d_data.get("maxEffectiveDepth", 0),
-            d_data.get("folderCount", 0),
-            d_data.get("fileCount", 0),
-            d_data.get("shortcutCount", 0)
-        ]
-        
-        # Add bucket counts
-        drive_buckets = {f"Bucket_{b.get('sizeRange', (0,0))[0]}_{b.get('sizeRange', (0,0))[1]}": b.get("count", 0) for b in d_data.get("fileSizeDistribution", {}).get("buckets", [])}
-        for b_col in bucket_cols:
-            row.append(drive_buckets.get(b_col, 0))
-            
-        writer.writerow(row)
+      if len(data.get("siteMetrics", {}).items()) > 0:
+        # Section 5: Site Details
+        writer.writerow(["Site Details", ""])
+        row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
+        if self.show_eta:
+          row.append("Suggested Batch")
 
+        writer.writerow(row)
+        site_metrics = data.get("siteMetrics", {})
+        df = data.get("df")
+        
+        for site_id, s_data in site_metrics.items():
+          batch_name = ""
+          if df is not None:
+              match = df[df["Site Id"] == site_id]
+              if not match.empty and self.show_eta:
+                  batch_name = match["Suggested Batch"].iloc[0]
+                  
+          row = [
+              self._get_display_name(site_id), 
+              s_data.get("subsiteCount", 0),
+              s_data.get("dlCount", 0),
+              s_data.get("listCount", 0),
+              s_data.get("folderCount", 0),
+              s_data.get("fileCount", 0),
+              s_data.get("shortcutCount", 0),
+              s_data.get("folderCountExceedingDepthLimit", 0),
+              s_data.get("fileCountExceedingDepthLimit", 0),
+              s_data.get("largeResourceCount", 0),
+              self.format_size(s_data.get("totalSize", 0))
+          ]
+
+          if self.show_eta:
+            row.append(batch_name)
+          writer.writerow(row)
+        
+        writer.writerow([]) # Blank line separator
 
   def _get_scan_configuration(self):
     config = super()._get_scan_configuration()
@@ -1032,6 +1050,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()
     self.val_eta_max_batches = self.eta_max_batches.get()
+    self.show_eta = os.environ.get("SHOW_ETA", "false") == "true"
       
     disclaimer_text = (
         "The estimations provided by this tool are calculated projections"
@@ -1062,10 +1081,27 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
     self.prog_widgets = {}
 
-    self.create_progress_row(self.scan_container, "sites", "Site Discovery", mode="indeterminate")
-    self.create_progress_row(self.scan_container, "drives", "Drive Discovery", mode="indeterminate")
+    self.create_progress_row(self.scan_container, "sites", "Site Discovery", mode="determinate")
+    self.create_progress_row(self.scan_container, "drives", "Drive Discovery", mode="determinate")
     self.create_progress_row(self.scan_container, "drive_parsing", "Metrics Calculation", mode="determinate")
     self.create_progress_row(self.scan_container, "plan_generation", "Generating Migration Plan", mode="determinate")
 
     import threading
     threading.Thread(target=self.execute_migration_scan, args=(config,)).start()
+
+if __name__ == "__main__":
+  """Application entry point."""
+  import urllib3
+  # Suppress SSL warnings for cleaner console output
+  urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+  # Configure High DPI scaling if necessary (Windows)
+  try:
+    from ctypes import windll
+
+    windll.shcore.SetProcessDpiAwareness(1)
+  except Exception:
+    pass
+  
+  app = FileMigrationEstimatorTool()
+  app.mainloop()

@@ -10,6 +10,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 import pandas as pd
 import psutil
 import time
+import os
+import subprocess
+import sys
 
 from util.connectors import TokenManager, UrlInvoker
 from util.monitoring import ResourceMonitor
@@ -75,6 +78,26 @@ class MigrationEstimatorTool(ctk.CTk):
     # --- HEADER ---
     self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
     self.header_frame.pack(fill="x", padx=30, pady=(20, 10))
+
+    # Top Navigation Row
+    self.nav_frame = ctk.CTkFrame(self.header_frame, fg_color="transparent")
+    self.nav_frame.pack(fill="x", anchor="w", pady=(0, 10))
+
+    self.btn_back = ctk.CTkButton(
+        self.nav_frame,
+        text="← Back to Selector",
+        width=160,
+        height=32,
+        corner_radius=16,
+        font=FONT_BODY_BOLD,
+        fg_color="transparent",
+        border_width=1,
+        border_color=COLOR_OUTLINE,
+        text_color=COLOR_PRIMARY,
+        hover_color=COLOR_SECONDARY_HOVER,
+        command=self.go_back_to_selector,
+    )
+    self.btn_back.pack(side="left", anchor="w")
 
     # Title
     ctk.CTkLabel(
@@ -157,6 +180,18 @@ class MigrationEstimatorTool(ctk.CTk):
     # Show Start Page
     self.show_config_view()
 
+  def go_back_to_selector(self):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    selector_path = os.path.join(current_dir, "../migration_planner.py")
+    subprocess.Popen(
+        [sys.executable, selector_path],
+        start_new_session=True,
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    self.destroy()
   # ==========================
   # VIEW: CONFIGURATION
   # ==========================
@@ -2848,3 +2883,20 @@ class MigrationEstimatorTool(ctk.CTk):
               "user_discovery", count=len(resolved), status="Resolving CSV..."
           )
     return resolved
+
+if __name__ == "__main__":
+  """Application entry point."""
+  import urllib3
+  # Suppress SSL warnings for cleaner console output
+  urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+  # Configure High DPI scaling if necessary (Windows)
+  try:
+    from ctypes import windll
+
+    windll.shcore.SetProcessDpiAwareness(1)
+  except Exception:
+    pass
+
+  app = MigrationEstimatorTool()
+  app.mainloop()

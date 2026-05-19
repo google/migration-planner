@@ -86,9 +86,12 @@ class FileEstimator(Estimator):
             
             drives = []
             subsite_to_drives = {}          # used to calculate effective max Depth
+            subsite_to_top_level_site = {}
             metrics = { 
                 "driveMetrics": {},
                 "siteMetrics": {},
+                "personalSiteCount": 0,
+                "teamSiteCount": 0,
                 "maxEffectiveDepth": 0,
                 "maxFolderDepth": 0,        # only includes depth from folders in drives
                 "maxSubsiteDepth": 0,       # only includes depth of subsites
@@ -105,6 +108,8 @@ class FileEstimator(Estimator):
                     "personal": 0,
                     "business": 0,
                 },
+                "personalSiteDLCount": 0,
+                "teamSiteDLCount": 0,
                 "tenantLevelFileSizeDistribution": {
                     "buckets": []
                 },
@@ -113,10 +118,9 @@ class FileEstimator(Estimator):
             }
 
             if "drives" in data and len(data["drives"]) > 0:
-                # One Drive Flow
                 drives = data["drives"]
             else:
-                # Sharepoint Flow
+                self.site_to_metadata = {}
                 site_discovery_progress_metrics = {
                     "siteCount": 0,
                     "personalSiteCount": 0,
@@ -129,7 +133,7 @@ class FileEstimator(Estimator):
 
                 self._configure_executor_from_license_counts(metrics["licenseMetrics"])
 
-                self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
+                self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, subsite_to_top_level_site, site_discovery_progress_metrics, failures)
                 self.logger("Site Scanning is finished!!!!")
 
             # get adjacency lists and parent references for each drive
@@ -140,7 +144,6 @@ class FileEstimator(Estimator):
                 "shortcutCount": 0
             }
 
-            # print(f"Drive Count: {len(drives)}")
             drive_id_to_adj_list, parent_references, resource_id_to_details, drive_id_to_total_size = self._create_in_memory_tree([drive["id"] for drive in drives], drive_discovery_progress_metrics, failures)
             self.progress_update_callback("drive_discovery", status="Done", count=len(drives), **drive_discovery_progress_metrics)
 
@@ -174,16 +177,6 @@ class FileEstimator(Estimator):
                         self.global_folder_exceeding_depth_limit += d_metric.get("folderCountExceedingDepthLimit", 0)
                         self.global_file_exceeding_depth_limit += d_metric.get("fileCountExceedingDepthLimit", 0)
 
-                    # print("Batch Finished!!!!")
-                    # print("Folder Count: ", self.global_folder_count)
-                    # print("File Count: ", self.global_file_count)
-                    # print("Shortcut Count: ", self.global_shortcut_count)
-                    # print("Max Depth: ", self.global_max_depth)
-                    # print("Folder Count Exceeding Depth Limit: ", self.global_folder_exceeding_depth_limit)
-                    # print("File Count Exceeding Depth Limit: ", self.global_file_exceeding_depth_limit)
-                    # print("Processed: ", processed)
-                    # print("Failed: ", failed)
-                    # print("Success: ", success)
                     self.progress_update_callback(
                         "scan_progress",
                         source="drive_parsing",
@@ -231,7 +224,15 @@ class FileEstimator(Estimator):
 
             self.progress_update_callback("phase_status", source="plan_generation", status="running")
             metrics["driveMetrics"] = drive_metrics
-            self._update_tenant_metrics_from_drive_metrics(metrics, subsite_to_drives, drive_id_to_total_size)
+            self._update_tenant_metrics_from_drive_metrics(metrics, subsite_to_drives, subsite_to_top_level_site, drive_id_to_total_size)
+            
+            # Filter out subsites (siteLevel > 0) to only keep root site collections
+            metrics["siteMetrics"] = {
+                site_id: s_data 
+                for site_id, s_data in metrics["siteMetrics"].items() 
+                if s_data.get("siteLevel", 0) == 0
+            }
+            
             self.progress_update_callback("phase_status", source="plan_generation", status="complete")
 
             return metrics
@@ -264,11 +265,14 @@ class FileEstimator(Estimator):
         else:
             self.executor = ThreadPoolExecutor(max_workers=5)
         
+    def _is_subsite_personal(self, site_id: str) -> bool:
+        return self.site_to_metadata.get(site_id, {}).get("isPersonalSite", False)
 
     def _update_tenant_metrics_from_drive_metrics(
         self,
         metrics: Dict[str, Any],
         subsite_to_drives: Dict[str, List[Any]],
+        subsite_to_top_level_site: Dict[str, str],
         drive_id_to_total_size: Dict[str, int]
     ):
         self.progress_update_callback(
@@ -277,8 +281,8 @@ class FileEstimator(Estimator):
             progress=0.33,
             extra_text="Calculating metrics...",
         )
+
         for drive_metric in metrics["driveMetrics"].values():
-            metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], drive_metric["maxEffectiveDepth"])
             metrics["maxFolderDepth"] = max(metrics["maxFolderDepth"], drive_metric["maxEffectiveDepth"])
             metrics["shortcutCount"] += drive_metric.get("shortcutCount", 0)
             metrics["folderCount"] += drive_metric.get("folderCount", 0)
@@ -288,20 +292,42 @@ class FileEstimator(Estimator):
         
         for subsite_id, drive_ids in subsite_to_drives.items():
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
+            top_level_site = subsite_to_top_level_site.get(subsite_id, subsite_id)
 
-            metrics["siteMetrics"][subsite_id]["folderCount"] = 0
-            metrics["siteMetrics"][subsite_id]["fileCount"] = 0
-            metrics["siteMetrics"][subsite_id]["totalSize"] = 0
+            if top_level_site != subsite_id:
+                metrics["siteMetrics"][top_level_site]["subsiteCount"] = metrics["siteMetrics"][top_level_site].get("subsiteCount", 0) + 1
+            
+            metrics["siteMetrics"][top_level_site]["listCount"] =  metrics["siteMetrics"][top_level_site].get("listCount", 0) + self.site_to_metadata[subsite_id].get("listCount", 0)
             
             for drive_id in drive_ids:
                 if drive_id in metrics["driveMetrics"]:
                     drive_metric = metrics["driveMetrics"][drive_id]
-                    metrics["siteMetrics"][subsite_id]["folderCount"] += drive_metric.get("folderCount", 0)
-                    metrics["siteMetrics"][subsite_id]["fileCount"] += drive_metric.get("fileCount", 0)
-                    metrics["siteMetrics"][subsite_id]["totalSize"] += drive_id_to_total_size.get(drive_id, 0)
-                    metrics["maxEffectiveDepth"] = max(metrics["maxEffectiveDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"] + drive_metric["maxEffectiveDepth"])  
                     
-            metrics["siteMetrics"][subsite_id]["resourceCount"] = metrics["siteMetrics"][subsite_id]["folderCount"] + metrics["siteMetrics"][subsite_id]["fileCount"]
+                    metrics["siteMetrics"][top_level_site]["largeResourceCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("largeResourceCount", 0) + len(drive_metric.get("largeResources", []))
+                    metrics["siteMetrics"][top_level_site]["folderCount"] =  metrics["siteMetrics"].get(top_level_site, {}).get("folderCount", 0) + drive_metric.get("folderCount", 0)
+                    metrics["siteMetrics"][top_level_site]["fileCount"] =  metrics["siteMetrics"].get(top_level_site, {}).get("fileCount", 0) + drive_metric.get("fileCount", 0)
+                    metrics["siteMetrics"][top_level_site]["shortcutCount"] =  metrics["siteMetrics"].get(top_level_site, {}).get("shortcutCount", 0) + drive_metric.get("shortcutCount", 0)
+                    metrics["siteMetrics"][top_level_site]["totalSize"] =  metrics["siteMetrics"].get(top_level_site, {}).get("totalSize", 0) + drive_id_to_total_size.get(drive_id, 0)
+                    metrics["siteMetrics"][top_level_site]["folderCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("folderCountExceedingDepthLimit", 0) + drive_metric.get("folderCountExceedingDepthLimit", 0)
+                    metrics["siteMetrics"][top_level_site]["fileCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("fileCountExceedingDepthLimit", 0) + drive_metric.get("fileCountExceedingDepthLimit", 0)
+                
+            
+            metrics["siteMetrics"][top_level_site]["dlCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("dlCount", 0) + len(drive_ids)
+            
+            if self._is_subsite_personal(subsite_id):
+                metrics["personalSiteDLCount"] += len(drive_ids)
+            else:
+                metrics["teamSiteDLCount"] += len(drive_ids)
+            
+            if top_level_site != subsite_id:
+                metrics["subSiteCount"] += 1
+                    
+        for siteId in subsite_to_drives.keys():
+            top_level_site = subsite_to_top_level_site.get(siteId, siteId)
+            if top_level_site != siteId:
+                continue
+
+            metrics["siteMetrics"][top_level_site]["resourceCount"] = metrics["siteMetrics"][top_level_site]["folderCount"] + metrics["siteMetrics"][top_level_site]["fileCount"] + metrics["siteMetrics"][top_level_site]["shortcutCount"]
 
         for size_range in self.config.bucket_ranges:
             metrics["tenantLevelFileSizeDistribution"]["buckets"].append({
@@ -344,6 +370,7 @@ class FileEstimator(Estimator):
         tenant_metrics: Dict[str, Any],
         drives: List[Any],
         subsite_to_drives: Dict[str, List[Any]],
+        subsite_to_top_level_site: Dict[str, str],
         site_discovery_progress_metrics: Dict[str, Any],
         failures: List[Dict[str, str]]
     ):
@@ -397,10 +424,17 @@ class FileEstimator(Estimator):
                     team_sites = [site for site in local_all_sites if not site["isPersonalSite"]]
 
                     site_discovery_progress_metrics["siteCount"] += len(local_all_sites)
+                    for site in local_all_sites:
+                        self.site_to_metadata[site["id"]] = {
+                            "isPersonalSite": site["isPersonalSite"]
+                        }
+
                     if self.config.includePersonalSites:
                         site_discovery_progress_metrics["personalSiteCount"] += len(personal_sites)
+                        tenant_metrics["personalSiteCount"] += len(personal_sites)
                     if self.config.includeTeamSites:
                         site_discovery_progress_metrics["teamSiteCount"] += len(team_sites)
+                        tenant_metrics["teamSiteCount"] += len(team_sites)
                     
                     self.progress_update_callback(
                         "site_discovery",
@@ -413,7 +447,7 @@ class FileEstimator(Estimator):
                     url = d.get("@odata.nextLink")
                 
             except Exception as e:
-                self._log_and_fail("Error in _get_license_metrics", e, failures)
+                self._log_and_fail("Error in _get_subsite_metrics_and_drives", e, failures)
             finally:
                 self.url_invoker.token_manager.return_token_slot(token_data)
             
@@ -421,15 +455,18 @@ class FileEstimator(Estimator):
                 self.id_to_display[site["id"]] = site["webUrl"]
 
             # Crawl all the subsites and collect them
-
-            site_id_to_level = self._get_site_id_to_level(sites, failures)
+            site_id_to_level = self._get_site_id_to_level(sites, subsite_to_top_level_site, failures)
             all_sites = [{"siteId": siteId, "siteLevel": level} for siteId, level in site_id_to_level.items()]
             all_site_ids = [site["siteId"] for site in all_sites]
+            
             for site_detail in all_sites:
                 tenant_metrics["siteMetrics"][site_detail["siteId"]] = {
                     "siteLevel": site_detail["siteLevel"]
                 }
-            tenant_metrics["subsite_count"] = len(all_site_ids)
+            
+            top_level_site_count = len([site for site in all_sites if site["siteLevel"] == 0])
+            tenant_metrics["siteCount"] = top_level_site_count
+            
             self._append_tenant_level_metrics(all_site_ids, tenant_metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
 
             self.progress_update_callback(
@@ -446,7 +483,12 @@ class FileEstimator(Estimator):
         except Exception as e:
             self._log_and_fail("Error in _calculate_site_metrics", e, failures)
 
-    def _get_site_id_to_level(self, sites: List[Dict[str, Any]], failures: List[Dict[str, str]]):
+    def _get_site_id_to_level(
+        self, 
+        sites: List[Dict[str, Any]], 
+        subsite_to_top_level_site: Dict[str, str], 
+        failures: List[Dict[str, str]]
+    ):
         site_id_to_level = {}
         parent_map = {}
         
@@ -456,22 +498,25 @@ class FileEstimator(Estimator):
             if parent_ref and "siteId" in parent_ref:
                 parent_map[site_id] = parent_ref["siteId"]
                 
-        def get_level(site_id):
+        def get_level_and_parent(site_id):
             if site_id in site_id_to_level:
-                return site_id_to_level[site_id]
+                return site_id_to_level[site_id], subsite_to_top_level_site.get(site_id, site_id)
             
             parent_id = parent_map.get(site_id)
             if not parent_id:
                 level = 0
+                top_level_parent = site_id
             else:
                 # If parent is not in our list, assume parent is level 0
-                level = get_level(parent_id) + 1
+                level, top_level_parent = get_level_and_parent(parent_id)
+                level += 1
                 
             site_id_to_level[site_id] = level
-            return level
+            subsite_to_top_level_site[site_id] = top_level_parent
+            return level, top_level_parent
             
         for site in sites:
-            get_level(site["id"])
+            level, top_level_par = get_level_and_parent(site["id"])
             
         return site_id_to_level
     
@@ -485,7 +530,7 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ):
         try:
-            tenant_metrics["listCount"] = self._get_list_count(site_ids, site_discovery_progress_metrics, failures)
+            tenant_metrics["listCount"] = self._get_list_count(site_ids, tenant_metrics, site_discovery_progress_metrics, failures)
             drive_type_to_count = self._get_drives(site_ids, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
             for key, value in drive_type_to_count.items():
                 if key not in tenant_metrics["driveCounts"]:
@@ -498,6 +543,7 @@ class FileEstimator(Estimator):
     def _get_list_count(
         self,
         site_ids: List[str],
+        tenant_metrics: Dict[str, Any],
         site_discovery_progress_metrics: Dict[str, int],
         failures: List[Dict[str, str]]
     ) -> int:
@@ -594,6 +640,7 @@ class FileEstimator(Estimator):
             for site_id, resp in site_to_resp_map.items():
                 if "body" in resp and "value" in resp["body"]:
                     total_lists += len(resp["body"]["value"])
+                    self.site_to_metadata[site_id]["listCount"] = len(resp["body"]["value"])
 
             return total_lists
         except Exception as e:
@@ -646,7 +693,7 @@ class FileEstimator(Estimator):
                 ]
                 # print("Sharepoint Licenses: " + str(len(sharepoint_licenses)))
 
-                site_discovery_progress_metrics["licenseCount"] += len(sharepoint_licenses)
+                site_discovery_progress_metrics["licenseCount"] += sum([l.get("prepaidUnits", {}).get("enabled", 0) for l in sharepoint_licenses])
                 self.progress_update_callback(
                     "site_discovery", 
                     count=site_discovery_progress_metrics.get("siteCount", 0), 
@@ -1244,5 +1291,3 @@ class FileEstimator(Estimator):
     def shutdown(self):
         self.executor.shutdown(wait=False)
         self.tree_executor.shutdown(wait=False)
-        for level, exec in self.level_to_executor.items():
-            exec.shutdown(wait=False)

@@ -1,5 +1,5 @@
 # Copyright 2026 Google LLC
-"""Selector app to choose between Exchange and Chat migration planners."""
+"""Selector app to choose between Exchange, Files and Chat migration planners."""
 
 import os
 import subprocess
