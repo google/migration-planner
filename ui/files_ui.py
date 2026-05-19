@@ -88,14 +88,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         border_color=COLOR_TEXT_SUB,
     ).pack(side="left", padx=10)
     
-    ctk.CTkCheckBox(
-        site_options_frame,
-        text="Team Sites",
-        variable=self.include_team_sites,
-        corner_radius=4,
-        fg_color=COLOR_PRIMARY,
-        border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    # Commenting for time being till Sharepoint support available
+    # ctk.CTkCheckBox(
+    #     site_options_frame,
+    #     text="Team Sites",
+    #     variable=self.include_team_sites,
+    #     corner_radius=4,
+    #     fg_color=COLOR_PRIMARY,
+    #     border_color=COLOR_TEXT_SUB,
+    # ).pack(side="left", padx=10)
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
