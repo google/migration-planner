@@ -50,7 +50,7 @@ be taken as guarantee or SLA.
 """
 
 import base64
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
@@ -81,6 +81,7 @@ from util.connectors import TokenManager, UrlInvoker
 from util.utils import ScanConfig
 from util.enums import FailureType
 from util.monitoring import ResourceMonitor
+from telemetry.license_usage import LicenseUsageTab
 
 # =================================================================================
 # CONSTANTS
@@ -404,9 +405,28 @@ class MigrationEstimatorTool(ctk.CTk):
     self.spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     self.spinner_indices = {}
 
+    # State flag and window close protocol
+    self.is_running = True
+    self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
     self.setup_variables()
     self.create_widgets()
     self.after(100, self.process_log_queue)
+
+  def on_closing(self):
+    """Safely stop all recurring loops and threads before destroying the app."""
+    self.is_running = False
+    self.stop_scan_event.set()
+    
+    # Cancel all pending Tkinter 'after' events to prevent orphaned script errors
+    try:
+      for after_id in self.tk.eval('after info').split():
+        self.after_cancel(after_id)
+    except Exception:
+      pass
+
+    self.quit()
+    self.destroy()
 
   def setup_variables(self):
     """Initializes all Tkinter variables."""
@@ -434,8 +454,15 @@ class MigrationEstimatorTool(ctk.CTk):
 
   def create_widgets(self):
     """Creates the main UI layout."""
+    # --- TAB CONTAINER ---
+    self.tabview = ctk.CTkTabview(self)
+    self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
+
+    self.tab_estimate = self.tabview.add("Migration Estimate")
+    self.tab_licenses = self.tabview.add("Licenses")
+
     # --- HEADER ---
-    self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
+    self.header_frame = ctk.CTkFrame(self.tab_estimate, fg_color="transparent")
     self.header_frame.pack(fill="x", padx=30, pady=(20, 10))
 
     # Title
@@ -458,7 +485,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
     # --- MAIN CARD ---
     self.main_card = ctk.CTkFrame(
-        self,
+        self.tab_estimate,
         fg_color=COLOR_SURFACE,
         corner_radius=16,
         border_color=COLOR_OUTLINE_LIGHT,
@@ -475,7 +502,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
     # --- FOOTER ---
     self.footer = ctk.CTkFrame(
-        self,
+        self.tab_estimate,
         fg_color=COLOR_SURFACE,
         height=80,
         corner_radius=16,
@@ -515,6 +542,15 @@ class MigrationEstimatorTool(ctk.CTk):
     self.build_config_view()
     self.build_progress_view()
     self.build_results_view()
+    
+    # Mount External Modules
+    self.license_usage_view = LicenseUsageTab(
+        master=self.tab_licenses, 
+        log_callback=self.log_msg, 
+        retries_var=self.retries, 
+        backoff_var=self.backoff
+    )
+    self.license_usage_view.pack(fill="both", expand=True, padx=15, pady=15)
 
     # Show Start Page
     self.show_config_view()
@@ -836,7 +872,8 @@ class MigrationEstimatorTool(ctk.CTk):
 
   def show_config_view(self):
     self.btn_action_secondary.configure(state="disabled")
-    self.after(10, self.perform_view_switch)
+    if self.is_running:
+      self.after(10, self.perform_view_switch)
 
   def perform_view_switch(self):
     for w in self.view_results.winfo_children():
@@ -942,6 +979,7 @@ class MigrationEstimatorTool(ctk.CTk):
           text="Timeline Estimates",
           font=FONT_HEADER_SMALL,
           text_color=COLOR_TEXT_MAIN,
+          anchor="w",
       ).pack(anchor="w", padx=10, pady=(20, 5))
       ctk.CTkLabel(
           self.view_results,
@@ -951,6 +989,7 @@ class MigrationEstimatorTool(ctk.CTk):
           ),
           font=FONT_BODY_MEDIUM,
           text_color=COLOR_TEXT_SUB,
+          anchor="w",
       ).pack(anchor="w", padx=10, pady=(0, 10))
 
       # Total Footer
@@ -1232,6 +1271,7 @@ class MigrationEstimatorTool(ctk.CTk):
           ),
           font=FONT_BODY_MEDIUM,
           text_color=COLOR_TEXT_SUB,
+          justify="left",
       ).pack(anchor="w", padx=20, pady=(0, 15))
 
       # 3. Parallel Batches Plan (Gantt Chart)
@@ -1668,6 +1708,8 @@ class MigrationEstimatorTool(ctk.CTk):
   # LOGIC & EXECUTION
   # ==========================
   def animate_spinner(self, source):
+    if not self.is_running:
+      return
     if source not in self.spinners_active or not self.spinners_active[source]:
       return
     idx = self.spinner_indices.get(source, 0)
@@ -1679,7 +1721,8 @@ class MigrationEstimatorTool(ctk.CTk):
         widget.configure(
             text=icon, text_color=COLOR_PRIMARY
         ) 
-    self.after(80, lambda: self.animate_spinner(source))
+    if self.is_running:
+      self.after(80, lambda: self.animate_spinner(source))
 
   def update_progress(self, msg):
     if isinstance(msg, str):
@@ -1742,7 +1785,7 @@ class MigrationEstimatorTool(ctk.CTk):
               if widget_bar.cget("mode") == "indeterminate":
                 widget_bar.stop()
                 widget_bar.configure(mode="determinate")
-              widget_bar.set(1.0)
+                widget_bar.set(1.0)
             if source == "plan_generation":
               widget_lbl = self.prog_widgets[source]["lbl"]
               if widget_lbl.winfo_exists():
@@ -1827,13 +1870,16 @@ class MigrationEstimatorTool(ctk.CTk):
         self.show_config_view()
 
   def process_log_queue(self):
+    if not self.is_running:
+      return
     try:
       while not self.log_queue.empty():
         self.update_progress(self.log_queue.get_nowait())
     except:
       pass
     finally:
-      self.after(100, self.process_log_queue)
+      if self.is_running:
+        self.after(100, self.process_log_queue)
 
   def start_scan(self):
     disclaimer_text = (
@@ -2308,7 +2354,7 @@ class MigrationEstimatorTool(ctk.CTk):
     users_partially_failed = 0
 
     executor = ThreadPoolExecutor(max_workers=config.concurrency)
-    estimator: Estimator = None
+    estimator = None
     if resource_type == "in_place_archives":
       estimator = self.factory.get_in_place_archive_estimator(use_delta_api=True)
     elif resource_type == "shared_mails":
@@ -2336,7 +2382,7 @@ class MigrationEstimatorTool(ctk.CTk):
         chunk = future_to_chunk_map[f]
         chunk_result = f.result()
         chunk_count += 1
-      
+        
         processed_users += len(chunk)
         chunk_total = sum(value for user_id, value in chunk_result.items())
         phase_total += chunk_total
@@ -2475,7 +2521,7 @@ class MigrationEstimatorTool(ctk.CTk):
         chunk = future_to_chunk_map[f]
         chunk_result_posts, chunk_result_threads = f.result()
         chunk_count += 1
-      
+        
         processed_groups += len(chunk)
         chunk_posts = sum(value for user_id, value in chunk_result_posts.items())
         chunk_threads = sum(value for user_id, value in chunk_result_threads.items())
@@ -3047,6 +3093,7 @@ class MigrationEstimatorTool(ctk.CTk):
             cumulative=phase_total,
             processed=users_processed,
             failed=users_failed,
+            partially_failed=users_partially_failed,
             total=total_users,
             extra_text=extra,
         )
