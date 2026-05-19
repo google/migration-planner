@@ -330,14 +330,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       total_ram_gb = psutil.virtual_memory().total / (1024**3)
       total_cpu_cores = psutil.cpu_count(logical=True)
 
+      total_corpus = sum([s_data.get("totalSize", 0) for s_data in site_metrics.values()])
       self.log_msg("\n" + "=" * 40)
       self.log_msg(f"TOTAL TIME: {elapsed}")
-      self.log_msg(f"Total Sites / Subsites: {file_metrics.get('subSiteCount', 0)}")
+      self.log_msg(f"Total Sites / Subsites: {file_metrics.get('subsite_count', 0)}")
       self.log_msg(
           f"Folders: {file_metrics.get('folderCount', 0):,} | Files: {file_metrics.get('fileCount', 0):,} |"
           f" Shortcuts: {file_metrics.get('shortcutCount', 0):,} | Lists: {file_metrics.get('listCount', 0):,}"
       )
-      self.log_msg(f"Total Size: {self.format_size(file_metrics.get('totalSize', 0))}")
+      self.log_msg(f"Total Size: {self.format_size(total_corpus)}")
       self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
       self.log_msg(f"CPU Avg/Peak: {avg_cpu:.1f}% / {max_cpu:.1f}%")
       self.log_msg(f"RAM Avg/Peak: {avg_ram:.1f}% / {max_ram:.1f}%")
