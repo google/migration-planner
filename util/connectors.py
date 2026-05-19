@@ -1,6 +1,7 @@
 import random
 import threading
 
+from util.auth_manager import TokenManager
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 from typing import Any, Callable, Dict, List, Optional
@@ -18,8 +19,6 @@ MAX_RETRIES = 30
 BACKOFF = 2
 SHOW_LOAD_MULTIPLIER = False
 USE_MSFT_BACKOFF = True
-
-from util.auth_manager import TokenManager
 
 class UrlInvoker():
     def __init__(self, token_manager: TokenManager, batch_retry_count: int, batch_backoff: int, initial_delay: int, jitter: float):
@@ -159,7 +158,7 @@ class UrlInvoker():
                         if "body" not in response_item or not response_item["body"]:
                             logger(f"WARNING: Response item {req_id} in {context} has missing or empty body! Status: {status}")
                         if status == 429:
-                            print(f"Received Throttling error for {batch_url} | Response: {response_item}")
+                            logger(f"Received Throttling error for {batch_url} | Response: {response_item}")
                             headers_429 = response_item.get("headers", {})
                             try:
                                 wait_sec = int(float(headers_429.get("Retry-After", 0)))

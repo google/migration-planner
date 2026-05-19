@@ -377,13 +377,12 @@ class FileEstimator(Estimator):
                     max_attempts = self.config.retries + 1
                     while attempts < max_attempts and not self.is_hard_stop_requested():
                         try:
-                            r = session.get(url, headers=headers)
+                            r = session.get(url, headers=headers, timeout=180)
                             if r.status_code != 200:
                                 raise Exception(f"Error in fetching root site : {r.status_code}")
                             d = r.json()
                             break
                         except Exception as e:
-                            # print(e)
                             attempts += 1
                             if attempts == max_attempts:
                                 self._log_and_fail("Error in fetching root site", e, failures)
@@ -394,7 +393,6 @@ class FileEstimator(Estimator):
                                 time.sleep(wait_time)
 
                     local_all_sites = d.get("value", [])
-                    # print(len(local_all_sites))
                     personal_sites = [site for site in local_all_sites if site["isPersonalSite"]]
                     team_sites = [site for site in local_all_sites if not site["isPersonalSite"]]
 
@@ -622,13 +620,26 @@ class FileEstimator(Estimator):
                     token = token_data["token"]
                     headers = {"Authorization": f"Bearer {token}"}
 
-                r = session.get(url, headers=headers)               # TODO Add retries
-                if r.status_code != 200:
-                    break
-                d = r.json()
+                attempts = 0
+                max_attempts = self.config.retries + 1
+                while attempts < max_attempts and not self.is_hard_stop_requested():
+                    try:
+                        r = session.get(url, headers=headers, timeout=180)
+                        if r.status_code != 200:
+                            break
+                        d = r.json()
+                        break
+                    except Exception as e:
+                        attempts += 1
+                        if attempts == max_attempts:
+                            self._log_and_fail("Error in fetching licenses", e, failures)
+                            break
+                        elif self.logger is not None:
+                            wait_time = min(10, max(2, self.config.backoff) ** (attempts - 1))
+                            self.logger(f"Error in fetching licenses. Attempt count: {attempts} | Retrying in {wait_time} seconds...")
+                            time.sleep(wait_time)
 
                 all_licenses = d.get("value", [])
-                # print("Licenses: " + str(len(all_licenses)))
                 sharepoint_licenses = [
                     l for l in all_licenses 
                     if any(sp.get("servicePlanType", "").lower() == "sharepoint" for sp in l.get("servicePlans", []))

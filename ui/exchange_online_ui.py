@@ -2796,7 +2796,7 @@ class MigrationEstimatorTool(ctk.CTk):
           token = token_data["token"]
           headers = {"Authorization": f"Bearer {token}"}
 
-        r = session.get(url, headers=headers)
+        r = session.get(url, headers=headers, timeout=60)
         if r.status_code != 200:
           break
         d = r.json()
@@ -2828,7 +2828,7 @@ class MigrationEstimatorTool(ctk.CTk):
       try:
         cln = email.replace("'", "''")
         u = url.format(GRAPH_BASE_URL = GRAPH_BASE_URL, cln = cln)
-        r = s.get(u, headers=h)
+        r = s.get(u, headers=h, timeout=60)
         if r.status_code == 200 and r.json().get("value"):
           return r.json()["value"][0]
       except:
