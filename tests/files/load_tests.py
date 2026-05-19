@@ -141,5 +141,16 @@ class TestFileEstimatorLoad(unittest.TestCase):
             self.assertEqual(r_site.get("totalSize", 0), e_site.get("totalSize", 0))
             self.assertEqual(r_site.get("resourceCount", 0), e_site.get("resourceCount", 0))
 
+        # Verify that sum of site-level metrics equals the tenant-level summary metrics
+        site_metrics_values = list(result.get("siteMetrics", {}).values())
+        self.assertEqual(sum(s.get("listCount", 0) for s in site_metrics_values), result.get("listCount", 0))
+        self.assertEqual(sum(s.get("folderCount", 0) for s in site_metrics_values), result.get("folderCount", 0))
+        self.assertEqual(sum(s.get("fileCount", 0) for s in site_metrics_values), result.get("fileCount", 0))
+        self.assertEqual(sum(s.get("shortcutCount", 0) for s in site_metrics_values), result.get("shortcutCount", 0))
+        self.assertEqual(sum(s.get("folderCountExceedingDepthLimit", 0) for s in site_metrics_values), result.get("folderCountExceedingDepthLimit", 0))
+        self.assertEqual(sum(s.get("fileCountExceedingDepthLimit", 0) for s in site_metrics_values), result.get("fileCountExceedingDepthLimit", 0))
+        self.assertEqual(sum(s.get("largeResourceCount", 0) for s in site_metrics_values), result.get("tenantLevelLargeResourceCount", 0))
+        self.assertEqual(sum(s.get("dlCount", 0) for s in site_metrics_values), sum(result.get("driveCounts", {}).values()))
+
 if __name__ == "__main__":
     unittest.main()

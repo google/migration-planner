@@ -338,16 +338,17 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       for site_id, s_data in site_metrics.items():
         site_data.append({
             "Site Id": site_id,
-            "DL Count": len(s_data.get("driveMetrics", {}).keys()),
-            "List Count": s_data.get("listCount", 0),
             "Subsite Count": s_data.get("subsiteCount", 0),
-            "Resource Count": s_data.get("resourceCount", 0),
+            "DL Count": s_data.get("dlCount", 0),
+            "List Count": s_data.get("listCount", 0),
             "Folder Count": s_data.get("folderCount", 0),
             "File Count": s_data.get("fileCount", 0),
             "Shortcut Count": s_data.get("shortcutCount", 0),
             "Folder Count > Depth Limit 100": s_data.get("folderCountExceedingDepthLimit", 0),
             "File Count > Depth Limit 100": s_data.get("fileCountExceedingDepthLimit", 0),
-            "Corpus Size": s_data.get("totalSize", 0)
+            "Folder with > 500k item count": s_data.get("largeResourceCount", 0),
+            "Corpus Size": s_data.get("totalSize", 0),
+            "Resource Count": s_data.get("resourceCount", 0)
         })
       df = pd.DataFrame(site_data)
       
@@ -387,9 +388,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       total_corpus = sum([s_data.get("totalSize", 0) for s_data in site_metrics.values()])
       self.log_msg("\n" + "=" * 40)
       self.log_msg(f"TOTAL TIME: {elapsed}")
-      self.log_msg(f"Total Sites Collection: {file_metrics.get('siteCount', 0)}")
       self.log_msg(
-          f"Folders: {file_metrics.get('folderCount', 0):,} | Files: {file_metrics.get('fileCount', 0):,} |"
+          f"Site Collections: {file_metrics.get('siteCount', 0):,} | Subsites: {file_metrics.get('subsiteCount', 0):,} | DLs: {sum(file_metrics.get('driveCounts', {}).values()):,} |"
+          f" Folders: {file_metrics.get('folderCount', 0):,} | Files: {file_metrics.get('fileCount', 0):,} |"
           f" Shortcuts: {file_metrics.get('shortcutCount', 0):,} | Lists: {file_metrics.get('listCount', 0):,}"
       )
       self.log_msg(f"Total Size: {self.format_size(total_corpus)}")
@@ -405,6 +406,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       df_output.rename(columns={"Site Id": "Site URL/Name"}, inplace=True)
       if "SortMetric" in df_output.columns:
         df_output.drop(columns=["SortMetric"], inplace=True)
+      if "Resource Count" in df_output.columns:
+        df_output.drop(columns=["Resource Count"], inplace=True)
       
       df_output.to_csv(report_path, index=False)
       
