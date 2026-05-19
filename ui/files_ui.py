@@ -939,8 +939,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       summary_rows = [
           ("Site Collection Count", data.get("siteCount", 0)),
           ("Subsite Count", data.get("subsiteCount", 0)),
-          ("Personal Site Collection Count", data.get("personalSiteCount", 0)),
-          ("Team Site Collection Count", data.get("teamSiteCount", 0)),
+          ("Personal Site / Subsite Count", data.get("personalSiteCount", 0)),
+          ("Team Site / Subsite Count", data.get("teamSiteCount", 0)),
           ("DL Count", sum(data.get("driveCounts", {}).values())),
           ("Personal DL Count", data.get("personalSiteDLCount", 0)),
           ("Team DL Count", data.get("teamSiteDLCount", 0)),

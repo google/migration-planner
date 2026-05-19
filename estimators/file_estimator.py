@@ -290,14 +290,18 @@ class FileEstimator(Estimator):
             metrics["folderCountExceedingDepthLimit"] += drive_metric.get("folderCountExceedingDepthLimit", 0)
             metrics["fileCountExceedingDepthLimit"] += drive_metric.get("fileCountExceedingDepthLimit", 0)
         
+        # Aggregate listCount for all sites (including those without drives or with failed drive scans)
+        for site_id in list(metrics["siteMetrics"].keys()):
+            top_level_site = subsite_to_top_level_site.get(site_id, site_id)
+            if top_level_site in metrics["siteMetrics"]:
+                metrics["siteMetrics"][top_level_site]["listCount"] = metrics["siteMetrics"][top_level_site].get("listCount", 0) + self.site_to_metadata.get(site_id, {}).get("listCount", 0)
+
         for subsite_id, drive_ids in subsite_to_drives.items():
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
             top_level_site = subsite_to_top_level_site.get(subsite_id, subsite_id)
 
             if top_level_site != subsite_id:
                 metrics["siteMetrics"][top_level_site]["subsiteCount"] = metrics["siteMetrics"][top_level_site].get("subsiteCount", 0) + 1
-            
-            metrics["siteMetrics"][top_level_site]["listCount"] =  metrics["siteMetrics"][top_level_site].get("listCount", 0) + self.site_to_metadata[subsite_id].get("listCount", 0)
             
             for drive_id in drive_ids:
                 if drive_id in metrics["driveMetrics"]:
@@ -320,7 +324,7 @@ class FileEstimator(Estimator):
                 metrics["teamSiteDLCount"] += len(drive_ids)
             
             if top_level_site != subsite_id:
-                metrics["subSiteCount"] += 1
+                metrics["subsiteCount"] += 1
                     
         for siteId in subsite_to_drives.keys():
             top_level_site = subsite_to_top_level_site.get(siteId, siteId)

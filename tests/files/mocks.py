@@ -18,7 +18,7 @@ class MockSession:
     def __init__(self, test_data: Dict[str, Any]):
         self.test_data = test_data
         
-    def get(self, url: str, headers: Dict[str, str] = None):
+    def get(self, url: str, headers: Dict[str, str] = None, **kwargs):
         parsed_url = urllib.parse.urlparse(url)
         path = parsed_url.path
         

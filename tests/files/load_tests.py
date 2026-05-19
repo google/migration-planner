@@ -51,7 +51,8 @@ class TestFileEstimatorLoad(unittest.TestCase):
             eta_max_users=5,
             parallel_batches=5,
             large_resource_count_limit=50,
-            bucket_ranges=[(0, 1000), (1001, 10000), (10001, 100000)]
+            bucket_ranges=[(0, 10240), (10241, 102400), (102401, 1048576), (1048577, float("inf"))],
+            max_allowed_depth=3
         )
         
         self.stop_event = threading.Event()
@@ -87,10 +88,20 @@ class TestFileEstimatorLoad(unittest.TestCase):
             expected = self.test_data["expected_result"]
         
         # Verify results
-        self.assertEqual(result.get("subsite_count", result.get("subsiteCount", 0)), expected.get("subsiteCount", 0))
+        # Verify results (Summary Metrics)
+        self.assertEqual(result.get("siteCount", 0), expected.get("siteCount", 0))
+        self.assertEqual(result.get("subsiteCount", 0), expected.get("subsiteCount", 0))
+        self.assertEqual(result.get("personalSiteCount", 0), expected.get("personalSiteCount", 0))
+        self.assertEqual(result.get("teamSiteCount", 0), expected.get("teamSiteCount", 0))
+        self.assertEqual(result.get("personalSiteDLCount", 0), expected.get("personalSiteDLCount", 0))
+        self.assertEqual(result.get("teamSiteDLCount", 0), expected.get("teamSiteDLCount", 0))
         self.assertEqual(result.get("listCount", 0), expected.get("listCount", 0))
         self.assertEqual(result.get("folderCount", 0), expected.get("folderCount", 0))
         self.assertEqual(result.get("fileCount", 0), expected.get("fileCount", 0))
+        self.assertEqual(result.get("shortcutCount", 0), expected.get("shortcutCount", 0))
+        self.assertEqual(result.get("folderCountExceedingDepthLimit", 0), expected.get("folderCountExceedingDepthLimit", 0))
+        self.assertEqual(result.get("fileCountExceedingDepthLimit", 0), expected.get("fileCountExceedingDepthLimit", 0))
+        self.assertEqual(result.get("tenantLevelLargeResourceCount", 0), expected.get("tenantLevelLargeResourceCount", 0))
         
         # Verify file size distribution
         for e_bucket in expected.get("tenantLevelFileSizeDistribution", {}).get("buckets", []):
@@ -110,9 +121,25 @@ class TestFileEstimatorLoad(unittest.TestCase):
                 self.assertEqual(r_drive.get("fileCount", 0), e_drive.get("fileCount", 0))
 
         # Verify depth
-        self.assertEqual(result.get("maxEffectiveDepth", 0), expected.get("maxEffectiveDepth", 0))
         self.assertEqual(result.get("maxFolderDepth", 0), expected.get("maxFolderDepth", 0))
         self.assertEqual(result.get("maxSubsiteDepth", 0), expected.get("maxSubsiteDepth", 0))
+
+        # Verify site-level aggregated metrics
+        for site_id, e_site in expected.get("siteMetrics", {}).items():
+            r_site = result.get("siteMetrics", {}).get(site_id)
+            self.assertIsNotNone(r_site, f"Site {site_id} is missing in result['siteMetrics']")
+            self.assertEqual(r_site.get("siteLevel", 0), e_site.get("siteLevel", 0))
+            self.assertEqual(r_site.get("dlCount", 0), e_site.get("dlCount", 0))
+            self.assertEqual(r_site.get("listCount", 0), e_site.get("listCount", 0))
+            self.assertEqual(r_site.get("subsiteCount", 0), e_site.get("subsiteCount", 0))
+            self.assertEqual(r_site.get("folderCount", 0), e_site.get("folderCount", 0))
+            self.assertEqual(r_site.get("fileCount", 0), e_site.get("fileCount", 0))
+            self.assertEqual(r_site.get("shortcutCount", 0), e_site.get("shortcutCount", 0))
+            self.assertEqual(r_site.get("folderCountExceedingDepthLimit", 0), e_site.get("folderCountExceedingDepthLimit", 0))
+            self.assertEqual(r_site.get("fileCountExceedingDepthLimit", 0), e_site.get("fileCountExceedingDepthLimit", 0))
+            self.assertEqual(r_site.get("largeResourceCount", 0), e_site.get("largeResourceCount", 0))
+            self.assertEqual(r_site.get("totalSize", 0), e_site.get("totalSize", 0))
+            self.assertEqual(r_site.get("resourceCount", 0), e_site.get("resourceCount", 0))
 
 if __name__ == "__main__":
     unittest.main()

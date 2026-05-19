@@ -286,11 +286,19 @@ def generate_data(
         return res
     # Calculate expected results
     def calculate_expected(ignore_failures=False):
+        personal_sites = [s for s in data["sites"].values() if s.get("isPersonalSite", False)]
+        team_sites = [s for s in data["sites"].values() if not s.get("isPersonalSite", False)]
+        
         expected = {
             "maxEffectiveDepth": 0,
             "maxFolderDepth": 0,
             "maxSubsiteDepth": 0,
-            "subsiteCount": len(data["sites"]),
+            "siteCount": len([s for s in data["sites"].values() if s["siteLevel"] == 0]),
+            "subsiteCount": len([s for s in data["sites"].values() if s["siteLevel"] > 0]),
+            "personalSiteCount": len(personal_sites),
+            "teamSiteCount": len(team_sites),
+            "personalSiteDLCount": 0,
+            "teamSiteDLCount": 0,
             "shortcutCount": 0,
             "folderCount": 0,
             "fileCount": 0,
@@ -310,11 +318,31 @@ def generate_data(
             },
             "tenantLevelFileSizeDistribution": {"buckets": []},
             "driveMetrics": {},
-            "tenantLevelLargeResources": []
+            "tenantLevelLargeResources": [],
+            "tenantLevelLargeResourceCount": 0,
+            "siteMetrics": {}
         }
         
+        # Initialize expected siteMetrics for root sites (level 0)
+        for site_id, site in data["sites"].items():
+            if site["siteLevel"] == 0:
+                expected["siteMetrics"][site_id] = {
+                    "siteLevel": 0,
+                    "largeResourceCount": 0,
+                    "folderCount": 0,
+                    "fileCount": 0,
+                    "shortcutCount": 0,
+                    "totalSize": 0,
+                    "dlCount": 0,
+                    "listCount": 0,
+                    "subsiteCount": 0,
+                    "folderCountExceedingDepthLimit": 0,
+                    "fileCountExceedingDepthLimit": 0,
+                    "resourceCount": 0
+                }
+        
         # Initialize buckets for tenant level
-        bucket_ranges = [(0, 1000), (1001, 10000), (10001, 100000)]
+        bucket_ranges = [(0, 10240), (10241, 102400), (102401, 1048576), (1048577, float("inf"))]
         for size_range in bucket_ranges:
             expected["tenantLevelFileSizeDistribution"]["buckets"].append({
                 "sizeRange": size_range,
@@ -359,11 +387,11 @@ def generate_data(
                     
                 # Process root items of the drive
                 for item_id in drive["items"]:
-                    metrics = get_subtree_metrics(item_id, 1, ignore_failures)
+                    metrics = get_subtree_metrics(item_id, 0, ignore_failures)
                     
                     drive_metrics["folderCount"] += metrics["folderCount"] - 1
                     drive_metrics["fileCount"] += metrics["fileCount"]
-                    drive_metrics["shortcutCount"] += metrics["skippedFolderCount"]
+                    drive_metrics["shortcutCount"] += len([sub_item for sub_item in metrics["items"] if "remoteItem" in sub_item])
                     
                     drive_metrics["maxEffectiveDepth"] = max(drive_metrics["maxEffectiveDepth"], metrics["maxDepth"] - 1)
                     drive_metrics["folderCountExceedingDepthLimit"] += metrics["folderCountExceedingDepthLimit"]
@@ -372,7 +400,7 @@ def generate_data(
                     
                     expected["maxEffectiveDepth"] = max(expected["maxEffectiveDepth"], site["siteLevel"] + drive_metrics["maxEffectiveDepth"])
                     expected["maxFolderDepth"] = max(expected["maxFolderDepth"], metrics["maxDepth"] - 1)
-                    expected["shortcutCount"] += metrics["skippedFolderCount"]
+                    expected["shortcutCount"] += len([sub_item for sub_item in metrics["items"] if "remoteItem" in sub_item])
                     
                     # File size distribution
                     for sub_item in metrics["items"]:
@@ -411,7 +439,45 @@ def generate_data(
                 expected["fileCountExceedingDepthLimit"] += drive_metrics["fileCountExceedingDepthLimit"]
                 expected["skippedFolderCount"] += drive_metrics["skippedFolderCount"]
                 expected["driveMetrics"][drive_id] = drive_metrics
+        # Aggregate site metrics into root site collections inside expected["siteMetrics"]
+        for site_id, site in data["sites"].items():
+            curr_site = site
+            while "parentReference" in curr_site and "siteId" in curr_site["parentReference"]:
+                parent_id = curr_site["parentReference"]["siteId"]
+                curr_site = data["sites"][parent_id]
+            root_site_id = curr_site["id"]
+            
+            expected["siteMetrics"][root_site_id]["listCount"] += len(site["lists"])
+            
+            if site["siteLevel"] > 0:
+                expected["siteMetrics"][root_site_id]["subsiteCount"] += 1
                 
+            for drive_id in site["drives"]:
+                if drive_id in expected["driveMetrics"]:
+                    drive_metric = expected["driveMetrics"][drive_id]
+                    expected["siteMetrics"][root_site_id]["dlCount"] += 1
+                    expected["siteMetrics"][root_site_id]["largeResourceCount"] += len(drive_metric["largeResources"])
+                    expected["siteMetrics"][root_site_id]["folderCount"] += drive_metric["folderCount"]
+                    expected["siteMetrics"][root_site_id]["fileCount"] += drive_metric["fileCount"]
+                    expected["siteMetrics"][root_site_id]["shortcutCount"] += drive_metric["shortcutCount"]
+                    expected["siteMetrics"][root_site_id]["folderCountExceedingDepthLimit"] += drive_metric["folderCountExceedingDepthLimit"]
+                    expected["siteMetrics"][root_site_id]["fileCountExceedingDepthLimit"] += drive_metric["fileCountExceedingDepthLimit"]
+                    
+                    drive_size = sum(item.get("size", 0) for item in data["items"].values() if item.get("parentReference", {}).get("driveId") == drive_id and "file" in item)
+                    expected["siteMetrics"][root_site_id]["totalSize"] += drive_size
+                    
+        for root_site_id, s_metrics in expected["siteMetrics"].items():
+            s_metrics["resourceCount"] = s_metrics["folderCount"] + s_metrics["fileCount"] + s_metrics["shortcutCount"]
+
+        for site_id, site in data["sites"].items():
+            is_personal = site.get("isPersonalSite", False)
+            if is_personal:
+                expected["personalSiteDLCount"] += len(site["drives"])
+            else:
+                expected["teamSiteDLCount"] += len(site["drives"])
+
+        expected["tenantLevelLargeResourceCount"] = len(expected["tenantLevelLargeResources"])
+
         return expected
 
     data["expected_result"] = calculate_expected(ignore_failures=True)
