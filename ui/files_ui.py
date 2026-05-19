@@ -336,10 +336,32 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       report_path = os.path.join(output_dir, f"site_report_{ts}.csv")
       logs_path = os.path.join(output_dir, f"logs_{ts}.log")
+
+      monitor.stop()
+      monitor.join()
+      elapsed = str(timedelta(seconds=int(time.time() - start_time)))
+      avg_cpu, max_cpu, avg_ram, max_ram = monitor.get_stats()
+      total_ram_gb = psutil.virtual_memory().total / (1024**3)
+      total_cpu_cores = psutil.cpu_count(logical=True)
+
+      total_corpus = sum([s_data.get("totalSize", 0) for s_data in site_metrics.values()])
+      self.log_msg("\n" + "=" * 40)
+      self.log_msg(f"TOTAL TIME: {elapsed}")
+      self.log_msg(f"Total Sites / Subsites: {file_metrics.get('subsite_count', 0)}")
+      self.log_msg(
+          f"Folders: {file_metrics.get('folderCount', 0):,} | Files: {file_metrics.get('fileCount', 0):,} |"
+          f" Shortcuts: {file_metrics.get('shortcutCount', 0):,} | Lists: {file_metrics.get('listCount', 0):,}"
+      )
+      self.log_msg(f"Total Size: {self.format_size(total_corpus)}")
+      self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
+      self.log_msg(f"CPU Avg/Peak: {avg_cpu:.1f}% / {max_cpu:.1f}%")
+      self.log_msg(f"RAM Avg/Peak: {avg_ram:.1f}% / {max_ram:.1f}%")
+      self.log_msg("=" * 40)
       
       # Create resolved copy of DataFrame for export to CSV and batches
       df_output = df_final.copy()
       df_output["Site Id"] = df_output["Site Id"].apply(self._get_display_name)
+      df_output["Corpus Size"] = df_output["Corpus Size"].apply(self.format_size)
       df_output.rename(columns={"Site Id": "Site URL/Name"}, inplace=True)
       if "SortMetric" in df_output.columns:
         df_output.drop(columns=["SortMetric"], inplace=True)
@@ -369,27 +391,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.ui_update("phase_status", source="plan_generation", status="complete")
       time.sleep(2)
       self.ui_update("complete", data=file_metrics)
-      
-      monitor.stop()
-      monitor.join()
-      elapsed = str(timedelta(seconds=int(time.time() - start_time)))
-      avg_cpu, max_cpu, avg_ram, max_ram = monitor.get_stats()
-      total_ram_gb = psutil.virtual_memory().total / (1024**3)
-      total_cpu_cores = psutil.cpu_count(logical=True)
-
-      total_corpus = sum([s_data.get("totalSize", 0) for s_data in site_metrics.values()])
-      self.log_msg("\n" + "=" * 40)
-      self.log_msg(f"TOTAL TIME: {elapsed}")
-      self.log_msg(f"Total Sites / Subsites: {file_metrics.get('subsite_count', 0)}")
-      self.log_msg(
-          f"Folders: {file_metrics.get('folderCount', 0):,} | Files: {file_metrics.get('fileCount', 0):,} |"
-          f" Shortcuts: {file_metrics.get('shortcutCount', 0):,} | Lists: {file_metrics.get('listCount', 0):,}"
-      )
-      self.log_msg(f"Total Size: {self.format_size(total_corpus)}")
-      self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
-      self.log_msg(f"CPU Avg/Peak: {avg_cpu:.1f}% / {max_cpu:.1f}%")
-      self.log_msg(f"RAM Avg/Peak: {avg_ram:.1f}% / {max_ram:.1f}%")
-      self.log_msg("=" * 40)
 
     except Exception as e:
       self.log_msg(f"Process failed: {e}")
@@ -681,6 +682,30 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       if "folder_file_size" in data:
           self.create_stat_card(card_frame, "Folder File Size", f"{data['folder_file_size']:,} KB", "💾")
+
+      # Timeline
+      ctk.CTkLabel(
+          self.view_results,
+          text="Timeline Estimates",
+          font=FONT_HEADER_SMALL,
+          text_color=COLOR_TEXT_MAIN,
+      ).pack(anchor="w", padx=10, pady=(20, 5))
+      ctk.CTkLabel(
+          self.view_results,
+          text=(
+              "Projected migration timeline based on the proposed execution"
+              " plan."
+          ),
+          font=FONT_BODY_MEDIUM,
+          text_color=COLOR_TEXT_SUB,
+      ).pack(anchor="w", padx=10, pady=(0, 10))
+
+      # Total Footer
+      foot = ctk.CTkFrame(self.view_results, fg_color="transparent")
+      foot.pack(fill="x", pady=10)
+      self.create_summary_box(
+          foot, self.format_eta(data["total_eta"]), "Estimated Time"
+      )
 
       # License Metrics
       if "licenseMetrics" in data:
