@@ -170,7 +170,7 @@ To scan or get telemetry reports for your tenant, you need to register an app in
    - `MailboxSettings.Read` (To distinguish user and shared mailboxes)
    - `Group.Read.All` (To get group information)
    - `Reports.Read.All` (To download M365 active usage and app usage reports)
-   - `Organization.Read.All` or `LicenseAssignment.Read.All` (To read tenant license allocations and SKUs)
+   - `Organization.Read.All` and `Directory.Read.All` (To read tenant license allocations and SKUs)
 4. Click **Add permissions**.
 5. **Crucial Step**: Click **"Grant admin consent for [Your Organization]"** and confirm "Yes". All status icons should turn green.
 
