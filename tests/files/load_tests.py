@@ -125,6 +125,7 @@ class TestFileEstimatorLoad(unittest.TestCase):
         self.assertEqual(result.get("maxSubsiteDepth", 0), expected.get("maxSubsiteDepth", 0))
 
         # Verify site-level aggregated metrics
+        self.assertEqual(set(result.get("siteMetrics", {}).keys()), set(expected.get("siteMetrics", {}).keys()))
         for site_id, e_site in expected.get("siteMetrics", {}).items():
             r_site = result.get("siteMetrics", {}).get(site_id)
             self.assertIsNotNone(r_site, f"Site {site_id} is missing in result['siteMetrics']")

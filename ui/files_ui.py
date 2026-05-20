@@ -43,6 +43,11 @@ def get_bucket_column_header(low, high):
 
 class FileMigrationEstimatorTool(MigrationEstimatorTool):
   def __init__(self):
+    try:
+      self.show_eta = os.environ.get("SHOW_ETA", "false").lower() == "true"
+    except:
+      self.show_eta = False
+
     super().__init__()
     self.factory = None
 
@@ -102,7 +107,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
 
     # Migration Plan Options
-    ui_utils.build_migration_plan_options(self, ctk)
+    if self.show_eta:
+      ui_utils.build_migration_plan_options(self, ctk)
 
   def update_progress(self, msg):
     if isinstance(msg, str):
@@ -218,11 +224,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             if source == "plan_generation":
               widget_lbl = self.prog_widgets[source]["lbl"]
               if widget_lbl.winfo_exists():
+                if self.show_eta:
+                  plan_text = "Plan generated, please wait while we prepare the final dashboard..."
+                else:
+                  plan_text = "Report generated, please wait while we prepare the final dashboard..."
                 widget_lbl.configure(
-                    text=(
-                        "Plan generated, please wait while we prepare the final"
-                        " dashboard..."
-                    )
+                    text=plan_text
                 )
       elif mtype == "scan_progress":
         source = msg.get("source")
@@ -1054,7 +1061,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()
     self.val_eta_max_batches = self.eta_max_batches.get()
-    self.show_eta = os.environ.get("SHOW_ETA", "false") == "true"
       
     disclaimer_text = (
         "The estimations provided by this tool are calculated projections"
@@ -1088,7 +1094,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.create_progress_row(self.scan_container, "sites", "Site Discovery", mode="determinate")
     self.create_progress_row(self.scan_container, "drives", "Drive Discovery", mode="determinate")
     self.create_progress_row(self.scan_container, "drive_parsing", "Metrics Calculation", mode="determinate")
-    self.create_progress_row(self.scan_container, "plan_generation", "Generating Migration Plan", mode="determinate")
+
+    if self.show_eta:
+      plan_text = "Generating Migration Plan"
+    else:
+      plan_text = "Generating Estimation Report"
+      
+    self.create_progress_row(self.scan_container, "plan_generation", plan_text, mode="determinate")
 
     import threading
     threading.Thread(target=self.execute_migration_scan, args=(config,)).start()
