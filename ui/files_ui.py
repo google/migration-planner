@@ -1063,9 +1063,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config.includeTeamSites = self.val_include_team_sites
     return config
 
-  def start_scan(self):
-    print("Invoked Start Scan")
-    
+  def start_scan(self):    
     if not self.include_personal_sites.get() and not self.include_team_sites.get():
       messagebox.showerror("Validation Error", "At least one site type (Personal or Team) must be selected!")
       return
