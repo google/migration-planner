@@ -16,8 +16,18 @@ import math
 
 def format_range(low, high):
   def format_boundary(kb_val):
-    if kb_val >= 1024 * 1024:
-      gb = kb_val / (1024 * 1024)
+    if kb_val >= 1024**4:
+      pb = kb_val / (1024**4)
+      if pb.is_integer():
+        return f"{int(pb)} PB"
+      return f"{pb:.2f} PB"
+    elif kb_val >= 1024**3:
+      tb = kb_val / (1024**3)
+      if tb.is_integer():
+        return f"{int(tb)} TB"
+      return f"{tb:.2f} TB"
+    elif kb_val >= 1024**2:
+      gb = kb_val / (1024**2)
       if gb.is_integer():
         return f"{int(gb)} GB"
       return f"{gb:.2f} GB"
@@ -646,7 +656,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     return df_final, final_batches_list, total_eta, buckets
 
   def format_size(self, size_in_bytes):
-    if size_in_bytes >= 1024**3:
+    if size_in_bytes >= 1024**5:
+      return f"{size_in_bytes / (1024**5):.2f} PB"
+    elif size_in_bytes >= 1024**4:
+      return f"{size_in_bytes / (1024**4):.2f} TB"
+    elif size_in_bytes >= 1024**3:
       return f"{size_in_bytes / (1024**3):.2f} GB"
     elif size_in_bytes >= 1024**2:
       return f"{size_in_bytes / (1024**2):.2f} MB"
@@ -947,7 +961,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       # Section 1: Summary Metrics
       writer.writerow(["Summary Metrics", "Value"])
       
+      total_corpus_size = sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()])
       summary_rows = [
+          ("Total Corpus Size", self.format_size(total_corpus_size)),
           ("Site Collection Count", data.get("siteCount", 0)),
           ("Subsite Count", data.get("subsiteCount", 0)),
           ("Personal Site / Subsite Count", data.get("personalSiteCount", 0)),
