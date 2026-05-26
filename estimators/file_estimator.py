@@ -129,6 +129,8 @@ class FileEstimator(Estimator):
                     "licenseCount": 0,
                     "driveCount": 0,
                 }
+
+                self.progress_update_callback("site_discovery", status="Fetching...", count=0)
                 metrics["licenseMetrics"] = self._get_license_metrics(site_discovery_progress_metrics, failures)
 
                 self._configure_executor_from_license_counts(metrics["licenseMetrics"])
@@ -527,7 +529,6 @@ class FileEstimator(Estimator):
                 return "&filter=isPersonalSite eq false"
 
         try:
-            self.progress_update_callback("site_discovery", status="Fetching...", count=0)
             sites = []
             url = f"{GRAPH_BASE_URL}/sites/delta?$select=id,webUrl,isPersonalSite,parentReference&$top=999{_get_filter()}"
             token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
@@ -837,15 +838,6 @@ class FileEstimator(Estimator):
                 # print("Sharepoint Licenses: " + str(len(sharepoint_licenses)))
 
                 site_discovery_progress_metrics["licenseCount"] += sum([l.get("prepaidUnits", {}).get("enabled", 0) for l in sharepoint_licenses])
-                self.progress_update_callback(
-                    "site_discovery", 
-                    count=site_discovery_progress_metrics.get("siteCount", 0), 
-                    personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
-                    teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
-                    driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
-                    listCount=site_discovery_progress_metrics.get("listCount", 0), 
-                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
-                )
 
                 licenses.extend(sharepoint_licenses)
                 url = d.get("@odata.nextLink")

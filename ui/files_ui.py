@@ -771,7 +771,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
   def show_results_content(self, data):
     try:
-      print(json.dumps(data, indent=4))
       self.last_scan_data = data
       self.view_config.pack_forget()
       self.view_progress.pack_forget()
@@ -968,7 +967,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         self.render_paginated_view(0)
 
     except Exception as e:
-      print(f"ERROR in show_results_content: {e}")
       for w in self.view_results.winfo_children():
         w.destroy()
       ctk.CTkLabel(
