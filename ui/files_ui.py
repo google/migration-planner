@@ -80,6 +80,48 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     # Main Content
     ui_utils.build_mail_input_frame(self, ctk)
 
+    ctk.CTkLabel(
+      self.scroll_connect,
+      text="Source:",
+      font=FONT_BODY_BOLD,
+      text_color=COLOR_TEXT_SUB,
+    ).pack(anchor="w", pady=(15, 5))
+
+    source_selection_frame = ctk.CTkFrame(
+      self.scroll_connect, fg_color="transparent"
+    )
+    source_selection_frame.pack(fill="x", anchor="w")
+    ctk.CTkRadioButton(
+      source_selection_frame,
+      text="Scan All Sites",
+      variable=self.user_source,
+      value="tenant",
+      border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=20)
+    ctk.CTkRadioButton(
+      source_selection_frame,
+      text="Upload CSV",
+      variable=self.user_source,
+      value="csv",
+      border_color=COLOR_TEXT_SUB,
+    ).pack(side="left")
+    ctk.CTkButton(
+      source_selection_frame,
+      text="Browse",
+      command=self.browse_user_csv,
+      width=80,
+      fg_color="transparent",
+      hover_color=COLOR_SURFACE_HOVER,
+      border_width=1,
+      text_color=COLOR_PRIMARY,
+      corner_radius=16,
+    ).pack(side="left", padx=10)
+    ctk.CTkLabel(
+      source_selection_frame,
+      textvariable=self.user_csv_path,
+      text_color=COLOR_TEXT_SUB,
+    ).pack(side="left")
+
     # Advanced Settings
     ui_utils.build_advanced_settings_frame(self, ctk)
     
@@ -293,6 +335,22 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         )
         self.show_config_view()
 
+  def _get_input_from_csv_if_uploaded(self, config):
+    if self.user_source.get() != "csv":
+      return {}
+      
+    if not config.csv_path or not os.path.exists(config.csv_path):
+      raise Exception("CSV path invalid or file not found.")
+    
+    df_input = pd.read_csv(config.csv_path)
+    df_input.columns = df_input.columns.str.strip()
+    
+    id_col = next((c for c in df_input.columns if c.lower() in ["email id"]), None)
+    if not id_col:
+      raise Exception("CSV must contain a column for Email Id.")
+      
+    return {"emailIds": [email.strip() for email in df_input[id_col].tolist()]}
+
   def _get_display_name(
     self,
     id
@@ -337,7 +395,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
       # Calculate resource metrics for the tenant. Progress update to be made directly in the backend.
       failures = []
-      file_metrics = estimator.calculate_resource_metrics({}, failures)
+      input_map = self._get_input_from_csv_if_uploaded(config)
+      file_metrics = estimator.calculate_resource_metrics(input_map, failures)
 
       self.log_msg("\n" + "=" * 60)
       self.log_msg("📊 Failures and Warnings:")
@@ -712,6 +771,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
   def show_results_content(self, data):
     try:
+      print(json.dumps(data, indent=4))
       self.last_scan_data = data
       self.view_config.pack_forget()
       self.view_progress.pack_forget()
@@ -1022,7 +1082,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if len(data.get("siteMetrics", {}).items()) > 0:
         # Section 5: Site Details
         writer.writerow(["Site Details", ""])
-        row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
+        if "siteIdToMail" not in data:
+          row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
+        else:
+          row = ["Site Collection", "Mail Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
+
         if self.show_eta:
           row.append("Suggested Batch")
 
@@ -1036,9 +1100,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               match = df[df["Site Id"] == site_id]
               if not match.empty and self.show_eta:
                   batch_name = match["Suggested Batch"].iloc[0]
-                  
-          row = [
+
+          if "siteIdToMail" not in data:
+            row = [
+                self._get_display_name(site_id), 
+                s_data.get("subsiteCount", 0),
+                s_data.get("dlCount", 0),
+                s_data.get("listCount", 0),
+                s_data.get("folderCount", 0),
+                s_data.get("fileCount", 0),
+                s_data.get("shortcutCount", 0),
+                s_data.get("folderCountExceedingDepthLimit", 0),
+                s_data.get("fileCountExceedingDepthLimit", 0),
+                s_data.get("largeResourceCount", 0),
+                self.format_size(s_data.get("totalSize", 0))
+            ]
+          else:
+            row = [
               self._get_display_name(site_id), 
+              data.get("siteIdToMail", {}).get(site_id, ""),
               s_data.get("subsiteCount", 0),
               s_data.get("dlCount", 0),
               s_data.get("listCount", 0),

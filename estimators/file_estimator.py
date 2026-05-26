@@ -133,7 +133,39 @@ class FileEstimator(Estimator):
 
                 self._configure_executor_from_license_counts(metrics["licenseMetrics"])
 
-                self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, subsite_to_top_level_site, site_discovery_progress_metrics, failures)
+                if "emailIds" not in data or len(data["emailIds"]) == 0:
+                    self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, subsite_to_top_level_site, site_discovery_progress_metrics, failures)
+                else:
+                    mail_to_top_level_site = self._get_sites_for_users(data["emailIds"], site_discovery_progress_metrics)
+                    subsite_to_top_level_site = {}
+                    top_level_sites = list(set(mail_to_top_level_site.values()))
+                    
+                    for site_id in top_level_sites:
+                        metrics["siteMetrics"][site_id] = {"siteLevel": 0}
+                        self.site_to_metadata[site_id] = {"isPersonalSite": True}
+                        metrics["personalSiteCount"] += 1
+                        
+                    metrics["siteCount"] = len(top_level_sites)
+                    all_sites = [{"siteId": site_id, "siteLevel": 0} for site_id in top_level_sites]
+                    self._get_subsites_in_site(top_level_sites, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, 1)
+                    all_site_ids = [site["siteId"] for site in all_sites]
+                    self._append_tenant_level_metrics(all_site_ids, metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
+
+
+                    site_id_to_mail = {site_id: mail for mail, site_id in mail_to_top_level_site.items()}
+                    metrics["siteIdToMail"] = site_id_to_mail
+
+                    self.progress_update_callback(
+                        "site_discovery", 
+                        status="Done", 
+                        count=site_discovery_progress_metrics.get("siteCount", 0), 
+                        personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                        teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                        driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
+                        listCount=site_discovery_progress_metrics.get("listCount", 0), 
+                        licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
+                    )
+
                 self.logger("Site Scanning is finished!!!!")
 
             # get adjacency lists and parent references for each drive
@@ -368,6 +400,113 @@ class FileEstimator(Estimator):
             progress=1,
             extra_text="Calculated metrics for all drives...",
         )
+
+    # To be used in case of CSV upload
+    def _get_subsites_in_site(
+        self,
+        site_ids: List[str],
+        all_sites: Dict[str, int],
+        subsite_to_top_level_site: Dict[str, str],
+        site_discovery_progress_metrics: Dict[str, Any],
+        failures: List[Dict[str, str]],
+        level: int = 1
+    ):
+        try:
+            site_url = "/sites/{siteId}/sites?$select=id,weburl,isPersonalSite&$top=999&filter=isPersonalSite eq true"
+            batches = create_batches(site_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
+
+            futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
+            batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
+            idx = 0
+            for batch in batches:
+                futures_map[idx] = self.executor.submit(self.url_invoker.invoke, GRAPH_BASE_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+                batch_id_to_batch_map[idx] = batch
+                idx += 1
+
+            response_map: Dict[int, List[Dict[str, Any]]] = {}
+            for batch_id, future in futures_map.items():
+                response_map[batch_id] = future.result()
+
+            site_to_resp_map: Dict[str, Dict[str, Any]] = {}
+            pending_next_items = []
+
+            for batch_id, responses in response_map.items():
+                batch = batch_id_to_batch_map[batch_id]
+                batch_responses_map = get_batch_responses_map(responses, self.logger)
+                for req in batch:
+                    req_id = req["id"]
+                    if req_id in batch_responses_map:
+                        resp = batch_responses_map[req_id]
+                        site_id = req["headers"]["siteId"]
+                        site_to_resp_map[site_id] = resp
+
+                        if "body" in resp and "@odata.nextLink" in resp["body"]:
+                            next_url = resp["body"]["@odata.nextLink"]
+                            relative_url = get_relative_url(next_url, GRAPH_BASE_URL)
+                            pending_next_items.append({
+                                "siteId": site_id,
+                                "url": relative_url
+                            })
+                        elif "body" in resp and "error" in resp["body"]:
+                            failures.append({
+                                "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                                "statusCode": resp["status"],
+                                "message": f"Error in fetching subsites for site {site_id}: {resp['body']['error']['message']}"
+                            })
+                    else:
+                        failures.append({
+                            "type": FailureType.NOT_FOUND,
+                            "statusCode": None,
+                            "message": f"No response found for subsites API for site {req['headers']['siteId']}."
+                        })
+
+            while pending_next_items and not self.is_hard_stop_requested():
+                batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+                
+                next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
+                next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
+                idx = 0
+                for batch in batches:
+                    next_futures_map[idx] = self.executor.submit(self.url_invoker.invoke, GRAPH_BASE_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+                    next_batch_id_to_batch_map[idx] = batch
+                    idx += 1
+                    
+                next_response_map: Dict[int, List[Dict[str, Any]]] = {}
+                for batch_id, future in next_futures_map.items():
+                    next_response_map[batch_id] = future.result()
+                    
+                new_pending_next_items = []
+                
+                for batch_id, responses in next_response_map.items():
+                    batch = next_batch_id_to_batch_map[batch_id]
+                    new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BASE_URL, failures, False))
+                    
+                pending_next_items = new_pending_next_items
+
+            new_sub_site_ids = []
+            for site_id, resp in site_to_resp_map.items():
+                if "body" in resp and "value" in resp["body"]:              # Note its fine to have this progress update here since we are not expected to have a very high count of subsites for each site/subsite.
+                    site_discovery_progress_metrics["siteCount"] += len(resp["body"]["value"])
+                    site_discovery_progress_metrics["teamSiteCount"] += len([site for site in resp["body"]["value"] if not site["isPersonalSite"]])
+                    site_discovery_progress_metrics["personalSiteCount"] += len([site for site in resp["body"]["value"] if site["isPersonalSite"]])
+
+                    self.progress_update_callback(
+                        "site_discovery",
+                        count=site_discovery_progress_metrics.get("siteCount", 0),
+                        personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                        teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                    )
+                        
+                    for site in resp["body"]["value"]:
+                        all_sites.append({"siteId": site["id"], "siteLevel": level})
+                        new_sub_site_ids.append(site["id"])
+                        subsite_to_top_level_site[site["id"]] = site_id if site_id not in subsite_to_top_level_site else subsite_to_top_level_site[site_id]
+
+            if new_sub_site_ids:
+                self._get_subsites_in_site(new_sub_site_ids, all_sites, subsite_to_top_level_site, failures, level + 1)
+
+        except Exception as e:
+            self._log_and_fail("Error in _get_subsites_in_site", e, failures)
 
     def _get_subsite_metrics_and_drives(
         self,
@@ -1295,3 +1434,69 @@ class FileEstimator(Estimator):
     def shutdown(self):
         self.executor.shutdown(wait=False)
         self.tree_executor.shutdown(wait=False)
+
+    def _get_sites_for_users(self, email_ids: List[str], site_discovery_progress_metrics: Dict[str, Any]) -> Dict[str, str]:
+        from concurrent.futures import as_completed
+        
+        mail_to_top_level_site = {}
+        token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
+        token = token_data["token"]
+        session = self.url_invoker.token_manager.get_session()
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        def fetch_drives_ids(email):
+            try:
+                url = f"{GRAPH_BASE_URL}/users/{email}/drives?$select=sharePointIds"
+                
+                attempts = 0
+                max_attempts = self.config.retries + 1
+                while attempts < max_attempts and not self.is_hard_stop_requested():
+                    try:
+                        r = session.get(url, headers=headers, timeout=60)
+                        if r.status_code == 200:
+                            return email, r.json()
+                        elif r.status_code == 404:
+                            return email, None
+                        else:
+                            raise Exception(f"Graph API returned status {r.status_code}")
+                    except Exception as e:
+                        attempts += 1
+                        if attempts == max_attempts:
+                            break
+                        wait_time = min(10, max(2, self.config.backoff) ** (attempts - 1))
+                        time.sleep(wait_time)
+            except Exception as e:
+                pass
+            return email, None
+
+        try:
+            future_to_email = {self.executor.submit(fetch_drives_ids, email): email for email in email_ids}
+            
+            for future in as_completed(future_to_email):
+                email = future_to_email[future]
+                upn, response_data = future.result()
+                
+                if response_data and "value" in response_data:
+                    drives_list = response_data["value"]
+                    for drive in drives_list:
+                        sp_ids = drive.get("sharePointIds")
+                        if sp_ids and "siteId" in sp_ids and "siteUrl" in sp_ids:
+                            site_id = sp_ids["siteId"]
+                            site_url = sp_ids["siteUrl"]
+                            
+                            self.id_to_display[site_id] = site_url
+                            mail_to_top_level_site[upn] = site_id
+                            break
+                            
+                site_discovery_progress_metrics["siteCount"] += 1
+                site_discovery_progress_metrics["personalSiteCount"] += 1
+                self.progress_update_callback(
+                    "site_discovery",
+                    count=site_discovery_progress_metrics["siteCount"],
+                    personalSiteCount=site_discovery_progress_metrics["personalSiteCount"],
+                    teamSiteCount=site_discovery_progress_metrics["teamSiteCount"]
+                )
+        finally:
+            self.url_invoker.token_manager.return_token_slot(token_data)
+            
+        return mail_to_top_level_site

@@ -153,5 +153,21 @@ class TestFileEstimatorLoad(unittest.TestCase):
         self.assertEqual(sum(s.get("largeResourceCount", 0) for s in site_metrics_values), result.get("tenantLevelLargeResourceCount", 0))
         self.assertEqual(sum(s.get("dlCount", 0) for s in site_metrics_values), sum(result.get("driveCounts", {}).values()))
 
+    def test_email_ids_simulation(self):
+        print("Starting emailIds targeted scan test for FileEstimator...")
+        
+        failures = []
+        email_ids = ["adelev@smh3v.onmicrosoft.com", "alexw@smh3v.onmicrosoft.com"]
+        
+        # Test the direct method return value
+        result = self.estimator._get_sites_for_users(email_ids)
+        
+        self.assertEqual(len(failures), 0, f"Expected 0 failures, got: {failures}")
+        
+        # Verify that we mapped both email IDs to site IDs
+        self.assertEqual(set(result.keys()), set(email_ids))
+        for email in email_ids:
+            self.assertTrue(result[email].startswith("site-mock-"))
+
 if __name__ == "__main__":
     unittest.main()
