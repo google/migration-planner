@@ -143,13 +143,18 @@ class FileEstimator(Estimator):
                     top_level_sites = list(set(mail_to_top_level_site.values()))
                     
                     for site_id in top_level_sites:
-                        metrics["siteMetrics"][site_id] = {"siteLevel": 0}
                         self.site_to_metadata[site_id] = {"isPersonalSite": True}
                         metrics["personalSiteCount"] += 1
                         
                     metrics["siteCount"] = len(top_level_sites)
                     all_sites = [{"siteId": site_id, "siteLevel": 0} for site_id in top_level_sites]
                     self._get_subsites_in_site(top_level_sites, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, 1)
+                    
+                    for site_detail in all_sites:
+                        metrics["siteMetrics"][site_detail["siteId"]] = {
+                            "siteLevel": site_detail["siteLevel"]
+                        }
+                        
                     all_site_ids = [site["siteId"] for site in all_sites]
                     self._append_tenant_level_metrics(all_site_ids, metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
 
@@ -503,9 +508,12 @@ class FileEstimator(Estimator):
                         all_sites.append({"siteId": site["id"], "siteLevel": level})
                         new_sub_site_ids.append(site["id"])
                         subsite_to_top_level_site[site["id"]] = site_id if site_id not in subsite_to_top_level_site else subsite_to_top_level_site[site_id]
+                        self.site_to_metadata[site["id"]] = {
+                            "isPersonalSite": site.get("isPersonalSite", False)
+                        }
 
             if new_sub_site_ids:
-                self._get_subsites_in_site(new_sub_site_ids, all_sites, subsite_to_top_level_site, failures, level + 1)
+                self._get_subsites_in_site(new_sub_site_ids, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, level + 1)
 
         except Exception as e:
             self._log_and_fail("Error in _get_subsites_in_site", e, failures)

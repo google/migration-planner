@@ -47,14 +47,22 @@ class MockSession:
                     drive_id = drives_list[h % len(drives_list)]
                 else:
                     drive_id = "drive-mock"
-                normalized_email = email_id.lower().replace("@", "_").replace(".", "_")
+                site_id = next((sid for sid, s in self.test_data.get("sites", {}).items() if drive_id in s.get("drives", [])), "root")
+                curr_site = self.test_data.get("sites", {}).get(site_id)
+                if curr_site:
+                    while "parentReference" in curr_site and "siteId" in curr_site["parentReference"]:
+                        parent_id = curr_site["parentReference"]["siteId"]
+                        curr_site = self.test_data.get("sites", {}).get(parent_id)
+                        if curr_site:
+                            site_id = parent_id
+                site_url = self.test_data.get("sites", {}).get(site_id, {}).get("webUrl", f"https://tenant.sharepoint.com/sites/{site_id}")
                 body = {
                     "value": [
                         {
                             "sharePointIds": {
                                 "listId": f"list-mock-{drive_id}",
-                                "siteId": f"site-mock-{drive_id}",
-                                "siteUrl": f"https://tenant-my.sharepoint.com/personal/{normalized_email}",
+                                "siteId": site_id,
+                                "siteUrl": site_url,
                                 "tenantId": "mock-tenant-id",
                                 "webId": f"web-mock-{drive_id}"
                             }
@@ -85,6 +93,11 @@ class MockUrlInvoker:
         self.token_manager = MockTokenManager(test_data)
         self.page_size = 5 # Default page size for simulation
         
+        self.drive_to_items = {}
+        for item in self.test_data.get("items", {}).values():
+            did = item["parentReference"]["driveId"]
+            self.drive_to_items.setdefault(did, []).append(item)
+        
     def invoke(self, base_url: str, batch: List[Dict[str, Any]], logger=None, stop_event=None, resource_type=None):
         responses = []
         for req in batch:
@@ -96,7 +109,7 @@ class MockUrlInvoker:
             query_params = urllib.parse.parse_qs(parsed_url.query)
             
             # Simulate network delay
-            time.sleep(random.uniform(0.01, 0.05))
+            time.sleep(random.uniform(0.001, 0.003))
             
             parts = path.split("/")
             
@@ -173,13 +186,13 @@ class MockUrlInvoker:
                     return False
 
                 # Find all items for this drive
+                raw_drive_items = self.drive_to_items.get(drive_id, [])
                 drive_items = []
-                for item in self.test_data["items"].values():
-                    if item["parentReference"]["driveId"] == drive_id:
-                        if os.environ.get("SIMULATE_FAILURES", "False").lower() == "true":
-                            if is_ancestor_failed(item["id"]):
-                                continue
-                        drive_items.append(item)
+                for item in raw_drive_items:
+                    if os.environ.get("SIMULATE_FAILURES", "False").lower() == "true":
+                        if is_ancestor_failed(item["id"]):
+                            continue
+                    drive_items.append(item)
                         
                 # Pagination
                 skip = int(query_params.get("$skip", [0])[0])

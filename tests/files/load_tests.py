@@ -2,7 +2,8 @@ import unittest
 from unittest.mock import MagicMock, patch
 from estimators.file_estimator import FileEstimator
 from util.utils import ScanConfig
-from util.enums import FailureType
+from typing import Dict, List, Tuple, Any
+import hashlib
 import json
 import os
 import time
@@ -67,8 +68,8 @@ class TestFileEstimatorLoad(unittest.TestCase):
 
         self.estimator.set_id_to_display_name_map({})
 
-    def test_load_simulation(self):
-        print("Starting load test for FileEstimator...")
+    def test_load_simulation_all_sites(self):
+        print("Starting load test for FileEstimator (All Sites)...")
         
         failures = []
         start_time = time.time()
@@ -153,6 +154,157 @@ class TestFileEstimatorLoad(unittest.TestCase):
         self.assertEqual(sum(s.get("largeResourceCount", 0) for s in site_metrics_values), result.get("tenantLevelLargeResourceCount", 0))
         self.assertEqual(sum(s.get("dlCount", 0) for s in site_metrics_values), sum(result.get("driveCounts", {}).values()))
 
+    def _get_expected_for_subset(self, email_ids: List[str]) -> Tuple[Dict[str, Any], List[str]]:
+        drives_list = list(self.test_data["drives"].keys())
+        subset_drive_ids = []
+        for email in email_ids:
+            h = int(hashlib.md5(email.encode('utf-8')).hexdigest(), 16)
+            drive_id = drives_list[h % len(drives_list)]
+            subset_drive_ids.append(drive_id)
+            
+        subset_drive_ids = list(set(subset_drive_ids))
+        
+        root_site_ids = []
+        for drive_id in subset_drive_ids:
+            site_id = next((sid for sid, s in self.test_data.get("sites", {}).items() if drive_id in s.get("drives", [])), "root")
+            curr_site = self.test_data.get("sites", {}).get(site_id)
+            if curr_site:
+                while "parentReference" in curr_site and "siteId" in curr_site["parentReference"]:
+                    parent_id = curr_site["parentReference"]["siteId"]
+                    curr_site = self.test_data.get("sites", {}).get(parent_id)
+                    if curr_site:
+                        site_id = parent_id
+            root_site_ids.append(site_id)
+        root_site_ids = list(set(root_site_ids))
+        
+        all_resolved_sites = []
+        visited = set()
+        def collect_subsites(site_id, level):
+            if site_id in visited:
+                return
+            visited.add(site_id)
+            all_resolved_sites.append({"siteId": site_id, "siteLevel": level})
+            subsite_ids = self.test_data.get("sites", {}).get(site_id, {}).get("subsites", [])
+            for sid in subsite_ids:
+                collect_subsites(sid, level + 1)
+                
+        for site_id in root_site_ids:
+            collect_subsites(site_id, 0)
+            
+        all_site_ids = [s["siteId"] for s in all_resolved_sites]
+        
+        scanned_drives = []
+        for sid in all_site_ids:
+            scanned_drives.extend(self.test_data.get("sites", {}).get(sid, {}).get("drives", []))
+        scanned_drives = list(set(scanned_drives))
+        
+        personal_site_dl_count = sum(len(self.test_data.get("sites", {}).get(sid, {}).get("drives", [])) for sid in root_site_ids)
+        team_site_dl_count = sum(len(self.test_data.get("sites", {}).get(sid, {}).get("drives", [])) for sid in all_site_ids if sid not in root_site_ids)
+        
+        expected = {
+            "siteCount": len(root_site_ids),
+            "subsiteCount": len(all_site_ids) - len(root_site_ids),
+            "personalSiteCount": len(root_site_ids),
+            "teamSiteCount": 0,
+            "personalSiteDLCount": personal_site_dl_count,
+            "teamSiteDLCount": team_site_dl_count,
+            "listCount": sum(len(self.test_data.get("sites", {}).get(sid, {}).get("lists", [])) for sid in all_site_ids),
+            "folderCount": 0,
+            "fileCount": 0,
+            "shortcutCount": 0,
+            "folderCountExceedingDepthLimit": 0,
+            "fileCountExceedingDepthLimit": 0,
+            "maxFolderDepth": 0,
+            "maxSubsiteDepth": max(s["siteLevel"] for s in all_resolved_sites) if all_resolved_sites else 0,
+            "tenantLevelLargeResourceCount": 0,
+            "tenantLevelFileSizeDistribution": {"buckets": []}
+        }
+        
+        bucket_ranges = [(0, 10240), (10241, 102400), (102401, 1048576), (1048577, float("inf"))]
+        for size_range in bucket_ranges:
+            expected["tenantLevelFileSizeDistribution"]["buckets"].append({
+                "sizeRange": size_range,
+                "count": 0
+            })
+            
+        for drive_id in scanned_drives:
+            d_expected = self.test_data.get("expected_result", {}).get("driveMetrics", {}).get(drive_id)
+            if d_expected:
+                expected["folderCount"] += d_expected.get("folderCount", 0)
+                expected["fileCount"] += d_expected.get("fileCount", 0)
+                expected["shortcutCount"] += d_expected.get("shortcutCount", 0)
+                expected["folderCountExceedingDepthLimit"] += d_expected.get("folderCountExceedingDepthLimit", 0)
+                expected["fileCountExceedingDepthLimit"] += d_expected.get("fileCountExceedingDepthLimit", 0)
+                expected["maxFolderDepth"] = max(expected["maxFolderDepth"], d_expected.get("maxEffectiveDepth", 0))
+                expected["tenantLevelLargeResourceCount"] += len(d_expected.get("largeResources", []))
+                
+                for bucket in d_expected.get("fileSizeDistribution", {}).get("buckets", []):
+                    r_bucket = next(b for b in expected["tenantLevelFileSizeDistribution"]["buckets"] if b["sizeRange"] == tuple(bucket["sizeRange"]))
+                    r_bucket["count"] += bucket["count"]
+                    
+        return expected, subset_drive_ids
+
+    def test_load_simulation_from_csv(self):
+        print("Starting load test for FileEstimator (from CSV UPNs subset)...")
+        
+        # Test with a subset of 5 email IDs
+        email_ids = [f"user-{i}@domain.com" for i in range(5)]
+        expected, subset_drive_ids = self._get_expected_for_subset(email_ids)
+
+        failures = []
+        start_time = time.time()
+        result = self.estimator.calculate_resource_metrics({"emailIds": email_ids}, failures)
+        end_time = time.time()
+        
+        print(f"UPN Load test completed in {end_time - start_time:.2f} seconds")
+        print(f"Total failures recorded: {len(failures)}")
+        
+        if failures and len(failures) > 0:
+            print("Failures:")
+            print(json.dumps(failures, indent=2))
+            
+        self.assertEqual(len(failures), 0)
+            
+        # Summary Metrics Assertions for UPN scan path (matching whole tenant metrics)
+        self.assertEqual(result.get("siteCount", 0), expected.get("siteCount", 0))
+        self.assertEqual(result.get("personalSiteCount", 0), expected.get("personalSiteCount", 0))
+        self.assertEqual(result.get("teamSiteCount", 0), expected.get("teamSiteCount", 0))
+        self.assertEqual(result.get("subsiteCount", 0), expected.get("subsiteCount", 0))
+        self.assertEqual(result.get("personalSiteDLCount", 0), expected.get("personalSiteDLCount", 0))
+        self.assertEqual(result.get("teamSiteDLCount", 0), expected.get("teamSiteDLCount", 0))
+        self.assertEqual(result.get("listCount", 0), expected.get("listCount", 0))
+        
+        # Crawled content metrics (should match whole tenant expected values)
+        self.assertEqual(result.get("folderCount", 0), expected.get("folderCount", 0))
+        self.assertEqual(result.get("fileCount", 0), expected.get("fileCount", 0))
+        self.assertEqual(result.get("shortcutCount", 0), expected.get("shortcutCount", 0))
+        self.assertEqual(result.get("folderCountExceedingDepthLimit", 0), expected.get("folderCountExceedingDepthLimit", 0))
+        self.assertEqual(result.get("fileCountExceedingDepthLimit", 0), expected.get("fileCountExceedingDepthLimit", 0))
+        self.assertEqual(result.get("tenantLevelLargeResourceCount", 0), expected.get("tenantLevelLargeResourceCount", 0))
+        
+        # Verify file size distribution
+        for e_bucket in expected.get("tenantLevelFileSizeDistribution", {}).get("buckets", []):
+            r_bucket = next((b for b in result.get("tenantLevelFileSizeDistribution", {}).get("buckets", []) if b["sizeRange"] == tuple(e_bucket["sizeRange"])), None)
+            self.assertIsNotNone(r_bucket)
+            self.assertEqual(r_bucket["count"], e_bucket["count"])
+            
+        # Verify siteIdToMail mapping UPN mapping
+        site_id_to_mail = result.get("siteIdToMail", {})
+        drives_list = list(self.test_data["drives"].keys())
+        for site_id, email in site_id_to_mail.items():
+            self.assertIn(email, email_ids)
+            h = int(hashlib.md5(email.encode('utf-8')).hexdigest(), 16)
+            drive_id = drives_list[h % len(drives_list)]
+            expected_site_id = next((sid for sid, s in self.test_data.get("sites", {}).items() if drive_id in s.get("drives", [])), "root")
+            curr_site = self.test_data.get("sites", {}).get(expected_site_id)
+            if curr_site:
+                while "parentReference" in curr_site and "siteId" in curr_site["parentReference"]:
+                    parent_id = curr_site["parentReference"]["siteId"]
+                    curr_site = self.test_data.get("sites", {}).get(parent_id)
+                    if curr_site:
+                        expected_site_id = parent_id
+            self.assertEqual(site_id, expected_site_id)
+
     def test_email_ids_simulation(self):
         print("Starting emailIds targeted scan test for FileEstimator...")
         
@@ -175,7 +327,7 @@ class TestFileEstimatorLoad(unittest.TestCase):
         # Verify that we mapped both email IDs to site IDs
         self.assertEqual(set(result.keys()), set(email_ids))
         for email in email_ids:
-            self.assertTrue(result[email].startswith("site-mock-"))
+            self.assertIn(result[email], self.test_data.get("sites", {}).keys())
 
 if __name__ == "__main__":
     unittest.main()
