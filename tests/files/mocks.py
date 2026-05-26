@@ -36,30 +36,32 @@ class MockSession:
             return MockResponse(200, {"value": licenses})
             
         parts = path.split("/")
-        if len(parts) >= 4 and parts[1] == "users" and parts[3] == "drives":
-            email_id = urllib.parse.unquote(parts[2])
-            drives_list = list(self.test_data.get("drives", {}).keys())
-            if drives_list:
-                import hashlib
-                h = int(hashlib.md5(email_id.encode('utf-8')).hexdigest(), 16)
-                drive_id = drives_list[h % len(drives_list)]
-            else:
-                drive_id = "drive-mock"
-            normalized_email = email_id.lower().replace("@", "_").replace(".", "_")
-            body = {
-                "value": [
-                    {
-                        "sharePointIds": {
-                            "listId": f"list-mock-{drive_id}",
-                            "siteId": f"site-mock-{drive_id}",
-                            "siteUrl": f"https://tenant-my.sharepoint.com/personal/{normalized_email}",
-                            "tenantId": "mock-tenant-id",
-                            "webId": f"web-mock-{drive_id}"
+        if "users" in parts:
+            idx = parts.index("users")
+            if len(parts) > idx + 2 and parts[idx + 2] == "drives":
+                email_id = urllib.parse.unquote(parts[idx + 1])
+                drives_list = list(self.test_data.get("drives", {}).keys())
+                if drives_list:
+                    import hashlib
+                    h = int(hashlib.md5(email_id.encode('utf-8')).hexdigest(), 16)
+                    drive_id = drives_list[h % len(drives_list)]
+                else:
+                    drive_id = "drive-mock"
+                normalized_email = email_id.lower().replace("@", "_").replace(".", "_")
+                body = {
+                    "value": [
+                        {
+                            "sharePointIds": {
+                                "listId": f"list-mock-{drive_id}",
+                                "siteId": f"site-mock-{drive_id}",
+                                "siteUrl": f"https://tenant-my.sharepoint.com/personal/{normalized_email}",
+                                "tenantId": "mock-tenant-id",
+                                "webId": f"web-mock-{drive_id}"
+                            }
                         }
-                    }
-                ]
-            }
-            return MockResponse(200, body)
+                    ]
+                }
+                return MockResponse(200, body)
             
         return MockResponse(404, {"error": {"message": "Not Found"}})
 

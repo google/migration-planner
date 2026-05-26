@@ -160,7 +160,15 @@ class TestFileEstimatorLoad(unittest.TestCase):
         email_ids = ["adelev@smh3v.onmicrosoft.com", "alexw@smh3v.onmicrosoft.com"]
         
         # Test the direct method return value
-        result = self.estimator._get_sites_for_users(email_ids)
+        site_discovery_progress_metrics = {
+            "siteCount": 0,
+            "personalSiteCount": 0,
+            "teamSiteCount": 0,
+            "listCount": 0,
+            "licenseCount": 0,
+            "driveCount": 0,
+        }
+        result = self.estimator._get_sites_for_users(email_ids, site_discovery_progress_metrics)
         
         self.assertEqual(len(failures), 0, f"Expected 0 failures, got: {failures}")
         

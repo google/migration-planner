@@ -1469,6 +1469,8 @@ class FileEstimator(Estimator):
                 upn, response_data = future.result()
                 
                 if response_data and "value" in response_data:
+                    site_discovery_progress_metrics["siteCount"] += 1
+                    site_discovery_progress_metrics["personalSiteCount"] += 1
                     drives_list = response_data["value"]
                     for drive in drives_list:
                         sp_ids = drive.get("sharePointIds")
@@ -1480,14 +1482,12 @@ class FileEstimator(Estimator):
                             mail_to_top_level_site[upn] = site_id
                             break
                             
-                site_discovery_progress_metrics["siteCount"] += 1
-                site_discovery_progress_metrics["personalSiteCount"] += 1
-                self.progress_update_callback(
-                    "site_discovery",
-                    count=site_discovery_progress_metrics["siteCount"],
-                    personalSiteCount=site_discovery_progress_metrics["personalSiteCount"],
-                    teamSiteCount=site_discovery_progress_metrics["teamSiteCount"]
-                )
+                    self.progress_update_callback(
+                        "site_discovery",
+                        count=site_discovery_progress_metrics["siteCount"],
+                        personalSiteCount=site_discovery_progress_metrics["personalSiteCount"],
+                        teamSiteCount=site_discovery_progress_metrics["teamSiteCount"]
+                    )
         finally:
             self.url_invoker.token_manager.return_token_slot(token_data)
             
