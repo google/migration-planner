@@ -5,19 +5,13 @@
 ## What's new
 
 - **Microsoft Teams & Chat Migration Planning**: Full support for scanning and projecting migration timelines for Microsoft Teams, Channels, and Private Chats alongside Exchange Online.
-- **Process-Level Decoupling Architecture**: Architectural refactoring that decouples the launcher (`migration_planner.py`) and individual workload planners (`migration_planner_exchange.py` and `migration_planner_chat.py`) into isolated OS subprocesses to prevent runtime contention, memory corruption, or GIL clashes during highly concurrent MS Graph API scanning.
+- **Files in OneDrive Planning**: Support added for metrics related to OneDrive sites.
+- **Process-Level Decoupling Architecture**: Architectural refactoring that decouples the launcher (`migration_planner.py`) and individual workload planners into isolated OS subprocesses to prevent runtime contention, memory corruption, or GIL clashes during highly concurrent MS Graph API scanning.
 - **Bidirectional Navigation**: Addition of a top navigation bar featuring a `← Back to Selector` button for seamless transitions between workload planners.
-- **In-place Archives**: Support for getting the count of emails in the in-place archive (alternatively known as online archive) of users is added.
-- **Group Mailboxes**: Support for getting the thread and mail (also called posts) count for each group provided / present in a tenant is added.
 
 #### UX change to support new features
-- When starting the estimations, the first progress bar now would display the text `Scanning Entities` instead of `Scanning Users` to indicate that we are scanning for both users and groups. Also the count subtext would now show the split of number of users and group mailboxes.
-- When using the CSV based flow, script users should specify a new column in the CSV called `Type` to distinguish users from group mailboxes. Note that this is not needed if group mailbox estimations are not required or if the Full scan mode is being used. Compatible values for this column are `User` and `Group Mailbox`.
-Support for Sharepoint metrics for a tenant have been added. Users will now be able to generate various metrics for the Sharepoint resources (like sites, drives, etc.) for their specific tenant.
-
-#### UX change to support new features
-- The startup screen would now show a selector that enables user to select if they want to run Exchange online estimations or Files estimations.
-- The progress screen would have three progress bars:
+- The startup screen would now show a selector that enables user to select if they want to run Exchange online estimations, Files estimations or Chat Estimations.
+- The progress screen would have three progress bars for Files estimation:
   - **Site Discovery**: This progress bar will report the progress while scanning all the sites/subsites in the tenant under the root site, along with some other metadata like List count, Drives/DLs count, License units count, etc..
   - **Drive Discovery**: This progress bar will report the progress while scanning all the folders in the drives found in the site scan.
   - **Metrics Calculation**: This will show the progress of the metrics (like max depth, folder count, files count, etc.) for the drives.
@@ -28,7 +22,7 @@ Support for Sharepoint metrics for a tenant have been added. Users will now be a
 #### System behaviour changes
 - **Site Discovery** and **Drive Discovery** phases in the progress screen would show indeterminate progress as the total number of sites/folders/files are not known during those phases.
 - However the **Metrics Calculation** phase would be determinate and show proper progress.
-- The logs and CSV report would only be available through the export option and not under the outputs/ directory to minimize report creation latency in case of huge reports.
+- The logs and CSV report would only be available through the export option and not under the outputs/ directory to minimize report creation latency for huge reports.
 
 ## DISCLAIMER
 
@@ -42,7 +36,7 @@ Support for Sharepoint metrics for a tenant have been added. Users will now be a
 ### Functionality Limitations
 
 *   This tool only provides migration time estimates for the new Data Migration Service with specific enhancements for large scale migrations. It does not cover Google Workspace Migrate, or any other data migration tool.
-*   Microsoft Exchange Online and Microsoft Teams / Private Chat scan and migration planning is supported. ETAs are based on Email and Chat/Channel corpus projections.
+*   Microsoft Exchange Online, Microsoft OneDrive and Microsoft Teams / Private Chat scan and migration planning is supported. ETAs are based on Email and Chat/Channel corpus projections. ETA projections are not yet supported for Onedrive flow.
 *   This tool only provides a guesstimate, and migration timelines should in no way be taken as guarantee or SLA.
 
 ---
@@ -64,20 +58,23 @@ Support for Sharepoint metrics for a tenant have been added. Users will now be a
 - [Running the Tool & Process Decoupling](#running-the-tool--process-decoupling)
 - [Tool Configuration & Scanning](#tool-configuration--scanning)
   - [Workflow A: Exchange Online Planner](#workflow-a-exchange-online-planner)
-  - [Workflow B: Microsoft Teams & Chat Planner](#workflow-b-microsoft-teams--chat-planner)
+  - [Workflow B: Microsoft OneDrive Planner](#workflow-b-microsoft-onedrive)
+  - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-microsoft-teams--chat-planner)
 - [Understanding the Results](#understanding-the-results)
   - [Workflow A: Exchange Online Planner](#workflow-a-results-exchange-online-planner)
-  - [Workflow B: Microsoft Teams & Chat Planner](#workflow-b-results-microsoft-teams--chat-planner)
+  - [Workflow B: Microsoft OneDrive Planner](#workflow-b-results-microsoft-onedrive)
+  - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-results-microsoft-teams--chat-planner)
 - [Outputs & Artifacts](#outputs--artifacts)
   - [Workflow A: Exchange Online Planner](#workflow-a-outputs-exchange-online-planner)
-  - [Workflow B: Microsoft Teams & Chat Planner](#workflow-b-outputs-microsoft-teams--chat-planner)
+  - [Workflow B: Microsoft OneDrive Planner](#workflow-b-outputs-microsoft-onedrive)
+  - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-outputs-microsoft-teams--chat-planner)
 - [Terms & Disclaimer](#terms--disclaimer)
 
 ---
 
 ## Introduction
 
-The Migration Planner is a desktop application designed to help deployment partners and IT administrators assess a Microsoft 365 tenant before migration. Through its process-decoupled architecture, administrators can independently assess Exchange Online (Emails, Contacts, Calendars, In-Place Archives, Group Mails) or Microsoft Teams (Channels, Private Chats) to provide accurate volume metrics and generate optimized Migration Batch Plans with estimated completion times (ETAs).
+The Migration Planner is a desktop application designed to help deployment partners and IT administrators assess a Microsoft 365 tenant before migration. Through its process-decoupled architecture, administrators can independently assess Exchange Online (Emails, Contacts, Calendars, In-Place Archives, Group Mails), Files in OneDrive or Microsoft Teams (Channels, Private Chats) to provide volume metrics and generate optimized Migration Batch Plans with estimated completion times (ETAs) (not applicable for files estimation).
 
 ---
 
@@ -220,9 +217,8 @@ You will need three values for the tool:
     *(Ensure you are in your virtual environment if you created one).*
 
 ### Process Decoupling Mechanics
-The launcher window (`migration_planner.py`) acts as a lightweight CustomTkinter `SelectorApp`. Clicking either *"Launch Exchange Planner"* or *"Launch Chat Planner"* spawns the respective standalone planner (`migration_planner_exchange.py` or `migration_planner_chat.py`) as an isolated OS process while the launcher immediately destroys itself. 
-
-Both workload planners feature a top navigation bar with a `← Back to Selector` button. Clicking this cleanly terminates the active planner process and respawns a fresh `migration_planner.py` selector session.
+The launcher window (`migration_planner.py`) acts as a lightweight CustomTkinter `SelectorApp`, which can be used to select which estimations need to be run (Exchange Online, Chats or Files).
+All workload planners feature a top navigation bar with a `← Back to Selector` button. Clicking this cleanly terminates the active planner process and respawns a fresh `migration_planner.py` selector session.
 
 ---
 
@@ -246,35 +242,36 @@ Click **"Show Advanced Settings"** to tune the performance:
 *   **Max Batches**: Defines the upper cap for the number of batches to be generated by the migration plan. In case of very large corpuses, it might not be possible to adhere to this number.
 *   **Site Types to Scan**: Users can select whether they want to scan Personal sites, Team sites or both.
 
-#### Files
+---
 
-### 1. Connect & Source Selection
+### Workflow B: Microsoft OneDrive
+
+#### 1. Connect & Source Selection
 *   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret.
+*   **User Source**:
+    *   **Scan All Sites**: Scans all the Sites in the tenant.
+    *   **Upload CSV**: Allows you to scan a specific subset of users.
 
-### 2. Advanced Settings
-Click **"Show Advanced Settings"** to tune the performance:
-*   **Site Types to Scan**: Presents an option to select which type of sites do we need to scan.
-*   **Concurrency**: Controls how many parallel threads the tool runs.
-    *   **Recommendation**: For a standard machine (8 Core, 16GB+ RAM), set this to **30**. Setting it too high may cause more frequent throttling errors from Microsoft and consume more resources from your system.
+#### 2. Advanced Settings
+Click **"Show Advanced Settings"** to tune the performance and select your estimation mode:
+*   **Site Types to Scan**:
+    *   **Personal Site**: Scans all the Personal / OneDrive sites in the tenant.
+*   **Concurrency**: Controls how many parallel threads the tool runs. Note that this number is not the exact number of threads spawned but is a guidance on the thread count.
 
-
-#### 3. Starting the Scan (Exchange)
+#### 3. Starting the Scan
 Click **"Get Migration Estimates"**.
 *   A disclaimer will appear noting that results are estimates. Click **OK** to proceed.
 *   The tool will verify your credentials and permissions before starting.
 
-#### 4. The Scan Page (Exchange)
+#### 4. The Scan Page
 Once started, you will see a real-time progress screen:
 *   **Spinners**: Indicate active scanning phases.
-*   **Progress Bars**: 
-    *   Show percentage completion for Users, Emails, Contacts, Calendars, In-Place Archives and Group Mails. For files it would show the progress of site/drive discovery.
-    *   Each spinner and progress bar should correspond to one of the sources selected for the scan. If a user did not select a certain source, the spinner and progress bar for that source should not be visible.
-    *   Specifically for In-Place archives the progress bar would also display the number of users for which partial failures were observed.
+*   **Progress Bars**: Show percentage completion for Site and Drive Discovery along with Metrics Calculations.
 *   **Live Counts**: Updates in real-time as items are discovered.
 
 ---
 
-### Workflow B: Microsoft Teams & Chat Planner
+### Workflow C: Microsoft Teams & Chat Planner
 
 #### 1. Connect & Source Selection (Chat)
 *   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret.
@@ -305,29 +302,16 @@ Once started, you will see a real-time progress screen:
 
 ## Understanding the Results
 
-### 1. Top Level Metrics
+### Workflow A Results: Microsoft Exchange Online
 
-#### Exchange Online
+#### 1. Top Level Metrics
 The top cards display the total scope of the migration:
 *   **Users**: Total distinct users identified/scanned.
 *   **Emails / Events / Contacts / In-Place Archives / Group Mailboxes**: The aggregate sum of items across all users.
 
-#### Sharepoint
-For sharepoint we show the following metrics in the UI report.
-*   **Total Corpus Size**: Total size of the files discovered in the scan.
-*   **Site Collection Count**: Number of sites discovered in the scan.
-*   **Subsite Count**: Total distinct subsites identified/scanned.
-*   **Document Library Count**: Number of Document Libraries / Drives identified in the scan.
-*   **Folder Count**: Total distinct folders identified/scanned.
-*   **File Count**: Total distinct files identified/scanned.
-*   **Shortcut Count**: Total distinct shortcuts identified/scanned.
-*   **List Count**: Total distinct lists identified/scanned.
-*   **File Size Distribution**: Distribution of files by size as per the buckets provided in input.
-*   **Large Resources Count**: Number of Resources (folders) whose subtree size is > 500k.
-
 The CSV report would include additional details at the more granular site level.
 
-### 2. Timeline Estimates & Parallel Batches (*Only for Exchange Online)
+### 2. Timeline Estimates & Parallel Batches
 The tool calculates an Estimated Completion Time (ETA) based on the email corpus using a heuristic based logic:
 *   **User Ordering**: Users are sorted in Ascending Order (Lightest users -> Heaviest users). The lightest users are packed into Batch 1, while the heaviest users usually end up in the final batches.
 *   Max(Emails , (Calendar Events + Contacts), In-Place Archives, Group Mails) determines the sorting logic.
@@ -338,7 +322,26 @@ The tool calculates an Estimated Completion Time (ETA) based on the email corpus
 
 ---
 
-### Workflow B Results: Microsoft Teams & Chat Planner
+### Workflow B Results: Microsoft OneDrive
+
+#### 1. Top Level Metrics
+For OneDrive we show the following metrics in the UI report.
+*   **Total Corpus Size**: Total size of the files discovered in the scan.
+*   **Site Collection Count**: Number of sites discovered in the scan.
+*   **Subsite Count**: Total distinct subsites identified/scanned.
+*   **Document Library Count**: Number of Document Libraries / Drives identified in the scan.
+*   **Folder Count**: Total distinct folders identified/scanned.
+*   **File Count**: Total distinct files identified/scanned.
+*   **Shortcut Count**: Total distinct shortcuts identified/scanned.
+*   **List Count**: Total distinct lists identified/scanned.
+*   **File Size Distribution**: Distribution of files by size as per the buckets provided in input.
+*   **Large Resources Count**: Number of Resources (folders) whose subtree item count is > 500k.
+
+The CSV report would include the above mentioned details along with the granular site level details.
+
+---
+
+### Workflow C Results: Microsoft Teams & Chat Planner
 
 #### 1. Top Level Metrics (Chat & Teams)
 The top cards display the total scope of the Chat/Teams migration:
@@ -363,11 +366,21 @@ It contains:
 2.  **Batch Files (`suggested batches/`)**: Individual CSV files (Batch1.csv, Batch2.csv) ready for use in migration tool. Headers are formatted as **Source Exchange Email**.
 3.  **Logs (`logs.log`)**: Detailed execution logs, including system performance (CPU/RAM) and any API errors encountered.
 
-You can also download just the log file via the **"Export logs"** button or the user report via the **"Export full report"** button and save them in a custom location on your system. Note that for files please use the **Export full Report** option for getting the CSV report.
+You can also download just the log file via the **"Export logs"** button or the user report via the **"Export full report"** button and save them in a custom location on your system.
 
 ---
 
-### Workflow B Outputs: Microsoft Teams & Chat Planner
+### Workflow B Outputs: Microsoft OneDrive
+
+Once the scan completes, the artifacts (CSV report and logs) can be downloaded via the "Export logs" and "Export full report" buttons in the UI.
+
+The artifacts include:
+1.  **Site Report**: A master list of all sites and their details (like folder, file counts, corpus size, etc)
+2.  **Logs**: Detailed execution logs, including system performance (CPU/RAM) and any API errors encountered.
+
+---
+
+### Workflow C Outputs: Microsoft Teams & Chat Planner
 
 Once the scan completes, the tool creates a folder in the `/outputs` directory named with the current timestamp.
 
