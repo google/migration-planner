@@ -145,7 +145,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         border_color=COLOR_TEXT_SUB,
     ).pack(side="left", padx=10)
     
-    # Commenting for time being till Sharepoint support available
     # ctk.CTkCheckBox(
     #     site_options_frame,
     #     text="Team Sites",
@@ -1090,18 +1089,55 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
         writer.writerow(row)
         site_metrics = data.get("siteMetrics", {})
+
+        personal_site_metrics = {}
+        team_site_metrics = {}
+
+        for key, value in site_metrics.items():
+          if data.get("siteClassification", {}).get(key, "") == "personal":
+            personal_site_metrics[key] = value
+          elif data.get("siteClassification", {}).get(key, "") == "teams":
+            team_site_metrics[key] = value
+          else:
+            raise Exception(f"Invalid Site Type found for site {key}")
+
         df = data.get("df")
         
-        for site_id, s_data in site_metrics.items():
-          batch_name = ""
-          if df is not None:
-              match = df[df["Site Id"] == site_id]
-              if not match.empty and self.show_eta:
-                  batch_name = match["Suggested Batch"].iloc[0]
+        site_metric_arr = [personal_site_metrics, team_site_metrics]
+        headers_arr = ["Personal Sites", "Team Sites"]
 
-          if "siteIdToMail" not in data:
-            row = [
+        for idx in range(0, len(site_metric_arr)):
+          if len(site_metric_arr[idx]) == 0:
+            continue
+            
+          writer.writerow([headers_arr[idx]])
+          curr_site_metrics = site_metric_arr[idx]
+
+          for site_id, s_data in curr_site_metrics.items():
+            batch_name = ""
+            if df is not None:
+                match = df[df["Site Id"] == site_id]
+                if not match.empty and self.show_eta:
+                    batch_name = match["Suggested Batch"].iloc[0]
+
+            if "siteIdToMail" not in data:
+              row = [
+                  self._get_display_name(site_id), 
+                  s_data.get("subsiteCount", 0),
+                  s_data.get("dlCount", 0),
+                  s_data.get("listCount", 0),
+                  s_data.get("folderCount", 0),
+                  s_data.get("fileCount", 0),
+                  s_data.get("shortcutCount", 0),
+                  s_data.get("folderCountExceedingDepthLimit", 0),
+                  s_data.get("fileCountExceedingDepthLimit", 0),
+                  s_data.get("largeResourceCount", 0),
+                  self.format_size(s_data.get("totalSize", 0))
+              ]
+            else:
+              row = [
                 self._get_display_name(site_id), 
+                data.get("siteIdToMail", {}).get(site_id, ""),
                 s_data.get("subsiteCount", 0),
                 s_data.get("dlCount", 0),
                 s_data.get("listCount", 0),
@@ -1113,27 +1149,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                 s_data.get("largeResourceCount", 0),
                 self.format_size(s_data.get("totalSize", 0))
             ]
-          else:
-            row = [
-              self._get_display_name(site_id), 
-              data.get("siteIdToMail", {}).get(site_id, ""),
-              s_data.get("subsiteCount", 0),
-              s_data.get("dlCount", 0),
-              s_data.get("listCount", 0),
-              s_data.get("folderCount", 0),
-              s_data.get("fileCount", 0),
-              s_data.get("shortcutCount", 0),
-              s_data.get("folderCountExceedingDepthLimit", 0),
-              s_data.get("fileCountExceedingDepthLimit", 0),
-              s_data.get("largeResourceCount", 0),
-              self.format_size(s_data.get("totalSize", 0))
-          ]
 
-          if self.show_eta:
-            row.append(batch_name)
-          writer.writerow(row)
-        
-        writer.writerow([]) # Blank line separator
+            if self.show_eta:
+              row.append(batch_name)
+            writer.writerow(row)
+          
+          writer.writerow([]) # Blank line separator
 
   def _get_scan_configuration(self):
     config = super()._get_scan_configuration()
@@ -1145,6 +1166,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     if not self.include_personal_sites.get() and not self.include_team_sites.get():
       messagebox.showerror("Validation Error", "At least one site type (Personal or Team) must be selected!")
       return
+      
+    if self.user_source.get() == "csv" and self.include_team_sites.get():
+      messagebox.showerror("Validation Error", "CSV Upload only supports Personal Sites (OneDrive) scanning. Please uncheck Team Sites.")
+      raise ValueError("CSV Upload only supports Personal Sites (OneDrive) scanning.")
       
     # Save values to regular variables to avoid thread-safety issues in Tkinter
     self.val_include_personal_sites = self.include_personal_sites.get()

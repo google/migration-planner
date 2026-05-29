@@ -27,8 +27,8 @@ class MockSession:
             root_site = self.test_data["sites"].get(root_id, {"id": root_id, "displayName": "Root Site"})
             return MockResponse(200, root_site)
             
-        elif "sites/delta" in path:
-            all_sites = self.test_data.get("all_sites", [])
+        elif "sites/delta" in path or "/sites" in path:
+            all_sites = [s for s in self.test_data.get("all_sites", []) if "parentReference" not in s]
             return MockResponse(200, {"value": all_sites})
             
         elif "subscribedSkus" in path:
@@ -114,8 +114,8 @@ class MockUrlInvoker:
             parts = path.split("/")
             
             # Handle /sites/delta
-            if path == "/sites/delta":
-                all_sites = self.test_data.get("all_sites", [])
+            if path in ["/sites/delta", "/sites"]:
+                all_sites = [s for s in self.test_data.get("all_sites", []) if "parentReference" not in s]
                 # Pagination
                 skip = int(query_params.get("$skip", [0])[0])
                 sliced_sites = all_sites[skip : skip + self.page_size]

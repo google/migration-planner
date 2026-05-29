@@ -136,7 +136,7 @@ class FileEstimator(Estimator):
                 self._configure_executor_from_license_counts(metrics["licenseMetrics"])
 
                 if "emailIds" not in data or len(data["emailIds"]) == 0:
-                    self._get_subsite_metrics_and_drives(metrics, drives, subsite_to_drives, subsite_to_top_level_site, site_discovery_progress_metrics, failures)
+                    top_level_sites = self._get_top_level_sites(metrics, site_discovery_progress_metrics, failures)
                 else:
                     mail_to_top_level_site = self._get_sites_for_users(data["emailIds"], site_discovery_progress_metrics)
                     subsite_to_top_level_site = {}
@@ -145,33 +145,36 @@ class FileEstimator(Estimator):
                     for site_id in top_level_sites:
                         self.site_to_metadata[site_id] = {"isPersonalSite": True}
                         metrics["personalSiteCount"] += 1
-                        
-                    metrics["siteCount"] = len(top_level_sites)
-                    all_sites = [{"siteId": site_id, "siteLevel": 0} for site_id in top_level_sites]
-                    self._get_subsites_in_site(top_level_sites, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, 1)
                     
-                    for site_detail in all_sites:
-                        metrics["siteMetrics"][site_detail["siteId"]] = {
-                            "siteLevel": site_detail["siteLevel"]
-                        }
-                        
-                    all_site_ids = [site["siteId"] for site in all_sites]
-                    self._append_tenant_level_metrics(all_site_ids, metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
-
-
                     site_id_to_mail = {site_id: mail for mail, site_id in mail_to_top_level_site.items()}
                     metrics["siteIdToMail"] = site_id_to_mail
+                    
+                metrics["siteCount"] = len(top_level_sites)
+                all_sites = [{"siteId": site_id, "siteLevel": 0} for site_id in top_level_sites]
+                self._get_subsites_in_site(top_level_sites, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, 1)
+                
+                if "emailIds" not in data or len(data["emailIds"]) == 0:
+                    metrics["personalSiteCount"] = site_discovery_progress_metrics.get("personalSiteCount", 0)
+                    metrics["teamSiteCount"] = site_discovery_progress_metrics.get("teamSiteCount", 0)
 
-                    self.progress_update_callback(
-                        "site_discovery", 
-                        status="Done", 
-                        count=site_discovery_progress_metrics.get("siteCount", 0), 
-                        personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
-                        teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
-                        driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
-                        listCount=site_discovery_progress_metrics.get("listCount", 0), 
-                        licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
-                    )
+                for site_detail in all_sites:
+                    metrics["siteMetrics"][site_detail["siteId"]] = {
+                        "siteLevel": site_detail["siteLevel"]
+                    }
+                    
+                all_site_ids = [site["siteId"] for site in all_sites]
+                self._append_tenant_level_metrics(all_site_ids, metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
+
+                self.progress_update_callback(
+                    "site_discovery", 
+                    status="Done", 
+                    count=site_discovery_progress_metrics.get("siteCount", 0), 
+                    personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                    teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                    driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
+                    listCount=site_discovery_progress_metrics.get("listCount", 0), 
+                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
+                )
 
                 self.logger("Site Scanning is finished!!!!")
 
@@ -274,6 +277,7 @@ class FileEstimator(Estimator):
             
             self.progress_update_callback("phase_status", source="plan_generation", status="complete")
 
+            metrics["siteClassification"] = {siteId: "personal" if self._is_subsite_personal(siteId) else "teams" for siteId in metrics["siteMetrics"].keys()}
             return metrics
             
         except Exception as e:
@@ -338,6 +342,9 @@ class FileEstimator(Estimator):
         for subsite_id, drive_ids in subsite_to_drives.items():
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
             top_level_site = subsite_to_top_level_site.get(subsite_id, subsite_id)
+
+            if self.id_to_display.get(subsite_id, "") == "https://smh3v.sharepoint.com/subsiteofrootsite":
+                print(f"FOUND the URL: {subsite_to_top_level_site.get(subsite_id, "")}")
 
             if top_level_site != subsite_id:
                 metrics["siteMetrics"][top_level_site]["subsiteCount"] = metrics["siteMetrics"][top_level_site].get("subsiteCount", 0) + 1
@@ -409,7 +416,6 @@ class FileEstimator(Estimator):
             extra_text="Calculated metrics for all drives...",
         )
 
-    # To be used in case of CSV upload
     def _get_subsites_in_site(
         self,
         site_ids: List[str],
@@ -420,7 +426,7 @@ class FileEstimator(Estimator):
         level: int = 1
     ):
         try:
-            site_url = "/sites/{siteId}/sites?$select=id,weburl,isPersonalSite&$top=999&filter=isPersonalSite eq true"
+            site_url = "/sites/{siteId}/sites?$select=id,weburl,isPersonalSite&$top=999"
             batches = create_batches(site_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -431,14 +437,27 @@ class FileEstimator(Estimator):
                 batch_id_to_batch_map[idx] = batch
                 idx += 1
 
-            response_map: Dict[int, List[Dict[str, Any]]] = {}
-            for batch_id, future in futures_map.items():
-                response_map[batch_id] = future.result()
+            from concurrent.futures import as_completed
+            future_to_batch_id = {future: bid for bid, future in futures_map.items()}
 
             site_to_resp_map: Dict[str, Dict[str, Any]] = {}
             pending_next_items = []
 
-            for batch_id, responses in response_map.items():
+            def local_progress_callback(responses: List, has_next=False):
+                site_discovery_progress_metrics["siteCount"] += len(responses)
+                site_discovery_progress_metrics["teamSiteCount"] += len([site for site in responses if not site.get("isPersonalSite", False)])
+                site_discovery_progress_metrics["personalSiteCount"] += len([site for site in responses if site.get("isPersonalSite", False)])
+
+                self.progress_update_callback(
+                    "site_discovery",
+                    count=site_discovery_progress_metrics.get("siteCount", 0),
+                    personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                    teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                )
+
+            for future in as_completed(futures_map.values()):
+                batch_id = future_to_batch_id[future]
+                responses = future.result()
                 batch = batch_id_to_batch_map[batch_id]
                 batch_responses_map = get_batch_responses_map(responses, self.logger)
                 for req in batch:
@@ -447,6 +466,9 @@ class FileEstimator(Estimator):
                         resp = batch_responses_map[req_id]
                         site_id = req["headers"]["siteId"]
                         site_to_resp_map[site_id] = resp
+
+                        if "body" in resp and "value" in resp["body"]:
+                            local_progress_callback(resp["body"]["value"])
 
                         if "body" in resp and "@odata.nextLink" in resp["body"]:
                             next_url = resp["body"]["@odata.nextLink"]
@@ -479,32 +501,20 @@ class FileEstimator(Estimator):
                     next_batch_id_to_batch_map[idx] = batch
                     idx += 1
                     
-                next_response_map: Dict[int, List[Dict[str, Any]]] = {}
-                for batch_id, future in next_futures_map.items():
-                    next_response_map[batch_id] = future.result()
-                    
+                future_to_batch_id = {future: bid for bid, future in next_futures_map.items()}
                 new_pending_next_items = []
                 
-                for batch_id, responses in next_response_map.items():
+                for future in as_completed(next_futures_map.values()):
+                    batch_id = future_to_batch_id[future]
+                    responses = future.result()
                     batch = next_batch_id_to_batch_map[batch_id]
-                    new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BASE_URL, failures, False))
+                    new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BASE_URL, failures, False, progress_callback=local_progress_callback))
                     
                 pending_next_items = new_pending_next_items
 
             new_sub_site_ids = []
             for site_id, resp in site_to_resp_map.items():
-                if "body" in resp and "value" in resp["body"]:              # Note its fine to have this progress update here since we are not expected to have a very high count of subsites for each site/subsite.
-                    site_discovery_progress_metrics["siteCount"] += len(resp["body"]["value"])
-                    site_discovery_progress_metrics["teamSiteCount"] += len([site for site in resp["body"]["value"] if not site["isPersonalSite"]])
-                    site_discovery_progress_metrics["personalSiteCount"] += len([site for site in resp["body"]["value"] if site["isPersonalSite"]])
-
-                    self.progress_update_callback(
-                        "site_discovery",
-                        count=site_discovery_progress_metrics.get("siteCount", 0),
-                        personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
-                        teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
-                    )
-                        
+                if "body" in resp and "value" in resp["body"]:
                     for site in resp["body"]["value"]:
                         all_sites.append({"siteId": site["id"], "siteLevel": level})
                         new_sub_site_ids.append(site["id"])
@@ -519,27 +529,15 @@ class FileEstimator(Estimator):
         except Exception as e:
             self._log_and_fail("Error in _get_subsites_in_site", e, failures)
 
-    def _get_subsite_metrics_and_drives(
+    def _get_top_level_sites(
         self,
         tenant_metrics: Dict[str, Any],
-        drives: List[Any],
-        subsite_to_drives: Dict[str, List[Any]],
-        subsite_to_top_level_site: Dict[str, str],
         site_discovery_progress_metrics: Dict[str, Any],
         failures: List[Dict[str, str]]
     ):
-        def _get_filter():
-            if self.config.includePersonalSites and self.config.includeTeamSites:
-                return ""
-            
-            if self.config.includePersonalSites:
-                return "&filter=isPersonalSite eq true"
-            else:
-                return "&filter=isPersonalSite eq false"
-
         try:
             sites = []
-            url = f"{GRAPH_BASE_URL}/sites/delta?$select=id,webUrl,isPersonalSite,parentReference&$top=999{_get_filter()}"
+            url = f"{GRAPH_BASE_URL}/sites?$select=id,webUrl,isPersonalSite,parentReference&$top=999"
             token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
             token = token_data["token"]
             session = self.url_invoker.token_manager.get_session()
@@ -559,17 +557,17 @@ class FileEstimator(Estimator):
                         try:
                             r = session.get(url, headers=headers, timeout=180)
                             if r.status_code != 200:
-                                raise Exception(f"Error in fetching root site : {r.status_code}")
+                                raise Exception(f"Error in fetching site : {r.status_code}")
                             d = r.json()
                             break
                         except Exception as e:
                             attempts += 1
                             if attempts == max_attempts:
-                                self._log_and_fail("Error in fetching root site", e, failures)
+                                self._log_and_fail("Error in fetching site", e, failures)
                                 break
                             elif self.logger is not None:
                                 wait_time = min(10, max(2, self.config.backoff) ** (attempts - 1))
-                                self.logger(f"Error in fetching root site. Attempt count: {attempts} | Retrying in {wait_time} seconds...")
+                                self.logger(f"Error in fetching site. Attempt count: {attempts} | Retrying in {wait_time} seconds...")
                                 time.sleep(wait_time)
 
                     local_all_sites = d.get("value", [])
@@ -600,41 +598,17 @@ class FileEstimator(Estimator):
                     url = d.get("@odata.nextLink")
                 
             except Exception as e:
-                self._log_and_fail("Error in _get_subsite_metrics_and_drives", e, failures)
+                self._log_and_fail("Error in _get_top_level_sites", e, failures)
             finally:
                 self.url_invoker.token_manager.return_token_slot(token_data)
             
             for site in sites:
                 self.id_to_display[site["id"]] = site["webUrl"]
 
-            # Crawl all the subsites and collect them
-            site_id_to_level = self._get_site_id_to_level(sites, subsite_to_top_level_site, failures)
-            all_sites = [{"siteId": siteId, "siteLevel": level} for siteId, level in site_id_to_level.items()]
-            all_site_ids = [site["siteId"] for site in all_sites]
-            
-            for site_detail in all_sites:
-                tenant_metrics["siteMetrics"][site_detail["siteId"]] = {
-                    "siteLevel": site_detail["siteLevel"]
-                }
-            
-            top_level_site_count = len([site for site in all_sites if site["siteLevel"] == 0])
-            tenant_metrics["siteCount"] = top_level_site_count
-            
-            self._append_tenant_level_metrics(all_site_ids, tenant_metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
-
-            self.progress_update_callback(
-                "site_discovery", 
-                status="Done", 
-                count=site_discovery_progress_metrics.get("siteCount", 0), 
-                personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
-                teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
-                driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
-                listCount=site_discovery_progress_metrics.get("listCount", 0), 
-                licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
-            )
-
         except Exception as e:
             self._log_and_fail("Error in _calculate_site_metrics", e, failures)
+        
+        return [site["id"] for site in sites]
 
     def _get_site_id_to_level(
         self, 
