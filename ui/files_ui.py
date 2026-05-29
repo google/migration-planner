@@ -61,13 +61,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     super().__init__()
     self.factory = None
 
+  def setup_variables(self):
+    super().setup_variables()
+    self.include_personal_sites = ctk.BooleanVar(value=True)
+    self.include_team_sites = ctk.BooleanVar(value=False)
+
   # ==========================
   # VIEW: CONFIGURATION
   # ==========================
   def build_config_view(self):
     # """Builds the Configuration View."""
-    self.include_personal_sites = ctk.BooleanVar(value=True)
-    self.include_team_sites = ctk.BooleanVar(value=False)
     
     ui_utils.build_configuration_view(self, ctk)
 
