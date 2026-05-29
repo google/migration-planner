@@ -445,8 +445,10 @@ class FileEstimator(Estimator):
 
             def local_progress_callback(responses: List, has_next=False):
                 site_discovery_progress_metrics["siteCount"] += len(responses)
-                site_discovery_progress_metrics["teamSiteCount"] += len([site for site in responses if not site.get("isPersonalSite", False)])
-                site_discovery_progress_metrics["personalSiteCount"] += len([site for site in responses if site.get("isPersonalSite", False)])
+                if self.config.includeTeamSites:
+                    site_discovery_progress_metrics["teamSiteCount"] += len([site for site in responses if not site.get("isPersonalSite", False)])
+                if self.config.includePersonalSites:
+                    site_discovery_progress_metrics["personalSiteCount"] += len([site for site in responses if site.get("isPersonalSite", False)])
 
                 self.progress_update_callback(
                     "site_discovery",
