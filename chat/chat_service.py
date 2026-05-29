@@ -253,15 +253,6 @@ class ChatScannerService:
         stop_event=self.stop_event,
     )
 
-    auth.authenticate_all(
-        required_scopes=[
-            "User.Read.All",
-            "Reports.Read.All",
-            "Chat.Read.All",
-            "ChannelMessage.Read.All",
-        ]
-    )
-
     # Initialize variables that will be set differently in each mode
     private_channels = 0
     team_memberships = 0

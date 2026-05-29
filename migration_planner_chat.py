@@ -1828,7 +1828,16 @@ class MigrationEstimatorTool(ctk.CTk):
             "Missing Credentials for Delta Scan (CSV missing some columns)."
         )
     # Determine scopes based on what is missing
-    required_scopes = ["User.Read.All"]
+    required_scopes = [
+        "User.Read.All", 
+        "Reports.Read.All", 
+        "Chat.Read.All", 
+        "ChannelMessage.Read.All",
+        "ChannelSettings.Read.All",
+        "TeamMember.Read.All",
+        "Group.Read.All",
+        "TeamsActivity.Read.All",
+    ]
 
     manager.authenticate_all(required_scopes=required_scopes)
 

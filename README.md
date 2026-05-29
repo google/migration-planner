@@ -169,7 +169,10 @@ In your new app, go to **API permissions > Add a permission > Microsoft Graph > 
 *   `Reports.Read.All` (To fetch automated M365 activity reports for heuristics estimation)
 *   `Chat.Read.All` (To scan private chats and chat memberships)
 *   `ChannelMessage.Read.All` (To estimate channel messages across teams)
+*   `ChannelSettings.Read.All` (To list channels)
 *   `TeamsActivity.Read.All` (To read Teams activity analytics)
+*   `TeamMember.Read.All` (To read team memberships)
+*   `Group.Read.All` (To list teams)
 
 4.  Click **Add permissions**.
 5.  **Crucial Step**: Click **"Grant admin consent for [Your Organization]"** and confirm "Yes". All status icons should turn green.
