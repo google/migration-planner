@@ -370,7 +370,8 @@ class FileEstimator(Estimator):
             if top_level_site != siteId:
                 continue
 
-            metrics["siteMetrics"][top_level_site]["resourceCount"] = metrics["siteMetrics"][top_level_site]["folderCount"] + metrics["siteMetrics"][top_level_site]["fileCount"] + metrics["siteMetrics"][top_level_site]["shortcutCount"]
+            if top_level_site in metrics["siteMetrics"]:
+                metrics["siteMetrics"][top_level_site]["resourceCount"] = metrics["siteMetrics"][top_level_site].get("folderCount", 0) + metrics["siteMetrics"][top_level_site].get("fileCount", 0) + metrics["siteMetrics"][top_level_site].get("shortcutCount", 0)
 
         for size_range in self.config.bucket_ranges:
             metrics["tenantLevelFileSizeDistribution"]["buckets"].append({
