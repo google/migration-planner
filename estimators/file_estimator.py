@@ -444,12 +444,15 @@ class FileEstimator(Estimator):
             pending_next_items = []
 
             def local_progress_callback(responses: List, has_next=False):
-                site_discovery_progress_metrics["siteCount"] += len(responses)
                 if self.config.includeTeamSites:
                     site_discovery_progress_metrics["teamSiteCount"] += len([site for site in responses if not site.get("isPersonalSite", False)])
                 if self.config.includePersonalSites:
                     site_discovery_progress_metrics["personalSiteCount"] += len([site for site in responses if site.get("isPersonalSite", False)])
 
+                site_discovery_progress_metrics["siteCount"] = (
+                    site_discovery_progress_metrics.get("personalSiteCount", 0)
+                    + site_discovery_progress_metrics.get("teamSiteCount", 0)
+                )
                 self.progress_update_callback(
                     "site_discovery",
                     count=site_discovery_progress_metrics.get("siteCount", 0),
@@ -576,19 +579,18 @@ class FileEstimator(Estimator):
                     personal_sites = [site for site in local_all_sites if site["isPersonalSite"]]
                     team_sites = [site for site in local_all_sites if not site["isPersonalSite"]]
 
-                    site_discovery_progress_metrics["siteCount"] += len(local_all_sites)
-                    for site in local_all_sites:
-                        self.site_to_metadata[site["id"]] = {
-                            "isPersonalSite": site["isPersonalSite"]
-                        }
-
                     if self.config.includePersonalSites:
                         site_discovery_progress_metrics["personalSiteCount"] += len(personal_sites)
                         tenant_metrics["personalSiteCount"] += len(personal_sites)
                     if self.config.includeTeamSites:
                         site_discovery_progress_metrics["teamSiteCount"] += len(team_sites)
                         tenant_metrics["teamSiteCount"] += len(team_sites)
-                    
+
+                    site_discovery_progress_metrics["siteCount"] = (
+                        site_discovery_progress_metrics.get("personalSiteCount", 0)
+                        + site_discovery_progress_metrics.get("teamSiteCount", 0)
+                    )
+
                     self.progress_update_callback(
                         "site_discovery",
                         count=site_discovery_progress_metrics.get("siteCount", 0),
@@ -596,7 +598,11 @@ class FileEstimator(Estimator):
                         teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
                     )
 
-                    sites.extend(d.get("value", []))
+                    if self.config.includePersonalSites:
+                        sites.extend(personal_sites)
+                    if self.config.includeTeamSites:
+                        sites.extend(team_sites)
+
                     url = d.get("@odata.nextLink")
                 
             except Exception as e:
@@ -605,6 +611,9 @@ class FileEstimator(Estimator):
                 self.url_invoker.token_manager.return_token_slot(token_data)
             
             for site in sites:
+                self.site_to_metadata[site["id"]] = {
+                    "isPersonalSite": site.get("isPersonalSite", False)
+                }
                 self.id_to_display[site["id"]] = site["webUrl"]
 
         except Exception as e:
