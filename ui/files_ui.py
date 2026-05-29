@@ -1083,7 +1083,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         if "siteIdToMail" not in data:
           row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
         else:
-          row = ["Site Collection", "Mail Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
+          row = ["Site Collection", "Email Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
 
         if self.show_eta:
           row.append("Suggested Batch")

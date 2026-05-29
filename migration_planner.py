@@ -52,14 +52,14 @@ class SelectorApp(ctk.CTk):
     selection = self.combobox.get()
     current_dir = os.path.dirname(os.path.abspath(__file__))
     if selection == "Exchange":
-      script_path = os.path.join(current_dir, "migration_planner_exchange.py")
+      module_name = "scripts.exchange_online"
     elif selection == "Chat":
-      script_path = os.path.join(current_dir, "migration_planner_chat.py")
+      module_name = "scripts.chats"
     elif selection == "Files":
-      script_path = os.path.join(current_dir, "scripts/files.py")
+      module_name = "scripts.files"
     else:
       return
-    subprocess.Popen([sys.executable, script_path])
+    subprocess.Popen([sys.executable, "-m", module_name])
     self.destroy()
 
 

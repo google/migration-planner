@@ -21,7 +21,7 @@ import queue
 import threading
 import time
 import types
-from typing import Any
+from typing import Any, Callable
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -66,6 +66,17 @@ class TokenManager:
     self._refresh_lock = threading.Lock()
     self.session = self._create_retry_session()
 
+  def log_msg(self, type: str, message: str, current_logger: Callable[[str], None] = None):
+    if type == "info":
+      logger.info(message)
+    elif type == "error":
+      logger.error(message)
+    elif type == "warning":
+      logger.warning(message)
+
+    if current_logger is not None:
+      current_logger(message)
+
   def close(self) -> None:
     """Securely release session pool resources."""
     self.session.close()
@@ -102,9 +113,9 @@ class TokenManager:
 
     return session
 
-  def authenticate_all(self, required_scopes: list[str] | None = None) -> None:
+  def authenticate_all(self, current_logger: Callable[[str], None] = None, required_scopes: list[str] | None = None) -> None:   # backward compatibility
     """Authenticates all configured applications and validates scopes."""
-    logger.info("Authenticating %d applications...", len(self.apps))
+    self.log_msg("info", f"Authenticating {len(self.apps)} applications...", current_logger)
     url = TOKEN_URL_TEMPLATE.format(self.tenant_id)
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
@@ -150,31 +161,29 @@ class TokenManager:
                   f"{', '.join(missing)}"
               )
           except Exception as error:
-            logger.error("Token verification failed: %s", error)
+            self.log_msg("error", f"Token verification failed: {error}", current_logger)
             raise
 
         self.tokens.append(token_data)
         for _ in range(self.concurrency):
           self.token_queue.put(token_data)
-        logger.info("App %s... authenticated and verified.", client_id[:5])
+        self.log_msg("info", f"App {client_id[:5]}... authenticated and verified.", current_logger)
 
       except requests.exceptions.RequestException as error:
         error_text = ""
         if error.response is not None:
           error_text = f": {error.response.text}"
-        logger.error(
-            "Auth failed for app %s: %s%s", client_id, error, error_text
-        )
+        self.log_msg("error", f"Auth failed for app {client_id[:5]}: {error}{error_text}", current_logger)
         raise ConnectionError(
             f"Authentication failed. Verify credentials. Details: {error_text}"
         ) from error
 
-  def refresh_token_data(self, token_data: dict[str, Any]) -> bool:
+  def refresh_token_data(self, token_data: dict[str, Any], current_logger: Callable[[str], None] = None) -> bool:    # backward compatibility
     """Attempts explicit inline re-acquisition using isolated private secrets."""
     client_id = token_data["client_id"]
     secret = self._client_secrets.get(client_id)
     if not secret:
-      logger.error("Attempted refresh without internal stored secret.")
+      self.log_msg("error", "Attempted refresh without internal stored secret.", current_logger)
       return False
 
     url = TOKEN_URL_TEMPLATE.format(self.tenant_id)
@@ -198,10 +207,10 @@ class TokenManager:
       token_data["expires_at"] = time.time() + int(expires_in) - 900
       return True
     except Exception as error:
-      logger.error("Failed to refresh token: %s", error)
+      self.log_msg("error", f"Failed to refresh token: {error}", current_logger)
       return False
 
-  def get_valid_token_slot(self) -> dict[str, Any]:
+  def get_valid_token_slot(self, current_logger: Callable[[str], None] = None) -> dict[str, Any]:       # backward compatibility
     """Yields ready-to-use token, preventing herd stampedes on concurrent expiry."""
     token_data = self.token_queue.get()
 
@@ -210,15 +219,9 @@ class TokenManager:
       with self._refresh_lock:
         # Re-evaluate inside lock to detect if another thread just refreshed it.
         if time.time() > token_data["expires_at"]:
-          logger.warning(
-              "Token expiring for App %s... triggering serial refresh.",
-              token_data["client_id"][:5],
-          )
+          self.log_msg("warning", f"Token expiring for App {token_data['client_id'][:5]}... triggering serial refresh.", current_logger)
           if self.refresh_token_data(token_data):
-            logger.info(
-                "Successfully refreshed token for App %s...",
-                token_data["client_id"][:5],
-            )
+            self.log_msg("info", f"Successfully refreshed token for App {token_data['client_id'][:5]}...", current_logger)
     return token_data
 
   def return_token_slot(self, token_data: dict[str, Any]) -> None:
