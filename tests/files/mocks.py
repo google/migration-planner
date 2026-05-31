@@ -17,11 +17,18 @@ class MockResponse:
 class MockSession:
     def __init__(self, test_data: Dict[str, Any]):
         self.test_data = test_data
+        self.custom_responses = {} # path -> (status_code, body)
         
     def get(self, url: str, headers: Dict[str, str] = None, **kwargs):
         parsed_url = urllib.parse.urlparse(url)
         path = parsed_url.path
-        
+        if path.startswith("/v1.0"):
+            path = path[5:]
+            
+        if path in self.custom_responses:
+            status, body = self.custom_responses[path]
+            return MockResponse(status, body)
+            
         if "sites/root" in path:
             root_id = self.test_data.get("root_site", "root")
             root_site = self.test_data["sites"].get(root_id, {"id": root_id, "displayName": "Root Site"})
@@ -106,7 +113,14 @@ class MockUrlInvoker:
             
             parsed_url = urllib.parse.urlparse(url)
             path = parsed_url.path
+            if path.startswith("/v1.0"):
+                path = path[5:]
             query_params = urllib.parse.parse_qs(parsed_url.query)
+            
+            if path in self.token_manager.session.custom_responses:
+                status, body = self.token_manager.session.custom_responses[path]
+                responses.append({"id": req_id, "status": status, "body": body})
+                continue
             
             # Simulate network delay
             time.sleep(random.uniform(0.001, 0.003))

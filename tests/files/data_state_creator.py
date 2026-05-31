@@ -376,7 +376,8 @@ def generate_data(
                     "fileCountExceedingDepthLimit": 0,
                     "skippedFolderCount": 0,
                     "fileSizeDistribution": {"buckets": []},
-                    "largeResources": []
+                    "largeResources": [],
+                    "totalSize": 0
                 }
                 
                 for size_range in bucket_ranges:
@@ -392,6 +393,7 @@ def generate_data(
                     drive_metrics["folderCount"] += metrics["folderCount"] - 1
                     drive_metrics["fileCount"] += metrics["fileCount"]
                     drive_metrics["shortcutCount"] += len([sub_item for sub_item in metrics["items"] if "remoteItem" in sub_item])
+                    drive_metrics["totalSize"] += metrics["subTreeSize"]
                     
                     drive_metrics["maxEffectiveDepth"] = max(drive_metrics["maxEffectiveDepth"], metrics["maxDepth"] - 1)
                     drive_metrics["folderCountExceedingDepthLimit"] += metrics["folderCountExceedingDepthLimit"]
@@ -463,8 +465,7 @@ def generate_data(
                     expected["siteMetrics"][root_site_id]["folderCountExceedingDepthLimit"] += drive_metric["folderCountExceedingDepthLimit"]
                     expected["siteMetrics"][root_site_id]["fileCountExceedingDepthLimit"] += drive_metric["fileCountExceedingDepthLimit"]
                     
-                    drive_size = sum(item.get("size", 0) for item in data["items"].values() if item.get("parentReference", {}).get("driveId") == drive_id and "file" in item)
-                    expected["siteMetrics"][root_site_id]["totalSize"] += drive_size
+                    expected["siteMetrics"][root_site_id]["totalSize"] += drive_metric["totalSize"]
                     
         for root_site_id, s_metrics in expected["siteMetrics"].items():
             s_metrics["resourceCount"] = s_metrics["folderCount"] + s_metrics["fileCount"] + s_metrics["shortcutCount"]

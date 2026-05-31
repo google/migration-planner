@@ -227,8 +227,11 @@ class TestFileEstimatorLoad(unittest.TestCase):
                 "count": 0
             })
             
+        is_simulate_failures = os.environ.get("SIMULATE_FAILURES", "False").lower() == "true"
+        expected_key = "expected_result_with_failures" if is_simulate_failures else "expected_result"
+        
         for drive_id in scanned_drives:
-            d_expected = self.test_data.get("expected_result", {}).get("driveMetrics", {}).get(drive_id)
+            d_expected = self.test_data.get(expected_key, {}).get("driveMetrics", {}).get(drive_id)
             if d_expected:
                 expected["folderCount"] += d_expected.get("folderCount", 0)
                 expected["fileCount"] += d_expected.get("fileCount", 0)
@@ -328,6 +331,108 @@ class TestFileEstimatorLoad(unittest.TestCase):
         self.assertEqual(set(result.keys()), set(email_ids))
         for email in email_ids:
             self.assertIn(result[email], self.test_data.get("sites", {}).keys())
+
+    @unittest.skipUnless(os.environ.get("SIMULATE_FAILURES", "False").lower() == "true", "Failure Simulation Enabled!")
+    def test_graph_api_500_error_handling(self):
+        print("Starting Graph API 500 error handling test...")
+        # Get list of site IDs in test data
+        site_ids = list(self.test_data["sites"].keys())
+        self.assertTrue(len(site_ids) >= 4, "Test requires at least 4 sites in mock data")
+        
+        site_1 = site_ids[0] # root site
+        site_2 = site_ids[1] # subsite
+        site_3 = site_ids[2]
+        site_4 = site_ids[3]
+        
+        # Determine a drive ID for site 4 to fail its delta crawl
+        drive_id = self.test_data["sites"][site_4]["drives"][0]
+        
+        lists_path = f"/sites/{site_1}/lists"
+        subsite_path = f"/sites/{site_2}/sites"
+        drives_path = f"/sites/{site_3}/drives"
+        delta_path = f"/drives/{drive_id}/root/delta"
+        
+        # Set up mock to return a 500 Internal Server Error status for all these paths
+        session_custom_responses = self.mock_url_invoker.token_manager.session.custom_responses
+        session_custom_responses[subsite_path] = (
+            500,
+            {"error": {"message": "Subsites Fetch Failure Simulation"}}
+        )
+        session_custom_responses[lists_path] = (
+            500,
+            {"error": {"message": "Lists Fetch Failure Simulation"}}
+        )
+        session_custom_responses[drives_path] = (
+            500,
+            {"error": {"message": "Drives Fetch Failure Simulation"}}
+        )
+        session_custom_responses[delta_path] = (
+            500,
+            {"error": {"message": "Delta Fetch Failure Simulation"}}
+        )
+        
+        failures = []
+        try:
+            # Run estimator
+            result = self.estimator.calculate_resource_metrics({}, failures)
+            
+            # Assert that the failures were recorded
+            self.assertTrue(len(failures) >= 4, f"Expected at least 4 failures to be recorded, got: {failures}")
+            
+            # 1. Check Subsite Fetch Failure
+            subsite_fail = next((f for f in failures), None)
+            self.assertIsNotNone(subsite_fail, f"Expected subsite fail in: {failures}")
+            self.assertEqual(subsite_fail.get("statusCode"), 500)
+            self.assertEqual(subsite_fail.get("type").name, "FAILURE_STATUS_CODE_ERROR")
+            
+            # 2. Check Lists Fetch Failure
+            lists_fail = next((f for f in failures), None)
+            self.assertIsNotNone(lists_fail, f"Expected lists fail in: {failures}")
+            self.assertEqual(lists_fail.get("statusCode"), 500)
+            self.assertEqual(lists_fail.get("type").name, "FAILURE_STATUS_CODE_ERROR")
+            
+            # 3. Check Drives Fetch Failure
+            drives_fail = next((f for f in failures), None)
+            self.assertIsNotNone(drives_fail, f"Expected drives fail in: {failures}")
+            self.assertEqual(drives_fail.get("statusCode"), 500)
+            self.assertEqual(drives_fail.get("type").name, "FAILURE_STATUS_CODE_ERROR")
+            
+            # 4. Check Delta Fetch Failure
+            delta_fail = next((f for f in failures), None)
+            self.assertIsNotNone(delta_fail, f"Expected delta fail in: {failures}")
+            self.assertEqual(delta_fail.get("statusCode"), 500)
+            self.assertEqual(delta_fail.get("type").name, "FAILURE_STATUS_CODE_ERROR")
+            
+        finally:
+            # Clean up the custom responses
+            for path in [subsite_path, lists_path, drives_path, delta_path]:
+                if path in session_custom_responses:
+                    del session_custom_responses[path]
+
+    @unittest.skipUnless(os.environ.get("SIMULATE_FAILURES", "False").lower() == "true", "Failure Simulation Enabled!")
+    def test_graph_api_500_error_on_top_level_sites(self):
+        print("Starting Graph API 500 error on top-level sites fetch test...")
+        # Since the complete scan queries "/sites", we configure a 500 response for it
+        sites_path = "/sites"
+        session_custom_responses = self.mock_url_invoker.token_manager.session.custom_responses
+        session_custom_responses[sites_path] = (
+            500,
+            {"error": {"message": "Top-level Sites Fetch Failure Simulation"}}
+        )
+        
+        failures = []
+        try:
+            result = self.estimator.calculate_resource_metrics({}, failures)
+            
+            # Check that the main error block caught it
+            self.assertTrue(len(failures) > 0, "Expected failure to be recorded")
+            top_failure = next((f for f in failures if "Error in fetching site" in f.get("message", "")), None)
+            self.assertIsNotNone(top_failure)
+            self.assertEqual(top_failure.get("statusCode"), 500)
+            
+        finally:
+            if sites_path in session_custom_responses:
+                del session_custom_responses[sites_path]
 
 if __name__ == "__main__":
     unittest.main()
