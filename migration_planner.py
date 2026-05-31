@@ -1,5 +1,5 @@
 # Copyright 2026 Google LLC
-"""Selector app to choose between Exchange and Chat migration planners."""
+"""Selector app to choose between Exchange, Chat, and Telemetry migration planners."""
 
 import os
 import subprocess
@@ -31,7 +31,7 @@ class SelectorApp(ctk.CTk):
         text_color=COLOR_TEXT_MAIN,
     ).pack(pady=(30, 20))
 
-    self.options = ["Exchange", "Chat"]
+    self.options = ["Exchange", "Chat", "Telemetry"]
     self.combobox = ctk.CTkComboBox(
         self,
         values=self.options,
@@ -63,10 +63,15 @@ class SelectorApp(ctk.CTk):
       script_path = os.path.join(current_dir, "migration_planner_exchange.py")
     elif selection == "Chat":
       script_path = os.path.join(current_dir, "migration_planner_chat.py")
+    elif selection == "Telemetry":
+      script_path = os.path.join(current_dir, "migration_planner_telemetry.py")
     else:
       return
     subprocess.Popen([sys.executable, script_path])
-    self.destroy()
+
+    # FIX: Force an immediate OS-level exit to prevent CustomTkinter 
+    # from throwing 'after script' errors during its garbage collection phase.
+    os._exit(0)
 
 
 if __name__ == "__main__":
