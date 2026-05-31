@@ -103,7 +103,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 4.  **Install Dependencies**:
     ```bash
-    pip3 install customtkinter requests pandas psutil Pillow urllib3 aiohttp certifi
+    pip3 install customtkinter requests pandas psutil Pillow urllib3 aiohttp certifi matplotlib
     ```
 
 #### Linux (Ubuntu/Debian)
@@ -173,6 +173,10 @@ In your new app, go to **API permissions > Add a permission > Microsoft Graph > 
 *   `TeamsActivity.Read.All` (To read Teams activity analytics)
 *   `TeamMember.Read.All` (To read team memberships)
 *   `Group.Read.All` (To list teams)
+
+#### Telemetry Permissions
+*   `Reports.Read.All` (To download M365 active usage and app usage reports)
+*   `Organization.Read.All` and `Directory.Read.All` (To read tenant license allocations and SKUs)
 
 4.  Click **Add permissions**.
 5.  **Crucial Step**: Click **"Grant admin consent for [Your Organization]"** and confirm "Yes". All status icons should turn green.
