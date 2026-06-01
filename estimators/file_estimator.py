@@ -135,25 +135,40 @@ class FileEstimator(Estimator):
 
                 self._configure_executor_from_license_counts(metrics["licenseMetrics"])
 
-                if "emailIds" not in data or len(data["emailIds"]) == 0:
+                has_emails = "emailIds" in data and len(data["emailIds"]) > 0
+                has_urls = "siteUrls" in data and len(data["siteUrls"]) > 0
+
+                if not has_emails and not has_urls:
                     top_level_sites = self._get_top_level_sites(metrics, site_discovery_progress_metrics, failures)
-                else:
-                    mail_to_top_level_site = self._get_sites_for_users(data["emailIds"], site_discovery_progress_metrics)
                     subsite_to_top_level_site = {}
-                    top_level_sites = list(set(mail_to_top_level_site.values()))
+                else:
+                    top_level_sites = []
+                    subsite_to_top_level_site = {}
                     
-                    for site_id in top_level_sites:
-                        self.site_to_metadata[site_id] = {"isPersonalSite": True}
-                        metrics["personalSiteCount"] += 1
-                    
-                    site_id_to_mail = {site_id: mail for mail, site_id in mail_to_top_level_site.items()}
-                    metrics["siteIdToMail"] = site_id_to_mail
+                    if has_emails:
+                        mail_to_top_level_site = self._get_sites_for_users(data["emailIds"], site_discovery_progress_metrics)
+                        for mail, site_id in mail_to_top_level_site.items():
+                            top_level_sites.append(site_id)
+                            self.site_to_metadata[site_id] = {"isPersonalSite": True}
+                            metrics["personalSiteCount"] += 1
+                        
+                        site_id_to_mail = {site_id: mail for mail, site_id in mail_to_top_level_site.items()}
+                        metrics["siteIdToMail"] = site_id_to_mail
+
+                    if has_urls:
+                        url_to_site_id = self._get_sites_from_urls(data["siteUrls"], site_discovery_progress_metrics, failures)
+                        for url, site_id in url_to_site_id.items():
+                            top_level_sites.append(site_id)
+                        
+                        site_id_to_url = {site_id: url for url, site_id in url_to_site_id.items()}
+                        
+                    top_level_sites = list(set(top_level_sites))
                     
                 metrics["siteCount"] = len(top_level_sites)
                 all_sites = [{"siteId": site_id, "siteLevel": 0} for site_id in top_level_sites]
                 self._get_subsites_in_site(top_level_sites, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, 1)
                 
-                if "emailIds" not in data or len(data["emailIds"]) == 0:
+                if not has_emails and not has_urls:
                     metrics["personalSiteCount"] = site_discovery_progress_metrics.get("personalSiteCount", 0)
                     metrics["teamSiteCount"] = site_discovery_progress_metrics.get("teamSiteCount", 0)
 
@@ -1486,3 +1501,82 @@ class FileEstimator(Estimator):
             self.url_invoker.token_manager.return_token_slot(token_data)
             
         return mail_to_top_level_site
+
+    def _get_sites_from_urls(self, site_urls: List[str], site_discovery_progress_metrics: Dict[str, Any], failures: List[Dict[str, str]]) -> Dict[str, str]:
+        from concurrent.futures import as_completed
+        import urllib.parse
+        
+        url_to_site_id = {}
+        token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
+        token = token_data["token"]
+        session = self.url_invoker.token_manager.get_session()
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        def fetch_site_id(site_url):
+            try:
+                parsed = urllib.parse.urlparse(site_url)
+                hostname = parsed.netloc
+                path = parsed.path
+                if path.endswith("/"):
+                    path = path[:-1]
+                
+                url = f"{GRAPH_BASE_URL}/sites/{hostname}:{path}?$select=id,isPersonalSite"
+                
+                attempts = 0
+                max_attempts = self.config.retries + 1
+                while attempts < max_attempts and not self.is_hard_stop_requested():
+                    try:
+                        r = session.get(url, headers=headers, timeout=60)
+                        if r.status_code == 200:
+                            return site_url, r.json()
+                        elif r.status_code == 404:
+                            return site_url, None
+                        else:
+                            raise Exception(f"Graph API returned status {r.status_code}")
+                    except Exception as e:
+                        attempts += 1
+                        if attempts == max_attempts:
+                            break
+                        wait_time = min(10, max(2, self.config.backoff) ** (attempts - 1))
+                        time.sleep(wait_time)
+            except Exception as e:
+                pass
+            return site_url, None
+
+        try:
+            future_to_url = {self.executor.submit(fetch_site_id, u): u for u in site_urls}
+            
+            for future in as_completed(future_to_url):
+                site_url = future_to_url[future]
+                url, response_data = future.result()
+                
+                if response_data and "id" in response_data:
+                    site_id = response_data["id"]
+                    is_personal = response_data.get("isPersonalSite", False)
+                    url_to_site_id[url] = site_id
+                    
+                    self.site_to_metadata[site_id] = {"isPersonalSite": is_personal}
+                    if is_personal:
+                        site_discovery_progress_metrics["personalSiteCount"] += 1
+                    else:
+                        site_discovery_progress_metrics["teamSiteCount"] += 1
+                    site_discovery_progress_metrics["siteCount"] += 1
+                    
+                    self.id_to_display[site_id] = site_url
+                else:
+                    failures.append({
+                        "siteUrl": site_url,
+                        "type": FailureType.NOT_FOUND.name,
+                        "message": "Site collection not found."
+                    })
+                    
+                self.progress_update_callback(
+                    "site_discovery",
+                    count=site_discovery_progress_metrics["siteCount"],
+                    personalSiteCount=site_discovery_progress_metrics["personalSiteCount"],
+                    teamSiteCount=site_discovery_progress_metrics["teamSiteCount"]
+                )
+        finally:
+            self.url_invoker.token_manager.return_token_slot(token_data)
+            
+        return url_to_site_id

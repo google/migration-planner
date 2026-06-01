@@ -155,7 +155,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-        # state="disabled"
     ).pack(side="left", padx=10)
     
     # Concurrency settings
@@ -348,11 +347,27 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     df_input = pd.read_csv(config.csv_path)
     df_input.columns = df_input.columns.str.strip()
     
-    id_col = next((c for c in df_input.columns if c.lower() in ["email id"]), None)
-    if not id_col:
-      raise Exception("CSV must contain a column for Email Id.")
-      
-    return {"emailIds": [email.strip() for email in df_input[id_col].tolist()]}
+    include_personal = self.include_personal_sites.get()
+    include_team = self.include_team_sites.get()
+    
+    email_ids = []
+    site_urls = []
+    
+    if "Type" in df_input.columns:
+      for _, row in df_input.iterrows():
+        entity = str(row["Entity"]).strip()
+        row_type = str(row["Type"]).strip().lower()
+        if row_type == "onedrive":
+          email_ids.append(entity)
+        elif row_type == "sharepoint":
+          site_urls.append(entity)
+    else:
+      if include_personal:
+        email_ids = [str(e).strip() for e in df_input["Entity"].tolist()]
+      elif include_team:
+        site_urls = [str(e).strip() for e in df_input["Entity"].tolist()]
+        
+    return {"emailIds": email_ids, "siteUrls": site_urls}
 
   def _get_display_name(
     self,
@@ -979,6 +994,93 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       ).pack(padx=20, pady=20)
       self.view_results.pack(fill="both", expand=True)
 
+  def _validate_csv(self):
+    csv_path = self.user_csv_path.get()
+    if not csv_path or not os.path.exists(csv_path):
+      messagebox.showerror("Validation Error", "CSV path invalid or file not found.")
+      raise ValueError("CSV path invalid or file not found.")
+
+    try:
+      df = pd.read_csv(csv_path)
+    except Exception as e:
+      messagebox.showerror("Validation Error", f"Failed to read CSV file: {e}")
+      raise ValueError(f"Failed to read CSV file: {e}")
+
+    df.columns = df.columns.str.strip()
+
+    # 1. No empty rows
+    if df.empty:
+      messagebox.showerror("Validation Error", "CSV file is empty.")
+      raise ValueError("CSV file is empty.")
+
+    # 2. No empty/null fields/cells present in any row
+    if df.isnull().any().any():
+      messagebox.showerror("Validation Error", "CSV contains empty or null values.")
+      raise ValueError("CSV contains empty or null values.")
+
+    for col in df.columns:
+      if (df[col].astype(str).str.strip() == "").any():
+        messagebox.showerror("Validation Error", f"CSV contains empty values in column '{col}'.")
+        raise ValueError(f"CSV contains empty values in column '{col}'.")
+
+    # 3. Check columns and types
+    include_personal = self.include_personal_sites.get()
+    include_team = self.include_team_sites.get()
+
+    import re
+    def is_valid_email(val):
+      return bool(re.match(r'^[^@]+@[^@]+\.[^@]+$', val))
+
+    def is_valid_url(val):
+      return val.startswith("http://") or val.startswith("https://")
+
+    if include_personal and include_team:
+      # Must have both Entity and Type
+      expected_cols = {"Entity", "Type"}
+      if set(df.columns) != expected_cols:
+        messagebox.showerror("Validation Error", "CSV must contain exactly 'Entity' and 'Type' columns when both Personal and SharePoint sites are selected.")
+        raise ValueError("CSV must contain exactly 'Entity' and 'Type' columns.")
+
+      for idx, row in df.iterrows():
+        entity = str(row["Entity"]).strip()
+        row_type = str(row["Type"]).strip().lower()
+        if row_type == "onedrive":
+          if not is_valid_email(entity):
+            messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid UPN/Email ID for OneDrive.")
+            raise ValueError(f"Invalid Email ID at row {idx+2}")
+        elif row_type == "sharepoint":
+          if not is_valid_url(entity):
+            messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid Site Collection URL for SharePoint.")
+            raise ValueError(f"Invalid URL at row {idx+2}")
+        else:
+          messagebox.showerror("Validation Error", f"Row {idx+2}: Type '{row['Type']}' is invalid. Allowed values are 'OneDrive' or 'SharePoint'.")
+          raise ValueError(f"Invalid Type at row {idx+2}")
+
+    elif include_personal:
+      # Must have exactly Entity
+      expected_cols = {"Entity"}
+      if set(df.columns) != expected_cols:
+        messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column.")
+        raise ValueError("CSV must contain exactly the 'Entity' column.")
+
+      for idx, row in df.iterrows():
+        entity = str(row["Entity"]).strip()
+        if not is_valid_email(entity):
+          messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid UPN/Email ID.")
+          raise ValueError(f"Invalid Email ID at row {idx+2}")
+
+    elif include_team:
+      # Must have exactly Entity
+      expected_cols = {"Entity"}
+      if set(df.columns) != expected_cols:
+        messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column.")
+        raise ValueError("CSV must contain exactly the 'Entity' column.")
+
+      for idx, row in df.iterrows():
+        entity = str(row["Entity"]).strip()
+        if not is_valid_url(entity):
+          messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid Site Collection URL.")
+          raise ValueError(f"Invalid URL at row {idx+2}")
 
   def export_current_report(self):
     if not hasattr(self, "last_scan_data"):
@@ -1171,10 +1273,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       messagebox.showerror("Validation Error", "At least one site type (Personal (OneDrive) or SharePoint) must be selected!")
       return
       
-    if self.user_source.get() == "csv" and self.include_team_sites.get():
-      messagebox.showerror("Validation Error", "CSV Upload only supports Personal Sites (OneDrive) scanning. Please uncheck SharePoint Sites.")
-      raise ValueError("CSV Upload only supports Personal Sites (OneDrive) scanning.")
-      
+    if self.user_source.get() == "csv":
+      self._validate_csv()
     # Save values to regular variables to avoid thread-safety issues in Tkinter
     self.val_include_personal_sites = self.include_personal_sites.get()
     self.val_include_team_sites = self.include_team_sites.get()
