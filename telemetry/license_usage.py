@@ -17,6 +17,10 @@ import customtkinter as ctk
 from telemetry import active_users_usage as usage
 from telemetry.sharepoint_onedrive_usage import SharePointOneDriveUsageFrame
 
+# Import unified core service layer
+from core.graph.client import GraphClient
+from core.graph.directory import DirectoryService
+
 # Safely import matplotlib to embed plots in Tkinter
 try:
     import matplotlib.pyplot as plt
@@ -310,67 +314,26 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             
             self.log_msg(f"Authenticating app {client_id[:5]}...")
             
-            session = requests.Session()
-            retries = Retry(
-                total=self.retries.get(),
-                backoff_factor=self.backoff.get(),
-                status_forcelist=[500, 502, 503, 504],
-                allowed_methods=["GET", "POST"],
+            client = GraphClient(
+                tenant_id=tenant,
+                client_ids=client_id,
+                client_secrets=client_secret,
+                concurrency=1,
+                retries=self.retries.get(),
+                backoff=self.backoff.get()
             )
-            adapter = HTTPAdapter(max_retries=retries)
-            session.mount("https://", adapter)
             
-            token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-            token_data = {
-                "grant_type": "client_credentials",
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "scope": "https://graph.microsoft.com/.default"
-            }
-            
-            resp = session.post(token_url, data=token_data, timeout=30)
-            resp.raise_for_status()
-            access_token = resp.json().get("access_token")
-            
-            # Verify permissions logic
+            # Re-use the GraphClient parallel scope verification inside core service client
             required_scopes = ["Organization.Read.All", "Directory.Read.All"]
-            payload_part = access_token.split(".")[1]
-            payload_part += "=" * (-len(payload_part) % 4)
-            decoded_bytes = base64.urlsafe_b64decode(payload_part)
-            payload = json.loads(decoded_bytes)
-
-            granted_roles = set(payload.get("roles", []))
-            missing = [s for s in required_scopes if s not in granted_roles]
-            if missing:
-                raise Exception(
-                    f"Missing Required Permissions for App {client_id[:5]}...: "
-                    f"{', '.join(missing)}\n"
-                    f"Current Assigned Roles: {', '.join(granted_roles)}\n"
-                    "Please grant these Application permissions in Azure Portal."
-                )
-                
-            self.log_msg("Querying Graph API endpoint for SKUs...")
-            headers = {
-                "Authorization": f"Bearer {access_token}", 
-                "ConsistencyLevel": "eventual"
-            }
-            response = session.get(f"{GRAPH_BASE_URL}/subscribedSkus", headers=headers, timeout=30)
+            client.authenticate(required_scopes=required_scopes)
             
-            if response.status_code == 200:
-                sku_data = response.json()
-                async_logger.info("Successfully fetched SKU data.")
-                self.after(0, self._render_skus_success, sku_data)
-            else:
-                err_string = f"API Fetch Error [{response.status_code}]: {response.text}"
-                async_logger.error(err_string)
-                self.after(0, self._render_skus_error, err_string)
-
-        except requests.exceptions.RequestException as e:
-            err_msg = f"Network/Auth Error: {e}"
-            if e.response is not None:
-                err_msg += f" - {e.response.text}"
-            async_logger.error(err_msg, exc_info=True)
-            self.after(0, self._render_skus_error, err_msg)
+            self.log_msg("Querying Graph API endpoint for SKUs...")
+            dir_service = DirectoryService(client)
+            sku_data = dir_service.get_subscribed_skus()
+            client.close()
+            
+            async_logger.info("Successfully fetched SKU data.")
+            self.after(0, self._render_skus_success, sku_data)
         except Exception as e:
             async_logger.error("Exception caught in _execute_sku_worker.", exc_info=True)
             self.after(0, self._render_skus_error, str(e))

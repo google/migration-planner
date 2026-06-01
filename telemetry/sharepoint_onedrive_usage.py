@@ -20,8 +20,9 @@ import logging
 import threading
 import customtkinter as ctk
 
-# Import pre-existing, resilient network and batch helpers directly from the core package
-from telemetry import active_users_usage as usage
+# Import unified core service layer
+from core.graph.client import GraphClient
+from core.graph.reports import ReportsService
 
 # Bind to the async logger initialized in license_usage.py
 usage_logger = logging.getLogger("LicenseUsageAsyncLogger")
@@ -134,19 +135,26 @@ def run_sharepoint_onedrive_pipeline(client_id, client_secret, tenant_id):
     """Pipeline specifically for SharePoint and OneDrive telemetry data collection."""
     usage_logger.info("Starting SharePoint & OneDrive Telemetry Pipeline...")
     
-    # Re-use core Entra ID token retriever
-    access_token = usage.get_access_token(client_id, client_secret, tenant_id)
+    client = GraphClient(
+        tenant_id=tenant_id,
+        client_ids=client_id,
+        client_secrets=client_secret,
+        concurrency=2,
+        retries=5,
+        backoff=2
+    )
+    service = ReportsService(client)
     
     reports = [
         ("https://graph.microsoft.com/v1.0/reports/getSharePointSiteUsageDetail(period='D180')", "SharePointSiteUsageDetail(180d).csv"),
         ("https://graph.microsoft.com/v1.0/reports/getOneDriveUsageAccountDetail(period='D180')", "OneDriveUsageAccountDetail(180d).csv")
     ]
     
-    # Re-use parallel batch stream downloader
-    usage._download_reports_batch(access_token, reports)
-    
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports")
+    
+    service.download_reports_batch(reports, reports_dir)
+    client.close()
     
     sp_data = parse_sharepoint_csv(os.path.join(reports_dir, "SharePointSiteUsageDetail(180d).csv"))
     od_data = parse_onedrive_csv(os.path.join(reports_dir, "OneDriveUsageAccountDetail(180d).csv"))
