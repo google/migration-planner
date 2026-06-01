@@ -13,6 +13,7 @@ from util.enums import FailureType
 import json
 import pandas as pd
 import math
+import re
 
 def format_range(low, high):
   def format_boundary(kb_val):
@@ -65,6 +66,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     super().setup_variables()
     self.include_personal_sites = ctk.BooleanVar(value=True)
     self.include_team_sites = ctk.BooleanVar(value=False)
+
+  def _is_valid_email(self, val):
+    return bool(re.match(r'^[^@]+@[^@]+\.[^@]+$', val))
+
+  def _is_valid_url(self, val):
+    return val.startswith("http://") or val.startswith("https://")
 
   # ==========================
   # VIEW: CONFIGURATION
@@ -352,20 +359,23 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     
     email_ids = []
     site_urls = []
+
+    def _get_entity_type(val):
+      val = str(val).strip().lower()
+      if self._is_valid_email(val):
+        return "onedrive"
+      elif self._is_valid_url(val):
+        return "sharepoint"
+      else:
+        raise ValueError(f"Invalid entity type: {val}")
     
-    if "Type" in df_input.columns:
-      for _, row in df_input.iterrows():
-        entity = str(row["Entity"]).strip()
-        row_type = str(row["Type"]).strip().lower()
-        if row_type == "onedrive":
-          email_ids.append(entity)
-        elif row_type == "sharepoint":
-          site_urls.append(entity)
-    else:
-      if include_personal:
-        email_ids = [str(e).strip() for e in df_input["Entity"].tolist()]
-      elif include_team:
-        site_urls = [str(e).strip() for e in df_input["Entity"].tolist()]
+    for _, row in df_input.iterrows():
+      entity = str(row["Entity"]).strip()
+      row_type = _get_entity_type(entity)
+      if row_type == "onedrive":
+        email_ids.append(entity)
+      elif row_type == "sharepoint":
+        site_urls.append(entity)
         
     return {"emailIds": email_ids, "siteUrls": site_urls}
 
@@ -1027,60 +1037,24 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     include_personal = self.include_personal_sites.get()
     include_team = self.include_team_sites.get()
 
-    import re
-    def is_valid_email(val):
-      return bool(re.match(r'^[^@]+@[^@]+\.[^@]+$', val))
+    expected_cols = {"Entity"}
+    if set(df.columns) != expected_cols:
+      messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column.")
+      raise ValueError("CSV must contain exactly the 'Entity' column.")
 
-    def is_valid_url(val):
-      return val.startswith("http://") or val.startswith("https://")
-
-    if include_personal and include_team:
-      # Must have both Entity and Type
-      expected_cols = {"Entity", "Type"}
-      if set(df.columns) != expected_cols:
-        messagebox.showerror("Validation Error", "CSV must contain exactly 'Entity' and 'Type' columns when both Personal and SharePoint sites are selected.")
-        raise ValueError("CSV must contain exactly 'Entity' and 'Type' columns.")
-
-      for idx, row in df.iterrows():
-        entity = str(row["Entity"]).strip()
-        row_type = str(row["Type"]).strip().lower()
-        if row_type == "onedrive":
-          if not is_valid_email(entity):
-            messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid UPN/Email ID for OneDrive.")
-            raise ValueError(f"Invalid Email ID at row {idx+2}")
-        elif row_type == "sharepoint":
-          if not is_valid_url(entity):
-            messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid Site Collection URL for SharePoint.")
-            raise ValueError(f"Invalid URL at row {idx+2}")
-        else:
-          messagebox.showerror("Validation Error", f"Row {idx+2}: Type '{row['Type']}' is invalid. Allowed values are 'OneDrive' or 'SharePoint'.")
-          raise ValueError(f"Invalid Type at row {idx+2}")
-
-    elif include_personal:
-      # Must have exactly Entity
-      expected_cols = {"Entity"}
-      if set(df.columns) != expected_cols:
-        messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column.")
-        raise ValueError("CSV must contain exactly the 'Entity' column.")
-
-      for idx, row in df.iterrows():
-        entity = str(row["Entity"]).strip()
-        if not is_valid_email(entity):
-          messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid UPN/Email ID.")
-          raise ValueError(f"Invalid Email ID at row {idx+2}")
-
-    elif include_team:
-      # Must have exactly Entity
-      expected_cols = {"Entity"}
-      if set(df.columns) != expected_cols:
-        messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column.")
-        raise ValueError("CSV must contain exactly the 'Entity' column.")
-
-      for idx, row in df.iterrows():
-        entity = str(row["Entity"]).strip()
-        if not is_valid_url(entity):
-          messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid Site Collection URL.")
-          raise ValueError(f"Invalid URL at row {idx+2}")
+    for idx, row in df.iterrows():
+      entity = str(row["Entity"]).strip()
+      if not self._is_valid_email(entity) and not self._is_valid_url(entity):
+        messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid UPN/Email ID or Site Collection URL.")
+        raise ValueError(f"Invalid Email ID / Site Collection Url at row {idx+2}")
+      
+      if self._is_valid_email(entity) and not include_personal:
+        messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is a UPN/Email ID. Please enable Include Personal Sites in the config.")
+        raise ValueError(f"Unexpected Email ID at row {idx+2}")
+      
+      if self._is_valid_url(entity) and not include_team:
+        messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is a Site Collection URL. Please enable Include Sharepoint Sites in the config.")
+        raise ValueError(f"Unexpected Site Collection URL at row {idx+2}")
 
   def export_current_report(self):
     if not hasattr(self, "last_scan_data"):
@@ -1275,6 +1249,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
     if self.user_source.get() == "csv":
       self._validate_csv()
+
     # Save values to regular variables to avoid thread-safety issues in Tkinter
     self.val_include_personal_sites = self.include_personal_sites.get()
     self.val_include_team_sites = self.include_team_sites.get()
