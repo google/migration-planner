@@ -27,27 +27,9 @@ from telemetry import active_users_usage as usage
 usage_logger = logging.getLogger("LicenseUsageAsyncLogger")
 
 # =================================================================================
-# CONSTANTS & STYLES (Material 3 parity with license_usage.py)
+# CONSTANTS & STYLES (Imported from shared styles)
 # =================================================================================
-COLOR_PRIMARY = "#0B57D0"
-COLOR_SURFACE = "#FFFFFF"
-COLOR_TEXT_MAIN = "#1F1F1F"
-COLOR_TEXT_SUB = "#444746"
-COLOR_OUTLINE = "#747775"
-COLOR_OUTLINE_LIGHT = "#E0E2E0"
-COLOR_TONAL_BG = "#D3E3FD"
-COLOR_TONAL_TEXT = "#041E49"
-COLOR_SUCCESS = "#188038"
-COLOR_ERROR = "#B3261E"
-COLOR_PRIMARY_HOVER = "#0842a0"
-COLOR_SECONDARY_HOVER = "#F1F3F4"
-COLOR_SURFACE_HOVER = "#EFF6FF"
-COLOR_SURFACE_VARIANT = "#F8F9FA"
-
-FONT_HEADER_SMALL = ("Roboto", 18, "bold")
-FONT_BODY_BOLD = ("Roboto", 14, "bold")
-FONT_BODY_MEDIUM = ("Roboto", 12)
-FONT_BODY_SMALL = ("Roboto", 11)
+from telemetry.styles import *
 
 # =================================================================================
 # PIPELINE UTILITIES
