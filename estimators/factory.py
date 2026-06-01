@@ -1,3 +1,4 @@
+from core.graph.client import GraphClient
 from estimators.chat_estimator import ChatEstimator
 from estimators.eo_group_mailbox_estimator import EOGroupMailBoxEstimator
 from estimators.eo_in_place_archive_estimator import EOInPlaceArchiveEstimator
@@ -14,11 +15,13 @@ class EstimatorFactory:
   def __init__(
     self,
     config: ScanConfig,
+    client: GraphClient = None,
     manager: TokenManager = None,
     logger = None,
     stop_event = None,
     id_to_display_name = None
   ):
+    self.client = client
     self.manager = manager
     self.config = config
     self.logger = logger
@@ -37,16 +40,20 @@ class EstimatorFactory:
 
   def get_manager(self):
     if not self.manager:
-      if self.isEmpty(self.config.client_ids) or self.isEmpty(self.config.client_secrets) or self.isEmpty(self.config.tenant_id):
-        raise Exception("Missing credentials for tenant scan!!")
-      self.manager = TokenManager(
-        self.config.tenant_id,
-        self.config.client_ids,
-        self.config.client_secrets,
-        self.config.concurrency,
-        self.config.retries,
-        self.config.backoff,
-      )
+      if self.client:
+        self.manager = self.client.token_manager
+      else:
+        if self.isEmpty(self.config.client_ids) or self.isEmpty(self.config.client_secrets) or self.isEmpty(self.config.tenant_id):
+          raise Exception("Missing credentials for tenant scan!!")
+        self.client = GraphClient(
+            self.config.tenant_id,
+            self.config.client_ids,
+            self.config.client_secrets,
+            self.config.concurrency,
+            self.config.retries,
+            self.config.backoff
+        )
+        self.manager = self.client.token_manager
     
     return self.manager
 
@@ -57,9 +64,13 @@ class EstimatorFactory:
 
   def get_url_invoker(self, hard_reset=False):
     if self.url_invoker is None or hard_reset:
-      self.url_invoker = UrlInvoker(
-          self.manager, self.config.retries, self.config.backoff, 1, 0.5
-      )
+      if self.client:
+        self.url_invoker = self.client.url_invoker
+      else:
+        manager = self.get_manager()
+        self.url_invoker = UrlInvoker(
+            manager, self.config.retries, self.config.backoff, 1, 0.5
+        )
 
     return self.url_invoker
 
