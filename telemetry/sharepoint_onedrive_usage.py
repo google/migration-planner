@@ -131,6 +131,30 @@ def parse_onedrive_csv(filepath):
         "active_files_pct": (active_files / total_files * 100) if total_files > 0 else 0.0
     }
 
+def parse_onedrive_activity_csv(filepath):
+    """Streams the OneDrive Activity User Detail CSV and aggregates active sync client users."""
+    usage_logger.info(f"Processing OneDrive Activity User Detail file: {os.path.basename(filepath)}")
+    if not os.path.exists(filepath):
+        usage_logger.error(f"Error: Could not find OneDrive Activity report {filepath}")
+        raise FileNotFoundError(f"OneDrive Activity User Detail report not found.")
+
+    sync_users = 0
+
+    with open(filepath, mode="r", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row.get("Is Deleted", "").strip().upper() != "TRUE":
+                try:
+                    synced_count = int(row.get("Synced File Count", 0) or 0)
+                    if synced_count > 0:
+                        sync_users += 1
+                except ValueError:
+                    pass
+
+    return {
+        "sync_users": sync_users
+    }
+
 def run_sharepoint_onedrive_pipeline(client_id, client_secret, tenant_id):
     """Pipeline specifically for SharePoint and OneDrive telemetry data collection."""
     usage_logger.info("Starting SharePoint & OneDrive Telemetry Pipeline...")
@@ -154,6 +178,11 @@ def run_sharepoint_onedrive_pipeline(client_id, client_secret, tenant_id):
     
     sp_data = parse_sharepoint_csv(os.path.join(reports_dir, "SharePointSiteUsageDetail(180d).csv"))
     od_data = parse_onedrive_csv(os.path.join(reports_dir, "OneDriveUsageAccountDetail(180d).csv"))
+    od_act_data = parse_onedrive_activity_csv(os.path.join(reports_dir, "OneDriveActivityUserDetail(180d).csv"))
+    
+    # Merge active sync client user data into od_data
+    od_data["sync_users"] = od_act_data["sync_users"]
+    od_data["sync_users_pct"] = (od_act_data["sync_users"] / od_data["total_accounts"] * 100) if od_data["total_accounts"] > 0 else 0.0
     
     return {
         "sharepoint": sp_data,
@@ -267,7 +296,10 @@ class SharePointOneDriveUsageFrame(ctk.CTkFrame):
             ("Total File Count", f"{sp.get('total_files', 0):,} Files", f"{od.get('total_files', 0):,} Files"),
             ("Active File Count", 
              f"{sp.get('active_files', 0):,} Files ({sp.get('active_files_pct', 0.0):.1f}%)", 
-             f"{od.get('active_files', 0):,} Files ({od.get('active_files_pct', 0.0):.1f}%)")
+             f"{od.get('active_files', 0):,} Files ({od.get('active_files_pct', 0.0):.1f}%)"),
+            ("Users with Synced Files", 
+             "N/A", 
+             f"{od.get('sync_users', 0):,} Users ({od.get('sync_users_pct', 0.0):.1f}%)")
         ]
 
         for r_idx, (metric_name, sp_val, od_val) in enumerate(rows_data, start=1):
