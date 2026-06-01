@@ -1,6 +1,7 @@
 import random
 import threading
 
+from util.auth_manager import TokenManager
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 from typing import Any, Callable, Dict, List, Optional
@@ -17,9 +18,7 @@ GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 MAX_RETRIES = 30
 BACKOFF = 2
 SHOW_LOAD_MULTIPLIER = False
-USE_MSFT_BACKOFF = False
-
-from util.auth_manager import TokenManager
+USE_MSFT_BACKOFF = True
 
 class UrlInvoker():
     def __init__(self, token_manager: TokenManager, batch_retry_count: int, batch_backoff: int, initial_delay: int, jitter: float):
@@ -28,8 +27,10 @@ class UrlInvoker():
         self.batch_backoff = batch_backoff
         self.initial_delay = initial_delay
         self.jitter = jitter
+        self.throttle_until = 0.0
+        self.lock = threading.Lock()
 
-    # Warning: Doesn't have support for paginated responses. They are handled in the callers themselvesß
+    # Warning: Doesn't have support for paginated responses. They are handled in the callers themselves
     def invoke(
         self, 
         url: str, 
@@ -39,50 +40,54 @@ class UrlInvoker():
         context: str = ""
     ) -> List[Dict[str, Any]]:
 
-        # Failsafe
-        if logger is None:
-            logger = lambda x: None
+        try:
+            # Failsafe
+            if logger is None:
+                logger = lambda x: None
 
-        token_data = self.token_manager.get_valid_token_slot()
-        session = self.token_manager.get_session()
+            token_data = self.token_manager.get_valid_token_slot(logger)
+            session = self.token_manager.get_session()
 
-        batch_url = f"{url}/$batch"
-        
-        final_responses = []
-        failed_responses = []
-
-        curr_batch = batch.copy()
-
-        retry_count = 0
-        while retry_count < self.batch_retry_count:
-            responses = self.execute_batch_request(
-                    session,
-                    batch_url,
-                    self.token_manager,
-                    token_data,
-                    curr_batch,
-                    logger,
-                    stop_event,
-                    context
-                )
+            batch_url = f"{url}/$batch"
             
-            final_responses += get_success_responses(responses)
-            failed_responses = get_failed_responses_that_can_be_retried(responses)
-            failed_response_ids = [response["id"] for response in failed_responses]
+            final_responses = []
+            failed_responses = []
 
-            curr_batch = [request for request in curr_batch if str(request["id"]) in failed_response_ids]
+            curr_batch = batch.copy()
+
+            retry_count = 0
+            while retry_count < self.batch_retry_count:
+                responses = self.execute_batch_request(
+                        session,
+                        batch_url,
+                        self.token_manager,
+                        token_data,
+                        curr_batch,
+                        logger,
+                        stop_event,
+                        context
+                    )
+                
+                final_responses += get_success_responses(responses)
+                failed_responses = get_failed_responses_that_can_be_retried(responses)
+                failed_response_ids = [response["id"] for response in failed_responses]
+
+                curr_batch = [request for request in curr_batch if str(request["id"]) in failed_response_ids]
+
+                if len(failed_responses) > 0:
+                    wait_time = self.initial_delay * pow(self.batch_backoff, retry_count) + random.uniform(0, self.jitter)
+                    retry_count += 1
+                    time.sleep(wait_time)
+                else:
+                    break
 
             if len(failed_responses) > 0:
-               wait_time = self.initial_delay * pow(self.batch_backoff, retry_count) + random.uniform(0, self.jitter)
-               retry_count += 1
-               time.sleep(wait_time)
-            else:
-              break
+                logger(f"Consistent failures observed for the following: {",".join(response.get("body") for response in failed_responses)}")
 
-        if len(failed_responses) > 0:
-           logger(f"Consistent failures observed for the following: {",".join(response.get("body") for response in failed_responses)}")
-
-        self.token_manager.return_token_slot(token_data)
+        except Exception as e:
+            logger(f"Error in {context}: {e}")
+        finally:
+            self.token_manager.return_token_slot(token_data)
 
         return final_responses + failed_responses
 
@@ -111,6 +116,17 @@ class UrlInvoker():
                 break
             
             current_try += 1
+
+            with self.lock:
+                now = time.time()
+                if now < self.throttle_until:
+                    sleep_time = self.throttle_until - now
+                    logger(f"Global throttling active. Sleeping for {sleep_time:.1f}s before sending request...")
+                    time.sleep(sleep_time)
+            
+            # Add jitter to stagger requests after lock is released
+            # Sleeps randomly between 0.1 and 2.0 seconds
+            time.sleep(random.uniform(0.1, 2.0)) 
 
             payload = {"requests": pending_requests}
 
@@ -142,12 +158,15 @@ class UrlInvoker():
                         if "body" not in response_item or not response_item["body"]:
                             logger(f"WARNING: Response item {req_id} in {context} has missing or empty body! Status: {status}")
                         if status == 429:
+                            logger(f"Received Throttling error for {batch_url} | Response: {response_item}")
                             headers_429 = response_item.get("headers", {})
                             try:
                                 wait_sec = int(float(headers_429.get("Retry-After", 0)))
                             except (ValueError, TypeError):
                                 wait_sec = 2
-                                retry_after_delay = max(retry_after_delay, wait_sec)
+                            
+                            retry_after_delay = max(retry_after_delay, wait_sec)
+                            self.throttle_until = max(self.throttle_until, time.time() + wait_sec)
                             if req_id in current_batch_map:
                                 next_retry_requests.append(current_batch_map[req_id])
                         elif status == 401:

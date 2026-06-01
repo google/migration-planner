@@ -1,19 +1,11 @@
 # Copyright 2026 Google LLC
-"""Selector app to choose between Exchange and Chat migration planners."""
+"""Selector app to choose between Exchange, Files and Chat migration planners."""
 
 import os
 import subprocess
 import sys
 import customtkinter as ctk
-
-COLOR_BACKGROUND = "#F0F2F5"
-COLOR_SURFACE = "#FFFFFF"
-COLOR_PRIMARY = "#0B57D0"
-COLOR_PRIMARY_HOVER = "#0842a0"
-COLOR_TEXT_MAIN = "#1F1F1F"
-FONT_HEADER_LARGE = ("Roboto", 24, "bold")
-FONT_BODY_BOLD = ("Roboto", 14, "bold")
-
+from util.constants import *
 
 class SelectorApp(ctk.CTk):
   """Main application for workload selection."""
@@ -31,7 +23,7 @@ class SelectorApp(ctk.CTk):
         text_color=COLOR_TEXT_MAIN,
     ).pack(pady=(30, 20))
 
-    self.options = ["Exchange", "Chat"]
+    self.options = ["Exchange", "Chat", "Files"]
     self.combobox = ctk.CTkComboBox(
         self,
         values=self.options,
@@ -60,12 +52,14 @@ class SelectorApp(ctk.CTk):
     selection = self.combobox.get()
     current_dir = os.path.dirname(os.path.abspath(__file__))
     if selection == "Exchange":
-      script_path = os.path.join(current_dir, "migration_planner_exchange.py")
+      module_name = "scripts.exchange_online"
     elif selection == "Chat":
-      script_path = os.path.join(current_dir, "migration_planner_chat.py")
+      module_name = "scripts.chats"
+    elif selection == "Files":
+      module_name = "scripts.files"
     else:
       return
-    subprocess.Popen([sys.executable, script_path])
+    subprocess.Popen([sys.executable, "-m", module_name])
     self.destroy()
 
 

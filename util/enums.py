@@ -8,3 +8,9 @@ class FailureType(Enum):
   RATE_LIMIT_ERROR = 5
   EXCEPTION = 6
   UNKNOWN_ERROR = 7
+
+class ResourceType(Enum):
+  SITE = "SITE"
+  FOLDER = "FOLDER"
+  DL = "DL"
+  FILE = "FILE"
