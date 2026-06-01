@@ -16,12 +16,12 @@
 
 import os
 import csv
-import requests
-import concurrent.futures
-import time
 import logging
 import threading
 import customtkinter as ctk
+
+# Import pre-existing, resilient network and batch helpers directly from the core package
+from telemetry import active_users_usage as usage
 
 # Bind to the async logger initialized in license_usage.py
 usage_logger = logging.getLogger("LicenseUsageAsyncLogger")
@@ -50,83 +50,8 @@ FONT_BODY_MEDIUM = ("Roboto", 12)
 FONT_BODY_SMALL = ("Roboto", 11)
 
 # =================================================================================
-# NETWORKING & PIPELINE UTILITIES (Isolated)
+# PIPELINE UTILITIES
 # =================================================================================
-
-def get_access_token(client_id, client_secret, tenant_id):
-    """Fetches the OAuth 2.0 Access Token from Microsoft Entra ID."""
-    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-    token_data = {
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "scope": "https://graph.microsoft.com/.default"
-    }
-    usage_logger.info("Fetching OAuth token from Microsoft Entra ID for SharePoint & OneDrive...")
-    token_response = requests.post(token_url, data=token_data)
-    token_response.raise_for_status()
-    return token_response.json().get("access_token")
-
-def download_report(api_url, access_token, output_filename):
-    """Calls the Graph API and downloads the CSV report to the 'reports' folder using a streaming download."""
-    headers = {
-        "Authorization": f"Bearer {access_token}"
-    }
-    
-    usage_logger.info(f"Calling API for {output_filename} (intercepting redirect)...")
-    report_response = requests.get(api_url, headers=headers, allow_redirects=False, stream=True)
-    
-    script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-    reports_dir = os.path.join(script_dir, "reports")
-    os.makedirs(reports_dir, exist_ok=True)
-    
-    output_path = os.path.join(reports_dir, output_filename)
-    
-    if report_response.status_code == 302:
-        report_response.close()
-        location_url = report_response.headers.get("Location")
-        if not location_url:
-            usage_logger.error(f"Received a 302 status for {output_filename} but no Location header was found.")
-            raise Exception(f"Received a 302 status for {output_filename} but no Location header was found.")
-            
-        usage_logger.info(f"Pre-authenticated URL retrieved for {output_filename}. Waiting 2 seconds before starting download...")
-        time.sleep(2)
-        
-        max_retries = 5
-        retry_interval = 30
-        
-        for attempt in range(1, max_retries + 1):
-            try:
-                usage_logger.info(f"[Attempt {attempt}/{max_retries}] Downloading {output_filename}...")
-                with requests.get(location_url, stream=True) as csv_response:
-                    csv_response.raise_for_status()
-                    with open(output_path, "wb") as f:
-                        for chunk in csv_response.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                break
-            except requests.exceptions.RequestException as e:
-                if attempt < max_retries:
-                    usage_logger.warning(f"[Attempt {attempt}/{max_retries}] Failed to download {output_filename}. Retrying in {retry_interval}s... (Error: {e})")
-                    time.sleep(retry_interval)
-                else:
-                    usage_logger.error(f"Failed to download {output_filename} after {max_retries} attempts.", exc_info=True)
-                    raise Exception(f"Failed to download {output_filename} after {max_retries} attempts. Last error: {e}")
-                    
-        usage_logger.info(f"Success! Saved usage report to: {output_path}")
-        
-    elif report_response.status_code == 200:
-        usage_logger.info(f"Unexpected 200 OK for {output_filename}. Saving payload directly via stream...")
-        with open(output_path, "wb") as f:
-            for chunk in report_response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        report_response.close()
-        usage_logger.info(f"Success! Saved usage report to: {output_path}")
-    else:
-        usage_logger.error(f"Error fetching {output_filename}. Status Code: {report_response.status_code}")
-        report_response.close()
-        raise Exception(f"API Error {report_response.status_code} fetching {output_filename}")
 
 def format_bytes(num_bytes: int) -> str:
     """Formats raw byte values into highly readable string equivalents (e.g., GB, TB)."""
@@ -226,18 +151,17 @@ def parse_onedrive_csv(filepath):
 def run_sharepoint_onedrive_pipeline(client_id, client_secret, tenant_id):
     """Pipeline specifically for SharePoint and OneDrive telemetry data collection."""
     usage_logger.info("Starting SharePoint & OneDrive Telemetry Pipeline...")
-    access_token = get_access_token(client_id, client_secret, tenant_id)
+    
+    # Re-use core Entra ID token retriever
+    access_token = usage.get_access_token(client_id, client_secret, tenant_id)
     
     reports = [
         ("https://graph.microsoft.com/v1.0/reports/getSharePointSiteUsageDetail(period='D180')", "SharePointSiteUsageDetail(180d).csv"),
         ("https://graph.microsoft.com/v1.0/reports/getOneDriveUsageAccountDetail(period='D180')", "OneDriveUsageAccountDetail(180d).csv")
     ]
     
-    # Parallel downloads inside isolated thread executor
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(download_report, url, access_token, filename) for url, filename in reports]
-        for future in concurrent.futures.as_completed(futures):
-            future.result()
+    # Re-use parallel batch stream downloader
+    usage._download_reports_batch(access_token, reports)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports")
@@ -251,9 +175,8 @@ def run_sharepoint_onedrive_pipeline(client_id, client_secret, tenant_id):
     }
 
 # =================================================================================
-# CUSTOM UI COMPONENT CLASS
+# CUSTOM UI COMPONENT CLASS (Preserved identically for visual parity)
 # =================================================================================
-
 class SharePointOneDriveUsageFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping SharePoint & OneDrive Telemetry UI."""
     
