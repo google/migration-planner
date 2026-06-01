@@ -143,6 +143,7 @@ def run_sharepoint_onedrive_pipeline(client_id, client_secret, tenant_id):
         retries=5,
         backoff=2
     )
+    client.authenticate()
     service = ReportsService(client)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()

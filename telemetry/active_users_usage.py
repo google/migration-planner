@@ -36,6 +36,7 @@ def _get_reports_service(client_id, client_secret, tenant_id) -> tuple[GraphClie
         retries=5,
         backoff=2
     )
+    client.authenticate()
     return client, ReportsService(client)
 
 def process_active_user_detail(filepath):
