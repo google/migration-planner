@@ -249,6 +249,13 @@ Once started, you will see a real-time progress screen:
 *   **User Source**:
     *   **Scan all teams and users**: Automatically fetches every team and user in your tenant.
     *   **Upload CSV**: Allows you to scan a specific subset of users/teams or pre-load existing counts.
+    *   **CSV Format**: Must contain a header **Email or Team ID** and a **Type** column specifying whether the row represents a `"User"` or a `"Team"`.
+        *   **Sample Format**:
+            ```csv
+            Email or Team ID,Type
+            user@xyz.com,User
+            124-adc-445,Team
+            ```
 
 #### 2. Advanced Settings & Estimation Modes (Chat)
 Click **"Show Advanced Settings"** to tune the performance and select your estimation mode:

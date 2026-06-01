@@ -195,8 +195,8 @@ class TestChatScannerService(unittest.TestCase):
     mock_exists.return_value = True
     
     real_df = pd.DataFrame({
-        "userId": ["user1@test.com", "user2@test.com"],
-        "teamId": ["team1", "team2"]
+        "Email or Team ID": ["user1@test.com", "user2@test.com", "team1", "team2"],
+        "Type": ["User", "User", "Team", "Team"]
     })
     mock_read_csv.return_value = real_df
 
@@ -229,8 +229,8 @@ class TestChatScannerService(unittest.TestCase):
     mock_exists.return_value = True
     
     real_df = pd.DataFrame({
-        "userId": ["user1@test.com", "user2@test.com"],
-        "teamId": ["team1", "team2"]
+        "Email or Team ID": ["user1@test.com", "user2@test.com", "team1", "team2"],
+        "Type": ["User", "User", "Team", "Team"]
     })
     mock_read_csv.return_value = real_df
 
@@ -270,7 +270,8 @@ class TestChatScannerService(unittest.TestCase):
     mock_exists.return_value = True
     
     real_df = pd.DataFrame({
-        "teamId": ["team1", "team2"]
+        "Email or Team ID": ["team1", "team2"],
+        "Type": ["Team", "Team"]
     })
     mock_read_csv.return_value = real_df
 

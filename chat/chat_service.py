@@ -270,21 +270,39 @@ class ChatScannerService:
       df = pd.read_csv(csv_path)
       df.columns = df.columns.str.strip()
 
-      if "userId" in df.columns:
+      if "Email or Team ID" in df.columns and "Type" in df.columns:
         csv_users = [
             {
-                "userPrincipalName": row["userId"],
-                "id": row.get("User ID"),
+                "userPrincipalName": row["Email or Team ID"],
+                "id": None,
             }
             for _, row in df.iterrows()
+            if pd.notna(row["Email or Team ID"])
+            and str(row.get("Type")).strip().lower() == "user"
         ]
-
-      if "teamId" in df.columns:
         csv_teams = [
-            {"id": row["teamId"]}
+            {"id": row["Email or Team ID"]}
             for _, row in df.iterrows()
-            if pd.notna(row["teamId"])
+            if pd.notna(row["Email or Team ID"])
+            and str(row.get("Type")).strip().lower() == "team"
         ]
+      else:
+        if "userId" in df.columns:
+          csv_users = [
+              {
+                  "userPrincipalName": row["userId"],
+                  "id": row.get("User ID"),
+              }
+              for _, row in df.iterrows()
+              if pd.notna(row["userId"])
+          ]
+
+        if "teamId" in df.columns:
+          csv_teams = [
+              {"id": row["teamId"]}
+              for _, row in df.iterrows()
+              if pd.notna(row["teamId"])
+          ]
 
     if config.mode == "heuristics":
       self.log_func("Applying automated heuristics estimation profiles.")
@@ -378,10 +396,14 @@ class ChatScannerService:
         for channel_id in details.get("all_channel_ids", []):
           all_ch_tuples.append((team_id, channel_id))
 
-      channel_sample_size = max(
-          1, int(len(all_ch_tuples) * (sample_percentage / 100.0))
-      )
-      sampled_channels = random.sample(all_ch_tuples, channel_sample_size)
+      if all_ch_tuples:
+        channel_sample_size = max(
+            1, int(len(all_ch_tuples) * (sample_percentage / 100.0))
+        )
+        channel_sample_size = min(len(all_ch_tuples), channel_sample_size)
+        sampled_channels = random.sample(all_ch_tuples, channel_sample_size)
+      else:
+        sampled_channels = []
 
       self.log_func(
           f"Firing Parallel Gate: {len(chat_id_pool)} chats &"
@@ -431,10 +453,14 @@ class ChatScannerService:
       )
       channel_messages = int(avg_messages_per_channel * channels)
 
-      member_sample_size = max(
-          1, int(len(team_ids) * (sample_percentage / 100.0))
-      )
-      sampled_member_teams = random.sample(team_ids, member_sample_size)
+      if team_ids:
+        member_sample_size = max(
+            1, int(len(team_ids) * (sample_percentage / 100.0))
+        )
+        member_sample_size = min(len(team_ids), member_sample_size)
+        sampled_member_teams = random.sample(team_ids, member_sample_size)
+      else:
+        sampled_member_teams = []
       team_member_details = scanner.fetch_team_details_batch(
           auth, sampled_member_teams
       )

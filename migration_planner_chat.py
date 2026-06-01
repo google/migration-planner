@@ -1799,25 +1799,42 @@ class MigrationEstimatorTool(ctk.CTk):
 
       df_input = pd.read_csv(config.csv_path)
       df_input.columns = df_input.columns.str.strip()
-      col = next(
-          (
-              c
-              for c in ["User Principal Name", "Email", "UPN"]
-              if c in df_input.columns
-          ),
-          None,
-      )
-
-      if col:
-        for _, row in df_input.iterrows():
-          upn = str(row[col]).lower().strip()
+      if "Email or Team ID" in df_input.columns and "Type" in df_input.columns:
+        user_rows = df_input[df_input["Type"].str.strip().str.lower() == "user"]
+        for _, row in user_rows.iterrows():
+          upn = str(row["Email or Team ID"]).lower().strip()
           existing_data[upn] = row.to_dict()
 
-        users_to_resolve = df_input[col].dropna().unique().tolist()
+        users_to_resolve = user_rows["Email or Team ID"].dropna().unique().tolist()
       else:
-        raise Exception(
-            "CSV must contain 'User Principal Name' column."
+        col = next(
+            (
+                c
+                for c in ["User Principal Name", "Email", "UPN"]
+                if c in df_input.columns
+            ),
+            None,
         )
+
+        has_team_col = "teamId" in df_input.columns
+        has_user_id_col = "userId" in df_input.columns
+
+        if col:
+          for _, row in df_input.iterrows():
+            upn = str(row[col]).lower().strip()
+            existing_data[upn] = row.to_dict()
+
+          users_to_resolve = df_input[col].dropna().unique().tolist()
+        elif has_user_id_col:
+          for _, row in df_input.iterrows():
+            upn = str(row["userId"]).lower().strip()
+            existing_data[upn] = row.to_dict()
+
+          users_to_resolve = df_input["userId"].dropna().unique().tolist()
+        elif not has_team_col:
+          raise Exception(
+              "CSV must contain 'Email or Team ID' & 'Type' columns, or standard user/team columns."
+          )
 
     # 2. Authenticate
     if not manager:
