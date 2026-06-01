@@ -16,6 +16,7 @@ import customtkinter as ctk
 
 from telemetry import active_users_usage as usage
 from telemetry.sharepoint_onedrive_usage import SharePointOneDriveUsageFrame
+from telemetry.data_security_governance import DataSecurityGovernanceFrame
 
 # Import unified core service layer
 from core.graph.client import GraphClient
@@ -180,6 +181,14 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             status_change_callback=self._check_all_done
         )
 
+        # 6. Data Security & Governance Section (Modular Integration)
+        self.security_gov_view = DataSecurityGovernanceFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done
+        )
+
         self._hide_all_grids()
 
     # -------------------------------------------------------------------------
@@ -191,6 +200,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.o365_trend_section.pack_forget()
         self.m365_section.pack_forget()
         self.sp_od_view.reset_view()
+        self.security_gov_view.reset_view()
 
         for grid in [self.lic_grid_frame, self.o365_grid_frame, self.o365_trend_grid_frame, self.m365_grid_frame]:
             for w in grid.winfo_children():
@@ -221,7 +231,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
 
     def _check_all_done(self):
         """Checks if all sections have resolved (success or error) and updates main UI."""
-        states = [self.status_sku, self.status_o365, self.status_o365_trend, self.status_m365, self.sp_od_view.status]
+        states = [self.status_sku, self.status_o365, self.status_o365_trend, self.status_m365, self.sp_od_view.status, self.security_gov_view.status]
 
         if "loading" in states:
             return
@@ -255,6 +265,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.retry_o365_trend(clear_log=False)
         self.retry_m365(clear_log=False)
         self.sp_od_view.trigger_fetch(tenant, clients[0], secrets[0])
+        self.security_gov_view.trigger_fetch(tenant, clients[0], secrets[0])
 
     # -------------------------------------------------------------------------
     # INDIVIDUAL RETRY HANDLERS
