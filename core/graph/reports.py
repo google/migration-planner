@@ -124,9 +124,10 @@ class ReportsService:
         self.download_reports_batch(reports, output_dir)
 
     def download_sharepoint_onedrive_details(self, output_dir: str) -> None:
-        """Downloads SharePoint site usage and OneDrive account usage details CSV reports concurrently."""
+        """Downloads SharePoint site usage, OneDrive account usage, and OneDrive activity details CSV reports concurrently."""
         reports = [
             ("https://graph.microsoft.com/v1.0/reports/getSharePointSiteUsageDetail(period='D180')", "SharePointSiteUsageDetail(180d).csv"),
-            ("https://graph.microsoft.com/v1.0/reports/getOneDriveUsageAccountDetail(period='D180')", "OneDriveUsageAccountDetail(180d).csv")
+            ("https://graph.microsoft.com/v1.0/reports/getOneDriveUsageAccountDetail(period='D180')", "OneDriveUsageAccountDetail(180d).csv"),
+            ("https://graph.microsoft.com/v1.0/reports/getOneDriveActivityUserDetail(period='D180')", "OneDriveActivityUserDetail(180d).csv")
         ]
         self.download_reports_batch(reports, output_dir)
