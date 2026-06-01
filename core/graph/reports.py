@@ -73,7 +73,7 @@ class ReportsService:
                             time.sleep(retry_interval)
                         else:
                             logger.error("Failed downloading %s after %d attempts.", output_filename, max_retries, exc_info=True)
-                            raise ConnectionError(f"Failed downloading report after {max_retries} attempts. Details: {error}")
+                            raise ConnectionError(f"Failed downloading report after %d attempts. Details: {error}")
                 
                 logger.info("Success! Saved report to: %s", output_path)
 
@@ -104,3 +104,29 @@ class ReportsService:
             # Gather all futures, raising exceptions if any thread failed
             for future in concurrent.futures.as_completed(futures):
                 future.result()
+
+    def download_o365_active_user_detail(self, output_dir: str) -> None:
+        """Downloads the Office 365 active user details CSV report (180 days)."""
+        url = "https://graph.microsoft.com/v1.0/reports/getOffice365ActiveUserDetail(period='D180')"
+        self.download_report(url, "Office365ActiveUserDetail(180d).csv", output_dir)
+
+    def download_o365_active_user_counts(self, output_dir: str) -> None:
+        """Downloads the Office 365 30-day active user counts CSV report."""
+        url = "https://graph.microsoft.com/v1.0/reports/getOffice365ActiveUserCounts(period='D30')"
+        self.download_report(url, "Office365ActiveUserCounts(30d).csv", output_dir)
+
+    def download_m365_app_details(self, output_dir: str) -> None:
+        """Downloads both M365 App user details and counts CSV reports concurrently."""
+        reports = [
+            ("https://graph.microsoft.com/v1.0/reports/getM365AppUserDetail(period='D180')", "M365AppUserDetail(180d).csv"),
+            ("https://graph.microsoft.com/v1.0/reports/getM365AppUserCounts(period='D180')", "getM365AppUserCounts(180d).csv")
+        ]
+        self.download_reports_batch(reports, output_dir)
+
+    def download_sharepoint_onedrive_details(self, output_dir: str) -> None:
+        """Downloads SharePoint site usage and OneDrive account usage details CSV reports concurrently."""
+        reports = [
+            ("https://graph.microsoft.com/v1.0/reports/getSharePointSiteUsageDetail(period='D180')", "SharePointSiteUsageDetail(180d).csv"),
+            ("https://graph.microsoft.com/v1.0/reports/getOneDriveUsageAccountDetail(period='D180')", "OneDriveUsageAccountDetail(180d).csv")
+        ]
+        self.download_reports_batch(reports, output_dir)

@@ -145,15 +145,10 @@ def run_sharepoint_onedrive_pipeline(client_id, client_secret, tenant_id):
     )
     service = ReportsService(client)
     
-    reports = [
-        ("https://graph.microsoft.com/v1.0/reports/getSharePointSiteUsageDetail(period='D180')", "SharePointSiteUsageDetail(180d).csv"),
-        ("https://graph.microsoft.com/v1.0/reports/getOneDriveUsageAccountDetail(period='D180')", "OneDriveUsageAccountDetail(180d).csv")
-    ]
-    
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports")
     
-    service.download_reports_batch(reports, reports_dir)
+    service.download_sharepoint_onedrive_details(reports_dir)
     client.close()
     
     sp_data = parse_sharepoint_csv(os.path.join(reports_dir, "SharePointSiteUsageDetail(180d).csv"))

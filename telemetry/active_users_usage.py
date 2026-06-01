@@ -26,23 +26,17 @@ from core.graph.reports import ReportsService
 # Bind to the async logger initialized in license_usage.py
 usage_logger = logging.getLogger("LicenseUsageAsyncLogger")
 
-def _download_reports_via_service(client_id, client_secret, tenant_id, reports) -> None:
-    """Helper to instantiate GraphClient/ReportsService and perform concurrent downloads."""
+def _get_reports_service(client_id, client_secret, tenant_id) -> tuple[GraphClient, ReportsService]:
+    """Helper to instantiate GraphClient/ReportsService and manage credentials slots."""
     client = GraphClient(
         tenant_id=tenant_id,
         client_ids=client_id,
         client_secrets=client_secret,
-        concurrency=len(reports),
+        concurrency=2,
         retries=5,
         backoff=2
     )
-    service = ReportsService(client)
-    
-    script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-    reports_dir = os.path.join(script_dir, "reports")
-    
-    service.download_reports_batch(reports, reports_dir)
-    client.close()
+    return client, ReportsService(client)
 
 def process_active_user_detail(filepath):
     """Streams the downloaded CSV and calculates usage counters over 30, 90, and 180 days."""
@@ -188,26 +182,28 @@ def process_m365_app_user_detail(filepath):
 def run_o365_pipeline(client_id, client_secret, tenant_id):
     """Pipeline specifically for O365 Active User Data (Isolated for independent retries)."""
     usage_logger.info("Starting isolated O365 Pipeline...")
-    reports = [
-        ("https://graph.microsoft.com/v1.0/reports/getOffice365ActiveUserDetail(period='D180')", "Office365ActiveUserDetail(180d).csv")
-    ]
-    _download_reports_via_service(client_id, client_secret, tenant_id, reports)
+    client, service = _get_reports_service(client_id, client_secret, tenant_id)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports")
+    
+    service.download_o365_active_user_detail(reports_dir)
+    client.close()
+    
     return process_active_user_detail(os.path.join(reports_dir, "Office365ActiveUserDetail(180d).csv"))
 
 def run_o365_trend_pipeline(client_id, client_secret, tenant_id):
     """Pipeline specifically for O365 Trend Data (Isolated for independent retries)."""
     try:
         usage_logger.info("Starting isolated O365 Trend Pipeline...")
-        reports = [
-            ("https://graph.microsoft.com/v1.0/reports/getOffice365ActiveUserCounts(period='D30')", "Office365ActiveUserCounts(30d).csv")
-        ]
-        _download_reports_via_service(client_id, client_secret, tenant_id, reports)
+        client, service = _get_reports_service(client_id, client_secret, tenant_id)
         
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         reports_dir = os.path.join(script_dir, "reports")
+        
+        service.download_o365_active_user_counts(reports_dir)
+        client.close()
+        
         return process_active_user_counts(os.path.join(reports_dir, "Office365ActiveUserCounts(30d).csv"))
     except Exception as e:
         usage_logger.error("O365 Trend pipeline failed.", exc_info=True)
@@ -216,12 +212,12 @@ def run_o365_trend_pipeline(client_id, client_secret, tenant_id):
 def run_m365_pipeline(client_id, client_secret, tenant_id):
     """Pipeline specifically for M365 Apps Data (Isolated for independent retries)."""
     usage_logger.info("Starting isolated M365 Apps Pipeline...")
-    reports = [
-        ("https://graph.microsoft.com/v1.0/reports/getM365AppUserDetail(period='D180')", "M365AppUserDetail(180d).csv"),
-        ("https://graph.microsoft.com/v1.0/reports/getM365AppUserCounts(period='D180')", "getM365AppUserCounts(180d).csv")
-    ]
-    _download_reports_via_service(client_id, client_secret, tenant_id, reports)
+    client, service = _get_reports_service(client_id, client_secret, tenant_id)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports")
+    
+    service.download_m365_app_details(reports_dir)
+    client.close()
+    
     return process_m365_app_user_detail(os.path.join(reports_dir, "M365AppUserDetail(180d).csv"))
