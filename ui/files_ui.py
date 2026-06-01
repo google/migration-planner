@@ -150,12 +150,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     
     ctk.CTkCheckBox(
         site_options_frame,
-        text="Team Sites",
+        text="SharePoint Sites",
         variable=self.include_team_sites,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-        state="disabled"
+        # state="disabled"
     ).pack(side="left", padx=10)
     
     # Concurrency settings
@@ -189,9 +189,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           if widget.winfo_exists():
             text = f"Sites: {count}"
             if team_site_count > 0:
-              text += f" | Team Sites: {team_site_count}"
+              text += f" | SharePoint Sites: {team_site_count}"
             if personal_site_count > 0:
-              text += f" | Personal Sites: {personal_site_count}"
+              text += f" | Personal (OneDrive) Sites: {personal_site_count}"
             if list_count > 0:
               text += f" | Lists: {list_count}"
             if drive_count > 0:
@@ -1027,11 +1027,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ("Total Corpus Size", self.format_size(total_corpus_size)),
           ("Site Collection Count", data.get("siteCount", 0)),
           ("Subsite Count", data.get("subsiteCount", 0)),
-          ("Personal Site / Subsite Count", data.get("personalSiteCount", 0)),
-          ("Team Site / Subsite Count", data.get("teamSiteCount", 0)),
+          ("Personal (OneDrive) Site / Subsite Count", data.get("personalSiteCount", 0)),
+          ("SharePoint Site / Subsite Count", data.get("teamSiteCount", 0)),
           ("DL Count", sum(data.get("driveCounts", {}).values())),
-          ("Personal DL Count", data.get("personalSiteDLCount", 0)),
-          ("Team DL Count", data.get("teamSiteDLCount", 0)),
+          ("Personal (OneDrive) DL Count", data.get("personalSiteDLCount", 0)),
+          ("SharePoint DL Count", data.get("teamSiteDLCount", 0)),
           ("List Count", data.get("listCount", 0)),
           ("Folder Count", data.get("folderCount", 0)),
           ("File Count", data.get("fileCount", 0)),
@@ -1108,7 +1108,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         df = data.get("df")
         
         site_metric_arr = [personal_site_metrics, team_site_metrics]
-        headers_arr = ["Personal Sites", "Team Sites"]
+        headers_arr = ["Personal (OneDrive) Sites", "SharePoint Sites"]
 
         for idx in range(0, len(site_metric_arr)):
           if len(site_metric_arr[idx]) == 0:
@@ -1168,11 +1168,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
   def start_scan(self):    
     if not self.include_personal_sites.get() and not self.include_team_sites.get():
-      messagebox.showerror("Validation Error", "At least one site type (Personal or Team) must be selected!")
+      messagebox.showerror("Validation Error", "At least one site type (Personal (OneDrive) or SharePoint) must be selected!")
       return
       
     if self.user_source.get() == "csv" and self.include_team_sites.get():
-      messagebox.showerror("Validation Error", "CSV Upload only supports Personal Sites (OneDrive) scanning. Please uncheck Team Sites.")
+      messagebox.showerror("Validation Error", "CSV Upload only supports Personal Sites (OneDrive) scanning. Please uncheck SharePoint Sites.")
       raise ValueError("CSV Upload only supports Personal Sites (OneDrive) scanning.")
       
     # Save values to regular variables to avoid thread-safety issues in Tkinter
