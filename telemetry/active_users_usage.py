@@ -1,106 +1,43 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Aggregations and data pipelines for O365 active user counts and details."""
+
 import os
-import requests
-import concurrent.futures
-import time
 import csv
 import logging
 from datetime import datetime, date
 
+# Import unified core service layer
+from core.graph.client import GraphClient
+from core.graph.reports import ReportsService
+
 # Bind to the async logger initialized in license_usage.py
 usage_logger = logging.getLogger("LicenseUsageAsyncLogger")
 
-def get_access_token(client_id, client_secret, tenant_id):
-    """Fetches the OAuth 2.0 Access Token from Microsoft Entra ID."""
-    token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-    token_data = {
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "scope": "https://graph.microsoft.com/.default"
-    }
-    
-    usage_logger.info("Fetching OAuth token from Microsoft Entra ID for usage reports...")
-    token_response = requests.post(token_url, data=token_data)
-    token_response.raise_for_status()
-    usage_logger.info("Successfully fetched OAuth token for usage reports.")
-    return token_response.json().get("access_token")
-
-def download_report(api_url, access_token, output_filename):
-    """Calls the Graph API and downloads the CSV report to the 'reports' folder using a streaming download."""
-    headers = {
-        "Authorization": f"Bearer {access_token}"
-    }
-    
-    usage_logger.info(f"Calling API for {output_filename} (intercepting redirect)...")
-    report_response = requests.get(api_url, headers=headers, allow_redirects=False, stream=True)
-    
-    script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-    reports_dir = os.path.join(script_dir, "reports")
-    os.makedirs(reports_dir, exist_ok=True)
-    
-    output_path = os.path.join(reports_dir, output_filename)
-    
-    if report_response.status_code == 302:
-        report_response.close()
-        location_url = report_response.headers.get("Location")
-        if not location_url:
-            usage_logger.error(f"Received a 302 status for {output_filename} but no Location header was found.")
-            raise Exception(f"Received a 302 status for {output_filename} but no Location header was found.")
-            
-        usage_logger.info(f"Pre-authenticated URL retrieved for {output_filename}. Waiting 2 seconds before starting download...")
-        time.sleep(2)
-        
-        max_retries = 5
-        retry_interval = 30
-        
-        for attempt in range(1, max_retries + 1):
-            try:
-                usage_logger.info(f"[Attempt {attempt}/{max_retries}] Downloading {output_filename}...")
-                with requests.get(location_url, stream=True) as csv_response:
-                    csv_response.raise_for_status()
-                    
-                    if os.path.exists(output_path):
-                        usage_logger.info(f"Notice: '{output_filename}' already exists in 'reports'. Overwriting...")
-                        
-                    with open(output_path, "wb") as f:
-                        for chunk in csv_response.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                break
-            except requests.exceptions.RequestException as e:
-                if attempt < max_retries:
-                    usage_logger.warning(f"[Attempt {attempt}/{max_retries}] Failed to download {output_filename}. Retrying in {retry_interval}s... (Error: {e})")
-                    time.sleep(retry_interval)
-                else:
-                    usage_logger.error(f"Failed to download {output_filename} after {max_retries} attempts.", exc_info=True)
-                    raise Exception(f"Failed to download {output_filename} after {max_retries} attempts. Last error: {e}")
-                    
-        usage_logger.info(f"Success! Saved usage report to: {output_path}")
-        
-    elif report_response.status_code == 200:
-        usage_logger.info(f"Unexpected 200 OK for {output_filename}. Saving payload directly via stream...")
-        if os.path.exists(output_path):
-            usage_logger.info(f"Notice: '{output_filename}' already exists in 'reports'. Overwriting...")
-            
-        with open(output_path, "wb") as f:
-            for chunk in report_response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        report_response.close()
-        usage_logger.info(f"Success! Saved usage report to: {output_path}")
-    else:
-        usage_logger.error(f"Error fetching {output_filename}. Status Code: {report_response.status_code}")
-        report_response.close()
-        raise Exception(f"API Error {report_response.status_code} fetching {output_filename}")
-
-def _download_reports_batch(access_token, reports_to_download):
-    """Helper to download a specific list of reports in parallel."""
-    usage_logger.info(f"Starting parallel downloads for {len(reports_to_download)} reports...")
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(reports_to_download)) as executor:
-        futures = [executor.submit(download_report, url, access_token, filename) for url, filename in reports_to_download]
-        for future in concurrent.futures.as_completed(futures):
-            future.result()
+def _get_reports_service(client_id, client_secret, tenant_id) -> tuple[GraphClient, ReportsService]:
+    """Helper to instantiate GraphClient/ReportsService and manage credentials slots."""
+    client = GraphClient(
+        tenant_id=tenant_id,
+        client_ids=client_id,
+        client_secrets=client_secret,
+        concurrency=2,
+        retries=5,
+        backoff=2
+    )
+    client.authenticate()
+    return client, ReportsService(client)
 
 def process_active_user_detail(filepath):
     """Streams the downloaded CSV and calculates usage counters over 30, 90, and 180 days."""
@@ -212,7 +149,7 @@ def process_active_user_counts(filepath):
     }
 
 def process_m365_app_user_detail(filepath):
-    """Streams the downloaded M365 App User Detail CSV and calculates usage counters."""
+    """Streams the downloaded CSV and calculates usage counters."""
     usage_logger.info(f"Processing M365 App file: {os.path.basename(filepath)}")
     
     if not os.path.exists(filepath):
@@ -246,16 +183,13 @@ def process_m365_app_user_detail(filepath):
 def run_o365_pipeline(client_id, client_secret, tenant_id):
     """Pipeline specifically for O365 Active User Data (Isolated for independent retries)."""
     usage_logger.info("Starting isolated O365 Pipeline...")
-    access_token = get_access_token(client_id, client_secret, tenant_id)
-    
-    reports = [
-        ("https://graph.microsoft.com/v1.0/reports/getOffice365ActiveUserDetail(period='D180')", "Office365ActiveUserDetail(180d).csv")
-    ]
-    
-    _download_reports_batch(access_token, reports)
+    client, service = _get_reports_service(client_id, client_secret, tenant_id)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports")
+    
+    service.download_o365_active_user_detail(reports_dir)
+    client.close()
     
     return process_active_user_detail(os.path.join(reports_dir, "Office365ActiveUserDetail(180d).csv"))
 
@@ -263,14 +197,13 @@ def run_o365_trend_pipeline(client_id, client_secret, tenant_id):
     """Pipeline specifically for O365 Trend Data (Isolated for independent retries)."""
     try:
         usage_logger.info("Starting isolated O365 Trend Pipeline...")
-        access_token = get_access_token(client_id, client_secret, tenant_id)
-        reports = [
-            ("https://graph.microsoft.com/v1.0/reports/getOffice365ActiveUserCounts(period='D30')", "Office365ActiveUserCounts(30d).csv")
-        ]
-        _download_reports_batch(access_token, reports)
+        client, service = _get_reports_service(client_id, client_secret, tenant_id)
         
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         reports_dir = os.path.join(script_dir, "reports")
+        
+        service.download_o365_active_user_counts(reports_dir)
+        client.close()
         
         return process_active_user_counts(os.path.join(reports_dir, "Office365ActiveUserCounts(30d).csv"))
     except Exception as e:
@@ -280,16 +213,12 @@ def run_o365_trend_pipeline(client_id, client_secret, tenant_id):
 def run_m365_pipeline(client_id, client_secret, tenant_id):
     """Pipeline specifically for M365 Apps Data (Isolated for independent retries)."""
     usage_logger.info("Starting isolated M365 Apps Pipeline...")
-    access_token = get_access_token(client_id, client_secret, tenant_id)
-    
-    reports = [
-        ("https://graph.microsoft.com/v1.0/reports/getM365AppUserDetail(period='D180')", "M365AppUserDetail(180d).csv"),
-        ("https://graph.microsoft.com/v1.0/reports/getM365AppUserCounts(period='D180')", "getM365AppUserCounts(180d).csv")
-    ]
-    
-    _download_reports_batch(access_token, reports)
+    client, service = _get_reports_service(client_id, client_secret, tenant_id)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports")
+    
+    service.download_m365_app_details(reports_dir)
+    client.close()
     
     return process_m365_app_user_detail(os.path.join(reports_dir, "M365AppUserDetail(180d).csv"))

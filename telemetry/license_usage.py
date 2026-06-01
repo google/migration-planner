@@ -15,6 +15,11 @@ from typing import Any, Dict, List, Optional
 import customtkinter as ctk
 
 from telemetry import active_users_usage as usage
+from telemetry.sharepoint_onedrive_usage import SharePointOneDriveUsageFrame
+
+# Import unified core service layer
+from core.graph.client import GraphClient
+from core.graph.directory import DirectoryService
 
 # Safely import matplotlib to embed plots in Tkinter
 try:
@@ -54,26 +59,7 @@ async_logger.propagate = False
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
-COLOR_PRIMARY = "#0B57D0"
-COLOR_SURFACE = "#FFFFFF"
-COLOR_TEXT_MAIN = "#1F1F1F"
-COLOR_TEXT_SUB = "#444746"
-COLOR_OUTLINE = "#747775"
-COLOR_OUTLINE_LIGHT = "#E0E2E0"
-COLOR_TONAL_BG = "#D3E3FD"
-COLOR_TONAL_TEXT = "#041E49"
-COLOR_SUCCESS = "#188038"
-COLOR_ERROR = "#B3261E"
-COLOR_PRIMARY_HOVER = "#0842a0"
-COLOR_SECONDARY_HOVER = "#F1F3F4"
-COLOR_SURFACE_HOVER = "#EFF6FF"
-COLOR_SURFACE_VARIANT = "#F8F9FA"
-
-FONT_HEADER_MEDIUM = ("Roboto", 24, "bold")
-FONT_HEADER_SMALL = ("Roboto", 18, "bold")
-FONT_BODY_BOLD = ("Roboto", 14, "bold")
-FONT_BODY_MEDIUM = ("Roboto", 12)
-FONT_BODY_SMALL = ("Roboto", 11)
+from telemetry.styles import *
 
 
 class LicenseUsageTab(ctk.CTkScrollableFrame):
@@ -186,6 +172,14 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.m365_state_frame = ctk.CTkFrame(self.m365_section, fg_color="transparent")
         self.m365_grid_frame = ctk.CTkFrame(self.m365_section, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
+        # 5. SharePoint & OneDrive Telemetry Section (Modular Integration)
+        self.sp_od_view = SharePointOneDriveUsageFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done
+        )
+
         self._hide_all_grids()
 
     # -------------------------------------------------------------------------
@@ -196,6 +190,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.o365_section.pack_forget()
         self.o365_trend_section.pack_forget()
         self.m365_section.pack_forget()
+        self.sp_od_view.reset_view()
 
         for grid in [self.lic_grid_frame, self.o365_grid_frame, self.o365_trend_grid_frame, self.m365_grid_frame]:
             for w in grid.winfo_children():
@@ -226,7 +221,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
 
     def _check_all_done(self):
         """Checks if all sections have resolved (success or error) and updates main UI."""
-        states = [self.status_sku, self.status_o365, self.status_o365_trend, self.status_m365]
+        states = [self.status_sku, self.status_o365, self.status_o365_trend, self.status_m365, self.sp_od_view.status]
 
         if "loading" in states:
             return
@@ -259,6 +254,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.retry_o365(clear_log=False)
         self.retry_o365_trend(clear_log=False)
         self.retry_m365(clear_log=False)
+        self.sp_od_view.trigger_fetch(tenant, clients[0], secrets[0])
 
     # -------------------------------------------------------------------------
     # INDIVIDUAL RETRY HANDLERS
@@ -318,67 +314,26 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             
             self.log_msg(f"Authenticating app {client_id[:5]}...")
             
-            session = requests.Session()
-            retries = Retry(
-                total=self.retries.get(),
-                backoff_factor=self.backoff.get(),
-                status_forcelist=[500, 502, 503, 504],
-                allowed_methods=["GET", "POST"],
+            client = GraphClient(
+                tenant_id=tenant,
+                client_ids=client_id,
+                client_secrets=client_secret,
+                concurrency=1,
+                retries=self.retries.get(),
+                backoff=self.backoff.get()
             )
-            adapter = HTTPAdapter(max_retries=retries)
-            session.mount("https://", adapter)
             
-            token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-            token_data = {
-                "grant_type": "client_credentials",
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "scope": "https://graph.microsoft.com/.default"
-            }
-            
-            resp = session.post(token_url, data=token_data, timeout=30)
-            resp.raise_for_status()
-            access_token = resp.json().get("access_token")
-            
-            # Verify permissions logic
+            # Re-use the GraphClient parallel scope verification inside core service client
             required_scopes = ["Organization.Read.All", "Directory.Read.All"]
-            payload_part = access_token.split(".")[1]
-            payload_part += "=" * (-len(payload_part) % 4)
-            decoded_bytes = base64.urlsafe_b64decode(payload_part)
-            payload = json.loads(decoded_bytes)
-
-            granted_roles = set(payload.get("roles", []))
-            missing = [s for s in required_scopes if s not in granted_roles]
-            if missing:
-                raise Exception(
-                    f"Missing Required Permissions for App {client_id[:5]}...: "
-                    f"{', '.join(missing)}\n"
-                    f"Current Assigned Roles: {', '.join(granted_roles)}\n"
-                    "Please grant these Application permissions in Azure Portal."
-                )
-                
-            self.log_msg("Querying Graph API endpoint for SKUs...")
-            headers = {
-                "Authorization": f"Bearer {access_token}", 
-                "ConsistencyLevel": "eventual"
-            }
-            response = session.get(f"{GRAPH_BASE_URL}/subscribedSkus", headers=headers, timeout=30)
+            client.authenticate(required_scopes=required_scopes)
             
-            if response.status_code == 200:
-                sku_data = response.json()
-                async_logger.info("Successfully fetched SKU data.")
-                self.after(0, self._render_skus_success, sku_data)
-            else:
-                err_string = f"API Fetch Error [{response.status_code}]: {response.text}"
-                async_logger.error(err_string)
-                self.after(0, self._render_skus_error, err_string)
-
-        except requests.exceptions.RequestException as e:
-            err_msg = f"Network/Auth Error: {e}"
-            if e.response is not None:
-                err_msg += f" - {e.response.text}"
-            async_logger.error(err_msg, exc_info=True)
-            self.after(0, self._render_skus_error, err_msg)
+            self.log_msg("Querying Graph API endpoint for SKUs...")
+            dir_service = DirectoryService(client)
+            sku_data = dir_service.get_subscribed_skus()
+            client.close()
+            
+            async_logger.info("Successfully fetched SKU data.")
+            self.after(0, self._render_skus_success, sku_data)
         except Exception as e:
             async_logger.error("Exception caught in _execute_sku_worker.", exc_info=True)
             self.after(0, self._render_skus_error, str(e))
