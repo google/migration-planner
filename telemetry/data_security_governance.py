@@ -167,11 +167,15 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
             c0 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
             c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
-            ctk.CTkLabel(c0, text=name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+            lbl_name = ctk.CTkLabel(c0, text=name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
+            lbl_name.pack(padx=10, pady=6, anchor="w")
+            c0.bind("<Configure>", lambda e, l=lbl_name: l.configure(wraplength=e.width - 20))
 
             c1 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
             c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
-            ctk.CTkLabel(c1, text=desc, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+            lbl_desc = ctk.CTkLabel(c1, text=desc, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+            lbl_desc.pack(padx=10, pady=6, anchor="w")
+            c1.bind("<Configure>", lambda e, l=lbl_desc: l.configure(wraplength=e.width - 20))
 
             c2 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
             c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
@@ -179,7 +183,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
             c3 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
             c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
-            ctk.CTkLabel(c3, text=applicable, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+            lbl_app = ctk.CTkLabel(c3, text=applicable, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+            lbl_app.pack(padx=10, pady=6, anchor="w")
+            c3.bind("<Configure>", lambda e, l=lbl_app: l.configure(wraplength=e.width - 20))
 
             c4 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
             c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
