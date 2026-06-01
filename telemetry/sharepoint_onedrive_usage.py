@@ -155,6 +155,27 @@ def parse_onedrive_activity_csv(filepath):
         "sync_users": sync_users
     }
 
+def parse_onenote_users_csv(filepath):
+    """Streams the M365 App User Detail CSV and counts unique active OneNote users."""
+    usage_logger.info(f"Processing OneNote Users file: {os.path.basename(filepath)}")
+    if not os.path.exists(filepath):
+        usage_logger.error(f"Error: Could not find M365 App User Detail report {filepath}")
+        raise FileNotFoundError(f"M365 App User Detail report not found.")
+
+    onenote_users = 0
+
+    with open(filepath, mode="r", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row.get("Is Deleted", "").strip().upper() != "TRUE":
+                val = row.get("OneNote", "").strip().lower()
+                if val in ["yes", "true"]:
+                    onenote_users += 1
+
+    return {
+        "onenote_users": onenote_users
+    }
+
 def run_sharepoint_onedrive_pipeline(client_id, client_secret, tenant_id):
     """Pipeline specifically for SharePoint and OneDrive telemetry data collection."""
     usage_logger.info("Starting SharePoint & OneDrive Telemetry Pipeline...")
@@ -179,10 +200,14 @@ def run_sharepoint_onedrive_pipeline(client_id, client_secret, tenant_id):
     sp_data = parse_sharepoint_csv(os.path.join(reports_dir, "SharePointSiteUsageDetail(180d).csv"))
     od_data = parse_onedrive_csv(os.path.join(reports_dir, "OneDriveUsageAccountDetail(180d).csv"))
     od_act_data = parse_onedrive_activity_csv(os.path.join(reports_dir, "OneDriveActivityUserDetail(180d).csv"))
+    onenote_data = parse_onenote_users_csv(os.path.join(reports_dir, "M365AppUserDetail_sp_od(180d).csv"))
     
     # Merge active sync client user data into od_data
     od_data["sync_users"] = od_act_data["sync_users"]
     od_data["sync_users_pct"] = (od_act_data["sync_users"] / od_data["total_accounts"] * 100) if od_data["total_accounts"] > 0 else 0.0
+    
+    # Merge OneNote user data
+    od_data["onenote_users"] = onenote_data["onenote_users"]
     
     return {
         "sharepoint": sp_data,
@@ -299,7 +324,10 @@ class SharePointOneDriveUsageFrame(ctk.CTkFrame):
              f"{od.get('active_files', 0):,} Files ({od.get('active_files_pct', 0.0):.1f}%)"),
             ("Users with Synced Files", 
              "N/A", 
-             f"{od.get('sync_users', 0):,} Users ({od.get('sync_users_pct', 0.0):.1f}%)")
+             f"{od.get('sync_users', 0):,} Users ({od.get('sync_users_pct', 0.0):.1f}%)"),
+            ("OneNote Active Users", 
+             "N/A", 
+             f"{od.get('onenote_users', 0):,} Users")
         ]
 
         for r_idx, (metric_name, sp_val, od_val) in enumerate(rows_data, start=1):
