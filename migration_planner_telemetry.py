@@ -4,6 +4,8 @@
 import os
 import customtkinter as ctk
 from telemetry.license_usage import LicenseUsageTab, async_logger
+import logging
+from telemetry.power_automate import PowerAutomateScanner
 
 class TelemetryApp(ctk.CTk):
     """Standalone application for the License Usage and Telemetry view."""
@@ -38,6 +40,33 @@ class TelemetryApp(ctk.CTk):
         """Trigger an OS-level exit to cleanly bypass Tkinter background tasks."""
         self.destroy()
         os._exit(0)
+
+    def collect_power_automate_telemetry(tenant_id, client_id, client_secret, env_url):
+        """Integrates the Power Automate scan into the telemetry execution flow."""
+        # Orchestrator logging
+        logger = logging.getLogger("TelemetryOrchestrator")
+        logger.info("--- Power Automate Telemetry Phase Initiated ---")
+        
+        if not env_url:
+            logger.warning("Skipping Power Automate: Environment URL not provided.")
+            return {}
+
+        try:
+            scanner = PowerAutomateScanner(tenant_id, client_id, client_secret, env_url)
+            results = scanner.scan_flows()
+        
+            if results:
+                logger.info(f"Telemetry Success: Aggregated data for {results['total_active_flows']} flows.")
+                return results
+            else:
+                logger.error("Telemetry Warning: No flow data was returned from the scanner.")
+                return {}
+            
+        except Exception as e:
+            logger.error(f"Critical Error during Power Automate scan: {str(e)}")
+            return {}
+        finally:
+            logger.info("--- Power Automate Telemetry Phase Concluded ---")
 
 if __name__ == "__main__":
     ctk.set_appearance_mode("Light")

@@ -17,6 +17,7 @@ import customtkinter as ctk
 from telemetry import active_users_usage as usage
 from telemetry.sharepoint_onedrive_usage import SharePointOneDriveUsageFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
+from telemetry.power_automate import PowerAutomateScanner
 
 # Import unified core service layer
 from core.graph.client import GraphClient
@@ -91,6 +92,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.status_o365 = None
         self.status_o365_trend = None
         self.status_m365 = None
+        self.status_pa = None
 
         self.build_ui()
 
@@ -119,6 +121,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self._create_entry(inner_pad, "Tenant ID", self.lic_tenant_id)
         self._create_entry(inner_pad, "Client ID", self.lic_client_ids)
         self._create_entry(inner_pad, "Client Secret", self.lic_client_secrets, show="*")
+
 
         actions_frame = ctk.CTkFrame(self, fg_color="transparent")
         actions_frame.pack(fill="x", pady=(20, 10))
@@ -189,6 +192,23 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             status_change_callback=self._check_all_done
         )
 
+        # 7. Power Automate Section
+        self.pa_section = ctk.CTkFrame(self, fg_color="transparent")
+        self.pa_section.pack(fill="x", expand=True, pady=(20, 10))
+        pa_header = ctk.CTkFrame(self.pa_section, fg_color="transparent")
+        pa_header.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(pa_header, text="Power Automate", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        
+        self.btn_export_pa = ctk.CTkButton(
+            pa_header, text="Export Complex Flows", width=160, height=32, corner_radius=16,
+            font=FONT_BODY_BOLD, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
+            command=self.export_complex_flows, state="disabled"
+        )
+        self.btn_export_pa.pack(side="right")
+        self.pa_state_frame = ctk.CTkFrame(self.pa_section, fg_color="transparent")
+        self.pa_grid_frame = ctk.CTkFrame(self.pa_section, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+
         self._hide_all_grids()
 
     # -------------------------------------------------------------------------
@@ -201,8 +221,9 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.m365_section.pack_forget()
         self.sp_od_view.reset_view()
         self.security_gov_view.reset_view()
+        self.pa_section.pack_forget()
 
-        for grid in [self.lic_grid_frame, self.o365_grid_frame, self.o365_trend_grid_frame, self.m365_grid_frame]:
+        for grid in [self.lic_grid_frame, self.o365_grid_frame, self.o365_trend_grid_frame, self.m365_grid_frame, self.pa_grid_frame]:
             for w in grid.winfo_children():
                 w.destroy()
 
@@ -231,7 +252,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
 
     def _check_all_done(self):
         """Checks if all sections have resolved (success or error) and updates main UI."""
-        states = [self.status_sku, self.status_o365, self.status_o365_trend, self.status_m365, self.sp_od_view.status, self.security_gov_view.status]
+        states = [self.status_sku, self.status_o365, self.status_o365_trend, self.status_m365, self.sp_od_view.status, self.security_gov_view.status, self.status_pa]
 
         if "loading" in states:
             return
@@ -266,6 +287,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.retry_m365(clear_log=False)
         self.sp_od_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.security_gov_view.trigger_fetch(tenant, clients[0], secrets[0])
+        self.retry_power_automate(clear_log=False)
 
     # -------------------------------------------------------------------------
     # INDIVIDUAL RETRY HANDLERS
@@ -597,6 +619,182 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self._check_all_done()
 
     # -------------------------------------------------------------------------
+    # WORKER 5: POWER AUTOMATE LOGIC
+    # -------------------------------------------------------------------------
+    def retry_power_automate(self, clear_log=True):
+        if clear_log: async_logger.info("User requested individual Power Automate retry.")
+        tenant, clients, secrets = self._get_credentials()
+        if not tenant: return
+
+        self.status_pa = "loading"
+        self.pa_section.pack(fill="x", expand=True, pady=(20, 10))
+        self.pa_grid_frame.pack_forget()
+        self._set_state_loading(self.pa_state_frame, "Scanning Power Automate flows...")
+        threading.Thread(target=self._execute_pa_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
+
+    def _execute_pa_worker(self, tenant: str, client_id: str, client_secret: str):
+        async_logger.info("Executing thread: _execute_pa_worker")
+        try:
+            scanner = PowerAutomateScanner(tenant, client_id, client_secret)
+            results = scanner.scan_flows()
+            async_logger.info("Successfully completed Power Automate scan.")
+            self.after(0, self._render_pa_success, results)
+        except Exception as e:
+            async_logger.error("Exception caught in _execute_pa_worker.", exc_info=True)
+            self.after(0, self._render_pa_error, str(e))
+
+    def _render_pa_success(self, results: dict):
+        self.pa_state_frame.pack_forget()
+        for w in self.pa_grid_frame.winfo_children(): w.destroy()
+
+        self.pa_grid_frame.pack(fill="x", expand=True)
+
+        if not results:
+            empty_cell = ctk.CTkFrame(self.pa_grid_frame, fg_color="transparent")
+            empty_cell.pack(fill="x", expand=True, pady=15)
+            ctk.CTkLabel(empty_cell, text="No Power Automate data found.", text_color=COLOR_TEXT_SUB).pack()
+            self.status_pa = "success"
+            self._check_all_done()
+            return
+
+        total_envs = results.get("total_environments", 0)
+        counts = results.get("counts", {})
+        active_counts = results.get("active_counts", {})
+        tier_counts = results.get("tier_counts", {})
+        active_tier_counts = results.get("active_tier_counts", {})
+        premium_conns = results.get("premium_connectors", [])
+        custom_conns = results.get("custom_connectors", [])
+        complex_flows = results.get("complex_logic_flows", [])
+
+        total_flows = counts.get("Cloud Flows", 0) + counts.get("Desktop Flows", 0)
+
+        # 1. Summary Grid
+        summary_frame = ctk.CTkFrame(self.pa_grid_frame, fg_color="transparent")
+        summary_frame.pack(fill="x", pady=20)
+        
+        for i in range(2): summary_frame.grid_columnconfigure(i, weight=1)
+
+        headers_pa = ["Metric", "Value"]
+        for col_idx, head_text in enumerate(headers_pa):
+            cell = ctk.CTkFrame(summary_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        prem_str = ", ".join(premium_conns) if premium_conns else "0"
+        cust_str = ", ".join(custom_conns) if custom_conns else "0"
+
+        mapping = [
+            ("Total Environments Scanned", total_envs),
+            ("Total Flows (Active + Inactive)", total_flows),
+            ("Premium Connectors In Use", prem_str),
+            ("Custom Connectors In Use", cust_str),
+        ]
+
+        r_idx = 1
+        for label, val in mapping:
+            bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+            
+            c0 = ctk.CTkFrame(summary_frame, fg_color=bg_style, corner_radius=0)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+            ctk.CTkLabel(c0, text=label, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="nw")
+
+            c1 = ctk.CTkFrame(summary_frame, fg_color=bg_style, corner_radius=0)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
+            ctk.CTkLabel(c1, text=str(val), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, wraplength=400).pack(padx=10, pady=6, anchor="nw")
+            
+            r_idx += 1
+
+        # Cache complex flows for export
+        self.last_complex_flows = complex_flows
+        if complex_flows:
+            self.btn_export_pa.configure(state="normal")
+        else:
+            self.btn_export_pa.configure(state="disabled")
+
+        # 2. Charts Section
+        if total_flows > 0:
+            charts_frame = ctk.CTkFrame(self.pa_grid_frame, fg_color="transparent")
+            charts_frame.pack(fill="x", pady=20)
+            
+            if not MATPLOTLIB_AVAILABLE:
+                ctk.CTkLabel(charts_frame, text="Matplotlib is required to render charts.\nPlease install it using 'pip install matplotlib'.", text_color=COLOR_ERROR).pack(pady=15)
+            else:
+                try:
+                    # Increased size as requested
+                    fig, ax = plt.subplots(figsize=(12, 7), dpi=100)
+                    fig.patch.set_facecolor(COLOR_SURFACE)
+                    ax.set_facecolor(COLOR_SURFACE)
+                    
+                    categories = ['Cloud Flows', 'Desktop Flows', 'Personal Flows', 'Enterprise Flows', 'Complex Flows']
+                    
+                    c_total = counts.get("Cloud Flows", 0)
+                    c_active = active_counts.get("Cloud Flows", 0)
+                    c_inactive = c_total - c_active
+                    
+                    d_total = counts.get("Desktop Flows", 0)
+                    d_active = active_counts.get("Desktop Flows", 0)
+                    d_inactive = d_total - d_active
+                    
+                    p_total = tier_counts.get("Personal Productivity", 0)
+                    p_active = active_tier_counts.get("Personal Productivity", 0)
+                    p_inactive = p_total - p_active
+                    
+                    e_total = tier_counts.get("Enterprise/Departmental", 0)
+                    e_active = active_tier_counts.get("Enterprise/Departmental", 0)
+                    e_inactive = e_total - e_active
+                    
+                    complex_active = sum(1 for f in complex_flows if f.get("Active") == "Yes")
+                    complex_inactive = len(complex_flows) - complex_active
+                    
+                    actives = [c_active, d_active, p_active, e_active, complex_active]
+                    inactives = [c_inactive, d_inactive, p_inactive, e_inactive, complex_inactive]
+                    
+                    x = range(len(categories))
+                    width = 0.15  # Reduced width of the bars
+                    
+                    color_active = COLOR_PRIMARY
+                    color_inactive = COLOR_TONAL_BG
+                    
+                    rects1 = ax.bar(x, actives, width, label='Active', color=color_active)
+                    rects2 = ax.bar([i + width for i in x], inactives, width, label='Inactive', color=color_inactive)
+                    
+                    ax.set_ylabel('Count', color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
+                    ax.set_title('Power Automate Flows Breakdown', color=COLOR_TEXT_MAIN, fontsize=18, fontweight='bold')
+                    ax.set_xticks([i + width/2 for i in x])
+                    ax.set_xticklabels(categories, color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
+                    ax.legend(facecolor=COLOR_SURFACE, edgecolor=COLOR_OUTLINE_LIGHT, labelcolor=COLOR_TEXT_MAIN, prop={'weight':'bold', 'size':12})
+                    
+                    ax.bar_label(rects1, padding=3, color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
+                    ax.bar_label(rects2, padding=3, color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
+                    
+                    for spine in ax.spines.values():
+                        spine.set_color(COLOR_OUTLINE_LIGHT)
+                    
+                    ax.tick_params(axis='y', colors=COLOR_TEXT_MAIN, labelsize=12)
+                    for label in ax.get_yticklabels():
+                        label.set_fontweight('bold')
+                    
+                    max_val = max(max(actives), max(inactives))
+                    ax.set_ylim(0, max(max_val + 3, int(max_val * 1.3)))
+                    
+                    fig.tight_layout()
+                    canvas = FigureCanvasTkAgg(fig, master=charts_frame)
+                    canvas.draw()
+                    # Allow it to expand more in width
+                    canvas.get_tk_widget().pack(fill="x", padx=50, pady=10)
+                    
+                except Exception as e:
+                    async_logger.error(f"Error drawing Power Automate charts: {e}", exc_info=True)
+
+        self.status_pa = "success"
+        self._check_all_done()
+
+    def _render_pa_error(self, err_msg):
+        self._set_state_error(self.pa_state_frame, f"Failed to load Power Automate Telemetry: {err_msg}", self.retry_power_automate)
+        self.status_pa = "error"
+        self._check_all_done()
+
+    # -------------------------------------------------------------------------
     # SPREADSHEET EXPORT LOGIC (SKUs)
     # -------------------------------------------------------------------------
     def export_licenses_spreadsheet(self):
@@ -653,6 +851,48 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
                 writer.writerows(rows)
             async_logger.info("Spreadsheet exported successfully.")
             messagebox.showinfo("Export Successful", f"Spreadsheet successfully saved to:\n{f}", parent=self)
+        except Exception as e:
+            async_logger.error("Failed writing export spreadsheet to disk.", exc_info=True)
+            messagebox.showerror("Export Error", f"Failed to save file:\n{e}", parent=self)
+
+    def export_complex_flows(self):
+        """Exports the complex flows to a CSV."""
+        async_logger.info("Exporting complex flows to local spreadsheet requested.")
+        if not hasattr(self, "last_complex_flows") or not self.last_complex_flows:
+            async_logger.warning("Export aborted: No cached complex flows available to export.")
+            return
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"complex_flows_{ts}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV Spreadsheet", "*.csv")]
+        )
+
+        if not f:
+            async_logger.info("Export aborted by user (dialog cancelled).")
+            return
+
+        headers = ["Environment", "Name", "Type", "Tier", "Active", "Reason"]
+        rows = []
+
+        for flow in self.last_complex_flows:
+            rows.append([
+                flow.get("Environment"),
+                flow.get("Name"),
+                flow.get("Type"),
+                flow.get("Tier"),
+                flow.get("Active"),
+                flow.get("Reason")
+            ])
+
+        try:
+            with open(f, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(headers)
+                writer.writerows(rows)
+            async_logger.info("Complex flows exported successfully.")
+            messagebox.showinfo("Export Successful", f"Complex flows successfully saved to:\n{f}", parent=self)
         except Exception as e:
             async_logger.error("Failed writing export spreadsheet to disk.", exc_info=True)
             messagebox.showerror("Export Error", f"Failed to save file:\n{e}", parent=self)
