@@ -87,7 +87,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 3.  **Install Dependencies**: Run the following command:
     ```cmd
-    pip install customtkinter requests pandas psutil Pillow urllib3 aiohttp certifi
+    pip install customtkinter requests pandas psutil Pillow urllib3 aiohttp certifi matplotlib
     ```
 
 #### macOS
@@ -118,7 +118,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 3.  **Install Dependencies**:
     ```bash
-    pip3 install customtkinter requests pandas psutil Pillow urllib3 aiohttp certifi
+    pip3 install customtkinter requests pandas psutil Pillow urllib3 aiohttp certifi matplotlib
     ```
 
 ### 3. Setting up a Virtual Environment (Optional / Corp Policy)
