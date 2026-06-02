@@ -27,10 +27,10 @@ class TelemetryApp(ctk.CTk):
         self.retries = ctk.IntVar(value=30)  # CITATION: self.retries = ctk.IntVar(value=30)
         self.backoff = ctk.IntVar(value=2)  # CITATION: self.backoff = ctk.IntVar(value=2)
 
-        # Shared credential string variables to bind to entries on Page 1
-        self.tenant_id_var = ctk.StringVar()
-        self.client_id_var = ctk.StringVar()
-        self.client_secret_var = ctk.StringVar()
+        # Stage 1: In-memory variables to store connection credentials
+        self.stored_tenant = ""
+        self.stored_client = ""
+        self.stored_secret = ""
 
         # Page containers
         self.auth_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -89,19 +89,19 @@ class TelemetryApp(ctk.CTk):
         # Tenant ID Input
         self.tenant_lbl = ctk.CTkLabel(self.form_container, text="Tenant ID", font=ctk.CTkFont(size=14, weight="bold"), text_color="#374151")
         self.tenant_lbl.pack(anchor="w", pady=(10, 5))
-        self.tenant_entry = ctk.CTkEntry(self.form_container, textvariable=self.tenant_id_var, width=500, height=40, placeholder_text="Enter Tenant ID")
+        self.tenant_entry = ctk.CTkEntry(self.form_container, width=500, height=40, placeholder_text="Enter Tenant ID")
         self.tenant_entry.pack(fill="x", pady=(0, 15))
 
         # Client ID Input
         self.client_lbl = ctk.CTkLabel(self.form_container, text="Client ID", font=ctk.CTkFont(size=14, weight="bold"), text_color="#374151")
         self.client_lbl.pack(anchor="w", pady=(10, 5))
-        self.client_entry = ctk.CTkEntry(self.form_container, textvariable=self.client_id_var, width=500, height=40, placeholder_text="Enter Client ID")
+        self.client_entry = ctk.CTkEntry(self.form_container, width=500, height=40, placeholder_text="Enter Client ID")
         self.client_entry.pack(fill="x", pady=(0, 15))
 
         # Client Secret Input
         self.secret_lbl = ctk.CTkLabel(self.form_container, text="Client Secret", font=ctk.CTkFont(size=14, weight="bold"), text_color="#374151")
         self.secret_lbl.pack(anchor="w", pady=(10, 5))
-        self.secret_entry = ctk.CTkEntry(self.form_container, textvariable=self.client_secret_var, width=500, height=40, show="*", placeholder_text="Enter Client Secret")
+        self.secret_entry = ctk.CTkEntry(self.form_container, width=500, height=40, show="*", placeholder_text="Enter Client Secret")
         self.secret_entry.pack(fill="x", pady=(0, 30))
 
         # Status & Feedback Display
@@ -111,7 +111,7 @@ class TelemetryApp(ctk.CTk):
         # Action Submission Trigger
         self.connect_btn = ctk.CTkButton(
             self.form_container,
-            text="Connect & Pull Reports",
+            text="Connect & Continue",  # Updated to denote transitioning without immediate fetch
             command=self.on_connect_clicked,
             height=45,
             fg_color="#1E3A8A",
@@ -131,7 +131,7 @@ class TelemetryApp(ctk.CTk):
         self.reports_page.pack(fill="both", expand=True)
 
     def on_connect_clicked(self):
-        """Validates credentials and programmatically submits connection queries."""
+        """Validates inputs, caches credentials in-memory, and transitions to Page 2."""
         tenant = self.tenant_entry.get().strip()
         client = self.client_entry.get().strip()
         secret = self.secret_entry.get().strip()
@@ -142,10 +142,12 @@ class TelemetryApp(ctk.CTk):
 
         self.auth_status_lbl.configure(text="")
 
-        # Map current Page 1 input entries to nested layout inputs dynamically
-        self.reports_page.map_credentials_and_run(tenant, client, secret)
+        # Cache connection details safely in memory (Stage 1)
+        self.stored_tenant = tenant
+        self.stored_client = client
+        self.stored_secret = secret
 
-        # Switch view to Page 2 (Reports dashboard screen)
+        # Switch view to Page 2 (Reports screen) without executing backend fetching threads
         self.show_reports_page()
 
     def on_disconnect_clicked(self):
@@ -155,6 +157,11 @@ class TelemetryApp(ctk.CTk):
         self.client_entry.delete(0, "end")
         self.secret_entry.delete(0, "end")
         self.auth_status_lbl.configure(text="")
+
+        # Wipes stored in-memory configurations
+        self.stored_tenant = ""
+        self.stored_client = ""
+        self.stored_secret = ""
 
         # Clears variables inside nested dashboards
         self.reports_page.clear_session_data()
@@ -189,11 +196,11 @@ class ReportsPage(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         self.controller = controller
 
-        # 1. Left Collapsible Navigation Panel
+        # 1. Left Collapsible Navigation Sidebar
         self.sidebar = SidebarFrame(self, disconnect_callback=self.controller.on_disconnect_clicked)
         self.sidebar.pack(side="left", fill="y", padx=(0, 10))
 
-        # 2. Right-hand Main Dashboard Frame
+        # 2. Right-hand Main Dashboard Container
         self.dashboard_container = ctk.CTkFrame(self, fg_color="transparent")
         self.dashboard_container.pack(side="right", fill="both", expand=True)
 
@@ -209,21 +216,38 @@ class ReportsPage(ctk.CTkFrame):
         self.nav_header.pack(fill="x", pady=(0, 15))
         self.nav_header.pack_propagate(False)
 
+        # Text container frame to keep alignment clean next to the Action Button
+        self.header_text_frame = ctk.CTkFrame(self.nav_header, fg_color="transparent")
+        self.header_text_frame.pack(side="left", padx=(20, 10), pady=(12, 0), anchor="w")
+
         self.nav_title = ctk.CTkLabel(
-            self.nav_header,
+            self.header_text_frame,
             text="Usage and adoption data",  # Match screenshot header text precisely
             font=ctk.CTkFont(size=20, weight="bold"),
             text_color="#111827"
         )
-        self.nav_title.pack(side="left", padx=(20, 10), pady=(12, 0), anchor="w")
+        self.nav_title.pack(anchor="w")
 
         self.nav_subtitle = ctk.CTkLabel(
-            self.nav_header,
+            self.header_text_frame,
             text="Overview of your current plans and how people are using applications.",
             font=ctk.CTkFont(size=12),
             text_color="#6B7280"
         )
-        self.nav_subtitle.pack(side="left", padx=(10, 20), pady=(18, 0), anchor="w")
+        self.nav_subtitle.pack(anchor="w", pady=(2, 0))
+
+        # 3. Fetch Report button on the right side of the header panel (Stage 2)
+        self.fetch_btn = ctk.CTkButton(
+            self.nav_header,
+            text="Fetch Report",
+            command=self.on_fetch_report_clicked,
+            width=150,
+            height=36,
+            fg_color="#1E3A8A",
+            hover_color="#172554",
+            font=ctk.CTkFont(size=13, weight="bold")
+        )
+        self.fetch_btn.pack(side="right", padx=20, pady=17)
 
         # Initialize the telemetry view (No TabView layout)
         self.license_usage_view = LicenseUsageTab(  # CITATION: self.license_usage_view = LicenseUsageTab(
@@ -273,8 +297,19 @@ class ReportsPage(ctk.CTkFrame):
             self.embedded_submit_btn.pack_forget()
             self.embedded_submit_btn.grid_forget()
 
-    def map_credentials_and_run(self, tenant, client, secret):
-        """Passes input values into hidden endpoints of LicenseUsageTab and runs validation query."""
+    def on_fetch_report_clicked(self):
+        """Stage 2: Migrates stored variables into the hidden entries and clicks the submit thread."""
+        tenant = self.controller.stored_tenant
+        client = self.controller.stored_client
+        secret = self.controller.stored_secret
+
+        if not tenant or not client or not secret:
+            return
+
+        # Disable the trigger button and update visual text during background thread audit
+        self.fetch_btn.configure(state="disabled", text="Fetching...", fg_color="#64748B")
+
+        # Map credentials into the hidden layout entries dynamically
         if len(self.embedded_entries) >= 3:
             self.embedded_entries[0].delete(0, "end")
             self.embedded_entries[0].insert(0, tenant)
@@ -285,13 +320,17 @@ class ReportsPage(ctk.CTkFrame):
             self.embedded_entries[2].delete(0, "end")
             self.embedded_entries[2].insert(0, secret)
 
+        # Programmatically trigger the hidden connection submit button
         if self.embedded_submit_btn:
             self.embedded_submit_btn.invoke()
 
     def clear_session_data(self):
-        """Wipes the cached parameters from telemetry objects."""
+        """Wipes the cached parameters from telemetry objects and resets the Fetch button."""
         for entry in self.embedded_entries:
             entry.delete(0, "end")
+        
+        # Reset Fetch Report button state
+        self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color="#1E3A8A")
 
 
 class SidebarFrame(ctk.CTkFrame):
@@ -380,7 +419,6 @@ class SidebarFrame(ctk.CTkFrame):
         )
         self.disconnect_symbol.pack(side="left", padx=(12, 6))
 
-        # Changed font weight from "medium" to standard "normal" to bypass Tcl constraints
         self.disconnect_btn = ctk.CTkButton(
             self.disconnect_row,
             text="Disconnect",
