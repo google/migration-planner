@@ -132,3 +132,16 @@ class ReportsService:
             ("https://graph.microsoft.com/v1.0/reports/getM365AppUserDetail(period='D180')", "M365AppUserDetail_sp_od(180d).csv")
         ]
         self.download_reports_batch(reports, output_dir)
+
+    def download_sharepoint_details(self, output_dir: str) -> None:
+        """Downloads only SharePoint site usage detail report."""
+        self.download_report("https://graph.microsoft.com/v1.0/reports/getSharePointSiteUsageDetail(period='D180')", "SharePointSiteUsageDetail(180d).csv", output_dir)
+
+    def download_onedrive_details(self, output_dir: str) -> None:
+        """Downloads OneDrive usage account, activity, and app user detail reports concurrently."""
+        reports = [
+            ("https://graph.microsoft.com/v1.0/reports/getOneDriveUsageAccountDetail(period='D180')", "OneDriveUsageAccountDetail(180d).csv"),
+            ("https://graph.microsoft.com/v1.0/reports/getOneDriveActivityUserDetail(period='D180')", "OneDriveActivityUserDetail(180d).csv"),
+            ("https://graph.microsoft.com/v1.0/reports/getM365AppUserDetail(period='D180')", "M365AppUserDetail_sp_od(180d).csv")
+        ]
+        self.download_reports_batch(reports, output_dir)

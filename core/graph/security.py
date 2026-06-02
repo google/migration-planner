@@ -46,3 +46,5 @@ class SecurityService:
                 raise ConnectionError(f"Microsoft Graph API request failed with status {resp.status_code}")
         finally:
             self.client.release_token(token_slot)
+
+

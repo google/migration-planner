@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 import customtkinter as ctk
 
 from telemetry import active_users_usage as usage
-from telemetry.sharepoint_onedrive_usage import SharePointOneDriveUsageFrame
+from telemetry.sharepoint_onedrive_usage import SharePointUsageFrame, OneDriveUsageFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
 from telemetry.power_automate import PowerAutomateScanner
 
@@ -93,6 +93,8 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.status_o365_trend = None
         self.status_m365 = None
         self.status_pa = None
+        self.status_sharepoint = None
+        self.status_onedrive = None
 
         self.build_ui()
 
@@ -176,8 +178,16 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.m365_state_frame = ctk.CTkFrame(self.m365_section, fg_color="transparent")
         self.m365_grid_frame = ctk.CTkFrame(self.m365_section, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
-        # 5. SharePoint & OneDrive Telemetry Section (Modular Integration)
-        self.sp_od_view = SharePointOneDriveUsageFrame(
+        # 5a. SharePoint Telemetry Section (Modular Integration)
+        self.sharepoint_view = SharePointUsageFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done
+        )
+
+        # 5b. OneDrive Telemetry Section (Modular Integration)
+        self.onedrive_view = OneDriveUsageFrame(
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
@@ -219,7 +229,8 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.o365_section.pack_forget()
         self.o365_trend_section.pack_forget()
         self.m365_section.pack_forget()
-        self.sp_od_view.reset_view()
+        self.sharepoint_view.reset_view()
+        self.onedrive_view.reset_view()
         self.security_gov_view.reset_view()
         self.pa_section.pack_forget()
 
@@ -252,7 +263,11 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
 
     def _check_all_done(self):
         """Checks if all sections have resolved (success or error) and updates main UI."""
-        states = [self.status_sku, self.status_o365, self.status_o365_trend, self.status_m365, self.sp_od_view.status, self.security_gov_view.status, self.status_pa]
+        states = [
+            self.status_sku, self.status_o365, self.status_o365_trend, self.status_m365,
+            self.sharepoint_view.status, self.onedrive_view.status, self.security_gov_view.status,
+            self.status_pa
+        ]
 
         if "loading" in states:
             return
@@ -285,7 +300,8 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.retry_o365(clear_log=False)
         self.retry_o365_trend(clear_log=False)
         self.retry_m365(clear_log=False)
-        self.sp_od_view.trigger_fetch(tenant, clients[0], secrets[0])
+        self.sharepoint_view.trigger_fetch(tenant, clients[0], secrets[0])
+        self.onedrive_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.security_gov_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.retry_power_automate(clear_log=False)
 
