@@ -155,7 +155,8 @@ def generate_data(
         if level >= max_level:
             return
             
-        num_subsites = random.randint(0, max_subsites_per_site)
+        min_subsites = 1 if level < 2 else 0
+        num_subsites = random.randint(min_subsites, max_subsites_per_site)
         for _ in range(num_subsites):
             site_id = f"site-{site_id_counter}"
             site_id_counter += 1

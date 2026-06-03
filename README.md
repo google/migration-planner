@@ -1,11 +1,11 @@
 # Migration Planner Tool
 
-**Doc version: v2.0.0**
+**Doc version: v2.1.0**
 
 ## What's new
 
 - **Microsoft Teams & Chat Migration Planning**: Full support for scanning and projecting migration timelines for Microsoft Teams, Channels, and Private Chats alongside Exchange Online.
-- **Files in OneDrive Planning**: Support added for metrics related to OneDrive sites.
+- **Files in OneDrive / SharePoint Planning**: Support added for metrics related to OneDrive / SharePoint sites.
 - **Process-Level Decoupling Architecture**: Architectural refactoring that decouples the launcher (`migration_planner.py`) and individual workload planners into isolated OS subprocesses to prevent runtime contention, memory corruption, or GIL clashes during highly concurrent MS Graph API scanning.
 - **Bidirectional Navigation**: Addition of a top navigation bar featuring a `← Back to Selector` button for seamless transitions between workload planners.
 
@@ -36,7 +36,7 @@
 ### Functionality Limitations
 
 *   This tool only provides migration time estimates for the new Data Migration Service with specific enhancements for large scale migrations. It does not cover Google Workspace Migrate, or any other data migration tool.
-*   Microsoft Exchange Online, Microsoft OneDrive and Microsoft Teams / Private Chat scan and migration planning is supported. ETAs are based on Email and Chat/Channel corpus projections. ETA projections are not yet supported for Onedrive flow.
+*   Microsoft Exchange Online, Microsoft OneDrive / SharePoint and Microsoft Teams / Private Chat scan and migration planning is supported. ETAs are based on Email and Chat/Channel corpus projections. ETA projections are not yet supported for Onedrive flow.
 *   This tool only provides a guesstimate, and migration timelines should in no way be taken as guarantee or SLA.
 
 ---
@@ -58,15 +58,15 @@
 - [Running the Tool & Process Decoupling](#running-the-tool--process-decoupling)
 - [Tool Configuration & Scanning](#tool-configuration--scanning)
   - [Workflow A: Exchange Online Planner](#workflow-a-exchange-online-planner)
-  - [Workflow B: Microsoft OneDrive Planner](#workflow-b-microsoft-onedrive)
+  - [Workflow B: Microsoft Files (OneDrive + SharePoint) Planner](#workflow-b-microsoft-onedrive--sharepoint)
   - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-microsoft-teams--chat-planner)
 - [Understanding the Results](#understanding-the-results)
   - [Workflow A: Exchange Online Planner](#workflow-a-results-exchange-online-planner)
-  - [Workflow B: Microsoft OneDrive Planner](#workflow-b-results-microsoft-onedrive)
+  - [Workflow B: Microsoft Files (OneDrive + SharePoint) Planner](#workflow-b-results-microsoft-onedrive--sharepoint)
   - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-results-microsoft-teams--chat-planner)
 - [Outputs & Artifacts](#outputs--artifacts)
   - [Workflow A: Exchange Online Planner](#workflow-a-outputs-exchange-online-planner)
-  - [Workflow B: Microsoft OneDrive Planner](#workflow-b-outputs-microsoft-onedrive)
+  - [Workflow B: Microsoft Files (OneDrive + SharePoint) Planner](#workflow-b-outputs-microsoft-onedrive--sharepoint)
   - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-outputs-microsoft-teams--chat-planner)
 - [Terms & Disclaimer](#terms--disclaimer)
 
@@ -74,7 +74,7 @@
 
 ## Introduction
 
-The Migration Planner is a desktop application designed to help deployment partners and IT administrators assess a Microsoft 365 tenant before migration. Through its process-decoupled architecture, administrators can independently assess Exchange Online (Emails, Contacts, Calendars, In-Place Archives, Group Mails), Files in OneDrive or Microsoft Teams (Channels, Private Chats) to provide volume metrics and generate optimized Migration Batch Plans with estimated completion times (ETAs) (not applicable for files estimation).
+The Migration Planner is a desktop application designed to help deployment partners and IT administrators assess a Microsoft 365 tenant before migration. Through its process-decoupled architecture, administrators can independently assess Exchange Online (Emails, Contacts, Calendars, In-Place Archives, Group Mails), Files in OneDrive / SharePoint or Microsoft Teams (Channels, Private Chats) to provide volume metrics and generate optimized Migration Batch Plans with estimated completion times (ETAs) (not applicable for files estimation).
 
 ---
 
@@ -184,7 +184,7 @@ In your new app, go to **API permissions > Add a permission > Microsoft Graph > 
 *   `TeamMember.Read.All` (To read team memberships)
 *   `Group.Read.All` (To list teams)
 
-### Files Planner Specific Persmissions
+### Files Planner Specific Permissions
 *   `Sites.Read.All` (To list sites)
 *   `Files.Read.All` (To count files)
 *   `LicenseAssignment.Read.All` (To check license information)
@@ -240,22 +240,36 @@ Click **"Show Advanced Settings"** to tune the performance:
 *   **Concurrency**: Controls how many parallel threads the tool runs.
     *   **Recommendation**: For a standard machine (8 Core, 16GB+ RAM), set this to **30**. Setting it too high may cause more frequent throttling errors from Microsoft and consume more resources from your system.
 *   **Max Batches**: Defines the upper cap for the number of batches to be generated by the migration plan. In case of very large corpuses, it might not be possible to adhere to this number.
-*   **Site Types to Scan**: Users can select whether they want to scan Personal sites, Team sites or both.
 
 ---
 
-### Workflow B: Microsoft OneDrive
+### Workflow B: Microsoft OneDrive / SharePoint
 
 #### 1. Connect & Source Selection
 *   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret.
 *   **User Source**:
     *   **Scan All Sites**: Scans all the Sites in the tenant.
-    *   **Upload CSV**: Allows you to scan a specific subset of users.
+    *   **Upload CSV**: Allows you to scan a specific subset of users / site collections. Users and Site collections are differentiated by their expected regex. Site collections are expected to start with `https://` or `http://` while users are expected to have the standard email regex.
+
+    Note that for CSV flow, only one column by the name `Entity` is expected. The provided entries under this column are split into SharePoint sites and OneDrive user emails based on their regex. Several validations are added to ensure the integrity of the input CSV. Some of them include validations around not allowing emails if only SharePoint scanning is enabled, or not allowing site collections if only OneDrive scanning is enabled. If the user does not provide a valid CSV or provides a CSV with invalid entries, a error message is displayed and the tool does not proceed with the scan.
+
+    Also if invalid entries that pass the regex checks are provided they'll be skipped during discovery and will not be shown in the final report. Please refer to the logs for details around these invalid entries.
+
+    PFB an example of a valid CSV
+
+    ```csv
+    Entity
+    bugbash4@smh3v.onmicrosoft.com
+    https://smh3v.sharepoint.com/sites/sc2
+    https://smh3v.sharepoint.com/
+
+    ```
 
 #### 2. Advanced Settings
 Click **"Show Advanced Settings"** to tune the performance and select your estimation mode:
 *   **Site Types to Scan**:
-    *   **Personal Site**: Scans all the Personal / OneDrive sites in the tenant.
+    *   **Personal Sites (OneDrive)**: Scans all the Personal / OneDrive sites in the tenant.
+    *   **SharePoint Sites**: Scans all the SharePoint sites in the tenant.
 *   **Concurrency**: Controls how many parallel threads the tool runs. Note that this number is not the exact number of threads spawned but is a guidance on the thread count.
 
 #### 3. Starting the Scan
@@ -329,7 +343,7 @@ The tool calculates an Estimated Completion Time (ETA) based on the email corpus
 
 ---
 
-### Workflow B Results: Microsoft OneDrive
+### Workflow B Results: Microsoft OneDrive / SharePoint
 
 #### 1. Top Level Metrics
 For OneDrive we show the following metrics in the UI report.
@@ -344,7 +358,7 @@ For OneDrive we show the following metrics in the UI report.
 *   **File Size Distribution**: Distribution of files by size as per the buckets provided in input.
 *   **Large Resources Count**: Number of Resources (folders) whose subtree item count is > 500k.
 
-The CSV report would include the above mentioned details along with the granular site level details.
+The CSV report would include the above mentioned details along with the granular site level details. If both Personal (OneDrive) and SharePoint Sites were scanned then results for both will be shown separately in the CSV report.
 
 ---
 
@@ -377,7 +391,7 @@ You can also download just the log file via the **"Export logs"** button or the 
 
 ---
 
-### Workflow B Outputs: Microsoft OneDrive
+### Workflow B Outputs: Microsoft OneDrive / SharePoint
 
 Once the scan completes, the artifacts (CSV report and logs) can be downloaded via the "Export logs" and "Export full report" buttons in the UI.
 

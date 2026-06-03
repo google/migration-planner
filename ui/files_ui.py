@@ -13,6 +13,7 @@ from util.enums import FailureType
 import json
 import pandas as pd
 import math
+import re
 
 def format_range(low, high):
   def format_boundary(kb_val):
@@ -65,6 +66,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     super().setup_variables()
     self.include_personal_sites = ctk.BooleanVar(value=True)
     self.include_team_sites = ctk.BooleanVar(value=False)
+
+  def _is_valid_email(self, val):
+    return bool(re.match(r'^[^@]+@[^@]+\.[^@]+$', val))
+
+  def _is_valid_url(self, val):
+    return val.startswith("http://") or val.startswith("https://")
 
   # ==========================
   # VIEW: CONFIGURATION
@@ -150,12 +157,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     
     ctk.CTkCheckBox(
         site_options_frame,
-        text="Team Sites",
+        text="SharePoint Sites",
         variable=self.include_team_sites,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-        state="disabled"
     ).pack(side="left", padx=10)
     
     # Concurrency settings
@@ -189,9 +195,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           if widget.winfo_exists():
             text = f"Sites: {count}"
             if team_site_count > 0:
-              text += f" | Team Sites: {team_site_count}"
+              text += f" | SharePoint Sites: {team_site_count}"
             if personal_site_count > 0:
-              text += f" | Personal Sites: {personal_site_count}"
+              text += f" | Personal (OneDrive) Sites: {personal_site_count}"
             if list_count > 0:
               text += f" | Lists: {list_count}"
             if drive_count > 0:
@@ -348,11 +354,30 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     df_input = pd.read_csv(config.csv_path)
     df_input.columns = df_input.columns.str.strip()
     
-    id_col = next((c for c in df_input.columns if c.lower() in ["email id"]), None)
-    if not id_col:
-      raise Exception("CSV must contain a column for Email Id.")
-      
-    return {"emailIds": [email.strip() for email in df_input[id_col].tolist()]}
+    include_personal = self.include_personal_sites.get()
+    include_team = self.include_team_sites.get()
+    
+    email_ids = []
+    site_urls = []
+
+    def _get_entity_type(val):
+      val = str(val).strip().lower()
+      if self._is_valid_email(val):
+        return "onedrive"
+      elif self._is_valid_url(val):
+        return "sharepoint"
+      else:
+        raise ValueError(f"Invalid entity type: {val}")
+    
+    for _, row in df_input.iterrows():
+      entity = str(row["Entity"]).strip()
+      row_type = _get_entity_type(entity)
+      if row_type == "onedrive":
+        email_ids.append(entity)
+      elif row_type == "sharepoint":
+        site_urls.append(entity)
+        
+    return {"emailIds": email_ids, "siteUrls": site_urls}
 
   def _get_display_name(
     self,
@@ -979,6 +1004,57 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       ).pack(padx=20, pady=20)
       self.view_results.pack(fill="both", expand=True)
 
+  def _validate_csv(self):
+    csv_path = self.user_csv_path.get()
+    if not csv_path or not os.path.exists(csv_path):
+      messagebox.showerror("Validation Error", "CSV path invalid or file not found.")
+      raise ValueError("CSV path invalid or file not found.")
+
+    try:
+      df = pd.read_csv(csv_path)
+    except Exception as e:
+      messagebox.showerror("Validation Error", f"Failed to read CSV file: {e}")
+      raise ValueError(f"Failed to read CSV file: {e}")
+
+    df.columns = df.columns.str.strip()
+
+    # 1. No empty rows
+    if df.empty:
+      messagebox.showerror("Validation Error", "CSV file is empty.")
+      raise ValueError("CSV file is empty.")
+
+    # 2. No empty/null fields/cells present in any row
+    if df.isnull().any().any():
+      messagebox.showerror("Validation Error", "CSV contains empty or null values.")
+      raise ValueError("CSV contains empty or null values.")
+
+    for col in df.columns:
+      if (df[col].astype(str).str.strip() == "").any():
+        messagebox.showerror("Validation Error", f"CSV contains empty values in column '{col}'.")
+        raise ValueError(f"CSV contains empty values in column '{col}'.")
+
+    # 3. Check columns and types
+    include_personal = self.include_personal_sites.get()
+    include_team = self.include_team_sites.get()
+
+    expected_cols = {"Entity"}
+    if set(df.columns) != expected_cols:
+      messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column.")
+      raise ValueError("CSV must contain exactly the 'Entity' column.")
+
+    for idx, row in df.iterrows():
+      entity = str(row["Entity"]).strip()
+      if not self._is_valid_email(entity) and not self._is_valid_url(entity):
+        messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid UPN/Email ID or Site Collection URL.")
+        raise ValueError(f"Invalid Email ID / Site Collection Url at row {idx+2}")
+      
+      if self._is_valid_email(entity) and not include_personal:
+        messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is a UPN/Email ID. Please enable Include Personal Sites in the config.")
+        raise ValueError(f"Unexpected Email ID at row {idx+2}")
+      
+      if self._is_valid_url(entity) and not include_team:
+        messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is a Site Collection URL. Please enable Include Sharepoint Sites in the config.")
+        raise ValueError(f"Unexpected Site Collection URL at row {idx+2}")
 
   def export_current_report(self):
     if not hasattr(self, "last_scan_data"):
@@ -1027,11 +1103,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ("Total Corpus Size", self.format_size(total_corpus_size)),
           ("Site Collection Count", data.get("siteCount", 0)),
           ("Subsite Count", data.get("subsiteCount", 0)),
-          ("Personal Site / Subsite Count", data.get("personalSiteCount", 0)),
-          ("Team Site / Subsite Count", data.get("teamSiteCount", 0)),
+          ("Personal (OneDrive) Site / Subsite Count", data.get("personalSiteCount", 0)),
+          ("SharePoint Site / Subsite Count", data.get("teamSiteCount", 0)),
           ("DL Count", sum(data.get("driveCounts", {}).values())),
-          ("Personal DL Count", data.get("personalSiteDLCount", 0)),
-          ("Team DL Count", data.get("teamSiteDLCount", 0)),
+          ("Personal (OneDrive) DL Count", data.get("personalSiteDLCount", 0)),
+          ("SharePoint DL Count", data.get("teamSiteDLCount", 0)),
           ("List Count", data.get("listCount", 0)),
           ("Folder Count", data.get("folderCount", 0)),
           ("File Count", data.get("fileCount", 0)),
@@ -1108,7 +1184,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         df = data.get("df")
         
         site_metric_arr = [personal_site_metrics, team_site_metrics]
-        headers_arr = ["Personal Sites", "Team Sites"]
+        headers_arr = ["Personal (OneDrive) Sites", "SharePoint Sites"]
 
         for idx in range(0, len(site_metric_arr)):
           if len(site_metric_arr[idx]) == 0:
@@ -1168,13 +1244,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
   def start_scan(self):    
     if not self.include_personal_sites.get() and not self.include_team_sites.get():
-      messagebox.showerror("Validation Error", "At least one site type (Personal or Team) must be selected!")
+      messagebox.showerror("Validation Error", "At least one site type (Personal (OneDrive) or SharePoint) must be selected!")
       return
       
-    if self.user_source.get() == "csv" and self.include_team_sites.get():
-      messagebox.showerror("Validation Error", "CSV Upload only supports Personal Sites (OneDrive) scanning. Please uncheck Team Sites.")
-      raise ValueError("CSV Upload only supports Personal Sites (OneDrive) scanning.")
-      
+    if self.user_source.get() == "csv":
+      self._validate_csv()
+
     # Save values to regular variables to avoid thread-safety issues in Tkinter
     self.val_include_personal_sites = self.include_personal_sites.get()
     self.val_include_team_sites = self.include_team_sites.get()

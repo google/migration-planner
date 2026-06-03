@@ -204,7 +204,7 @@ class TestFileEstimatorLoad(unittest.TestCase):
         expected = {
             "siteCount": len(root_site_ids),
             "subsiteCount": len(all_site_ids) - len(root_site_ids),
-            "personalSiteCount": len(root_site_ids),
+            "personalSiteCount": len(email_ids),
             "teamSiteCount": 0,
             "personalSiteDLCount": personal_site_dl_count,
             "teamSiteDLCount": team_site_dl_count,
@@ -339,10 +339,13 @@ class TestFileEstimatorLoad(unittest.TestCase):
         site_ids = list(self.test_data["sites"].keys())
         self.assertTrue(len(site_ids) >= 4, "Test requires at least 4 sites in mock data")
         
-        site_1 = site_ids[0] # root site
-        site_2 = site_ids[1] # subsite
-        site_3 = site_ids[2]
-        site_4 = site_ids[3]
+        site_1 = "root"
+        # Find a leaf site (has no subsites)
+        site_2 = next(sid for sid, s in self.test_data["sites"].items() if not s.get("subsites") and sid != "root")
+        # Find a site with drives that is not site_2
+        site_3 = next(sid for sid, s in self.test_data["sites"].items() if sid not in ["root", site_2] and len(s.get("drives", [])) > 0)
+        # Find another site with drives that is not site_2 or site_3
+        site_4 = next(sid for sid, s in self.test_data["sites"].items() if sid not in ["root", site_2, site_3] and len(s.get("drives", [])) > 0)
         
         # Determine a drive ID for site 4 to fail its delta crawl
         drive_id = self.test_data["sites"][site_4]["drives"][0]
