@@ -127,7 +127,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         
         # Sensitivity Labels section header
-        self.labels_header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.labels_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.labels_title = ctk.CTkLabel(
             self.labels_header_frame,
             text="Sensitivity Labels",
@@ -200,7 +200,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.btn_next.pack(side="left", padx=10)
         
         # Retention Policies section
-        self.retention_header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.retention_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.retention_title = ctk.CTkLabel(
             self.retention_header_frame,
             text="Retention Compliance Policies",
@@ -238,7 +238,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         self.btn_export_retention.pack(side="right", anchor="e")
         self.retention_grid = ctk.CTkFrame(
-            self,
+            self.inner_pad,
             fg_color=COLOR_SURFACE,
             border_color=COLOR_OUTLINE_LIGHT,
             border_width=1,
