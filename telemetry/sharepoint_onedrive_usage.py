@@ -269,7 +269,7 @@ class SharePointUsageFrame(ctk.CTkFrame):
         ctk.CTkLabel(self, text="SharePoint Site Usage Telemetry (180 Days)", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
         
         self.state_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.grid_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.grid_frame = ctk.CTkFrame(self, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
         self.reset_view()
 
@@ -348,7 +348,7 @@ class SharePointUsageFrame(ctk.CTkFrame):
         headers_sp = ["SharePoint Metric Description", "Value / Measurement"]
         for col_idx, head_text in enumerate(headers_sp):
             cell = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
-            cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
         rows_data = [
@@ -359,14 +359,14 @@ class SharePointUsageFrame(ctk.CTkFrame):
         ]
 
         for r_idx, (metric_name, val) in enumerate(rows_data, start=1):
-            bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+            bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
             
             c0 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
-            c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c0, text=metric_name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
             c1 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
-            c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c1, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
         self.status = "success"
@@ -398,7 +398,7 @@ class OneDriveUsageFrame(ctk.CTkFrame):
         ctk.CTkLabel(self, text="OneDrive Usage Telemetry (180 Days)", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
         
         self.state_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.grid_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.grid_frame = ctk.CTkFrame(self, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
         self.reset_view()
 
@@ -477,7 +477,7 @@ class OneDriveUsageFrame(ctk.CTkFrame):
         headers_od = ["OneDrive Metric Description", "Value / Measurement"]
         for col_idx, head_text in enumerate(headers_od):
             cell = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
-            cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
         rows_data = [
@@ -490,14 +490,14 @@ class OneDriveUsageFrame(ctk.CTkFrame):
         ]
 
         for r_idx, (metric_name, val) in enumerate(rows_data, start=1):
-            bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+            bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
             
             c0 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
-            c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c0, text=metric_name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
             c1 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
-            c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c1, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
         self.status = "success"

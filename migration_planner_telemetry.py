@@ -6,6 +6,7 @@ import customtkinter as ctk
 from telemetry.license_usage import LicenseUsageTab, async_logger
 import logging
 from telemetry.power_automate import PowerAutomateScanner
+from telemetry.styles import *
 
 # Orchestrator logging
 logger = logging.getLogger("LicenseUsageAsyncLogger.TelemetryOrchestrator")
@@ -52,75 +53,115 @@ class TelemetryApp(ctk.CTk):
         # Welcome Branding Card
         self.brand_card = ctk.CTkFrame(
             self.auth_frame,
-            fg_color="white",
-            corner_radius=15,
+            fg_color=COLOR_SURFACE,
+            corner_radius=12,
             border_width=1,
-            border_color="#E2E8F0"
+            border_color=COLOR_OUTLINE_LIGHT
         )
         self.brand_card.pack(fill="x", padx=40, pady=(60, 20))
 
         self.brand_title = ctk.CTkLabel(
             self.brand_card,
             text="Migration Planner - Telemetry Connection",
-            font=ctk.CTkFont(size=22, weight="bold"),
-            text_color="#1E3A8A"
+            font=FONT_HEADER_MEDIUM,
+            text_color=COLOR_PRIMARY
         )
         self.brand_title.pack(pady=(25, 5))
 
         self.brand_subtitle = ctk.CTkLabel(
             self.brand_card,
             text="Connect your Azure Active Directory credentials to begin auditing your tenant.",
-            font=ctk.CTkFont(size=13),
-            text_color="#4B5563"
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_SUB
         )
         self.brand_subtitle.pack(pady=(0, 25))
 
         # Credentials Form Box
         self.credentials_card = ctk.CTkFrame(
             self.auth_frame,
-            fg_color="white",
-            corner_radius=15,
+            fg_color=COLOR_SURFACE,
+            corner_radius=12,
             border_width=1,
-            border_color="#E2E8F0"
+            border_color=COLOR_OUTLINE_LIGHT
         )
         self.credentials_card.pack(fill="both", expand=True, padx=40, pady=(0, 40))
 
         self.form_container = ctk.CTkFrame(self.credentials_card, fg_color="transparent")
-        self.form_container.pack(pady=40, padx=50, fill="both", expand=True)
+        self.form_container.pack(pady=40, anchor="center")
 
         # Tenant ID Input
-        self.tenant_lbl = ctk.CTkLabel(self.form_container, text="Tenant ID", font=ctk.CTkFont(size=14, weight="bold"), text_color="#374151")
+        self.tenant_lbl = ctk.CTkLabel(self.form_container, text="Tenant ID", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
         self.tenant_lbl.pack(anchor="w", pady=(10, 5))
-        self.tenant_entry = ctk.CTkEntry(self.form_container, width=500, height=40, placeholder_text="Enter Tenant ID")
-        self.tenant_entry.pack(fill="x", pady=(0, 15))
+        import tkinter as tk
+
+        # Tenant ID Input Wrapper Frame (using native tk.Frame to ensure full X11 border rendering)
+        self.tenant_border = tk.Frame(
+            self.form_container, width=850, height=42,
+            highlightbackground=COLOR_OUTLINE, highlightcolor=COLOR_PRIMARY, highlightthickness=1,
+            bd=0, background=COLOR_SURFACE
+        )
+        self.tenant_border.pack(pady=(0, 15))
+        self.tenant_border.pack_propagate(False)
+
+        self.tenant_entry = ctk.CTkEntry(
+            self.tenant_border, border_width=0, fg_color="transparent", text_color=COLOR_TEXT_MAIN,
+            placeholder_text="Enter Tenant ID"
+        )
+        self.tenant_entry.pack(fill="both", expand=True, padx=10, pady=2)
 
         # Client ID Input
-        self.client_lbl = ctk.CTkLabel(self.form_container, text="Client ID", font=ctk.CTkFont(size=14, weight="bold"), text_color="#374151")
+        self.client_lbl = ctk.CTkLabel(self.form_container, text="Client ID", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
         self.client_lbl.pack(anchor="w", pady=(10, 5))
-        self.client_entry = ctk.CTkEntry(self.form_container, width=500, height=40, placeholder_text="Enter Client ID")
-        self.client_entry.pack(fill="x", pady=(0, 15))
+        
+        self.client_border = tk.Frame(
+            self.form_container, width=850, height=42,
+            highlightbackground=COLOR_OUTLINE, highlightcolor=COLOR_PRIMARY, highlightthickness=1,
+            bd=0, background=COLOR_SURFACE
+        )
+        self.client_border.pack(pady=(0, 15))
+        self.client_border.pack_propagate(False)
+
+        self.client_entry = ctk.CTkEntry(
+            self.client_border, border_width=0, fg_color="transparent", text_color=COLOR_TEXT_MAIN,
+            placeholder_text="Enter Client ID"
+        )
+        self.client_entry.pack(fill="both", expand=True, padx=10, pady=2)
 
         # Client Secret Input
-        self.secret_lbl = ctk.CTkLabel(self.form_container, text="Client Secret", font=ctk.CTkFont(size=14, weight="bold"), text_color="#374151")
+        self.secret_lbl = ctk.CTkLabel(self.form_container, text="Client Secret", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
         self.secret_lbl.pack(anchor="w", pady=(10, 5))
-        self.secret_entry = ctk.CTkEntry(self.form_container, width=500, height=40, show="*", placeholder_text="Enter Client Secret")
-        self.secret_entry.pack(fill="x", pady=(0, 30))
+        
+        self.secret_border = tk.Frame(
+            self.form_container, width=850, height=42,
+            highlightbackground=COLOR_OUTLINE, highlightcolor=COLOR_PRIMARY, highlightthickness=1,
+            bd=0, background=COLOR_SURFACE
+        )
+        self.secret_border.pack(pady=(0, 30))
+        self.secret_border.pack_propagate(False)
+
+        self.secret_entry = ctk.CTkEntry(
+            self.secret_border, show="*", border_width=0, fg_color="transparent", text_color=COLOR_TEXT_MAIN,
+            placeholder_text="Enter Client Secret"
+        )
+        self.secret_entry.pack(fill="both", expand=True, padx=10, pady=2)
 
         # Status & Feedback Display
-        self.auth_status_lbl = ctk.CTkLabel(self.form_container, text="", font=ctk.CTkFont(size=13), text_color="red")
+        self.auth_status_lbl = ctk.CTkLabel(self.form_container, text="", font=FONT_BODY_MEDIUM, text_color=COLOR_ERROR)
         self.auth_status_lbl.pack(pady=(0, 15))
 
         # Action Submission Trigger
         self.connect_btn = ctk.CTkButton(
             self.form_container,
-            text="Connect & Continue",  # Updated to denote transitioning without immediate fetch
+            text="Connect & Continue",
             command=self.on_connect_clicked,
-            height=45,
-            fg_color="#1E3A8A",
-            hover_color="#172554",
-            font=ctk.CTkFont(size=14, weight="bold")
+            height=44,
+            corner_radius=8,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            font=FONT_BODY_BOLD
         )
         self.connect_btn.pack(fill="x", pady=(0, 10))
+
 
     def setup_report_ui(self):
         """Instantiates the ReportsPage frame which contains the collapsible navigation structure."""
@@ -216,11 +257,11 @@ class ReportsPage(ctk.CTkFrame):
         # Top Header Bar mimicking Google Workspace Deal Assistant details
         self.nav_header = ctk.CTkFrame(
             self.dashboard_container,
-            fg_color="white",
+            fg_color=COLOR_SURFACE,
             height=70,
-            corner_radius=10,
+            corner_radius=12,
             border_width=1,
-            border_color="#E2E8F0"
+            border_color=COLOR_OUTLINE_LIGHT
         )
         self.nav_header.pack(fill="x", pady=(0, 15))
         self.nav_header.pack_propagate(False)
@@ -232,16 +273,16 @@ class ReportsPage(ctk.CTkFrame):
         self.nav_title = ctk.CTkLabel(
             self.header_text_frame,
             text="Usage and adoption data",  # Match screenshot header text precisely
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color="#111827"
+            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
+            text_color=COLOR_TEXT_MAIN
         )
         self.nav_title.pack(anchor="w")
 
         self.nav_subtitle = ctk.CTkLabel(
             self.header_text_frame,
             text="Overview of your current plans and how people are using applications.",
-            font=ctk.CTkFont(size=12),
-            text_color="#6B7280"
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_SUB
         )
         self.nav_subtitle.pack(anchor="w", pady=(2, 0))
 
@@ -252,11 +293,13 @@ class ReportsPage(ctk.CTkFrame):
             command=self.on_fetch_report_clicked,
             width=150,
             height=36,
-            fg_color="#1E3A8A",
-            hover_color="#172554",
-            font=ctk.CTkFont(size=13, weight="bold")
+            corner_radius=8,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            font=FONT_BODY_BOLD
         )
         self.fetch_btn.pack(side="right", padx=20, pady=17)
+
 
         # Initialize the telemetry view (No TabView layout)
         self.license_usage_view = LicenseUsageTab(  # CITATION: self.license_usage_view = LicenseUsageTab(
@@ -349,22 +392,22 @@ class SidebarFrame(ctk.CTkFrame):
     """Collapsible Left Navigation Sidebar, matching Workspace Deal Assistant styling."""
 
     def __init__(self, master, disconnect_callback, **kwargs):
-        # Increased initial width to 300px to avoid text truncation of longer menu items
-        super().__init__(master, width=300, fg_color="white", corner_radius=12, border_width=1, border_color="#E2E8F0", **kwargs)
+        # Increased initial width to 380px to avoid text truncation of longer menu items
+        super().__init__(master, width=380, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE_LIGHT, **kwargs)
         self.pack_propagate(False)  # Lock sidebar panel dimensions
         self.disconnect_callback = disconnect_callback
         self.is_expanded = True
 
         # Header Branding Section
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.header_frame.pack(fill="x", padx=15, pady=(25, 30))
+        self.header_frame.pack(fill="x", padx=20, pady=(25, 30))
 
         # Brand Icon symbolizing colorful Workspace shape
         self.logo_label = ctk.CTkLabel(
             self.header_frame,
             text="✦",
-            font=ctk.CTkFont(size=24, weight="bold"),
-            text_color="#2563EB"
+            font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"),
+            text_color=COLOR_PRIMARY
         )
         self.logo_label.pack(side="left", padx=(5, 5))
 
@@ -374,8 +417,8 @@ class SidebarFrame(ctk.CTkFrame):
         self.brand_title = ctk.CTkLabel(
             self.brand_text_area,
             text="Workspace",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color="#1E293B",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_TEXT_MAIN,
             anchor="w"
         )
         self.brand_title.pack(fill="x")
@@ -383,8 +426,8 @@ class SidebarFrame(ctk.CTkFrame):
         self.brand_subtitle = ctk.CTkLabel(
             self.brand_text_area,
             text="Deal Assistant",
-            font=ctk.CTkFont(size=10),
-            text_color="#64748B",
+            font=FONT_BODY_SMALL,
+            text_color=COLOR_TEXT_SUB,
             anchor="w"
         )
         self.brand_subtitle.pack(fill="x")
@@ -397,16 +440,16 @@ class SidebarFrame(ctk.CTkFrame):
             width=26,
             height=28,
             corner_radius=13,
-            fg_color="#F1F5F9",
-            hover_color="#E2E8F0",
-            text_color="#475569",
-            font=ctk.CTkFont(size=11, weight="bold")
+            fg_color=COLOR_SURFACE_VARIANT,
+            hover_color=COLOR_SECONDARY_HOVER,
+            text_color=COLOR_TEXT_SUB,
+            font=FONT_BODY_BOLD
         )
         self.toggle_btn.place(relx=1.0, x=-22, y=26, anchor="center")
 
-        # Vertical menu container
+        # Vertical menu container (increased padding for larger sidebar)
         self.menu_items_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.menu_items_frame.pack(fill="both", expand=True, padx=10)
+        self.menu_items_frame.pack(fill="both", expand=True, padx=20)
 
         # Definitions for active/inactive routes
         self.menu_buttons = []
@@ -421,13 +464,13 @@ class SidebarFrame(ctk.CTkFrame):
 
         # Session closure button pinned safely at bottom
         self.disconnect_row = ctk.CTkFrame(self, fg_color="transparent")
-        self.disconnect_row.pack(fill="x", side="bottom", padx=10, pady=25)
+        self.disconnect_row.pack(fill="x", side="bottom", padx=20, pady=25)
 
         self.disconnect_symbol = ctk.CTkLabel(
             self.disconnect_row,
             text="🚪",
-            font=ctk.CTkFont(size=14),
-            text_color="#EF4444"
+            font=ctk.CTkFont(family="Segoe UI", size=14),
+            text_color=COLOR_ERROR
         )
         self.disconnect_symbol.pack(side="left", padx=(12, 6))
 
@@ -439,9 +482,9 @@ class SidebarFrame(ctk.CTkFrame):
             height=38,
             corner_radius=8,
             fg_color="transparent",
-            text_color="#EF4444",
-            hover_color="#FEF2F2",
-            font=ctk.CTkFont(size=13, weight="normal")  # CITATION: _tkinter.TclError: bad -weight value "medium": must be normal, or bold
+            text_color=COLOR_ERROR,
+            hover_color="#FCE8E6",
+            font=FONT_BODY_MEDIUM
         )
         self.disconnect_btn.pack(side="left", fill="x", expand=True)
 
@@ -458,20 +501,20 @@ class SidebarFrame(ctk.CTkFrame):
 
             # Highlighting indicators mapping screenshot
             if is_active:
-                btn_fg = "#EFF6FF"
-                text_color = "#1D4ED8"
-                hover_color = "#DBEAFE"
+                btn_fg = COLOR_TONAL_BG
+                text_color = COLOR_PRIMARY
+                hover_color = "#D2E3FC"
                 weight = "bold"
             else:
                 btn_fg = "transparent"
-                text_color = "#475569"
-                hover_color = "#F8FAFC"
+                text_color = COLOR_TEXT_SUB
+                hover_color = COLOR_SURFACE_VARIANT
                 weight = "normal"
 
             icon_lbl = ctk.CTkLabel(
                 row_frame,
                 text=icon,
-                font=ctk.CTkFont(size=15),
+                font=ctk.CTkFont(family="Segoe UI", size=15),
                 text_color=text_color
             )
             icon_lbl.pack(side="left", padx=(12, 8))
@@ -486,10 +529,11 @@ class SidebarFrame(ctk.CTkFrame):
                 text_color=text_color,
                 hover_color=hover_color,
                 state="normal" if is_active else "disabled",
-                font=ctk.CTkFont(size=13, weight=weight)
+                font=ctk.CTkFont(family="Segoe UI", size=13, weight=weight)
             )
             btn.pack(side="left", fill="x", expand=True)
             self.menu_buttons.append((row_frame, btn, icon_lbl))
+
 
     def toggle_sidebar(self):
         """Performs layout adjustments to expand/collapse panel width dynamically."""
@@ -507,8 +551,8 @@ class SidebarFrame(ctk.CTkFrame):
             self.disconnect_btn.configure(text="")
             logger.info("Sidebar collapsed.")
         else:
-            # Return layout to expanded parameters (300px)
-            self.configure(width=300)
+            # Return layout to expanded parameters (380px)
+            self.configure(width=380)
             self.logo_label.pack(side="left", padx=(5, 5))
             self.brand_text_area.pack(side="left", fill="both", expand=True)
             self.is_expanded = True

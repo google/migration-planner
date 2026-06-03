@@ -162,14 +162,14 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.btn_export_lic.pack(side="right")
 
         self.lic_state_frame = ctk.CTkFrame(self.lic_section, fg_color="transparent")
-        self.lic_grid_frame = ctk.CTkFrame(self.lic_section, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.lic_grid_frame = ctk.CTkFrame(self.lic_section, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
         # 2. O365 Usage Section
         self.o365_section = ctk.CTkFrame(self, fg_color="transparent")
         self.o365_section.pack(fill="x", expand=True, pady=(20, 10))
         ctk.CTkLabel(self.o365_section, text="O365 Active Users Usage", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
         self.o365_state_frame = ctk.CTkFrame(self.o365_section, fg_color="transparent")
-        self.o365_grid_frame = ctk.CTkFrame(self.o365_section, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.o365_grid_frame = ctk.CTkFrame(self.o365_section, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
         # 3. O365 Usage Trend Graph Section
         self.o365_trend_section = ctk.CTkFrame(self, fg_color="transparent")
@@ -183,7 +183,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.m365_section.pack(fill="x", expand=True, pady=(20, 10))
         ctk.CTkLabel(self.m365_section, text="M365 App Usage (180 Days)", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
         self.m365_state_frame = ctk.CTkFrame(self.m365_section, fg_color="transparent")
-        self.m365_grid_frame = ctk.CTkFrame(self.m365_section, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.m365_grid_frame = ctk.CTkFrame(self.m365_section, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
         # 5a. SharePoint Telemetry Section (Modular Integration)
         self.sharepoint_view = SharePointUsageFrame(
@@ -225,6 +225,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.btn_export_pa.pack(side="right")
         self.pa_state_frame = ctk.CTkFrame(self.pa_section, fg_color="transparent")
         self.pa_grid_frame = ctk.CTkFrame(self.pa_section, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+
 
         self._hide_all_grids()
 
@@ -408,7 +409,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         headers = ["SKU Part Number", "Units", "Consumed Units"]
         for col_idx, head_text in enumerate(headers):
             cell = ctk.CTkFrame(self.lic_grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
-            cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
         items = sku_dict.get("value", [])
@@ -423,14 +424,14 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
 
             current_row = 1
             for item_idx, item in enumerate(items):
-                bg_style = "transparent" if item_idx % 2 == 0 else COLOR_SURFACE_VARIANT
+                bg_style = COLOR_SURFACE if item_idx % 2 == 0 else COLOR_SURFACE_VARIANT
 
                 c0 = ctk.CTkFrame(self.lic_grid_frame, fg_color=bg_style, corner_radius=0)
-                c0.grid(row=current_row, column=0, sticky="nsew", padx=1, pady=1)
+                c0.grid(row=current_row, column=0, sticky="nsew", padx=0, pady=(0, 1))
                 ctk.CTkLabel(c0, text=item.get("skuPartNumber", "UNKNOWN_SKU"), font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
                 c1 = ctk.CTkFrame(self.lic_grid_frame, fg_color=bg_style, corner_radius=0)
-                c1.grid(row=current_row, column=1, sticky="nsew", padx=1, pady=1)
+                c1.grid(row=current_row, column=1, sticky="nsew", padx=0, pady=(0, 1))
                 prepaid = item.get("prepaidUnits", {})
                 p_str = f"Enabled: {prepaid.get('enabled', 0):,}"
                 if prepaid.get('warning', 0) > 0: p_str += f"\nWarn: {prepaid.get('warning'):,}"
@@ -438,7 +439,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
                 ctk.CTkLabel(c1, text=p_str, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=8, anchor="nw")
 
                 c2 = ctk.CTkFrame(self.lic_grid_frame, fg_color=bg_style, corner_radius=0)
-                c2.grid(row=current_row, column=2, sticky="nsew", padx=1, pady=1)
+                c2.grid(row=current_row, column=2, sticky="nsew", padx=0, pady=(0, 1))
                 ctk.CTkLabel(c2, text=f"{item.get('consumedUnits', 0):,}", text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
                 current_row += 1
@@ -481,7 +482,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         headers_o365 = ["Service", "30 Days", "90 Days", "180 Days"]
         for col_idx, head_text in enumerate(headers_o365):
             cell = ctk.CTkFrame(self.o365_grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
-            cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
         if not o365_data:
@@ -490,10 +491,10 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             ctk.CTkLabel(empty_cell, text="No O365 usage data found.", text_color=COLOR_TEXT_SUB).pack()
         else:
             for r_idx, row_data in enumerate(o365_data, start=1):
-                bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+                bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
                 for c_idx, val in enumerate(row_data):
                     cell = ctk.CTkFrame(self.o365_grid_frame, fg_color=bg_style, corner_radius=0)
-                    cell.grid(row=r_idx, column=c_idx, sticky="nsew", padx=1, pady=1)
+                    cell.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                     fnt = FONT_BODY_BOLD if c_idx == 0 else FONT_BODY_MEDIUM
                     ctk.CTkLabel(cell, text=str(val), font=fnt, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
@@ -611,7 +612,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         headers_m365 = ["App / Platform", "Users Count", "App / Platform", "Users Count"]
         for col_idx, head_text in enumerate(headers_m365):
             cell = ctk.CTkFrame(self.m365_grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
-            cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
         if not m365_data:
@@ -624,7 +625,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             right_col = m365_data[half:]
 
             for r_idx in range(half):
-                bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+                bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
                 row_items = []
 
                 if r_idx < len(left_col): row_items.extend([left_col[r_idx][0], left_col[r_idx][1]])
@@ -635,7 +636,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
 
                 for c_idx, val in enumerate(row_items):
                     cell = ctk.CTkFrame(self.m365_grid_frame, fg_color=bg_style, corner_radius=0)
-                    cell.grid(row=r_idx + 1, column=c_idx, sticky="nsew", padx=1, pady=1)
+                    cell.grid(row=r_idx + 1, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                     fnt = FONT_BODY_BOLD if c_idx in [0, 2] else FONT_BODY_MEDIUM
                     ctk.CTkLabel(cell, text=str(val), font=fnt, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="nw")
 
@@ -700,7 +701,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         total_flows = counts.get("Cloud Flows", 0) + counts.get("Desktop Flows", 0)
 
         # 1. Summary Grid
-        summary_frame = ctk.CTkFrame(self.pa_grid_frame, fg_color="transparent")
+        summary_frame = ctk.CTkFrame(self.pa_grid_frame, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         summary_frame.pack(fill="x", pady=20)
         
         for i in range(2): summary_frame.grid_columnconfigure(i, weight=1)
@@ -708,7 +709,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         headers_pa = ["Metric", "Value"]
         for col_idx, head_text in enumerate(headers_pa):
             cell = ctk.CTkFrame(summary_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
-            cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
         prem_str = ", ".join(premium_conns) if premium_conns else "0"
@@ -723,14 +724,14 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
 
         r_idx = 1
         for label, val in mapping:
-            bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+            bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
             
             c0 = ctk.CTkFrame(summary_frame, fg_color=bg_style, corner_radius=0)
-            c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c0, text=label, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="nw")
 
             c1 = ctk.CTkFrame(summary_frame, fg_color=bg_style, corner_radius=0)
-            c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c1, text=str(val), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, wraplength=400).pack(padx=10, pady=6, anchor="nw")
             
             r_idx += 1

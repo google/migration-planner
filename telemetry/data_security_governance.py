@@ -96,7 +96,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         # Grid for Sensitivity Labels
         self.labels_grid = ctk.CTkFrame(
             self,
-            fg_color=COLOR_SURFACE,
+            fg_color=COLOR_OUTLINE_LIGHT,
             border_color=COLOR_OUTLINE_LIGHT,
             border_width=1,
             corner_radius=8
@@ -239,7 +239,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             headers = ["Sensitivity Label", "Description", "Protection", "Mode", "Priority", "Applicable Targets", "Status"]
             for col_idx, head_text in enumerate(headers):
                 cell = ctk.CTkFrame(self.labels_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
-                cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+                cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
                 ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
             # Flatten parent labels and their sorted sublabels
@@ -309,7 +309,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         for offset, row_item in enumerate(page_items, start=1):
             r_idx = offset
-            bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+            bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
             
             name = row_item["name"]
             desc = row_item["description"]
@@ -324,37 +324,37 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             name_font = FONT_BODY_BOLD if not is_sublabel else FONT_BODY_MEDIUM
 
             c0 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
-            c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
             lbl_name = ctk.CTkLabel(c0, text=name, font=name_font, text_color=name_color)
             lbl_name.pack(padx=10, pady=6, anchor="w")
             c0.bind("<Configure>", lambda e, l=lbl_name: l.configure(wraplength=e.width - 20))
 
             c1 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
-            c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
             lbl_desc = ctk.CTkLabel(c1, text=desc, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
             lbl_desc.pack(padx=10, pady=6, anchor="w")
             c1.bind("<Configure>", lambda e, l=lbl_desc: l.configure(wraplength=e.width - 20))
 
             c2 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
-            c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
+            c2.grid(row=r_idx, column=2, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c2, text=protection, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
             c3 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
-            c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
+            c3.grid(row=r_idx, column=3, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c3, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
             c4 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
-            c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
+            c4.grid(row=r_idx, column=4, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c4, text=priority, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
             c5 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
-            c5.grid(row=r_idx, column=5, sticky="nsew", padx=1, pady=1)
+            c5.grid(row=r_idx, column=5, sticky="nsew", padx=0, pady=(0, 1))
             lbl_app = ctk.CTkLabel(c5, text=applicable, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
             lbl_app.pack(padx=10, pady=6, anchor="w")
             c5.bind("<Configure>", lambda e, l=lbl_app: l.configure(wraplength=e.width - 20))
 
             c6 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
-            c6.grid(row=r_idx, column=6, sticky="nsew", padx=1, pady=1)
+            c6.grid(row=r_idx, column=6, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c6, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
         # Update page info label
