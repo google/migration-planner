@@ -68,30 +68,55 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
 
     client.close()
     
-    # Fetch Retention Policies via PowerShell client
+    # Fetch Retention Policies & eDiscovery Cases via PowerShell client
     policies = None
     policies_error = None
+    ediscovery_cases = None
+    ediscovery_error = None
+    
+    ps_client = None
     try:
         from core.powershell.client import PowerShellClient
-        from core.powershell.retention import RetentionService
-        
         ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret)
-        retention_service = RetentionService(ps_client)
-        policies = retention_service.fetch_retention_policies()
     except Exception as e:
-        usage_logger.error("Failed to fetch retention policies via PowerShell", exc_info=True)
-        policies_error = str(e)
+        usage_logger.error("Failed to initialize PowerShell client", exc_info=True)
+        policies_error = f"PowerShell initialization failed: {str(e)}"
+        ediscovery_error = f"PowerShell initialization failed: {str(e)}"
         
-    # Raise ConnectionError only if BOTH failed
-    if labels_error and policies_error:
-        raise ConnectionError(f"Security governance fetch failed.\nLabels Error: {labels_error}\nPolicies Error: {policies_error}")
+    if ps_client:
+        try:
+            from core.powershell.retention import RetentionService
+            retention_service = RetentionService(ps_client)
+            policies = retention_service.fetch_retention_policies()
+        except Exception as e:
+            usage_logger.error("Failed to fetch retention policies via PowerShell", exc_info=True)
+            policies_error = str(e)
+            
+        try:
+            from core.powershell.ediscovery import EDiscoveryService
+            ediscovery_service = EDiscoveryService(ps_client)
+            ediscovery_cases = ediscovery_service.fetch_ediscovery_cases()
+        except Exception as e:
+            usage_logger.error("Failed to fetch eDiscovery cases via PowerShell", exc_info=True)
+            ediscovery_error = str(e)
+        
+    # Raise ConnectionError only if ALL failed
+    if labels_error and policies_error and ediscovery_error:
+        raise ConnectionError(
+            f"Security governance fetch failed.\n"
+            f"Labels Error: {labels_error}\n"
+            f"Policies Error: {policies_error}\n"
+            f"eDiscovery Error: {ediscovery_error}"
+        )
         
     usage_logger.info("Data Security & Governance Pipeline completed successfully.")
     return {
         "labels": labels,
         "labels_error": labels_error,
         "policies": policies,
-        "policies_error": policies_error
+        "policies_error": policies_error,
+        "ediscovery_cases": ediscovery_cases,
+        "ediscovery_error": ediscovery_error
     }
 
 
@@ -110,6 +135,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.ITEMS_PER_PAGE = 8
         self.last_labels_data = None
         self.last_policies_data = None
+        self.last_ediscovery_data = None
         
         self.build_ui()
 
@@ -245,6 +271,52 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             corner_radius=8
         )
         
+        # Purview eDiscovery Cases section
+        self.ediscovery_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.ediscovery_title = ctk.CTkLabel(
+            self.ediscovery_header_frame,
+            text="Purview eDiscovery Cases",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.ediscovery_title.pack(side="left", anchor="w")
+        
+        self.ediscovery_link = ctk.CTkLabel(
+            self.ediscovery_header_frame,
+            text="Open Microsoft Purview eDiscovery ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.ediscovery_link.pack(side="left", anchor="w", padx=(15, 0))
+        self.ediscovery_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/ediscovery/standard"))
+        self.ediscovery_link.bind("<Enter>", lambda e: self.ediscovery_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.ediscovery_link.bind("<Leave>", lambda e: self.ediscovery_link.configure(text_color=COLOR_PRIMARY))
+
+        self.btn_export_ediscovery = ctk.CTkButton(
+            self.ediscovery_header_frame,
+            text="Export eDiscovery Cases",
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            text_color=COLOR_PRIMARY,
+            border_width=1,
+            border_color=COLOR_OUTLINE,
+            hover_color=COLOR_SECONDARY_HOVER,
+            width=180,
+            height=32,
+            corner_radius=16,
+            command=self.export_ediscovery_csv,
+            state="disabled"
+        )
+        self.btn_export_ediscovery.pack(side="right", anchor="e")
+        self.ediscovery_grid = ctk.CTkFrame(
+            self.inner_pad,
+            fg_color=COLOR_SURFACE,
+            border_color=COLOR_OUTLINE_LIGHT,
+            border_width=1,
+            corner_radius=8
+        )
+        
         self.reset_view()
 
     def reset_view(self):
@@ -256,12 +328,16 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.labels_header_frame.pack_forget()
         self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
+        self.ediscovery_header_frame.pack_forget()
+        self.ediscovery_grid.pack_forget()
         
         for w in self.state_frame.winfo_children():
             w.destroy()
         for w in self.labels_grid.winfo_children():
             w.destroy()
         for w in self.retention_grid.winfo_children():
+            w.destroy()
+        for w in self.ediscovery_grid.winfo_children():
             w.destroy()
             
         self.flattened_rows = []
@@ -271,6 +347,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self.btn_export_labels.configure(state="disabled")
         if hasattr(self, "btn_export_retention"):
             self.btn_export_retention.configure(state="disabled")
+        if hasattr(self, "btn_export_ediscovery"):
+            self.btn_export_ediscovery.configure(state="disabled")
 
     def _set_state_loading(self, msg="Loading..."):
         for w in self.state_frame.winfo_children():
@@ -306,11 +384,14 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.labels_header_frame.pack_forget()
         self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
+        self.ediscovery_header_frame.pack_forget()
+        self.ediscovery_grid.pack_forget()
         
         self._set_state_loading("Retrieving tenant Security & Compliance policies...")
         
         self.btn_export_labels.configure(state="disabled")
         self.btn_export_retention.configure(state="disabled")
+        self.btn_export_ediscovery.configure(state="disabled")
         
         threading.Thread(
             target=self._execute_worker,
@@ -334,14 +415,19 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             w.destroy()
         for w in self.retention_grid.winfo_children():
             w.destroy()
+        for w in self.ediscovery_grid.winfo_children():
+            w.destroy()
 
         labels = data.get("labels")
         labels_error = data.get("labels_error")
         policies = data.get("policies")
         policies_error = data.get("policies_error")
+        ediscovery_cases = data.get("ediscovery_cases")
+        ediscovery_error = data.get("ediscovery_error")
 
         self.last_labels_data = labels
         self.last_policies_data = policies
+        self.last_ediscovery_data = ediscovery_cases
 
         usage_logger.info(f"Sensitivity Labels fetched successfully. Total labels to render: {len(labels) if labels else 0}")
         self.status = "success"
@@ -417,6 +503,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.retention_header_frame.pack(fill="x", pady=(20, 10))
         self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
         self._render_retention_policies(policies, policies_error)
+
+        # 3. Render eDiscovery Cases Grid
+        self.ediscovery_header_frame.pack(fill="x", pady=(20, 10))
+        self.ediscovery_grid.pack(fill="x", expand=True, pady=(0, 15))
+        self._render_ediscovery_cases(ediscovery_cases, ediscovery_error)
 
         self.on_status_change()
 
@@ -528,6 +619,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.on_status_change()
         self.btn_export_labels.configure(state="disabled")
         self.btn_export_retention.configure(state="disabled")
+        self.btn_export_ediscovery.configure(state="disabled")
 
     def _render_retention_policies(self, policies, policies_error):
         if policies_error:
@@ -778,5 +870,125 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             messagebox.showinfo("Export Successful", f"Retention policies exported successfully to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
+
+    def _render_ediscovery_cases(self, cases, cases_error):
+        if cases_error:
+            msg = cases_error
+            # Provide helpful, friendly advice if pwsh or dependency issue
+            if "powershell" in cases_error.lower() or "pwsh" in cases_error.lower():
+                msg = "PowerShell Core ('pwsh') is not installed or configured on this machine.\nPlease refer to the Prerequisites in the README to configure it."
+            elif "exchangeonlinemanagement" in cases_error.lower():
+                msg = "ExchangeOnlineManagement PowerShell module is missing.\nPlease run: Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser"
+                
+            ctk.CTkLabel(
+                self.ediscovery_grid, 
+                text=f"✖ {msg}", 
+                font=FONT_BODY_MEDIUM, 
+                text_color=COLOR_ERROR,
+                justify="center"
+            ).pack(padx=20, pady=20)
+            self.btn_export_ediscovery.configure(state="disabled")
+        elif cases is None or not cases:
+            ctk.CTkLabel(
+                self.ediscovery_grid, 
+                text="No Active Purview eDiscovery Cases/Matters found in this tenant.", 
+                font=FONT_BODY_MEDIUM, 
+                text_color=COLOR_TEXT_SUB
+            ).pack(padx=20, pady=20)
+            self.btn_export_ediscovery.configure(state="disabled")
+        else:
+            self.btn_export_ediscovery.configure(state="normal")
+            
+            # Configure grid columns
+            self.ediscovery_grid.grid_columnconfigure(0, weight=3)  # Case Name
+            self.ediscovery_grid.grid_columnconfigure(1, weight=2)  # Type
+            self.ediscovery_grid.grid_columnconfigure(2, weight=1)  # Status
+            self.ediscovery_grid.grid_columnconfigure(3, weight=2)  # Created By
+            self.ediscovery_grid.grid_columnconfigure(4, weight=2)  # Created Date
+
+            headers = ["Case Name", "Case Type", "Status", "Created By", "Created Date"]
+            for col_idx, head_text in enumerate(headers):
+                cell = ctk.CTkFrame(self.ediscovery_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+                cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+            cases_list = cases if isinstance(cases, list) else [cases]
+
+            for r_idx, case in enumerate(cases_list, start=1):
+                bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+
+                name = case.get("Name", "N/A")
+                case_type = case.get("CaseType", "N/A")
+                status_val = case.get("Status", "Active")
+                created_by = case.get("CreatedBy", "N/A")
+                when_created = case.get("WhenCreated", "N/A")
+                
+                # Format Status nicely
+                status_str = f"🟢 {status_val}" if status_val.lower() == "active" else f"🔴 {status_val}"
+
+                c0 = ctk.CTkFrame(self.ediscovery_grid, fg_color=bg_style, corner_radius=0)
+                c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+                lbl_name = ctk.CTkLabel(c0, text=name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
+                lbl_name.pack(padx=10, pady=6, anchor="w")
+                c0.bind("<Configure>", lambda e, l=lbl_name: l.configure(wraplength=e.width - 20))
+
+                c1 = ctk.CTkFrame(self.ediscovery_grid, fg_color=bg_style, corner_radius=0)
+                c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(c1, text=case_type, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+                c2 = ctk.CTkFrame(self.ediscovery_grid, fg_color=bg_style, corner_radius=0)
+                c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(c2, text=status_str, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+                c3 = ctk.CTkFrame(self.ediscovery_grid, fg_color=bg_style, corner_radius=0)
+                c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
+                lbl_created_by = ctk.CTkLabel(c3, text=created_by, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+                lbl_created_by.pack(padx=10, pady=6, anchor="w")
+                c3.bind("<Configure>", lambda e, l=lbl_created_by: l.configure(wraplength=e.width - 20))
+
+                c4 = ctk.CTkFrame(self.ediscovery_grid, fg_color=bg_style, corner_radius=0)
+                c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(c4, text=when_created, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+    def export_ediscovery_csv(self):
+        """Prompts the user to save eDiscovery cases as a detailed CSV file."""
+        if not hasattr(self, "last_ediscovery_data") or not self.last_ediscovery_data:
+            from tkinter import messagebox
+            messagebox.showinfo("No Data", "There is no eDiscovery cases data to export. Please run a scan first.", parent=self)
+            return
+            
+        from tkinter import filedialog, messagebox
+        from datetime import datetime
+        import pandas as pd
+        
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"ediscovery_cases_{ts}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+            parent=self
+        )
+        if not f:
+            return
+            
+        cases_list = self.last_ediscovery_data if isinstance(self.last_ediscovery_data, list) else [self.last_ediscovery_data]
+        
+        rows = []
+        for case in cases_list:
+            rows.append({
+                "Case Name": case.get("Name", "N/A"),
+                "Case Type": case.get("CaseType", "N/A"),
+                "Status": case.get("Status", "N/A"),
+                "Created By": case.get("CreatedBy", "N/A"),
+                "When Created": case.get("WhenCreated", "N/A")
+            })
+            
+        df = pd.DataFrame(rows)
+        try:
+            df.to_csv(f, index=False)
+            messagebox.showinfo("Export Successful", f"eDiscovery cases exported successfully to:\n{f}", parent=self)
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
+
 
 
