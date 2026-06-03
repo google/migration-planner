@@ -2,14 +2,16 @@
 
 ## Prerequisites
 
-The certificate authentication flow requires the following Python libraries:
+The certificate authentication flow and reports parsing require the following Python libraries:
 * `msal`
 * `cryptography`
+* `pandas`
 
 You can install them via pip:
 ```bash
-pip install msal cryptography
+pip install msal cryptography pandas
 ```
+
 
 ## Setup & Execution
 
