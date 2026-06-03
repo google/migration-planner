@@ -138,6 +138,26 @@ If your organization restricts installing packages globally, use a virtual envir
     *   Mac/Linux: `source venv/bin/activate`
 3.  **Install packages** as shown above inside this environment.
 
+### 4. PowerShell Prerequisites (for Retention Policy Scanning)
+
+To run the retention policy discovery features using certificate-based authentication, the following must be installed on your system:
+
+#### Install PowerShell Core (`pwsh`)
+*   **macOS**: Install via Homebrew:
+    ```bash
+    brew install powershell
+    ```
+*   **Windows**: Install via winget:
+    ```cmd
+    winget install --id Microsoft.Powershell --source winget
+    ```
+
+#### Install ExchangeOnlineManagement Module
+Open PowerShell (`pwsh`) and install the Microsoft Exchange Online module:
+```powershell
+Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser -Force
+```
+
 ---
 
 ## Setting up Microsoft Azure
