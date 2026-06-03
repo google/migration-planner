@@ -79,7 +79,8 @@ def parse_sharepoint_csv(filepath):
                     active_files += int(row.get("Active File Count", 0) or 0)
                 except ValueError:
                     pass
-                    
+
+    usage_logger.info(f"SharePoint parsing complete: sites={total_sites}, storage={format_bytes(total_storage)}, files={total_files}, active_files={active_files}")
     return {
         "total_sites": total_sites,
         "total_storage_bytes": total_storage,
@@ -121,7 +122,8 @@ def parse_onedrive_csv(filepath):
                     active_files += int(row.get("Active File Count", 0) or 0)
                 except ValueError:
                     pass
-                    
+
+    usage_logger.info(f"OneDrive parsing complete: accounts={total_accounts}, storage={format_bytes(total_storage)}, files={total_files}, active_files={active_files}")
     return {
         "total_accounts": total_accounts,
         "total_storage_bytes": total_storage,
@@ -151,6 +153,7 @@ def parse_onedrive_activity_csv(filepath):
                 except ValueError:
                     pass
 
+    usage_logger.info(f"OneDrive Activity parsing complete: sync_users={sync_users}")
     return {
         "sync_users": sync_users
     }
@@ -172,6 +175,7 @@ def parse_onenote_users_csv(filepath):
                 if val in ["yes", "true"]:
                      onenote_users += 1
 
+    usage_logger.info(f"OneNote Users parsing complete: onenote_users={onenote_users}")
     return {
         "onenote_users": onenote_users
     }
@@ -199,9 +203,11 @@ def run_sharepoint_pipeline(client_id, client_secret, tenant_id) -> dict:
     reports_dir = os.path.join(script_dir, "reports")
     
     service.download_sharepoint_details(reports_dir)
+    usage_logger.info("SharePoint Site Usage CSV download completed. Initiating parser...")
     client.close()
     
     sp_data = parse_sharepoint_csv(os.path.join(reports_dir, "SharePointSiteUsageDetail(180d).csv"))
+    usage_logger.info("SharePoint Telemetry Pipeline completed successfully.")
     return sp_data
 
 def run_onedrive_pipeline(client_id, client_secret, tenant_id) -> dict:
@@ -223,6 +229,7 @@ def run_onedrive_pipeline(client_id, client_secret, tenant_id) -> dict:
     reports_dir = os.path.join(script_dir, "reports")
     
     service.download_onedrive_details(reports_dir)
+    usage_logger.info("OneDrive account, activity, and OneNote CSV downloads completed. Initiating parsers...")
     client.close()
     
     od_data = parse_onedrive_csv(os.path.join(reports_dir, "OneDriveUsageAccountDetail(180d).csv"))
@@ -236,6 +243,7 @@ def run_onedrive_pipeline(client_id, client_secret, tenant_id) -> dict:
     # Merge OneNote user data
     od_data["onenote_users"] = onenote_data["onenote_users"]
     
+    usage_logger.info("OneDrive Telemetry Pipeline completed successfully.")
     return od_data
 
 # =================================================================================
@@ -301,6 +309,7 @@ class SharePointUsageFrame(ctk.CTkFrame):
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         """Triggers parallel fetches inside isolated background threads."""
+        usage_logger.info("SharePoint Site Usage trigger_fetch called. Spawning background worker thread...")
         self.status = "loading"
         self.on_status_change()
         
@@ -326,6 +335,7 @@ class SharePointUsageFrame(ctk.CTkFrame):
             self.after(0, self._render_error, str(e))
 
     def _render_success(self, data: dict):
+        usage_logger.info("SharePoint Site Usage data successfully retrieved. Rendering UI grid.")
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -363,6 +373,7 @@ class SharePointUsageFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def _render_error(self, err_msg):
+        usage_logger.warning(f"SharePoint Site Usage fetch failed: {err_msg}")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()
@@ -427,6 +438,7 @@ class OneDriveUsageFrame(ctk.CTkFrame):
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         """Triggers parallel fetches inside isolated background threads."""
+        usage_logger.info("OneDrive Usage trigger_fetch called. Spawning background worker thread...")
         self.status = "loading"
         self.on_status_change()
         
@@ -452,6 +464,7 @@ class OneDriveUsageFrame(ctk.CTkFrame):
             self.after(0, self._render_error, str(e))
 
     def _render_success(self, data: dict):
+        usage_logger.info("OneDrive Usage data successfully retrieved. Rendering UI grid.")
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -491,6 +504,7 @@ class OneDriveUsageFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def _render_error(self, err_msg):
+        usage_logger.warning(f"OneDrive Usage fetch failed: {err_msg}")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()

@@ -8,7 +8,7 @@ import logging
 from telemetry.power_automate import PowerAutomateScanner
 
 # Orchestrator logging
-logger = logging.getLogger("TelemetryOrchestrator")
+logger = logging.getLogger("LicenseUsageAsyncLogger.TelemetryOrchestrator")
 
 
 class TelemetryApp(ctk.CTk):
@@ -16,6 +16,7 @@ class TelemetryApp(ctk.CTk):
 
     def __init__(self):
         super().__init__()
+        logger.info("Initializing TelemetryApp application...")
         self.title("Migration Planner - Telemetry")  # CITATION: self.title("Migration Planner - Telemetry")
         self.geometry("1230x950")  # Expanded window width to support increased sidebar dimensions
 
@@ -44,6 +45,7 @@ class TelemetryApp(ctk.CTk):
 
         # Initial view
         self.show_auth_page()
+        logger.info("TelemetryApp UI initialized successfully.")
 
     def setup_auth_ui(self):
         """Builds a modern, polished Connection interface for Page 1."""
@@ -136,7 +138,9 @@ class TelemetryApp(ctk.CTk):
         client = self.client_entry.get().strip()
         secret = self.secret_entry.get().strip()
 
+        logger.info("Connect & Continue clicked. Verifying connection credentials...")
         if not tenant or not client or not secret:
+            logger.warning("Connection failed: Missing one or more required credential fields.")
             self.auth_status_lbl.configure(text="Error: Tenant ID, Client ID, and Client Secret are required.", text_color="red")
             return
 
@@ -147,11 +151,13 @@ class TelemetryApp(ctk.CTk):
         self.stored_client = client
         self.stored_secret = secret
 
+        logger.info("Credentials validated and cached in memory.")
         # Switch view to Page 2 (Reports screen) without executing backend fetching threads
         self.show_reports_page()
 
     def on_disconnect_clicked(self):
         """Clears all session properties and safely resets screens back to Page 1."""
+        logger.info("Disconnect clicked. Clearing cached session and credentials...")
         # Wipes local entry buffers
         self.tenant_entry.delete(0, "end")
         self.client_entry.delete(0, "end")
@@ -168,14 +174,17 @@ class TelemetryApp(ctk.CTk):
 
         # Shifts screen orientation
         self.show_auth_page()
+        logger.info("Session successfully disconnected. Returned to Auth page.")
 
     def show_auth_page(self):
         """Transitions view port to Page 1 (Authentication screen)."""
+        logger.info("Showing Authentication Page.")
         self.report_frame.pack_forget()
         self.auth_frame.pack(fill="both", expand=True)
 
     def show_reports_page(self):
         """Transitions view port to Page 2 (Reports Dashboard)."""
+        logger.info("Showing Reports Dashboard Page.")
         self.auth_frame.pack_forget()
         self.report_frame.pack(fill="both", expand=True)
 
@@ -304,8 +313,10 @@ class ReportsPage(ctk.CTkFrame):
         secret = self.controller.stored_secret
 
         if not tenant or not client or not secret:
+            logger.warning("Fetch Report triggered, but connection credentials are empty.")
             return
 
+        logger.info("Fetch Report triggered. Invoking background parallel audits...")
         # Disable the trigger button and update visual text during background thread audit
         self.fetch_btn.configure(state="disabled", text="Fetching...", fg_color="#64748B")
 
@@ -326,6 +337,7 @@ class ReportsPage(ctk.CTkFrame):
 
     def clear_session_data(self):
         """Wipes the cached parameters from telemetry objects and resets the Fetch button."""
+        logger.info("Clearing session data in ReportsPage.")
         for entry in self.embedded_entries:
             entry.delete(0, "end")
         
@@ -493,6 +505,7 @@ class SidebarFrame(ctk.CTkFrame):
             for row, btn, icon in self.menu_buttons:
                 btn.configure(text="")
             self.disconnect_btn.configure(text="")
+            logger.info("Sidebar collapsed.")
         else:
             # Return layout to expanded parameters (300px)
             self.configure(width=300)
@@ -505,6 +518,7 @@ class SidebarFrame(ctk.CTkFrame):
             for idx, (row, btn, icon) in enumerate(self.menu_buttons):
                 btn.configure(text=self.menu_data[idx][0])
             self.disconnect_btn.configure(text="Disconnect")
+            logger.info("Sidebar expanded.")
 
 
 def collect_power_automate_telemetry(tenant_id, client_id, client_secret, env_url):  # CITATION: def collect_power_automate_telemetry(tenant_id, client_id, client_secret, env_url):
