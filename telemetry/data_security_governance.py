@@ -215,7 +215,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             text_color=COLOR_PRIMARY,
             cursor="hand2"
         )
-        self.retention_link.pack(side="right", anchor="e", padx=(10, 0))
+        self.retention_link.pack(side="left", anchor="w", padx=(15, 0))
         self.retention_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/datalifecyclemanagement/retention"))
         self.retention_link.bind("<Enter>", lambda e: self.retention_link.configure(text_color=COLOR_PRIMARY_HOVER))
         self.retention_link.bind("<Leave>", lambda e: self.retention_link.configure(text_color=COLOR_PRIMARY))
@@ -234,7 +234,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             corner_radius=16,
             command=self.export_retention_csv
         )
-        self.btn_export_retention.pack(side="right", anchor="e", padx=(10, 0))
+        self.btn_export_retention.pack(side="right", anchor="e")
         self.retention_grid = ctk.CTkFrame(
             self,
             fg_color=COLOR_SURFACE,
