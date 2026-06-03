@@ -467,12 +467,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self.retention_grid.grid_columnconfigure(0, weight=3)  # Policy Name
             self.retention_grid.grid_columnconfigure(1, weight=3)  # Workloads
             self.retention_grid.grid_columnconfigure(2, weight=2)  # Duration & Trigger
-            self.retention_grid.grid_columnconfigure(3, weight=2)  # Action
-            self.retention_grid.grid_columnconfigure(4, weight=1)  # Mode
-            self.retention_grid.grid_columnconfigure(5, weight=1)  # Distribution
-            self.retention_grid.grid_columnconfigure(6, weight=1)  # Status
+            self.retention_grid.grid_columnconfigure(3, weight=1)  # Mode
+            self.retention_grid.grid_columnconfigure(4, weight=1)  # Distribution
+            self.retention_grid.grid_columnconfigure(5, weight=1)  # Status
 
-            headers = ["Policy Name", "Workloads", "Duration", "Action", "Mode", "Distribution", "Status"]
+            headers = ["Policy Name", "Workloads", "Duration", "Mode", "Distribution", "Status"]
             for col_idx, head_text in enumerate(headers):
                 cell = ctk.CTkFrame(self.retention_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
                 cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
@@ -489,7 +488,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 workload = policy.get("Workload", "N/A")
                 duration_val = str(policy.get("Duration", "N/A"))
                 trigger_val = policy.get("RetentionTrigger", "N/A")
-                action_val = policy.get("RetentionAction", "N/A")
                 mode = policy.get("Mode", "Enforce")
                 dist_status = policy.get("DistributionStatus", "Success")
                 
@@ -517,14 +515,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                     }
                     friendly_trigger = trigger_map.get(trigger_val, trigger_val)
                     duration_str += f"\n(from {friendly_trigger})"
-
-                # Format Action nicely
-                action_map = {
-                    "Keep": "Retain Only",
-                    "KeepAndDelete": "Retain & Delete",
-                    "Delete": "Delete Only"
-                }
-                action_str = action_map.get(action_val, action_val)
 
                 # Enabled can be boolean or string
                 enabled_val = policy.get("Enabled", True)
@@ -563,20 +553,14 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
                 c3 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
-                lbl_action = ctk.CTkLabel(c3, text=action_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
-                lbl_action.pack(padx=10, pady=6, anchor="w")
-                c3.bind("<Configure>", lambda e, l=lbl_action: l.configure(wraplength=e.width - 20))
+                ctk.CTkLabel(c3, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
                 c4 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c4, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                ctk.CTkLabel(c4, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
                 c5 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c5.grid(row=r_idx, column=5, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c5, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
-
-                c6 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
-                c6.grid(row=r_idx, column=6, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c6, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                ctk.CTkLabel(c5, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
 
