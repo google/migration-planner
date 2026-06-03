@@ -156,3 +156,8 @@ class ReportsService:
             ("https://graph.microsoft.com/v1.0/reports/getM365AppUserDetail(period='D180')", "M365AppUserDetail_sp_od(180d).csv")
         ]
         self.download_reports_batch(reports, output_dir)
+
+    def download_mailbox_usage_detail(self, output_dir: str) -> None:
+        """Downloads Exchange mailbox usage detail CSV report (180 days)."""
+        self.download_report("https://graph.microsoft.com/v1.0/reports/getMailboxUsageDetail(period='D180')", "MailboxUsageDetail(180d).csv", output_dir)
+

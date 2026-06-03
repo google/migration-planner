@@ -16,6 +16,7 @@ import customtkinter as ctk
 
 from telemetry import active_users_usage as usage
 from telemetry.sharepoint_onedrive_usage import SharePointUsageFrame, OneDriveUsageFrame
+from telemetry.mailbox_usage import MailboxUsageFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
 from telemetry.power_automate import PowerAutomateScanner
 
@@ -241,7 +242,15 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.m365_state_frame = ctk.CTkFrame(self.m365_inner, fg_color="transparent")
         self.m365_grid_frame = ctk.CTkFrame(self.m365_inner, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
-        # 5a. SharePoint Telemetry Section (Modular Integration)
+        # 5a. Exchange Online Mailbox Usage (Modular Integration)
+        self.mailbox_view = MailboxUsageFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done
+        )
+
+        # 5b. SharePoint Telemetry Section (Modular Integration)
         self.sharepoint_view = SharePointUsageFrame(
             master=self,
             log_callback=self.log_msg,
@@ -299,6 +308,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.o365_section.pack_forget()
         self.o365_trend_section.pack_forget()
         self.m365_section.pack_forget()
+        self.mailbox_view.reset_view()
         self.sharepoint_view.reset_view()
         self.onedrive_view.reset_view()
         self.security_gov_view.reset_view()
@@ -335,8 +345,8 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         """Checks if all sections have resolved (success or error) and updates main UI."""
         states = [
             self.status_sku, self.status_o365, self.status_o365_trend, self.status_m365,
-            self.sharepoint_view.status, self.onedrive_view.status, self.security_gov_view.status,
-            self.status_pa
+            self.mailbox_view.status, self.sharepoint_view.status, self.onedrive_view.status,
+            self.security_gov_view.status, self.status_pa
         ]
 
         if "loading" in states:
@@ -374,6 +384,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.retry_o365(clear_log=False)
         self.retry_o365_trend(clear_log=False)
         self.retry_m365(clear_log=False)
+        self.mailbox_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.sharepoint_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.onedrive_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.security_gov_view.trigger_fetch(tenant, clients[0], secrets[0])
