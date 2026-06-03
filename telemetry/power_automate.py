@@ -140,18 +140,29 @@ class PowerAutomateScanner:
             
             self.logger.info(f"    -> Cloud Flows: {len(cloud_flows)} total found, {len(active_cloud_flows)} are currently active.")
             
-            for flow_summary in cloud_flows:
+            # Fetch details in parallel using ThreadPoolExecutor
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            
+            def fetch_and_process_flow_detail(flow_summary):
+                flow_id = flow_summary.get("name")
                 state = flow_summary.get("properties", {}).get("state")
                 is_active = (state == "Started")
                 
-                flow_id = flow_summary.get("name")
-                
                 detail_url = f"https://api.flow.microsoft.com/providers/Microsoft.ProcessSimple/scopes/admin/environments/{env_name}/flows/{flow_id}?api-version=2016-11-01"
                 flow_detail = self.fetch_single_resource(detail_url, flow_headers, context_name=f"Get Flow Details ({flow_id})")
-                
                 if not flow_detail:
-                    continue
-
+                    return None
+                return (flow_summary, flow_detail, is_active)
+            
+            processed_details = []
+            with ThreadPoolExecutor(max_workers=15) as executor:
+                futures = {executor.submit(fetch_and_process_flow_detail, f): f for f in cloud_flows}
+                for future in as_completed(futures):
+                    res = future.result()
+                    if res:
+                        processed_details.append(res)
+            
+            for flow_summary, flow_detail, is_active in processed_details:
                 props = flow_detail.get("properties", {})
                 name = props.get("displayName", "Unnamed Flow")
                 
