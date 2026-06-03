@@ -128,7 +128,7 @@ class MailboxUsageFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping Exchange Online Mailbox Usage UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
-        super().__init__(master, fg_color="transparent", **kwargs)
+        super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
         self.on_status_change = status_change_callback
@@ -138,12 +138,15 @@ class MailboxUsageFrame(ctk.CTkFrame):
 
     def build_ui(self):
         """Creates card container for the tab."""
-        self.pack(fill="x", expand=True, pady=(20, 10))
+        self.pack(fill="x", expand=True, pady=10)
         
-        ctk.CTkLabel(self, text="Exchange Online Mailbox Usage Telemetry", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
+        self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
+        self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
         
-        self.state_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.grid_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        ctk.CTkLabel(self.inner_pad, text="Exchange Online Mailbox Usage Telemetry", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
+        
+        self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
         self.reset_view()
 
@@ -187,7 +190,7 @@ class MailboxUsageFrame(ctk.CTkFrame):
         self.status = "loading"
         self.on_status_change()
         
-        self.pack(fill="x", expand=True, pady=(20, 10))
+        self.pack(fill="x", expand=True, pady=10)
         self.grid_frame.pack_forget()
         
         self._set_state_loading("Downloading and parsing Mailbox Usage reports...")
