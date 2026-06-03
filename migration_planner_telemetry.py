@@ -8,7 +8,7 @@ import logging
 from telemetry.power_automate import PowerAutomateScanner
 
 # Orchestrator logging
-logger = logging.getLogger("TelemetryOrchestrator")
+logger = logging.getLogger("LicenseUsageAsyncLogger.TelemetryOrchestrator")
 
 
 class TelemetryApp(ctk.CTk):
@@ -16,6 +16,7 @@ class TelemetryApp(ctk.CTk):
 
     def __init__(self):
         super().__init__()
+        logger.info("Initializing TelemetryApp application...")
         self.title("Migration Planner - Telemetry")  # CITATION: self.title("Migration Planner - Telemetry")
         self.geometry("1230x950")  # Expanded window width to support increased sidebar dimensions
 
@@ -44,6 +45,7 @@ class TelemetryApp(ctk.CTk):
 
         # Initial view
         self.show_auth_page()
+        logger.info("TelemetryApp UI initialized successfully.")
 
     def setup_auth_ui(self):
         """Builds a modern, polished Connection interface for Page 1."""
@@ -131,27 +133,124 @@ class TelemetryApp(ctk.CTk):
         self.reports_page.pack(fill="both", expand=True)
 
     def on_connect_clicked(self):
-        """Validates inputs, caches credentials in-memory, and transitions to Page 2."""
+        """Validates inputs, caches credentials in-memory, checks certificate status, and transitions/generates cert."""
         tenant = self.tenant_entry.get().strip()
         client = self.client_entry.get().strip()
         secret = self.secret_entry.get().strip()
 
+        logger.info("Connect & Continue clicked. Verifying connection credentials...")
         if not tenant or not client or not secret:
+            logger.warning("Connection failed: Missing one or more required credential fields.")
             self.auth_status_lbl.configure(text="Error: Tenant ID, Client ID, and Client Secret are required.", text_color="red")
             return
 
         self.auth_status_lbl.configure(text="")
 
-        # Cache connection details safely in memory (Stage 1)
+        # Cache connection details safely in memory
         self.stored_tenant = tenant
         self.stored_client = client
         self.stored_secret = secret
 
-        # Switch view to Page 2 (Reports screen) without executing backend fetching threads
+        logger.info("Credentials validated and cached in memory.")
+
+        from core.cert_auth import check_certificate_exists, generate_certificate, load_certificate
+
+        if check_certificate_exists():
+            try:
+                # Decrypt the PFX certificate using the client secret
+                load_certificate(secret)
+            except Exception as e:
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Certificate Decryption Error",
+                    f"Unable to unlock certificate with Client Secret. Proceeding with standard Client Secret authentication fallback.\n\nError: {e}",
+                    parent=self
+                )
+            # Proceed to reports page in either case
+            self.show_reports_page()
+        else:
+            try:
+                # Generate new certificate and pfx encrypted with the client secret
+                pem_path, _ = generate_certificate(secret)
+                # Setup instructions UI requesting the user to upload it to Entra
+                self.setup_cert_instructions_ui(pem_path)
+            except Exception as e:
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Certificate Generation Error",
+                    f"Unable to generate certificate. Proceeding with standard Client Secret authentication fallback.\n\nError: {e}",
+                    parent=self
+                )
+                self.show_reports_page()
+
+    def setup_cert_instructions_ui(self, pem_path):
+        """Displays certificate upload instructions screen when a new certificate is generated."""
+        self.form_container.pack_forget()
+
+        if hasattr(self, "cert_container") and self.cert_container:
+            self.cert_container.destroy()
+
+        self.cert_container = ctk.CTkFrame(self.credentials_card, fg_color="transparent")
+        self.cert_container.pack(pady=30, padx=50, fill="both", expand=True)
+
+        ctk.CTkLabel(
+            self.cert_container,
+            text="Certificate Upload Required",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color="#1E3A8A"
+        ).pack(anchor="w", pady=(0, 15))
+
+        instructions_text = (
+            "A new security certificate has been generated for hybrid authentication.\n\n"
+            f"1. Locate the certificate file at:\n   {pem_path}\n\n"
+            "2. Upload this 'certificate.pem' file to your App Registration in the Microsoft Entra ID portal.\n"
+            "   (App Registration -> Certificates & secrets -> Certificates -> Upload certificate)\n\n"
+            "3. Once you have successfully uploaded the certificate, click the 'Continue' button below."
+        )
+
+        self.cert_instr_lbl = ctk.CTkLabel(
+            self.cert_container,
+            text=instructions_text,
+            font=ctk.CTkFont(size=13),
+            text_color="#374151",
+            justify="left"
+        )
+        self.cert_instr_lbl.pack(anchor="w", pady=(0, 25))
+
+        self.cert_continue_btn = ctk.CTkButton(
+            self.cert_container,
+            text="I have uploaded the certificate. Continue",
+            command=self.on_cert_continue_clicked,
+            height=45,
+            fg_color="#1E3A8A",
+            hover_color="#172554",
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.cert_continue_btn.pack(fill="x")
+
+    def on_cert_continue_clicked(self):
+        """Validates certificate after user claims to have uploaded it and transitions to reports."""
+        from core.cert_auth import load_certificate
+        try:
+            # Verify we can unlock/read the cert successfully
+            load_certificate(self.stored_secret)
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror(
+                "Certificate Verification Error",
+                f"Unable to verify certificate. Proceeding with standard Client Secret authentication fallback.\n\nError: {e}",
+                parent=self
+            )
         self.show_reports_page()
+        
+        # Reset UI form in case of subsequent logins
+        if hasattr(self, "cert_container") and self.cert_container:
+            self.cert_container.pack_forget()
+        self.form_container.pack(pady=40, padx=50, fill="both", expand=True)
 
     def on_disconnect_clicked(self):
         """Clears all session properties and safely resets screens back to Page 1."""
+        logger.info("Disconnect clicked. Clearing cached session and credentials...")
         # Wipes local entry buffers
         self.tenant_entry.delete(0, "end")
         self.client_entry.delete(0, "end")
@@ -166,16 +265,27 @@ class TelemetryApp(ctk.CTk):
         # Clears variables inside nested dashboards
         self.reports_page.clear_session_data()
 
+        # Clean up cert screen UI and restore normal entry layout
+        if hasattr(self, "cert_container") and self.cert_container:
+            try:
+                self.cert_container.pack_forget()
+            except Exception:
+                pass
+        self.form_container.pack(pady=40, padx=50, fill="both", expand=True)
+
         # Shifts screen orientation
         self.show_auth_page()
+        logger.info("Session successfully disconnected. Returned to Auth page.")
 
     def show_auth_page(self):
         """Transitions view port to Page 1 (Authentication screen)."""
+        logger.info("Showing Authentication Page.")
         self.report_frame.pack_forget()
         self.auth_frame.pack(fill="both", expand=True)
 
     def show_reports_page(self):
         """Transitions view port to Page 2 (Reports Dashboard)."""
+        logger.info("Showing Reports Dashboard Page.")
         self.auth_frame.pack_forget()
         self.report_frame.pack(fill="both", expand=True)
 
@@ -309,8 +419,10 @@ class ReportsPage(ctk.CTkFrame):
         secret = self.controller.stored_secret
 
         if not tenant or not client or not secret:
+            logger.warning("Fetch Report triggered, but connection credentials are empty.")
             return
 
+        logger.info("Fetch Report triggered. Invoking background parallel audits...")
         # Disable the trigger button and update visual text during background thread audit
         self.fetch_btn.configure(state="disabled", text="Fetching...", fg_color="#64748B")
 
@@ -335,6 +447,7 @@ class ReportsPage(ctk.CTkFrame):
 
     def clear_session_data(self):
         """Wipes the cached parameters from telemetry objects and resets the Fetch button."""
+        logger.info("Clearing session data in ReportsPage.")
         for entry in self.embedded_entries:
             entry.delete(0, "end")
         
@@ -502,6 +615,7 @@ class SidebarFrame(ctk.CTkFrame):
             for row, btn, icon in self.menu_buttons:
                 btn.configure(text="")
             self.disconnect_btn.configure(text="")
+            logger.info("Sidebar collapsed.")
         else:
             # Return layout to expanded parameters (300px)
             self.configure(width=300)
@@ -514,6 +628,7 @@ class SidebarFrame(ctk.CTkFrame):
             for idx, (row, btn, icon) in enumerate(self.menu_buttons):
                 btn.configure(text=self.menu_data[idx][0])
             self.disconnect_btn.configure(text="Disconnect")
+            logger.info("Sidebar expanded.")
 
 
 def collect_power_automate_telemetry(tenant_id, client_id, client_secret, env_url):  # CITATION: def collect_power_automate_telemetry(tenant_id, client_id, client_secret, env_url):

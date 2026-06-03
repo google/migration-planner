@@ -43,16 +43,23 @@ _log_file_path = os.path.join(_log_dir, 'license_log.txt')
 
 _log_queue = queue.Queue()
 _file_handler = logging.FileHandler(_log_file_path, mode='a', encoding='utf-8')
-_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 _file_handler.setFormatter(_formatter)
 
 _queue_listener = QueueListener(_log_queue, _file_handler)
 _queue_listener.start()
 
+# Configure the root logger to send all records to the log queue and clear other handlers (stdout/stderr)
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.DEBUG)
+for h in list(root_logger.handlers):
+    root_logger.removeHandler(h)
+root_logger.addHandler(QueueHandler(_log_queue))
+
 async_logger = logging.getLogger("LicenseUsageAsyncLogger")
 async_logger.setLevel(logging.DEBUG)
-async_logger.addHandler(QueueHandler(_log_queue))
-async_logger.propagate = False
+# Note: Since the root logger now routes everything to queue, async_logger can simply propagate.
+async_logger.propagate = True
 
 
 # =================================================================================
@@ -450,6 +457,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self._check_all_done()
 
     def _render_skus_error(self, err_msg):
+        async_logger.warning(f"Rendering SKU table error state: {err_msg}")
         self._set_state_error(self.lic_state_frame, f"Failed to load SKUs: {err_msg}", self.retry_sku)
         self.btn_export_lic.configure(state="disabled")
         self.status_sku = "error"
@@ -469,6 +477,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             self.after(0, self._render_o365_error, str(e))
 
     def _render_o365_success(self, o365_data: list):
+        async_logger.info("Rendering O365 Active Users Usage grid success state.")
         self.o365_state_frame.pack_forget()
         for w in self.o365_grid_frame.winfo_children(): w.destroy()
 
@@ -502,6 +511,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self._check_all_done()
 
     def _render_o365_error(self, err_msg):
+        async_logger.warning(f"Rendering O365 Active Users Usage grid error state: {err_msg}")
         self._set_state_error(self.o365_state_frame, f"Failed to load O365 Usage: {err_msg}", self.retry_o365)
         self.status_o365 = "error"
         self._check_all_done()
@@ -520,6 +530,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             self.after(0, self._render_o365_trend_error, str(e))
 
     def _render_o365_trend_success(self, trend_data: dict):
+        async_logger.info("Rendering O365 Trend Chart success state.")
         self.o365_trend_state_frame.pack_forget()
         for w in self.o365_trend_grid_frame.winfo_children(): w.destroy()
 
@@ -580,6 +591,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self._check_all_done()
 
     def _render_o365_trend_error(self, err_msg):
+        async_logger.warning(f"Rendering O365 Trend Chart error state: {err_msg}")
         self._set_state_error(self.o365_trend_state_frame, f"Failed to load O365 Trend: {err_msg}", self.retry_o365_trend)
         self.status_o365_trend = "error"
         self._check_all_done()
@@ -598,6 +610,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             self.after(0, self._render_m365_error, str(e))
 
     def _render_m365_success(self, m365_data: list):
+        async_logger.info("Rendering M365 Apps Usage success state.")
         self.m365_state_frame.pack_forget()
         for w in self.m365_grid_frame.winfo_children(): w.destroy()
 
@@ -640,6 +653,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self._check_all_done()
 
     def _render_m365_error(self, err_msg):
+        async_logger.warning(f"Rendering M365 Apps Usage error state: {err_msg}")
         self._set_state_error(self.m365_state_frame, f"Failed to load M365 Apps Usage: {err_msg}", self.retry_m365)
         self.status_m365 = "error"
         self._check_all_done()
@@ -670,6 +684,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             self.after(0, self._render_pa_error, str(e))
 
     def _render_pa_success(self, results: dict):
+        async_logger.info("Rendering Power Automate success state.")
         self.pa_state_frame.pack_forget()
         for w in self.pa_grid_frame.winfo_children(): w.destroy()
 
@@ -816,6 +831,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self._check_all_done()
 
     def _render_pa_error(self, err_msg):
+        async_logger.warning(f"Rendering Power Automate error state: {err_msg}")
         self._set_state_error(self.pa_state_frame, f"Failed to load Power Automate Telemetry: {err_msg}", self.retry_power_automate)
         self.status_pa = "error"
         self._check_all_done()

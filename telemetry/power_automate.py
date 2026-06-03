@@ -21,14 +21,8 @@ class PowerAutomateScanner:
         self.access_token = None
 
     def _setup_logger(self):
-        """Configures logging to append to telemetry/logs/log.txt."""
-        self.logger = logging.getLogger("PowerAutomateScanner")
-        self.logger.setLevel(logging.DEBUG)
-        if not self.logger.handlers:
-            fh = logging.FileHandler(self.log_file, mode='a')
-            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-            fh.setFormatter(formatter)
-            self.logger.addHandler(fh)
+        """Configures logging to propagate to the central LicenseUsageAsyncLogger."""
+        self.logger = logging.getLogger("LicenseUsageAsyncLogger.PowerAutomateScanner")
 
     def _get_access_token(self, scope):
         """Fetches OAuth 2.0 token for a given scope."""
