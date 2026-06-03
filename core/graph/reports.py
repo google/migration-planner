@@ -32,6 +32,8 @@ def _sanitize_string(s: str) -> str:
     s = re.sub(r'Bearer\s+[^&"\')\s]+', 'Bearer [MASKED]', s, flags=re.IGNORECASE)
     return s
 
+logger = logging.getLogger(__name__)
+
 
 class ReportsService:
     """Service to fetch streaming M365 telemetry reports via Microsoft Graph API."""
