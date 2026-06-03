@@ -148,7 +148,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             width=180,
             height=32,
             corner_radius=16,
-            command=self.export_labels_csv
+            command=self.export_labels_csv,
+            state="disabled"
         )
         self.btn_export_labels.pack(side="right", anchor="e")
 
@@ -232,7 +233,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             width=180,
             height=32,
             corner_radius=16,
-            command=self.export_retention_csv
+            command=self.export_retention_csv,
+            state="disabled"
         )
         self.btn_export_retention.pack(side="right", anchor="e")
         self.retention_grid = ctk.CTkFrame(
@@ -264,6 +266,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             
         self.flattened_rows = []
         self.current_page = 0
+        
+        if hasattr(self, "btn_export_labels"):
+            self.btn_export_labels.configure(state="disabled")
+        if hasattr(self, "btn_export_retention"):
+            self.btn_export_retention.configure(state="disabled")
 
     def _set_state_loading(self, msg="Loading..."):
         for w in self.state_frame.winfo_children():
@@ -301,6 +308,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.retention_grid.pack_forget()
         
         self._set_state_loading("Retrieving tenant Security & Compliance policies...")
+        
+        self.btn_export_labels.configure(state="disabled")
+        self.btn_export_retention.configure(state="disabled")
         
         threading.Thread(
             target=self._execute_worker,
@@ -343,10 +353,13 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if labels_error:
             ctk.CTkLabel(self.labels_grid, text=f"✖ Failed to load Sensitivity Labels: {labels_error}", font=FONT_BODY_MEDIUM, text_color=COLOR_ERROR).pack(padx=20, pady=20)
             self.pagination_frame.pack_forget()
+            self.btn_export_labels.configure(state="disabled")
         elif labels is None or not labels:
             ctk.CTkLabel(self.labels_grid, text="No Sensitivity Labels configured in this tenant.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(padx=20, pady=20)
             self.pagination_frame.pack_forget()
+            self.btn_export_labels.configure(state="disabled")
         else:
+            self.btn_export_labels.configure(state="normal")
             # Define column weights for proper proportional spacing
             self.labels_grid.grid_columnconfigure(0, weight=2)  # Label Name
             self.labels_grid.grid_columnconfigure(1, weight=3)  # Description
@@ -513,6 +526,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()
+        self.btn_export_labels.configure(state="disabled")
+        self.btn_export_retention.configure(state="disabled")
 
     def _render_retention_policies(self, policies, policies_error):
         if policies_error:
@@ -530,6 +545,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 text_color=COLOR_ERROR,
                 justify="center"
             ).pack(padx=20, pady=20)
+            self.btn_export_retention.configure(state="disabled")
         elif policies is None or not policies:
             ctk.CTkLabel(
                 self.retention_grid, 
@@ -537,7 +553,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 font=FONT_BODY_MEDIUM, 
                 text_color=COLOR_TEXT_SUB
             ).pack(padx=20, pady=20)
+            self.btn_export_retention.configure(state="disabled")
         else:
+            self.btn_export_retention.configure(state="normal")
             # Configure grid columns
             self.retention_grid.grid_columnconfigure(0, weight=3)  # Policy Name
             self.retention_grid.grid_columnconfigure(1, weight=3)  # Workloads
