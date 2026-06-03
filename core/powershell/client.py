@@ -5,22 +5,18 @@ import logging
 logger = logging.getLogger("PowerShellClient")
 
 class PowerShellClient:
-    def __init__(self, tenant_id, client_id, cert_password="YourSecureCertPassword123", cert_dir="/Users/srishtinegi/Desktop/Test/certificates"):
+    def __init__(self, tenant_id, client_id, client_secret):
         self.tenant_id = tenant_id
         self.client_id = client_id
-        self.cert_password = cert_password
-        self.cert_dir = cert_dir
+        self.cert_password = client_secret
 
     def locate_certificate(self) -> str:
-        """Finds the first .pfx or .pem certificate in the target directory."""
-        if not os.path.exists(self.cert_dir):
-            raise FileNotFoundError(f"Certificate directory does not exist: {self.cert_dir}")
-        
-        for file in os.listdir(self.cert_dir):
-            if file.endswith(".pfx") or file.endswith(".pem"):
-                return os.path.join(self.cert_dir, file)
-                
-        raise FileNotFoundError(f"No .pfx or .pem certificate found in {self.cert_dir}")
+        """Locates the automated hybrid auth PFX certificate path."""
+        from core.cert_auth import get_cert_paths
+        _, _, pfx_path = get_cert_paths()
+        if not os.path.exists(pfx_path):
+            raise FileNotFoundError(f"Hybrid auth PFX certificate not found at {pfx_path}. Please complete the hybrid authentication flow on the login page first.")
+        return pfx_path
 
     def execute_script(self, script_relative_path: str, args: list) -> str:
         """Executes pwsh with the specified script and arguments."""

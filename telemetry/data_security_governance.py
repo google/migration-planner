@@ -75,7 +75,7 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
         from core.powershell.client import PowerShellClient
         from core.powershell.retention import RetentionService
         
-        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id)
+        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret)
         retention_service = RetentionService(ps_client)
         policies = retention_service.fetch_retention_policies()
     except Exception as e:
