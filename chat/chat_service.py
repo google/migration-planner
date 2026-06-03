@@ -251,6 +251,7 @@ class ChatScannerService:
         chat_batch_limiter=self.chat_batch_limiter,
         channel_batch_limiter=self.channel_batch_limiter,
         stop_event=self.stop_event,
+        log_func=self.log_func,
     )
 
     # Initialize variables that will be set differently in each mode

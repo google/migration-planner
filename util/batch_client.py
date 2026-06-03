@@ -21,6 +21,7 @@ import random
 import threading
 import time
 from typing import Any
+import typing
 
 import aiohttp
 import requests
@@ -35,6 +36,13 @@ logger = logging.getLogger(__name__)
 
 class GraphBatchClient:
   """Central communication engine handling batch negotiation and resilient retries."""
+
+  def __init__(self, log_func: typing.Callable[[str], None] | None = None) -> None:
+    self.log_func = log_func
+
+  def _log(self, message: str) -> None:
+    if self.log_func:
+      self.log_func(message)
 
   def execute_batch_request(
       self,
@@ -95,7 +103,7 @@ class GraphBatchClient:
           try:
             batch_responses = response.json().get("responses", [])
           except ValueError:
-            logger.warning("Invalid JSON retrieved from batch. Awaiting retry.")
+            self._log("Invalid JSON retrieved from batch. Awaiting retry.")
             if _sleep(default_backoff):
               break
             continue
@@ -136,10 +144,8 @@ class GraphBatchClient:
               break
 
             if needs_refresh:
-              logger.warning(
-                  "Batch individual items failed auth in %s. Performing inline"
-                  " refresh.",
-                  context,
+              self._log(
+                  f"Batch individual items failed auth in {context}. Performing inline refresh."
               )
               token_manager.refresh_token_data(token_data)
 
@@ -149,10 +155,8 @@ class GraphBatchClient:
               sleep_time = default_backoff ** (current_try - 1)
 
             sleep_time = min(sleep_time, 300.0)
-            logger.info(
-                "Batch partial fail (%d items). Throttle sleep: %.1fs",
-                len(next_retry_requests),
-                sleep_time,
+            self._log(
+                f"Batch partial fail ({len(next_retry_requests)} items). Throttle sleep: {sleep_time:.1f}s"
             )
             if stop_event and stop_event.is_set():
               break
@@ -175,13 +179,13 @@ class GraphBatchClient:
           wait = min(float(raw_retry_after_seconds), 300.0) + random.uniform(
               0, 1.0
           )
-          logger.warning("Outer Batch 429 Throttled. Pausing for %.1fs", wait)
+          self._log(f"Outer Batch 429 Throttled. Pausing for {wait:.1f}s")
           if _sleep(wait):
             break
         elif response.status_code == 401:
           if stop_event and stop_event.is_set():
             break
-          logger.warning("Outer Batch 401 Unauthorized. Attempting refresh...")
+          self._log("Outer Batch 401 Unauthorized. Attempting refresh...")
           token_manager.refresh_token_data(token_data)
           if _sleep(default_backoff):
             break
@@ -189,16 +193,14 @@ class GraphBatchClient:
           if stop_event and stop_event.is_set():
             break
           wait = min(float(default_backoff ** (current_try - 1)), 30.0)
-          logger.error(
-              "Outer Batch Server Error %d. Waiting %.1fs",
-              response.status_code,
-              wait,
+          self._log(
+              f"Outer Batch Server Error {response.status_code}. Waiting {wait:.1f}s"
           )
           if _sleep(wait):
             break
         else:
-          logger.error(
-              "Batch terminal unrecoverable failure %d", response.status_code
+          self._log(
+              f"Batch terminal unrecoverable failure {response.status_code}"
           )
           raise ConnectionError(
               f"Terminal outer batch failure code {response.status_code}"
@@ -206,11 +208,8 @@ class GraphBatchClient:
       except Exception as error:
         # Catch specific connection errors without swallowing.
         last_exception = error
-        logger.warning(
-            "Network exception trapped during outer batch (%d/%d): %s",
-            current_try,
-            max_retries,
-            error,
+        self._log(
+            f"Network exception trapped during outer batch ({current_try}/{max_retries}): {error}"
         )
         if current_try < max_retries:
           if stop_event and stop_event.is_set():
@@ -227,6 +226,7 @@ class GraphBatchClient:
           f" {context} context. Failed to deliver {len(pending_requests)}"
           " sub-items."
       )
+      self._log(message)
       if last_exception:
         raise RuntimeError(message) from last_exception
       raise RuntimeError(message)
@@ -281,7 +281,7 @@ class GraphBatchClient:
         if response.status_code == 200:
           return response
         elif response.status_code == 401:
-          logger.warning("401 Unauthenticated captured in GET operation.")
+          self._log("401 Unauthenticated captured in GET operation.")
           # Safe consumption: don't decrease retry count.
           if token_manager.refresh_token_data(token_data):
             headers["Authorization"] = f"Bearer {token_data['token']}"
@@ -292,17 +292,20 @@ class GraphBatchClient:
           except (ValueError, TypeError):
             retry_after = backoff * retries
           retry_val = retry_after or (backoff * retries)
-          logger.warning("429 Throttle active. Sleeping %.1fs", retry_val)
+          self._log(f"429 Throttle active. Sleeping {retry_val:.1f}s")
           time.sleep(retry_val)
         elif response.status_code in [500, 502, 503, 504]:
+          self._log(f"Server Error {response.status_code} captured on {url}. Retrying...")
           time.sleep(backoff * retries)
         elif response.status_code in [403, 404]:
+          self._log(f"WARNING: API call to {url} failed with status {response.status_code}: {response.text[:200]}")
           return response
         else:
+          self._log(f"WARNING: API call to {url} returned unexpected status {response.status_code}: {response.text[:200]}")
           time.sleep(backoff * retries)
       except Exception as error:
         last_exception = error
-        logger.error("GET operation exception encountered: %s", error)
+        self._log(f"GET operation exception encountered on {url}: {error}")
         time.sleep(backoff * retries)
 
     if last_exception:
@@ -349,9 +352,7 @@ class GraphBatchClient:
             response_headers = response.headers.copy()
 
           if status == 401:
-            logger.warning(
-                "Async 401 detected. Initiating secure off-thread refresh."
-            )
+            self._log("Async 401 detected. Initiating secure off-thread refresh.")
             refreshed = await asyncio.to_thread(
                 token_manager.refresh_token_data, token_data
             )
@@ -363,17 +364,20 @@ class GraphBatchClient:
               retry_after = int(float(response_headers.get("Retry-After", 5)))
             except (ValueError, TypeError):
               retry_after = 5
-            logger.warning("Async 429 detected. Suspending %.1fs", retry_after)
+            self._log(f"Async 429 detected. Suspending {retry_after:.1f}s")
             await asyncio.sleep(retry_after)
           elif status in [500, 502, 503, 504]:
+            self._log(f"Async Server Error {status} captured on {url}. Retrying...")
             await asyncio.sleep(backoff * retries)
           elif status in [403, 404]:
+            self._log(f"WARNING: Async API call to {url} failed with status {status}")
             return None, status
           else:
+            self._log(f"WARNING: Async API call to {url} returned unexpected status {status}")
             await asyncio.sleep(backoff * retries)
         except Exception as error:
           last_exception = error
-          logger.error("Async exception trapped: %s", error)
+          self._log(f"Async exception trapped on {url}: {error}")
           await asyncio.sleep(backoff * retries)
 
     if last_exception:
