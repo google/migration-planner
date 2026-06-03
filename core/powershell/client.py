@@ -5,9 +5,10 @@ import logging
 logger = logging.getLogger("PowerShellClient")
 
 class PowerShellClient:
-    def __init__(self, tenant_id, client_id, cert_dir="/Users/srishtinegi/Desktop/Test/certificates"):
+    def __init__(self, tenant_id, client_id, cert_password="YourSecureCertPassword123", cert_dir="/Users/srishtinegi/Desktop/Test/certificates"):
         self.tenant_id = tenant_id
         self.client_id = client_id
+        self.cert_password = cert_password
         self.cert_dir = cert_dir
 
     def locate_certificate(self) -> str:

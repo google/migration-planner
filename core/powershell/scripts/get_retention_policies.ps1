@@ -4,7 +4,9 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$Organization,
     [Parameter(Mandatory=$true)]
-    [string]$CertificatePath
+    [string]$CertificatePath,
+    [Parameter(Mandatory=$false)]
+    [string]$CertificatePassword
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,7 +19,12 @@ if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
 Import-Module ExchangeOnlineManagement
 
 # Connect to Security & Compliance PowerShell using App-Only Cert Auth
-Connect-IPPSSession -CertificateFilePath $CertificatePath -AppId $AppId -Organization $Organization
+if ($CertificatePassword) {
+    $secPassword = ConvertTo-SecureString -String $CertificatePassword -AsPlainText -Force
+    Connect-IPPSSession -CertificateFilePath $CertificatePath -CertificatePassword $secPassword -AppId $AppId -Organization $Organization
+} else {
+    Connect-IPPSSession -CertificateFilePath $CertificatePath -AppId $AppId -Organization $Organization
+}
 
 try {
     # Retrieve policies and convert to JSON

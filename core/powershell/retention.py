@@ -17,6 +17,8 @@ class RetentionService:
             "-Organization", self.client.tenant_id,
             "-CertificatePath", cert_path
         ]
+        if self.client.cert_password:
+            args += ["-CertificatePassword", self.client.cert_password]
 
         raw_output = self.client.execute_script("scripts/get_retention_policies.ps1", args)
         
