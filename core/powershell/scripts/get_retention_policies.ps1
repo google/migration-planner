@@ -38,8 +38,14 @@ try {
         if ($allRules) {
             foreach ($rule in @($allRules)) {
                 if ($rule.Policy) {
-                    $policyKey = $rule.Policy.ToString()
-                    $ruleMap[$policyKey] = $rule
+                    $rawKey = $rule.Policy.ToString()
+                    $ruleMap[$rawKey] = $rule
+                    
+                    # Extract the policy name if the reference is a DistinguishedName
+                    if ($rawKey -match "CN=([^,]+)") {
+                        $cnKey = $Matches[1]
+                        $ruleMap[$cnKey] = $rule
+                    }
                 }
             }
         }
@@ -57,6 +63,8 @@ try {
                 $rule = $ruleMap[$policy.Name]
             } elseif ($ruleMap.ContainsKey($policy.Identity.ToString())) {
                 $rule = $ruleMap[$policy.Identity.ToString()]
+            } elseif ($policy.Guid -and $ruleMap.ContainsKey($policy.Guid.ToString())) {
+                $rule = $ruleMap[$policy.Guid.ToString()]
             }
 
             if ($rule) {
