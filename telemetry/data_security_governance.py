@@ -29,6 +29,54 @@ usage_logger = logging.getLogger("LicenseUsageAsyncLogger")
 # Import shared styles
 from telemetry.styles import *
 
+def format_dlp_workloads(policy) -> str:
+    """Formats active workloads/locations for a DLP policy as a friendly string."""
+    active = []
+    if policy.get("ExchangeLocation"):
+        active.append("Exchange")
+    if policy.get("SharePointLocation"):
+        active.append("SharePoint")
+    if policy.get("OneDriveLocation"):
+        active.append("OneDrive")
+    if policy.get("TeamsLocation"):
+        active.append("Teams")
+    if policy.get("DevicesLocation"):
+        active.append("Devices (Endpoints)")
+    return ", ".join(active) if active else "None"
+
+def analyze_thick_client_enforcement(policy) -> str:
+    """Analyzes the rules of a DLP policy to determine thick client (desktop app) enforcement details."""
+    devices = policy.get("DevicesLocation")
+    if not devices:
+        return "Not Configured (Devices workload inactive)"
+    
+    rules = policy.get("Rules", [])
+    if not rules:
+        return "Devices Workload Active (No rules configured)"
+        
+    has_restricted_apps = False
+    has_other_endpoint_restrictions = False
+    
+    for rule in rules:
+        if not rule.get("Enabled", True):
+            continue
+        actions = rule.get("Actions", [])
+        for act in actions:
+            act_str = str(act).lower()
+            if "restrictedapp" in act_str:
+                has_restricted_apps = True
+            elif any(keyword in act_str for keyword in ["clipboard", "print", "removablemedia", "usb", "networkshare", "cloudlookup", "bluetooth"]):
+                has_other_endpoint_restrictions = True
+                
+    if has_restricted_apps and has_other_endpoint_restrictions:
+        return "Purview Restricted Apps & Device Restrictions (Clipboard/USB/Print)"
+    elif has_restricted_apps:
+        return "Purview Restricted Apps"
+    elif has_other_endpoint_restrictions:
+        return "Purview Device Restrictions (Clipboard/USB/Print)"
+    else:
+        return "Devices Workload Active (Audit/Alert Only)"
+
 def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dict:
     """Pipeline specifically for security and governance policy data collection."""
     usage_logger.info("Starting Data Security & Governance Pipeline...")
@@ -82,16 +130,37 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
         usage_logger.error("Failed to fetch retention policies via PowerShell", exc_info=True)
         policies_error = str(e)
         
-    # Raise ConnectionError only if BOTH failed
-    if labels_error and policies_error:
-        raise ConnectionError(f"Security governance fetch failed.\nLabels Error: {labels_error}\nPolicies Error: {policies_error}")
+    # Fetch DLP Policies via PowerShell client
+    dlp_policies = None
+    dlp_policies_error = None
+    try:
+        from core.powershell.client import PowerShellClient
+        from core.powershell.dlp import DlpService
+        
+        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret)
+        dlp_service = DlpService(ps_client)
+        dlp_policies = dlp_service.fetch_dlp_policies()
+    except Exception as e:
+        usage_logger.error("Failed to fetch DLP compliance policies via PowerShell", exc_info=True)
+        dlp_policies_error = str(e)
+        
+    # Raise ConnectionError only if ALL failed
+    if labels_error and policies_error and dlp_policies_error:
+        raise ConnectionError(
+            f"Security governance fetch failed.\n"
+            f"Labels Error: {labels_error}\n"
+            f"Policies Error: {policies_error}\n"
+            f"DLP Error: {dlp_policies_error}"
+        )
         
     usage_logger.info("Data Security & Governance Pipeline completed successfully.")
     return {
         "labels": labels,
         "labels_error": labels_error,
         "policies": policies,
-        "policies_error": policies_error
+        "policies_error": policies_error,
+        "dlp_policies": dlp_policies,
+        "dlp_policies_error": dlp_policies_error
     }
 
 
@@ -110,6 +179,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.ITEMS_PER_PAGE = 8
         self.last_labels_data = None
         self.last_policies_data = None
+        self.last_dlp_policies_data = None
         
         self.build_ui()
 
@@ -237,7 +307,55 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             state="disabled"
         )
         self.btn_export_retention.pack(side="right", anchor="e")
+        
         self.retention_grid = ctk.CTkFrame(
+            self.inner_pad,
+            fg_color=COLOR_SURFACE,
+            border_color=COLOR_OUTLINE_LIGHT,
+            border_width=1,
+            corner_radius=8
+        )
+
+        # DLP Compliance Policies section
+        self.dlp_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.dlp_title = ctk.CTkLabel(
+            self.dlp_header_frame,
+            text="DLP Compliance Policies",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.dlp_title.pack(side="left", anchor="w")
+        
+        self.dlp_link = ctk.CTkLabel(
+            self.dlp_header_frame,
+            text="Open Microsoft Purview Portal ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.dlp_link.pack(side="left", anchor="w", padx=(15, 0))
+        self.dlp_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/datalossprevention/policies"))
+        self.dlp_link.bind("<Enter>", lambda e: self.dlp_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.dlp_link.bind("<Leave>", lambda e: self.dlp_link.configure(text_color=COLOR_PRIMARY))
+
+        self.btn_export_dlp = ctk.CTkButton(
+            self.dlp_header_frame,
+            text="Export DLP Policies",
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            text_color=COLOR_PRIMARY,
+            border_width=1,
+            border_color=COLOR_OUTLINE,
+            hover_color=COLOR_SECONDARY_HOVER,
+            width=180,
+            height=32,
+            corner_radius=16,
+            command=self.export_dlp_csv,
+            state="disabled"
+        )
+        self.btn_export_dlp.pack(side="right", anchor="e")
+        
+        self.dlp_grid = ctk.CTkFrame(
             self.inner_pad,
             fg_color=COLOR_SURFACE,
             border_color=COLOR_OUTLINE_LIGHT,
@@ -256,12 +374,16 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.labels_header_frame.pack_forget()
         self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
+        self.dlp_header_frame.pack_forget()
+        self.dlp_grid.pack_forget()
         
         for w in self.state_frame.winfo_children():
             w.destroy()
         for w in self.labels_grid.winfo_children():
             w.destroy()
         for w in self.retention_grid.winfo_children():
+            w.destroy()
+        for w in self.dlp_grid.winfo_children():
             w.destroy()
             
         self.flattened_rows = []
@@ -271,6 +393,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self.btn_export_labels.configure(state="disabled")
         if hasattr(self, "btn_export_retention"):
             self.btn_export_retention.configure(state="disabled")
+        if hasattr(self, "btn_export_dlp"):
+            self.btn_export_dlp.configure(state="disabled")
 
     def _set_state_loading(self, msg="Loading..."):
         for w in self.state_frame.winfo_children():
@@ -306,11 +430,14 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.labels_header_frame.pack_forget()
         self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
+        self.dlp_header_frame.pack_forget()
+        self.dlp_grid.pack_forget()
         
         self._set_state_loading("Retrieving tenant Security & Compliance policies...")
         
         self.btn_export_labels.configure(state="disabled")
         self.btn_export_retention.configure(state="disabled")
+        self.btn_export_dlp.configure(state="disabled")
         
         threading.Thread(
             target=self._execute_worker,
@@ -334,14 +461,19 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             w.destroy()
         for w in self.retention_grid.winfo_children():
             w.destroy()
+        for w in self.dlp_grid.winfo_children():
+            w.destroy()
 
         labels = data.get("labels")
         labels_error = data.get("labels_error")
         policies = data.get("policies")
         policies_error = data.get("policies_error")
+        dlp_policies = data.get("dlp_policies")
+        dlp_policies_error = data.get("dlp_policies_error")
 
         self.last_labels_data = labels
         self.last_policies_data = policies
+        self.last_dlp_policies_data = dlp_policies
 
         usage_logger.info(f"Sensitivity Labels fetched successfully. Total labels to render: {len(labels) if labels else 0}")
         self.status = "success"
@@ -417,6 +549,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.retention_header_frame.pack(fill="x", pady=(20, 10))
         self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
         self._render_retention_policies(policies, policies_error)
+
+        # 3. Render DLP Policies Grid
+        self.dlp_header_frame.pack(fill="x", pady=(20, 10))
+        self.dlp_grid.pack(fill="x", expand=True, pady=(0, 15))
+        self._render_dlp_policies(dlp_policies, dlp_policies_error)
 
         self.on_status_change()
 
@@ -528,6 +665,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.on_status_change()
         self.btn_export_labels.configure(state="disabled")
         self.btn_export_retention.configure(state="disabled")
+        self.btn_export_dlp.configure(state="disabled")
 
     def _render_retention_policies(self, policies, policies_error):
         if policies_error:
@@ -656,6 +794,101 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 c5.grid(row=r_idx, column=5, sticky="nsew", padx=1, pady=1)
                 ctk.CTkLabel(c5, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
+    def _render_dlp_policies(self, policies, policies_error):
+        if policies_error:
+            msg = policies_error
+            # Provide helpful, friendly advice if pwsh or dependency issue
+            if "powershell" in policies_error.lower() or "pwsh" in policies_error.lower():
+                msg = "PowerShell Core ('pwsh') is not installed or configured on this machine.\nPlease refer to the Prerequisites in the README to configure it."
+            elif "exchangeonlinemanagement" in policies_error.lower():
+                msg = "ExchangeOnlineManagement PowerShell module is missing.\nPlease run: Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser"
+                
+            ctk.CTkLabel(
+                self.dlp_grid, 
+                text=f"✖ {msg}", 
+                font=FONT_BODY_MEDIUM, 
+                text_color=COLOR_ERROR,
+                justify="center"
+            ).pack(padx=20, pady=20)
+            self.btn_export_dlp.configure(state="disabled")
+        elif policies is None or not policies:
+            ctk.CTkLabel(
+                self.dlp_grid, 
+                text="No DLP Compliance Policies found in this tenant.", 
+                font=FONT_BODY_MEDIUM, 
+                text_color=COLOR_TEXT_SUB
+            ).pack(padx=20, pady=20)
+            self.btn_export_dlp.configure(state="disabled")
+        else:
+            self.btn_export_dlp.configure(state="normal")
+            # Configure grid columns
+            self.dlp_grid.grid_columnconfigure(0, weight=3)  # Policy Name
+            self.dlp_grid.grid_columnconfigure(1, weight=3)  # Workloads
+            self.dlp_grid.grid_columnconfigure(2, weight=1)  # Mode
+            self.dlp_grid.grid_columnconfigure(3, weight=4)  # Thick Client Enforcement
+            self.dlp_grid.grid_columnconfigure(4, weight=1)  # Status
+
+            headers = ["Policy Name", "Workloads", "Mode", "Thick Client DLP Enforcement", "Status"]
+            for col_idx, head_text in enumerate(headers):
+                cell = ctk.CTkFrame(self.dlp_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+                cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+            # Handle case where policies is a single dict rather than a list
+            policies_list = policies if isinstance(policies, list) else [policies]
+
+            for r_idx, policy in enumerate(policies_list, start=1):
+                bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+
+                name = policy.get("Name", "N/A")
+                comment = policy.get("Comment", "")
+                workloads_str = format_dlp_workloads(policy)
+                mode = policy.get("Mode", "Enforce")
+                thick_client_status = analyze_thick_client_enforcement(policy)
+
+                # Enabled can be boolean or string
+                enabled_val = policy.get("Enabled", True)
+                if isinstance(enabled_val, str):
+                    is_enabled = enabled_val.lower() == "true"
+                else:
+                    is_enabled = bool(enabled_val)
+                    
+                status = "🟢 Enabled" if is_enabled else "🔴 Disabled"
+
+                c0 = ctk.CTkFrame(self.dlp_grid, fg_color=bg_style, corner_radius=0)
+                c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+                
+                has_comment = bool(comment and comment != name)
+                lbl_name = ctk.CTkLabel(c0, text=name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
+                lbl_name.pack(padx=10, pady=(6, 2) if has_comment else 6, anchor="w")
+                
+                if has_comment:
+                    lbl_comment = ctk.CTkLabel(c0, text=comment, font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB)
+                    lbl_comment.pack(padx=10, pady=(0, 6), anchor="w")
+                    c0.bind("<Configure>", lambda e, l1=lbl_name, l2=lbl_comment: (l1.configure(wraplength=e.width - 20), l2.configure(wraplength=e.width - 20)))
+                else:
+                    c0.bind("<Configure>", lambda e, l=lbl_name: l.configure(wraplength=e.width - 20))
+
+                c1 = ctk.CTkFrame(self.dlp_grid, fg_color=bg_style, corner_radius=0)
+                c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
+                lbl_workload = ctk.CTkLabel(c1, text=workloads_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+                lbl_workload.pack(padx=10, pady=6, anchor="w")
+                c1.bind("<Configure>", lambda e, l=lbl_workload: l.configure(wraplength=e.width - 20))
+
+                c2 = ctk.CTkFrame(self.dlp_grid, fg_color=bg_style, corner_radius=0)
+                c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(c2, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+                c3 = ctk.CTkFrame(self.dlp_grid, fg_color=bg_style, corner_radius=0)
+                c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
+                lbl_thick = ctk.CTkLabel(c3, text=thick_client_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left")
+                lbl_thick.pack(padx=10, pady=6, anchor="w")
+                c3.bind("<Configure>", lambda e, l=lbl_thick: l.configure(wraplength=e.width - 20))
+
+                c4 = ctk.CTkFrame(self.dlp_grid, fg_color=bg_style, corner_radius=0)
+                c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(c4, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
     def export_labels_csv(self):
         """Prompts the user to save sensitivity labels as a detailed CSV file."""
         if not hasattr(self, "last_labels_data") or not self.last_labels_data:
@@ -779,4 +1012,66 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         except Exception as e:
             messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
 
-
+    def export_dlp_csv(self):
+        """Prompts the user to save DLP compliance policies as a detailed CSV file."""
+        if not hasattr(self, "last_dlp_policies_data") or not self.last_dlp_policies_data:
+            from tkinter import messagebox
+            messagebox.showinfo("No Data", "There is no DLP policies data to export. Please run a scan first.", parent=self)
+            return
+            
+        from tkinter import filedialog, messagebox
+        from datetime import datetime
+        import pandas as pd
+        
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"dlp_compliance_policies_{ts}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+            parent=self
+        )
+        if not f:
+            return
+            
+        policies_list = self.last_dlp_policies_data if isinstance(self.last_dlp_policies_data, list) else [self.last_dlp_policies_data]
+        
+        rows = []
+        for policy in policies_list:
+            workloads_str = format_dlp_workloads(policy)
+            thick_client_status = analyze_thick_client_enforcement(policy)
+            
+            # Format rules details
+            rules = policy.get("Rules", [])
+            rules_details = []
+            for r in rules:
+                actions_str = ", ".join(r.get("Actions", []))
+                rules_details.append(f"Rule: {r.get('Name')} (Enabled: {r.get('Enabled')}) - Actions: [{actions_str}]")
+            rules_str = "\n".join(rules_details)
+            
+            rows.append({
+                "Policy Name": policy.get("Name", "N/A"),
+                "Identity": policy.get("Identity", "N/A"),
+                "Description / Comment": policy.get("Comment", "N/A"),
+                "Workloads": workloads_str,
+                "Mode": policy.get("Mode", "N/A"),
+                "Distribution Status": policy.get("DistributionStatus", "N/A"),
+                "Is Enabled": policy.get("Enabled", True),
+                "Thick Client DLP Enforcement": thick_client_status,
+                "Exchange Locations": ", ".join(policy.get("ExchangeLocation") or []),
+                "SharePoint Locations": ", ".join(policy.get("SharePointLocation") or []),
+                "OneDrive Locations": ", ".join(policy.get("OneDriveLocation") or []),
+                "Teams Locations": ", ".join(policy.get("TeamsLocation") or []),
+                "Devices Locations": ", ".join(policy.get("DevicesLocation") or []),
+                "Rules Configured": rules_str,
+                "When Created": policy.get("WhenCreated", "N/A"),
+                "When Changed": policy.get("WhenChanged", "N/A"),
+                "Created By": policy.get("CreatedBy", "N/A"),
+                "Last Modified By": policy.get("LastModifiedBy", "N/A")
+            })
+            
+        df = pd.DataFrame(rows)
+        try:
+            df.to_csv(f, index=False)
+            messagebox.showinfo("Export Successful", f"DLP compliance policies exported successfully to:\n{f}", parent=self)
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
