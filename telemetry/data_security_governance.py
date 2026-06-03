@@ -138,14 +138,16 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         self.btn_export_labels = ctk.CTkButton(
             self.labels_header_frame,
-            text="📥 Export Detailed CSV",
+            text="Export Sensitivity Labels",
             font=FONT_BODY_BOLD,
             fg_color="transparent",
             text_color=COLOR_PRIMARY,
             border_width=1,
-            border_color=COLOR_PRIMARY,
+            border_color=COLOR_OUTLINE,
             hover_color=COLOR_SECONDARY_HOVER,
-            width=140,
+            width=180,
+            height=32,
+            corner_radius=16,
             command=self.export_labels_csv
         )
         self.btn_export_labels.pack(side="right", anchor="e")
@@ -220,14 +222,16 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         self.btn_export_retention = ctk.CTkButton(
             self.retention_header_frame,
-            text="📥 Export Detailed CSV",
+            text="Export Retention Policies",
             font=FONT_BODY_BOLD,
             fg_color="transparent",
             text_color=COLOR_PRIMARY,
             border_width=1,
-            border_color=COLOR_PRIMARY,
+            border_color=COLOR_OUTLINE,
             hover_color=COLOR_SECONDARY_HOVER,
-            width=140,
+            width=180,
+            height=32,
+            corner_radius=16,
             command=self.export_retention_csv
         )
         self.btn_export_retention.pack(side="right", anchor="e", padx=(10, 0))
