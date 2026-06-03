@@ -445,10 +445,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         else:
             # Configure grid columns
             self.retention_grid.grid_columnconfigure(0, weight=3)  # Policy Name
-            self.retention_grid.grid_columnconfigure(1, weight=3)  # Applicable Workloads
-            self.retention_grid.grid_columnconfigure(2, weight=1)  # Status
+            self.retention_grid.grid_columnconfigure(1, weight=3)  # Workloads
+            self.retention_grid.grid_columnconfigure(2, weight=1)  # Mode
+            self.retention_grid.grid_columnconfigure(3, weight=1)  # Distribution
+            self.retention_grid.grid_columnconfigure(4, weight=1)  # Status
 
-            headers = ["Policy Name", "Applicable Workloads", "Status"]
+            headers = ["Policy Name", "Workloads", "Mode", "Distribution", "Status"]
             for col_idx, head_text in enumerate(headers):
                 cell = ctk.CTkFrame(self.retention_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
                 cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
@@ -461,7 +463,10 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
 
                 name = policy.get("Name", "N/A")
+                comment = policy.get("Comment", "")
                 workload = policy.get("Workload", "N/A")
+                mode = policy.get("Mode", "Enforce")
+                dist_status = policy.get("DistributionStatus", "Success")
                 
                 # Enabled can be boolean or string
                 enabled_val = policy.get("Enabled", True)
@@ -474,9 +479,17 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
                 c0 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+                
+                has_comment = bool(comment and comment != name)
                 lbl_name = ctk.CTkLabel(c0, text=name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
-                lbl_name.pack(padx=10, pady=6, anchor="w")
-                c0.bind("<Configure>", lambda e, l=lbl_name: l.configure(wraplength=e.width - 20))
+                lbl_name.pack(padx=10, pady=(6, 2) if has_comment else 6, anchor="w")
+                
+                if has_comment:
+                    lbl_comment = ctk.CTkLabel(c0, text=comment, font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB)
+                    lbl_comment.pack(padx=10, pady=(0, 6), anchor="w")
+                    c0.bind("<Configure>", lambda e, l1=lbl_name, l2=lbl_comment: (l1.configure(wraplength=e.width - 20), l2.configure(wraplength=e.width - 20)))
+                else:
+                    c0.bind("<Configure>", lambda e, l=lbl_name: l.configure(wraplength=e.width - 20))
 
                 c1 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
@@ -486,6 +499,14 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
                 c2 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c2, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                ctk.CTkLabel(c2, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+                c3 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+                c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(c3, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+                c4 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+                c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(c4, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
 
