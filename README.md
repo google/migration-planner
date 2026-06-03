@@ -147,6 +147,26 @@ To run the retention policy discovery features using certificate-based authentic
     ```bash
     brew install powershell
     ```
+    
+    Alternatively, to install PowerShell Core directly via the command line on your Mac, run the following commands in your **Terminal**:
+
+    ##### 1. Download the package using `curl`
+    ```bash
+    curl -L -o /tmp/powershell.pkg https://github.com/PowerShell/PowerShell/releases/download/v7.4.2/powershell-7.4.2-osx-arm64.pkg
+    ```
+
+    ##### 2. Install the package using `installer` (requires your Mac password)
+    ```bash
+    sudo installer -pkg /tmp/powershell.pkg -target /
+    ```
+
+    ##### 3. Install the Exchange Online Module
+    ```bash
+    pwsh -c "Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser -Force"
+    ```
+
+    Once completed, you can run the Migration Planner tool (`python3 migration_planner.py`) and initiate a clean telemetry run.
+
 *   **Windows**: Install via winget:
     ```cmd
     winget install --id Microsoft.Powershell --source winget
