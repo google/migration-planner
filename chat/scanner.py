@@ -47,6 +47,7 @@ class MigrationScanner:
   chat_batch_limiter: HybridLimiter
   channel_batch_limiter: HybridLimiter
   stop_event: threading.Event
+  log_func: typing.Callable[[str], None] | None
 
   def __init__(
       self,
@@ -59,11 +60,13 @@ class MigrationScanner:
       chat_batch_limiter: HybridLimiter | None = None,
       channel_batch_limiter: HybridLimiter | None = None,
       stop_event: threading.Event | None = None,
+      log_func: typing.Callable[[str], None] | None = None,
   ) -> None:
     self.db = db
     self.client = client
     self.metrics = metrics
     self.audit_logger = audit_logger
+    self.log_func = log_func
     self.default_limiter = default_limiter or HybridLimiter(
         requests_per_second=20.0
     )
@@ -511,6 +514,14 @@ class MigrationScanner:
             ]
             local_counts[user_id] = chat_id_list
             self.db.save_processed_user(user_id, chat_id_list)
+          else:
+            status_val = response.get("status")
+            body = response.get("body", {})
+            error_msg = body.get("error", {}).get("message", "Unknown error")
+            if self.log_func:
+              self.log_func(
+                  f"WARNING: Batch request for user {user_id} chats returned status {status_val}: {error_msg}"
+              )
         return local_counts
       except Exception:
         logger.exception("Async batch failure trapped inside worker.")
@@ -611,6 +622,14 @@ class MigrationScanner:
             }
             local_details[team_id] = team_entry
             self.db.save_processed_team(team_id, team_entry)
+          else:
+            status_val = response.get("status")
+            body = response.get("body", {})
+            error_msg = body.get("error", {}).get("message", "Unknown error")
+            if self.log_func:
+              self.log_func(
+                  f"WARNING: Batch request for team {team_id} channels returned status {status_val}: {error_msg}"
+              )
         return local_details
       except Exception:
         logger.exception("Failed to fetch channels for teams batch.")
@@ -822,6 +841,14 @@ class MigrationScanner:
                   local_details[team_id]["private_channel_ids"]
               )
             self.db.save_processed_team(team_id, local_details[team_id])
+          else:
+            status_val = response.get("status")
+            body = response.get("body", {})
+            error_msg = body.get("error", {}).get("message", "Unknown error")
+            if self.log_func:
+              self.log_func(
+                  f"WARNING: Batch request for team {team_id} {detail_type} returned status {status_val}: {error_msg}"
+              )
         return local_details
       except Exception:
         logger.exception("Failed to fetch team details batch.")
