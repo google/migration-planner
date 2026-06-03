@@ -63,6 +63,11 @@ try {
                 Duration = $duration
                 RetentionAction = $action
                 RetentionTrigger = $trigger
+                Identity = $policy.Identity.ToString()
+                WhenCreated = $policy.WhenCreated
+                WhenChanged = $policy.WhenChanged
+                CreatedBy = $policy.CreatedBy
+                LastModifiedBy = $policy.LastModifiedBy
             }
             $output += $policyObj
         }

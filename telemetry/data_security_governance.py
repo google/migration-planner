@@ -108,6 +108,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.flattened_rows = []
         self.current_page = 0
         self.ITEMS_PER_PAGE = 8
+        self.last_labels_data = None
+        self.last_policies_data = None
         
         self.build_ui()
 
@@ -124,6 +126,30 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         
+        # Sensitivity Labels section header
+        self.labels_header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.labels_title = ctk.CTkLabel(
+            self.labels_header_frame,
+            text="Sensitivity Labels",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.labels_title.pack(side="left", anchor="w")
+        
+        self.btn_export_labels = ctk.CTkButton(
+            self.labels_header_frame,
+            text="📥 Export Detailed CSV",
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            text_color=COLOR_PRIMARY,
+            border_width=1,
+            border_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER,
+            width=140,
+            command=self.export_labels_csv
+        )
+        self.btn_export_labels.pack(side="right", anchor="e")
+
         # Grid for Sensitivity Labels
         self.labels_grid = ctk.CTkFrame(
             self.inner_pad,
@@ -191,6 +217,20 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.retention_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/datalifecyclemanagement/retention"))
         self.retention_link.bind("<Enter>", lambda e: self.retention_link.configure(text_color=COLOR_PRIMARY_HOVER))
         self.retention_link.bind("<Leave>", lambda e: self.retention_link.configure(text_color=COLOR_PRIMARY))
+
+        self.btn_export_retention = ctk.CTkButton(
+            self.retention_header_frame,
+            text="📥 Export Detailed CSV",
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            text_color=COLOR_PRIMARY,
+            border_width=1,
+            border_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER,
+            width=140,
+            command=self.export_retention_csv
+        )
+        self.btn_export_retention.pack(side="right", anchor="e", padx=(10, 0))
         self.retention_grid = ctk.CTkFrame(
             self,
             fg_color=COLOR_SURFACE,
@@ -207,6 +247,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.state_frame.pack_forget()
         self.labels_grid.pack_forget()
         self.pagination_frame.pack_forget()
+        self.labels_header_frame.pack_forget()
         self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
         
@@ -251,6 +292,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         self.pack(fill="x", expand=True, pady=(20, 10))
         self.labels_grid.pack_forget()
+        self.labels_header_frame.pack_forget()
         self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
         
@@ -284,10 +326,14 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         policies = data.get("policies")
         policies_error = data.get("policies_error")
 
+        self.last_labels_data = labels
+        self.last_policies_data = policies
+
         usage_logger.info(f"Sensitivity Labels fetched successfully. Total labels to render: {len(labels) if labels else 0}")
         self.status = "success"
 
         # 1. Render Sensitivity Labels Grid
+        self.labels_header_frame.pack(fill="x", pady=(0, 10))
         self.labels_grid.pack(fill="x", expand=True, pady=(0, 15))
 
         if labels_error:
@@ -587,5 +633,128 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 c5 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c5.grid(row=r_idx, column=5, sticky="nsew", padx=1, pady=1)
                 ctk.CTkLabel(c5, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+    def export_labels_csv(self):
+        """Prompts the user to save sensitivity labels as a detailed CSV file."""
+        if not hasattr(self, "last_labels_data") or not self.last_labels_data:
+            from tkinter import messagebox
+            messagebox.showinfo("No Data", "There is no sensitivity labels data to export. Please run a scan first.", parent=self)
+            return
+            
+        from tkinter import filedialog, messagebox
+        from datetime import datetime
+        import pandas as pd
+        
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"sensitivity_labels_{ts}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+            parent=self
+        )
+        if not f:
+            return
+            
+        # Flatten the labels (including sublabels) to export detailed records
+        rows = []
+        for parent in self.last_labels_data:
+            parent_id = parent.get("id", "N/A")
+            parent_name = parent.get("name", "N/A")
+            
+            rows.append({
+                "Label ID": parent_id,
+                "Label Name": parent_name,
+                "Display Name": parent.get("displayName", "N/A"),
+                "Description": parent.get("description", "") or parent.get("toolTip", "") or "N/A",
+                "Priority": parent.get("priority", 0),
+                "Applicable Targets": parent.get("applicableTo", "N/A"),
+                "Is Enabled": parent.get("isEnabled", True),
+                "Is Sublabel": False,
+                "Parent Label ID": "",
+                "Parent Label Name": ""
+            })
+            
+            for sub in parent.get("sublabels", []):
+                rows.append({
+                    "Label ID": sub.get("id", "N/A"),
+                    "Label Name": sub.get("name", "N/A"),
+                    "Display Name": sub.get("displayName", "N/A"),
+                    "Description": sub.get("description", "") or sub.get("toolTip", "") or "N/A",
+                    "Priority": sub.get("priority", 0),
+                    "Applicable Targets": sub.get("applicableTo", "N/A"),
+                    "Is Enabled": sub.get("isEnabled", True),
+                    "Is Sublabel": True,
+                    "Parent Label ID": parent_id,
+                    "Parent Label Name": parent_name
+                })
+                
+        df = pd.DataFrame(rows)
+        try:
+            df.to_csv(f, index=False)
+            messagebox.showinfo("Export Successful", f"Sensitivity labels exported successfully to:\n{f}", parent=self)
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
+
+    def export_retention_csv(self):
+        """Prompts the user to save retention policies as a detailed CSV file."""
+        if not hasattr(self, "last_policies_data") or not self.last_policies_data:
+            from tkinter import messagebox
+            messagebox.showinfo("No Data", "There is no retention policies data to export. Please run a scan first.", parent=self)
+            return
+            
+        from tkinter import filedialog, messagebox
+        from datetime import datetime
+        import pandas as pd
+        
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"retention_policies_{ts}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+            parent=self
+        )
+        if not f:
+            return
+            
+        policies_list = self.last_policies_data if isinstance(self.last_policies_data, list) else [self.last_policies_data]
+        
+        rows = []
+        for policy in policies_list:
+            duration_val = str(policy.get("Duration", "N/A"))
+            duration_str = duration_val
+            if duration_val.lower() == "unlimited":
+                duration_str = "Keep Forever"
+            elif duration_val.isdigit():
+                days = int(duration_val)
+                if days >= 365:
+                    years = days / 365.0
+                    duration_str = f"{int(years)} Years ({days} days)" if years.is_integer() else f"{years:.1f} Years ({days} days)"
+                else:
+                    duration_str = f"{days} days"
+                    
+            rows.append({
+                "Policy Name": policy.get("Name", "N/A"),
+                "Identity": policy.get("Identity", "N/A"),
+                "Description / Comment": policy.get("Comment", "N/A"),
+                "Workloads": policy.get("Workload", "N/A"),
+                "Mode": policy.get("Mode", "N/A"),
+                "Distribution Status": policy.get("DistributionStatus", "N/A"),
+                "Is Enabled": policy.get("Enabled", True),
+                "Duration Days": duration_val,
+                "Duration Description": duration_str,
+                "Retention Action": policy.get("RetentionAction", "N/A"),
+                "Retention Trigger Basis": policy.get("RetentionTrigger", "N/A"),
+                "When Created": policy.get("WhenCreated", "N/A"),
+                "When Changed": policy.get("WhenChanged", "N/A"),
+                "Created By": policy.get("CreatedBy", "N/A"),
+                "Last Modified By": policy.get("LastModifiedBy", "N/A")
+            })
+            
+        df = pd.DataFrame(rows)
+        try:
+            df.to_csv(f, index=False)
+            messagebox.showinfo("Export Successful", f"Retention policies exported successfully to:\n{f}", parent=self)
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
 
 
