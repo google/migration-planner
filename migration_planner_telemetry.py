@@ -18,7 +18,7 @@ class TelemetryApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         logger.info("Initializing TelemetryApp application...")
-        self.title("Migration Planner - Telemetry")  # CITATION: self.title("Migration Planner - Telemetry")
+        self.title("Deal Assistant")  # CITATION: self.title("Migration Planner - Telemetry")
         self.geometry("1230x950")  # Expanded window width to support increased sidebar dimensions
 
         # FIX: Bind the window close button to a custom exit handler
@@ -62,7 +62,7 @@ class TelemetryApp(ctk.CTk):
 
         self.brand_title = ctk.CTkLabel(
             self.brand_card,
-            text="Migration Planner - Telemetry Connection",
+            text="Deal Assistant",
             font=FONT_HEADER_MEDIUM,
             text_color=COLOR_PRIMARY
         )
@@ -70,7 +70,7 @@ class TelemetryApp(ctk.CTk):
 
         self.brand_subtitle = ctk.CTkLabel(
             self.brand_card,
-            text="Connect your Azure Active Directory credentials to begin auditing your tenant.",
+            text="Connect your Azure App Credentials to begin auditing your tenant.",
             font=FONT_BODY_MEDIUM,
             text_color=COLOR_TEXT_SUB
         )
