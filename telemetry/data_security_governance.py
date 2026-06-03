@@ -446,11 +446,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             # Configure grid columns
             self.retention_grid.grid_columnconfigure(0, weight=3)  # Policy Name
             self.retention_grid.grid_columnconfigure(1, weight=3)  # Workloads
-            self.retention_grid.grid_columnconfigure(2, weight=1)  # Mode
-            self.retention_grid.grid_columnconfigure(3, weight=1)  # Distribution
-            self.retention_grid.grid_columnconfigure(4, weight=1)  # Status
+            self.retention_grid.grid_columnconfigure(2, weight=2)  # Duration
+            self.retention_grid.grid_columnconfigure(3, weight=1)  # Mode
+            self.retention_grid.grid_columnconfigure(4, weight=1)  # Distribution
+            self.retention_grid.grid_columnconfigure(5, weight=1)  # Status
 
-            headers = ["Policy Name", "Workloads", "Mode", "Distribution", "Status"]
+            headers = ["Policy Name", "Workloads", "Duration", "Mode", "Distribution", "Status"]
             for col_idx, head_text in enumerate(headers):
                 cell = ctk.CTkFrame(self.retention_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
                 cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
@@ -465,9 +466,25 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 name = policy.get("Name", "N/A")
                 comment = policy.get("Comment", "")
                 workload = policy.get("Workload", "N/A")
+                duration_val = str(policy.get("Duration", "N/A"))
                 mode = policy.get("Mode", "Enforce")
                 dist_status = policy.get("DistributionStatus", "Success")
                 
+                # Format Duration nicely
+                duration_str = duration_val
+                if duration_val.lower() == "unlimited":
+                    duration_str = "Keep Forever (Unlimited)"
+                elif duration_val.isdigit():
+                    days = int(duration_val)
+                    if days >= 365:
+                        years = days / 365.0
+                        if years.is_integer():
+                            duration_str = f"{int(years)} Years ({days} days)"
+                        else:
+                            duration_str = f"{years:.1f} Years ({days} days)"
+                    else:
+                        duration_str = f"{days} days"
+
                 # Enabled can be boolean or string
                 enabled_val = policy.get("Enabled", True)
                 if isinstance(enabled_val, str):
@@ -499,14 +516,20 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
                 c2 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c2, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                lbl_duration = ctk.CTkLabel(c2, text=duration_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+                lbl_duration.pack(padx=10, pady=6, anchor="w")
+                c2.bind("<Configure>", lambda e, l=lbl_duration: l.configure(wraplength=e.width - 20))
 
                 c3 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c3, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                ctk.CTkLabel(c3, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
                 c4 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c4, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                ctk.CTkLabel(c4, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+                c5 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+                c5.grid(row=r_idx, column=5, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(c5, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
 
