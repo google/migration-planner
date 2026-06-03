@@ -1548,6 +1548,10 @@ class MigrationEstimatorTool(ctk.CTk):
             "CSV must contain 'Email Id' or 'User Principal Name' column."
         )
 
+      # Strip all the white spaces
+      users_to_resolve = [user.strip() for user in users_to_resolve]
+      groups_to_resolve = [group.strip() for group in groups_to_resolve]
+
     # 2. Determine if we need live scanning
     scanning_required = (
         (config.scan_email and not have_email)
