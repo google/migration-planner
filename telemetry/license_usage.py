@@ -86,6 +86,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.lic_client_secrets = ctk.StringVar()
 
         self.last_licenses_items = []
+        self.on_all_done_callback = None
 
         # Track individual section statuses ('loading', 'success', 'error', None)
         self.status_sku = None
@@ -114,10 +115,10 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         ctk.CTkLabel(self, text="Microsoft 365 Subscribed SKUs & Usage Overview", font=FONT_HEADER_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 5))
         ctk.CTkLabel(self, text="Connect your Microsoft Azure account to authenticate and audit tenant licensing bundle inventories and usage.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w", pady=(0, 15))
 
-        inputs_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
-        inputs_frame.pack(fill="x", pady=5)
+        self.inputs_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.inputs_frame.pack(fill="x", pady=5)
 
-        inner_pad = ctk.CTkFrame(inputs_frame, fg_color="transparent")
+        inner_pad = ctk.CTkFrame(self.inputs_frame, fg_color="transparent")
         inner_pad.pack(fill="x", padx=15, pady=15)
 
         self._create_entry(inner_pad, "Tenant ID", self.lic_tenant_id)
@@ -274,10 +275,14 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
 
         self.btn_lic_submit.configure(state="normal", text="Submit")
 
-        if all(s == "success" for s in states):
+        success = all(s == "success" for s in states)
+        if success:
             self.lbl_lic_status.configure(text="✔ All Inventory and Usage Reports Pulled Successfully!", text_color=COLOR_SUCCESS)
         else:
             self.lbl_lic_status.configure(text="⚠ Some reports failed. Please retry individually.", text_color=COLOR_ERROR)
+
+        if hasattr(self, "on_all_done_callback") and self.on_all_done_callback:
+            self.on_all_done_callback(success)
 
     # -------------------------------------------------------------------------
     # MASTER SUBMIT LOGIC
