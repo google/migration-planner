@@ -18,6 +18,7 @@ import os
 import logging
 import threading
 import customtkinter as ctk
+import webbrowser
 
 from core.graph.client import GraphClient
 from core.graph.security import SecurityService
@@ -166,7 +167,26 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.btn_next.pack(side="left", padx=10)
         
         # Retention Policies section
-        self.retention_title = ctk.CTkLabel(self, text="Retention Compliance Policies", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
+        self.retention_header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.retention_title = ctk.CTkLabel(
+            self.retention_header_frame,
+            text="Retention Compliance Policies",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.retention_title.pack(side="left", anchor="w")
+        
+        self.retention_link = ctk.CTkLabel(
+            self.retention_header_frame,
+            text="Open Microsoft Purview Portal ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.retention_link.pack(side="right", anchor="e", padx=(10, 0))
+        self.retention_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/datalifecyclemanagement/retention"))
+        self.retention_link.bind("<Enter>", lambda e: self.retention_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.retention_link.bind("<Leave>", lambda e: self.retention_link.configure(text_color=COLOR_PRIMARY))
         self.retention_grid = ctk.CTkFrame(
             self,
             fg_color=COLOR_SURFACE,
@@ -183,7 +203,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.state_frame.pack_forget()
         self.labels_grid.pack_forget()
         self.pagination_frame.pack_forget()
-        self.retention_title.pack_forget()
+        self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
         
         for w in self.state_frame.winfo_children():
@@ -226,7 +246,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         self.pack(fill="x", expand=True, pady=(20, 10))
         self.labels_grid.pack_forget()
-        self.retention_title.pack_forget()
+        self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
         
         self._set_state_loading("Retrieving tenant Security & Compliance policies...")
@@ -319,7 +339,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 self.pagination_frame.pack_forget()
 
         # 2. Render Retention Policies Grid
-        self.retention_title.pack(anchor="w", pady=(20, 10))
+        self.retention_header_frame.pack(fill="x", pady=(20, 10))
         self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
         self._render_retention_policies(policies, policies_error)
 
@@ -446,12 +466,13 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             # Configure grid columns
             self.retention_grid.grid_columnconfigure(0, weight=3)  # Policy Name
             self.retention_grid.grid_columnconfigure(1, weight=3)  # Workloads
-            self.retention_grid.grid_columnconfigure(2, weight=2)  # Duration
-            self.retention_grid.grid_columnconfigure(3, weight=1)  # Mode
-            self.retention_grid.grid_columnconfigure(4, weight=1)  # Distribution
-            self.retention_grid.grid_columnconfigure(5, weight=1)  # Status
+            self.retention_grid.grid_columnconfigure(2, weight=2)  # Duration & Trigger
+            self.retention_grid.grid_columnconfigure(3, weight=2)  # Action
+            self.retention_grid.grid_columnconfigure(4, weight=1)  # Mode
+            self.retention_grid.grid_columnconfigure(5, weight=1)  # Distribution
+            self.retention_grid.grid_columnconfigure(6, weight=1)  # Status
 
-            headers = ["Policy Name", "Workloads", "Duration", "Mode", "Distribution", "Status"]
+            headers = ["Policy Name", "Workloads", "Duration", "Action", "Mode", "Distribution", "Status"]
             for col_idx, head_text in enumerate(headers):
                 cell = ctk.CTkFrame(self.retention_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
                 cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
@@ -467,13 +488,15 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 comment = policy.get("Comment", "")
                 workload = policy.get("Workload", "N/A")
                 duration_val = str(policy.get("Duration", "N/A"))
+                trigger_val = policy.get("RetentionTrigger", "N/A")
+                action_val = policy.get("RetentionAction", "N/A")
                 mode = policy.get("Mode", "Enforce")
                 dist_status = policy.get("DistributionStatus", "Success")
                 
                 # Format Duration nicely
                 duration_str = duration_val
                 if duration_val.lower() == "unlimited":
-                    duration_str = "Keep Forever (Unlimited)"
+                    duration_str = "Keep Forever"
                 elif duration_val.isdigit():
                     days = int(duration_val)
                     if days >= 365:
@@ -484,6 +507,24 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                             duration_str = f"{years:.1f} Years ({days} days)"
                     else:
                         duration_str = f"{days} days"
+                
+                # Append trigger details to duration string if present and not N/A
+                if trigger_val and trigger_val != "N/A":
+                    trigger_map = {
+                        "DateCreated": "created date",
+                        "DateModified": "last modified date",
+                        "DateLabeled": "labeled date"
+                    }
+                    friendly_trigger = trigger_map.get(trigger_val, trigger_val)
+                    duration_str += f"\n(from {friendly_trigger})"
+
+                # Format Action nicely
+                action_map = {
+                    "Keep": "Retain Only",
+                    "KeepAndDelete": "Retain & Delete",
+                    "Delete": "Delete Only"
+                }
+                action_str = action_map.get(action_val, action_val)
 
                 # Enabled can be boolean or string
                 enabled_val = policy.get("Enabled", True)
@@ -516,20 +557,26 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
                 c2 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
-                lbl_duration = ctk.CTkLabel(c2, text=duration_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+                lbl_duration = ctk.CTkLabel(c2, text=duration_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left")
                 lbl_duration.pack(padx=10, pady=6, anchor="w")
                 c2.bind("<Configure>", lambda e, l=lbl_duration: l.configure(wraplength=e.width - 20))
 
                 c3 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c3, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                lbl_action = ctk.CTkLabel(c3, text=action_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+                lbl_action.pack(padx=10, pady=6, anchor="w")
+                c3.bind("<Configure>", lambda e, l=lbl_action: l.configure(wraplength=e.width - 20))
 
                 c4 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c4, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                ctk.CTkLabel(c4, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
                 c5 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c5.grid(row=r_idx, column=5, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c5, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                ctk.CTkLabel(c5, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+                c6 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+                c6.grid(row=r_idx, column=6, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(c6, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
 

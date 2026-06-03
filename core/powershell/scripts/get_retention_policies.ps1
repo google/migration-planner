@@ -41,12 +41,14 @@ try {
             
             $duration = "N/A"
             $action = "N/A"
+            $trigger = "N/A"
             if ($rules) {
                 $rules_list = @($rules)
                 if ($rules_list.Count -gt 0) {
                     $rule = $rules_list[0]
                     $duration = $rule.RetentionDuration
                     $action = $rule.RetentionAction
+                    $trigger = $rule.RetentionTrigger
                 }
             }
             
@@ -60,6 +62,7 @@ try {
                 Enabled = $policy.Enabled
                 Duration = $duration
                 RetentionAction = $action
+                RetentionTrigger = $trigger
             }
             $output += $policyObj
         }
