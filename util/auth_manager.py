@@ -163,7 +163,7 @@ class TokenManager:
         if error.response is not None:
           error_text = f": {error.response.text}"
         logger.error(
-            "Auth failed for app %s: %s%s", client_id, error, error_text
+            "Auth failed for app %s...: %s%s", client_id[:5], error, error_text
         )
         raise ConnectionError(
             f"Authentication failed. Verify credentials. Details: {error_text}"

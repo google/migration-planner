@@ -60,6 +60,7 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
     if labels_error:
         raise ConnectionError(f"Security governance fetch failed.\nLabels Error: {labels_error}")
         
+    usage_logger.info("Data Security & Governance Pipeline completed successfully.")
     return {
         "labels": labels,
         "labels_error": labels_error
@@ -180,6 +181,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         """Triggers parallel fetches inside isolated background threads."""
+        usage_logger.info("Data Security & Governance trigger_fetch called. Spawning background worker thread...")
         self.status = "loading"
         self.on_status_change()
         
@@ -212,6 +214,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         labels = data.get("labels")
         labels_error = data.get("labels_error")
 
+        usage_logger.info(f"Sensitivity Labels fetched successfully. Total labels to render: {len(labels) if labels else 0}")
         self.status = "success"
 
         # 1. Render Sensitivity Labels Grid
@@ -285,6 +288,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             info = w.grid_info()
             if "row" in info and int(info["row"]) > 0:
                 w.destroy()
+
+        usage_logger.info(f"Displaying page {self.current_page + 1} of Sensitivity Labels.")
 
         total_items = len(self.flattened_rows)
         total_pages = (total_items + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
@@ -379,6 +384,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self._display_current_page()
 
     def _render_error(self, err_msg):
+        usage_logger.warning(f"Data Security & Governance fetch failed: {err_msg}")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()
