@@ -99,7 +99,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping Data Security & Governance UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
-        super().__init__(master, fg_color="transparent", **kwargs)
+        super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
         self.on_status_change = status_change_callback
@@ -113,17 +113,20 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def build_ui(self):
         """Creates card container for the tab."""
-        self.pack(fill="x", expand=True, pady=(20, 10))
+        self.pack(fill="x", expand=True, pady=10)
+        
+        self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
+        self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Permanent section heading visible during loading and error states
-        self.main_title = ctk.CTkLabel(self, text="Data Security & Governance", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
+        self.main_title = ctk.CTkLabel(self.inner_pad, text="Data Security & Governance", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
         self.main_title.pack(anchor="w", pady=(0, 10))
         
-        self.state_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         
         # Grid for Sensitivity Labels
         self.labels_grid = ctk.CTkFrame(
-            self,
+            self.inner_pad,
             fg_color=COLOR_OUTLINE_LIGHT,
             border_color=COLOR_OUTLINE_LIGHT,
             border_width=1,
@@ -131,7 +134,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         
         # Pagination controls frame (centered below the grid)
-        self.pagination_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         
         self.btn_prev = ctk.CTkButton(
             self.pagination_frame,

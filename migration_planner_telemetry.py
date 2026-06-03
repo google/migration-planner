@@ -369,23 +369,17 @@ class ReportsPage(ctk.CTkFrame):
 
         # Text container frame to keep alignment clean next to the Action Button
         self.header_text_frame = ctk.CTkFrame(self.nav_header, fg_color="transparent")
-        self.header_text_frame.pack(side="left", padx=(20, 10), pady=(12, 0), anchor="w")
+        self.header_text_frame.pack(side="left", padx=20)
 
         self.nav_title = ctk.CTkLabel(
             self.header_text_frame,
-            text="Usage and adoption data",  # Match screenshot header text precisely
+            text="Usage Report",
             font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
             text_color=COLOR_TEXT_MAIN
         )
         self.nav_title.pack(anchor="w")
 
-        self.nav_subtitle = ctk.CTkLabel(
-            self.header_text_frame,
-            text="Overview of your current plans and how people are using applications.",
-            font=FONT_BODY_MEDIUM,
-            text_color=COLOR_TEXT_SUB
-        )
-        self.nav_subtitle.pack(anchor="w", pady=(2, 0))
+
 
         # 3. Fetch Report button on the right side of the header panel (Stage 2)
         self.fetch_btn = ctk.CTkButton(

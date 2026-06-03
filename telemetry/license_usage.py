@@ -124,7 +124,6 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
     def build_ui(self):
         async_logger.info("Building graphical UI elements for License Usage Tab.")
 
-        ctk.CTkLabel(self, text="Microsoft 365 Subscribed SKUs & Usage Overview", font=FONT_HEADER_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 5))
         ctk.CTkLabel(self, text="Connect your Microsoft Azure account to authenticate and audit tenant licensing bundle inventories and usage.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w", pady=(0, 15))
 
         self.inputs_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
@@ -155,11 +154,16 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         # UI CONTAINERS
         # ----------------------------------------------------
 
-        # 1. SKUs Section
-        self.lic_section = ctk.CTkFrame(self, fg_color="transparent")
+        # 1. SKUs Section (Styled as Card)
+        self.lic_section = ctk.CTkFrame(
+            self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12
+        )
         self.lic_section.pack(fill="x", expand=True, pady=(15, 10))
 
-        lic_header = ctk.CTkFrame(self.lic_section, fg_color="transparent")
+        self.lic_inner = ctk.CTkFrame(self.lic_section, fg_color="transparent")
+        self.lic_inner.pack(fill="both", expand=True, padx=20, pady=20)
+
+        lic_header = ctk.CTkFrame(self.lic_inner, fg_color="transparent")
         lic_header.pack(fill="x", pady=(0, 10))
         ctk.CTkLabel(lic_header, text="Subscribed SKUs Inventory Summary", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         ctk.CTkLabel(lic_header, text="* To view specific services offered, export the spreadsheet.", font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB).pack(side="left", padx=(10, 0))
@@ -167,29 +171,75 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.btn_export_lic = ctk.CTkButton(lic_header, text="Export Spreadsheet", width=140, height=32, corner_radius=16, font=FONT_BODY_BOLD, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, command=self.export_licenses_spreadsheet, state="disabled")
         self.btn_export_lic.pack(side="right")
 
-        self.lic_state_frame = ctk.CTkFrame(self.lic_section, fg_color="transparent")
-        self.lic_grid_frame = ctk.CTkFrame(self.lic_section, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.lic_state_frame = ctk.CTkFrame(self.lic_inner, fg_color="transparent")
+        self.lic_grid_frame = ctk.CTkFrame(self.lic_inner, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
-        # 2. O365 Usage Section
-        self.o365_section = ctk.CTkFrame(self, fg_color="transparent")
+        # 2. O365 Usage Section (Styled as Card)
+        self.o365_section = ctk.CTkFrame(
+            self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12
+        )
         self.o365_section.pack(fill="x", expand=True, pady=(20, 10))
-        ctk.CTkLabel(self.o365_section, text="O365 Active Users Usage", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
-        self.o365_state_frame = ctk.CTkFrame(self.o365_section, fg_color="transparent")
-        self.o365_grid_frame = ctk.CTkFrame(self.o365_section, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
-        # 3. O365 Usage Trend Graph Section
-        self.o365_trend_section = ctk.CTkFrame(self, fg_color="transparent")
+        self.o365_inner = ctk.CTkFrame(self.o365_section, fg_color="transparent")
+        self.o365_inner.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(self.o365_inner, text="O365 Active Users Usage", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
+        self.o365_state_frame = ctk.CTkFrame(self.o365_inner, fg_color="transparent")
+        self.o365_grid_frame = ctk.CTkFrame(self.o365_inner, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+
+        # 3. O365 Usage Trend Graph Section (Styled as Card with Dynamic Height Slider)
+        self.o365_trend_section = ctk.CTkFrame(
+            self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12
+        )
         self.o365_trend_section.pack(fill="x", expand=True, pady=(20, 10))
-        ctk.CTkLabel(self.o365_trend_section, text="O365 30-Day Active User Trend", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
-        self.o365_trend_state_frame = ctk.CTkFrame(self.o365_trend_section, fg_color="transparent")
-        self.o365_trend_grid_frame = ctk.CTkFrame(self.o365_trend_section, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
-        # 4. M365 Apps Usage Section
-        self.m365_section = ctk.CTkFrame(self, fg_color="transparent")
+        self.o365_trend_inner = ctk.CTkFrame(self.o365_trend_section, fg_color="transparent")
+        self.o365_trend_inner.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Header with title on left and slider on right
+        trend_header = ctk.CTkFrame(self.o365_trend_inner, fg_color="transparent")
+        trend_header.pack(fill="x", pady=(0, 10))
+
+        ctk.CTkLabel(trend_header, text="O365 30-Day Active User Trend", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+
+        # Height control slider
+        self.trend_height_var = ctk.DoubleVar(value=400)
+        
+        slider_frame = ctk.CTkFrame(trend_header, fg_color="transparent")
+        slider_frame.pack(side="right")
+        
+        self.lbl_trend_height = ctk.CTkLabel(slider_frame, text="Height: 400px", font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB)
+        self.lbl_trend_height.pack(side="left", padx=(0, 10))
+        
+        self.slider_trend_height = ctk.CTkSlider(
+            slider_frame, from_=200, to=800, number_of_steps=60,
+            variable=self.trend_height_var, width=120, height=16,
+            command=self._on_trend_height_slider_change
+        )
+        self.slider_trend_height.pack(side="left")
+
+        self.o365_trend_state_frame = ctk.CTkFrame(self.o365_trend_inner, fg_color="transparent")
+        
+        # Grid frame starts with a fixed default height of 400px and does not propagate
+        self.o365_trend_grid_frame = ctk.CTkFrame(
+            self.o365_trend_inner, fg_color=COLOR_SURFACE,
+            border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8,
+            height=400
+        )
+        self.o365_trend_grid_frame.pack_propagate(False)
+
+        # 4. M365 Apps Usage Section (Styled as Card)
+        self.m365_section = ctk.CTkFrame(
+            self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12
+        )
         self.m365_section.pack(fill="x", expand=True, pady=(20, 10))
-        ctk.CTkLabel(self.m365_section, text="M365 App Usage (180 Days)", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
-        self.m365_state_frame = ctk.CTkFrame(self.m365_section, fg_color="transparent")
-        self.m365_grid_frame = ctk.CTkFrame(self.m365_section, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+
+        self.m365_inner = ctk.CTkFrame(self.m365_section, fg_color="transparent")
+        self.m365_inner.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(self.m365_inner, text="M365 App Usage (180 Days)", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
+        self.m365_state_frame = ctk.CTkFrame(self.m365_inner, fg_color="transparent")
+        self.m365_grid_frame = ctk.CTkFrame(self.m365_inner, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
         # 5a. SharePoint Telemetry Section (Modular Integration)
         self.sharepoint_view = SharePointUsageFrame(
@@ -215,10 +265,16 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             status_change_callback=self._check_all_done
         )
 
-        # 7. Power Automate Section
-        self.pa_section = ctk.CTkFrame(self, fg_color="transparent")
+        # 7. Power Automate Section (Styled as Card)
+        self.pa_section = ctk.CTkFrame(
+            self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12
+        )
         self.pa_section.pack(fill="x", expand=True, pady=(20, 10))
-        pa_header = ctk.CTkFrame(self.pa_section, fg_color="transparent")
+
+        self.pa_inner = ctk.CTkFrame(self.pa_section, fg_color="transparent")
+        self.pa_inner.pack(fill="both", expand=True, padx=20, pady=20)
+
+        pa_header = ctk.CTkFrame(self.pa_inner, fg_color="transparent")
         pa_header.pack(fill="x", pady=(0, 10))
         ctk.CTkLabel(pa_header, text="Power Automate", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         
@@ -229,8 +285,8 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             command=self.export_complex_flows, state="disabled"
         )
         self.btn_export_pa.pack(side="right")
-        self.pa_state_frame = ctk.CTkFrame(self.pa_section, fg_color="transparent")
-        self.pa_grid_frame = ctk.CTkFrame(self.pa_section, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.pa_state_frame = ctk.CTkFrame(self.pa_inner, fg_color="transparent")
+        self.pa_grid_frame = ctk.CTkFrame(self.pa_inner, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
 
         self._hide_all_grids()
@@ -535,7 +591,7 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         self.o365_trend_state_frame.pack_forget()
         for w in self.o365_trend_grid_frame.winfo_children(): w.destroy()
 
-        self.o365_trend_grid_frame.pack(fill="x", expand=True)
+        self.o365_trend_grid_frame.pack(fill="both", expand=True)
 
         if not MATPLOTLIB_AVAILABLE:
             empty_cell = ctk.CTkFrame(self.o365_trend_grid_frame, fg_color="transparent")
@@ -974,3 +1030,8 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
                 else:
                     # Windows delta (usually multiple of 120)
                     self._parent_canvas.yview("scroll", -int(event.delta / 120), "units")
+
+    def _on_trend_height_slider_change(self, val):
+        height_val = int(val)
+        self.lbl_trend_height.configure(text=f"Height: {height_val}px")
+        self.o365_trend_grid_frame.configure(height=height_val)
