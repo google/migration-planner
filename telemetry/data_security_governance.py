@@ -57,12 +57,29 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
         
     client.close()
     
-    if labels_error:
-        raise ConnectionError(f"Security governance fetch failed.\nLabels Error: {labels_error}")
+    # Fetch Retention Policies via PowerShell client
+    policies = None
+    policies_error = None
+    try:
+        from core.powershell.client import PowerShellClient
+        from core.powershell.retention import RetentionService
+        
+        ps_client = PowerShellClient(tenant_id=tenant_id, client_id=client_id)
+        retention_service = RetentionService(ps_client)
+        policies = retention_service.fetch_retention_policies()
+    except Exception as e:
+        usage_logger.error("Failed to fetch retention policies via PowerShell", exc_info=True)
+        policies_error = str(e)
+        
+    # Raise ConnectionError only if BOTH failed
+    if labels_error and policies_error:
+        raise ConnectionError(f"Security governance fetch failed.\nLabels Error: {labels_error}\nPolicies Error: {policies_error}")
         
     return {
         "labels": labels,
-        "labels_error": labels_error
+        "labels_error": labels_error,
+        "policies": policies,
+        "policies_error": policies_error
     }
 
 
@@ -138,6 +155,16 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         self.btn_next.pack(side="left", padx=10)
         
+        # Retention Policies section
+        self.retention_title = ctk.CTkLabel(self, text="Retention Compliance Policies", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
+        self.retention_grid = ctk.CTkFrame(
+            self,
+            fg_color=COLOR_SURFACE,
+            border_color=COLOR_OUTLINE_LIGHT,
+            border_width=1,
+            corner_radius=8
+        )
+        
         self.reset_view()
 
     def reset_view(self):
@@ -146,10 +173,14 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.state_frame.pack_forget()
         self.labels_grid.pack_forget()
         self.pagination_frame.pack_forget()
+        self.retention_title.pack_forget()
+        self.retention_grid.pack_forget()
         
         for w in self.state_frame.winfo_children():
             w.destroy()
         for w in self.labels_grid.winfo_children():
+            w.destroy()
+        for w in self.retention_grid.winfo_children():
             w.destroy()
             
         self.flattened_rows = []
@@ -185,8 +216,10 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         self.pack(fill="x", expand=True, pady=(20, 10))
         self.labels_grid.pack_forget()
+        self.retention_title.pack_forget()
+        self.retention_grid.pack_forget()
         
-        self._set_state_loading("Retrieving tenant Sensitivity Labels...")
+        self._set_state_loading("Retrieving tenant Security & Compliance policies...")
         
         threading.Thread(
             target=self._execute_worker,
@@ -208,9 +241,13 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.state_frame.pack_forget()
         for w in self.labels_grid.winfo_children():
             w.destroy()
+        for w in self.retention_grid.winfo_children():
+            w.destroy()
 
         labels = data.get("labels")
         labels_error = data.get("labels_error")
+        policies = data.get("policies")
+        policies_error = data.get("policies_error")
 
         self.status = "success"
 
@@ -270,6 +307,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 self.pagination_frame.pack(pady=(5, 10))
             else:
                 self.pagination_frame.pack_forget()
+
+        # 2. Render Retention Policies Grid
+        self.retention_title.pack(anchor="w", pady=(20, 10))
+        self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
+        self._render_retention_policies(policies, policies_error)
 
         self.on_status_change()
 
@@ -366,4 +408,74 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()
+
+    def _render_retention_policies(self, policies, policies_error):
+        if policies_error:
+            msg = policies_error
+            # Provide helpful, friendly advice if pwsh or dependency issue
+            if "powershell" in policies_error.lower() or "pwsh" in policies_error.lower():
+                msg = "PowerShell Core ('pwsh') is not installed or configured on this machine.\nPlease refer to the Prerequisites in the README to configure it."
+            elif "exchangeonlinemanagement" in policies_error.lower():
+                msg = "ExchangeOnlineManagement PowerShell module is missing.\nPlease run: Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser"
+                
+            ctk.CTkLabel(
+                self.retention_grid, 
+                text=f"✖ {msg}", 
+                font=FONT_BODY_MEDIUM, 
+                text_color=COLOR_ERROR,
+                justify="center"
+            ).pack(padx=20, pady=20)
+        elif policies is None or not policies:
+            ctk.CTkLabel(
+                self.retention_grid, 
+                text="No Retention Compliance Policies found in this tenant.", 
+                font=FONT_BODY_MEDIUM, 
+                text_color=COLOR_TEXT_SUB
+            ).pack(padx=20, pady=20)
+        else:
+            # Configure grid columns
+            self.retention_grid.grid_columnconfigure(0, weight=3)  # Policy Name
+            self.retention_grid.grid_columnconfigure(1, weight=3)  # Applicable Workloads
+            self.retention_grid.grid_columnconfigure(2, weight=1)  # Status
+
+            headers = ["Policy Name", "Applicable Workloads", "Status"]
+            for col_idx, head_text in enumerate(headers):
+                cell = ctk.CTkFrame(self.retention_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+                cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+            # Handle case where policies is a single dict rather than a list
+            policies_list = policies if isinstance(policies, list) else [policies]
+
+            for r_idx, policy in enumerate(policies_list, start=1):
+                bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+
+                name = policy.get("Name", "N/A")
+                workload = policy.get("Workload", "N/A")
+                
+                # Enabled can be boolean or string
+                enabled_val = policy.get("Enabled", True)
+                if isinstance(enabled_val, str):
+                    is_enabled = enabled_val.lower() == "true"
+                else:
+                    is_enabled = bool(enabled_val)
+                    
+                status = "🟢 Enabled" if is_enabled else "🔴 Disabled"
+
+                c0 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+                c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+                lbl_name = ctk.CTkLabel(c0, text=name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
+                lbl_name.pack(padx=10, pady=6, anchor="w")
+                c0.bind("<Configure>", lambda e, l=lbl_name: l.configure(wraplength=e.width - 20))
+
+                c1 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+                c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
+                lbl_workload = ctk.CTkLabel(c1, text=workload, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+                lbl_workload.pack(padx=10, pady=6, anchor="w")
+                c1.bind("<Configure>", lambda e, l=lbl_workload: l.configure(wraplength=e.width - 20))
+
+                c2 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+                c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
+                ctk.CTkLabel(c2, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
 
