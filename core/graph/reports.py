@@ -22,7 +22,16 @@ from typing import List, Tuple
 import requests
 from core.graph.client import GraphClient
 
-logger = logging.getLogger(__name__)
+import re
+
+def _sanitize_string(s: str) -> str:
+    if not s:
+        return ""
+    # Mask JWT and access tokens in query parameters or headers
+    s = re.sub(r'token=[^&"\')\s]+', 'token=[MASKED]', s)
+    s = re.sub(r'Bearer\s+[^&"\')\s]+', 'Bearer [MASKED]', s, flags=re.IGNORECASE)
+    return s
+
 
 class ReportsService:
     """Service to fetch streaming M365 telemetry reports via Microsoft Graph API."""
@@ -69,11 +78,11 @@ class ReportsService:
                         break
                     except requests.exceptions.RequestException as error:
                         if attempt < max_retries:
-                            logger.warning("[Attempt %d/%d] Failed stream download. Retrying in %ds... (Error: %s)", attempt, max_retries, retry_interval, error)
+                            logger.warning("[Attempt %d/%d] Failed stream download. Retrying in %ds... (Error: %s)", attempt, max_retries, retry_interval, _sanitize_string(str(error)))
                             time.sleep(retry_interval)
                         else:
-                            logger.error("Failed downloading %s after %d attempts.", output_filename, max_retries, exc_info=True)
-                            raise ConnectionError(f"Failed downloading report after %d attempts. Details: {error}")
+                            logger.error("Failed downloading %s after %d attempts. Error: %s", output_filename, max_retries, _sanitize_string(str(error)))
+                            raise ConnectionError(f"Failed downloading report after {max_retries} attempts.")
                 
                 logger.info("Success! Saved report to: %s", output_path)
 
@@ -87,7 +96,7 @@ class ReportsService:
                 logger.info("Success! Saved report to: %s", output_path)
             else:
                 resp.close()
-                logger.error("Graph report request failed with status code %d: %s", resp.status_code, resp.text)
+                logger.error("Graph report request failed with status code %d: %s", resp.status_code, _sanitize_string(resp.text))
                 raise ConnectionError(f"Microsoft Graph API request failed with status code {resp.status_code}")
         finally:
             self.client.release_token(token_slot)
