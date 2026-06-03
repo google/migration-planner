@@ -506,11 +506,11 @@ class SidebarFrame(ctk.CTkFrame):
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.header_frame.pack(fill="x", padx=20, pady=(25, 30))
 
-        # Brand Icon symbolizing colorful Workspace shape
+        # Brand Icon representing a deal helper (Handshake 🤝)
         self.logo_label = ctk.CTkLabel(
             self.header_frame,
-            text="✦",
-            font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"),
+            text="🤝",
+            font=ctk.CTkFont(family="Segoe UI", size=24),
             text_color=COLOR_PRIMARY
         )
         self.logo_label.pack(side="left", padx=(5, 5))
@@ -520,21 +520,12 @@ class SidebarFrame(ctk.CTkFrame):
 
         self.brand_title = ctk.CTkLabel(
             self.brand_text_area,
-            text="Workspace",
-            font=FONT_BODY_BOLD,
+            text="Deal Assistant",
+            font=FONT_HEADER_SMALL,
             text_color=COLOR_TEXT_MAIN,
             anchor="w"
         )
-        self.brand_title.pack(fill="x")
-
-        self.brand_subtitle = ctk.CTkLabel(
-            self.brand_text_area,
-            text="Deal Assistant",
-            font=FONT_BODY_SMALL,
-            text_color=COLOR_TEXT_SUB,
-            anchor="w"
-        )
-        self.brand_subtitle.pack(fill="x")
+        self.brand_title.pack(fill="x", pady=2)
 
         # Collapse / Expand control button
         self.toggle_btn = ctk.CTkButton(
