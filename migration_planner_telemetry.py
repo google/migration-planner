@@ -367,6 +367,7 @@ class ReportsPage(ctk.CTkFrame):
             backoff_var=backoff_var
         )
         self.license_usage_view.pack(fill="both", expand=True)  # CITATION: self.license_usage_view.pack(fill="both", expand=True, padx=15, pady=15)
+        self.license_usage_view.on_all_done_callback = self.on_telemetry_fetch_completed
 
         # Adapt layout recursively to hide original inputs from view
         self.adapt_embedded_view()
@@ -407,6 +408,10 @@ class ReportsPage(ctk.CTkFrame):
             self.embedded_submit_btn.pack_forget()
             self.embedded_submit_btn.grid_forget()
 
+        if hasattr(self.license_usage_view, "inputs_frame"):
+            self.license_usage_view.inputs_frame.pack_forget()
+            self.license_usage_view.inputs_frame.grid_forget()
+
     def on_fetch_report_clicked(self):
         """Stage 2: Migrates stored variables into the hidden entries and clicks the submit thread."""
         tenant = self.controller.stored_tenant
@@ -435,6 +440,10 @@ class ReportsPage(ctk.CTkFrame):
         # Programmatically trigger the hidden connection submit button
         if self.embedded_submit_btn:
             self.embedded_submit_btn.invoke()
+
+    def on_telemetry_fetch_completed(self, success: bool):
+        """Callback from LicenseUsageTab when all parallel reports complete."""
+        self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color="#1E3A8A")
 
     def clear_session_data(self):
         """Wipes the cached parameters from telemetry objects and resets the Fetch button."""
