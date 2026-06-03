@@ -55,6 +55,16 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
         usage_logger.error("Failed to fetch sensitivity labels", exc_info=True)
         labels_error = str(e)
         
+    # Fetch tenant primary domain name from organization endpoint
+    tenant_domain = tenant_id
+    try:
+        from core.graph.directory import DirectoryService
+        dir_svc = DirectoryService(client)
+        tenant_domain = dir_svc.get_tenant_primary_domain()
+        usage_logger.info(f"Retrieved primary tenant domain for Connect-IPPSSession: {tenant_domain}")
+    except Exception as e:
+        usage_logger.warning(f"Could not retrieve tenant domain via Graph. Falling back to Tenant ID Guid: {e}")
+
     client.close()
     
     # Fetch Retention Policies via PowerShell client
@@ -64,7 +74,7 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
         from core.powershell.client import PowerShellClient
         from core.powershell.retention import RetentionService
         
-        ps_client = PowerShellClient(tenant_id=tenant_id, client_id=client_id)
+        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id)
         retention_service = RetentionService(ps_client)
         policies = retention_service.fetch_retention_policies()
     except Exception as e:
