@@ -671,10 +671,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if policies_error:
             msg = policies_error
             # Provide helpful, friendly advice if pwsh or dependency issue
-            if "powershell" in policies_error.lower() or "pwsh" in policies_error.lower():
+            if "is not installed or not in PATH" in policies_error.lower():
                 msg = "PowerShell Core ('pwsh') is not installed or configured on this machine.\nPlease refer to the Prerequisites in the README to configure it."
             elif "exchangeonlinemanagement" in policies_error.lower():
                 msg = "ExchangeOnlineManagement PowerShell module is missing.\nPlease run: Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser"
+            elif "get-retentioncompliancypolicy" in policies_error.lower() and "not recognized" in policies_error.lower():
+                msg = "Retention Management permissions required.\nPlease ensure the authenticated account is assigned the 'Retention Management' or 'Compliance Administrator' role in Microsoft Purview."
                 
             ctk.CTkLabel(
                 self.retention_grid, 
@@ -798,10 +800,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if policies_error:
             msg = policies_error
             # Provide helpful, friendly advice if pwsh or dependency issue
-            if "powershell" in policies_error.lower() or "pwsh" in policies_error.lower():
+            if "is not installed or not in PATH" in policies_error.lower():
                 msg = "PowerShell Core ('pwsh') is not installed or configured on this machine.\nPlease refer to the Prerequisites in the README to configure it."
             elif "exchangeonlinemanagement" in policies_error.lower():
                 msg = "ExchangeOnlineManagement PowerShell module is missing.\nPlease run: Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser"
+            elif "get-dlpcompliancypolicy" in policies_error.lower() and "not recognized" in policies_error.lower():
+                msg = "DLP Compliance Management permissions required.\nPlease ensure the authenticated account is assigned the 'DLP Compliance Management' or 'Compliance Administrator' role in Microsoft Purview."
                 
             ctk.CTkLabel(
                 self.dlp_grid, 
