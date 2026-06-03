@@ -230,11 +230,13 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             # Define column weights for proper proportional spacing
             self.labels_grid.grid_columnconfigure(0, weight=2)  # Label Name
             self.labels_grid.grid_columnconfigure(1, weight=3)  # Description
-            self.labels_grid.grid_columnconfigure(2, weight=1)  # Priority
-            self.labels_grid.grid_columnconfigure(3, weight=2)  # Applicable To
-            self.labels_grid.grid_columnconfigure(4, weight=1)  # Status
+            self.labels_grid.grid_columnconfigure(2, weight=1)  # Protection
+            self.labels_grid.grid_columnconfigure(3, weight=1)  # Mode
+            self.labels_grid.grid_columnconfigure(4, weight=1)  # Priority
+            self.labels_grid.grid_columnconfigure(5, weight=2)  # Applicable To
+            self.labels_grid.grid_columnconfigure(6, weight=1)  # Status
 
-            headers = ["Sensitivity Label", "Description", "Priority", "Applicable Targets", "Status"]
+            headers = ["Sensitivity Label", "Description", "Protection", "Mode", "Priority", "Applicable Targets", "Status"]
             for col_idx, head_text in enumerate(headers):
                 cell = ctk.CTkFrame(self.labels_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
                 cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
@@ -246,6 +248,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 self.flattened_rows.append({
                     "name": parent.get("name", "N/A"),
                     "description": parent.get("description", "") or parent.get("toolTip", "") or "N/A",
+                    "hasProtection": parent.get("hasProtection", False),
+                    "applicationMode": parent.get("applicationMode", "N/A") or "N/A",
                     "priority": parent.get("priority", 0),
                     "applicableTo": parent.get("applicableTo", ""),
                     "isEnabled": parent.get("isEnabled", True),
@@ -260,6 +264,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                         self.flattened_rows.append({
                             "name": f"    ↳  {sub.get('name', 'N/A')}",
                             "description": sub.get("description", "") or sub.get("toolTip", "") or "N/A",
+                            "hasProtection": sub.get("hasProtection", False),
+                            "applicationMode": sub.get("applicationMode", "N/A") or "N/A",
                             "priority": sub.get("priority", 0),
                             "applicableTo": sub.get("applicableTo", ""),
                             "isEnabled": sub.get("isEnabled", True),
@@ -307,6 +313,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             
             name = row_item["name"]
             desc = row_item["description"]
+            protection = "🛡️ Yes" if row_item["hasProtection"] else "🔓 No"
+            mode = str(row_item["applicationMode"]).capitalize()
             priority = str(row_item["priority"])
             applicable = ", ".join([x.capitalize() for x in row_item["applicableTo"].split(",") if x.strip()]) or "N/A"
             status = "🟢 Enabled" if row_item["isEnabled"] else "🔴 Disabled"
@@ -329,17 +337,25 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
             c2 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
             c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
-            ctk.CTkLabel(c2, text=priority, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+            ctk.CTkLabel(c2, text=protection, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
             c3 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
             c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
-            lbl_app = ctk.CTkLabel(c3, text=applicable, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
-            lbl_app.pack(padx=10, pady=6, anchor="w")
-            c3.bind("<Configure>", lambda e, l=lbl_app: l.configure(wraplength=e.width - 20))
+            ctk.CTkLabel(c3, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
             c4 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
             c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
-            ctk.CTkLabel(c4, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+            ctk.CTkLabel(c4, text=priority, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+            c5 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
+            c5.grid(row=r_idx, column=5, sticky="nsew", padx=1, pady=1)
+            lbl_app = ctk.CTkLabel(c5, text=applicable, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+            lbl_app.pack(padx=10, pady=6, anchor="w")
+            c5.bind("<Configure>", lambda e, l=lbl_app: l.configure(wraplength=e.width - 20))
+
+            c6 = ctk.CTkFrame(self.labels_grid, fg_color=bg_style, corner_radius=0)
+            c6.grid(row=r_idx, column=6, sticky="nsew", padx=1, pady=1)
+            ctk.CTkLabel(c6, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
         # Update page info label
         self.lbl_page_info.configure(text=f"Page {self.current_page + 1} of {total_pages}")
