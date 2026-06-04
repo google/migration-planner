@@ -40,6 +40,7 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping Subscribed SKUs Inventory Summary UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, retries_var=None, backoff_var=None, **kwargs):
+        self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -144,6 +145,8 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
 
     def _execute_worker(self, tenant: str, clients: List[str], secrets: List[str]):
         usage_logger.info("Executing thread: _execute_sku_worker")
+        if self.semaphore:
+            self.semaphore.acquire()
         try:
             client_id = clients[0]
             client_secret = secrets[0]
@@ -175,6 +178,9 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         except Exception as e:
             usage_logger.error("Exception caught in SubscribedSKUs worker.", exc_info=True)
             self.after(0, self._render_error, str(e))
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
     def _render_success(self, sku_dict: Dict[str, Any]):
         usage_logger.info("Executing UI render for SKU table.")

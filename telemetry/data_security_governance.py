@@ -166,6 +166,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping Data Security & Governance UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
+        self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -503,13 +504,25 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def _execute_labels_worker(self, tenant: str, client_id: str, client_secret: str):
         usage_logger.info("Executing thread: _execute_labels_worker")
-        res = fetch_sensitivity_labels_data(client_id, client_secret, tenant)
-        self.after(0, self._handle_labels_result, res)
+        if self.semaphore:
+            self.semaphore.acquire()
+        try:
+            res = fetch_sensitivity_labels_data(client_id, client_secret, tenant)
+            self.after(0, self._handle_labels_result, res)
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
     def _execute_retention_worker(self, tenant: str, client_id: str, client_secret: str):
         usage_logger.info("Executing thread: _execute_retention_worker")
-        res = fetch_retention_policies_data(client_id, client_secret, tenant)
-        self.after(0, self._handle_retention_result, res)
+        if self.semaphore:
+            self.semaphore.acquire()
+        try:
+            res = fetch_retention_policies_data(client_id, client_secret, tenant)
+            self.after(0, self._handle_retention_result, res)
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
     def _handle_labels_result(self, result: dict):
         for w in self.labels_grid.winfo_children():

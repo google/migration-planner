@@ -261,6 +261,7 @@ class SharePointUsageFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping SharePoint Telemetry UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
+        self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -336,6 +337,8 @@ class SharePointUsageFrame(ctk.CTkFrame):
 
     def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
         usage_logger.info("Executing thread: _execute_sharepoint_worker")
+        if self.semaphore:
+            self.semaphore.acquire()
         try:
             data = run_sharepoint_pipeline(client_id, client_secret, tenant)
             usage_logger.info("Successfully completed SharePoint telemetry data fetch.")
@@ -343,6 +346,9 @@ class SharePointUsageFrame(ctk.CTkFrame):
         except Exception as e:
             usage_logger.error("Exception caught in SharePoint worker.", exc_info=True)
             self.after(0, self._render_error, str(e))
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
     def _render_success(self, data: dict):
         usage_logger.info("SharePoint Site Usage data successfully retrieved. Rendering UI grid.")
@@ -393,6 +399,7 @@ class OneDriveUsageFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping OneDrive Telemetry UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
+        self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -468,6 +475,8 @@ class OneDriveUsageFrame(ctk.CTkFrame):
 
     def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
         usage_logger.info("Executing thread: _execute_onedrive_worker")
+        if self.semaphore:
+            self.semaphore.acquire()
         try:
             data = run_onedrive_pipeline(client_id, client_secret, tenant)
             usage_logger.info("Successfully completed OneDrive telemetry data fetch.")
@@ -475,6 +484,9 @@ class OneDriveUsageFrame(ctk.CTkFrame):
         except Exception as e:
             usage_logger.error("Exception caught in OneDrive worker.", exc_info=True)
             self.after(0, self._render_error, str(e))
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
     def _render_success(self, data: dict):
         usage_logger.info("OneDrive Usage data successfully retrieved. Rendering UI grid.")

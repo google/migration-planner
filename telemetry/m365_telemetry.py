@@ -119,6 +119,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.lic_client_secrets = ctk.StringVar()
 
         self.on_all_done_callback = None
+        self.telemetry_semaphore = threading.Semaphore(3)
 
         self.build_ui()
 
@@ -176,7 +177,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
             retries_var=self.retries,
-            backoff_var=self.backoff
+            backoff_var=self.backoff,
+            concurrency_semaphore=self.telemetry_semaphore
         )
 
         # 2. O365 Active Users Section
@@ -184,7 +186,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
         )
 
         # 3. O365 Usage Trend Graph Section
@@ -192,7 +195,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
         )
 
         # 4. M365 Apps Usage Section
@@ -200,7 +204,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
         )
 
         # 5a. Exchange Online Mailbox Usage
@@ -208,7 +213,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
         )
 
         # 5b. SharePoint Telemetry Section
@@ -216,7 +222,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
         )
 
         # 5c. OneDrive Telemetry Section
@@ -224,7 +231,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
         )
 
         # 6. Data Security & Governance Section
@@ -232,7 +240,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
         )
 
         # 7. Power Automate Section
@@ -240,7 +249,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
         )
 
         self._hide_all_grids()

@@ -344,6 +344,7 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
     """Self-contained component wrapping Power Automate UI and export controls."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
+        self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -455,6 +456,8 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         ).start()
 
     def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
+        if self.semaphore:
+            self.semaphore.acquire()
         try:
             scanner = PowerAutomateScanner(tenant, client_id, client_secret)
             results = scanner.scan_flows()
@@ -463,6 +466,9 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         except Exception as e:
             usage_logger.error("Exception caught in PowerAutomateUsage worker.", exc_info=True)
             self.after(0, self._render_error, str(e))
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
     def _render_success(self, results: dict):
         self.state_frame.pack_forget()

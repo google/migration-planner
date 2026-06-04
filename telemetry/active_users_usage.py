@@ -245,6 +245,7 @@ class ActiveUsersUsageFrame(ctk.CTkFrame):
     """Self-contained component wrapping O365 Active Users Usage UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
+        self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -316,6 +317,8 @@ class ActiveUsersUsageFrame(ctk.CTkFrame):
         ).start()
 
     def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
+        if self.semaphore:
+            self.semaphore.acquire()
         try:
             o365_data = run_o365_pipeline(client_id, client_secret, tenant)
             usage_logger.info("Successfully completed O365 usage data fetch.")
@@ -323,6 +326,9 @@ class ActiveUsersUsageFrame(ctk.CTkFrame):
         except Exception as e:
             usage_logger.error("Exception caught in ActiveUsersUsage worker.", exc_info=True)
             self.after(0, self._render_error, str(e))
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
     def _render_success(self, o365_data: list):
         self.state_frame.pack_forget()
@@ -369,6 +375,7 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
     """Self-contained component wrapping O365 Active User Trend Chart and height controls."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
+        self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -464,6 +471,8 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
         ).start()
 
     def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
+        if self.semaphore:
+            self.semaphore.acquire()
         try:
             trend_data = run_o365_trend_pipeline(client_id, client_secret, tenant)
             usage_logger.info("Successfully completed O365 trend data fetch.")
@@ -471,6 +480,9 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
         except Exception as e:
             usage_logger.error("Exception caught in ActiveUsersTrend worker.", exc_info=True)
             self.after(0, self._render_error, str(e))
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
     def _render_success(self, trend_data: dict):
         self.state_frame.pack_forget()
@@ -553,6 +565,7 @@ class M365AppUsageFrame(ctk.CTkFrame):
     """Self-contained component wrapping M365 App Usage UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
+        self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -624,6 +637,8 @@ class M365AppUsageFrame(ctk.CTkFrame):
         ).start()
 
     def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
+        if self.semaphore:
+            self.semaphore.acquire()
         try:
             m365_data = run_m365_pipeline(client_id, client_secret, tenant)
             usage_logger.info("Successfully completed M365 Apps usage data fetch.")
@@ -631,6 +646,9 @@ class M365AppUsageFrame(ctk.CTkFrame):
         except Exception as e:
             usage_logger.error("Exception caught in M365AppUsage worker.", exc_info=True)
             self.after(0, self._render_error, str(e))
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
     def _render_success(self, m365_data: list):
         self.state_frame.pack_forget()
