@@ -1,5 +1,5 @@
 import json
-import csv
+import pandas as pd
 import threading
 import os
 import queue
@@ -969,10 +969,8 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
                         rows.append(["", "", "", p_name, p_scope])
 
         try:
-            with open(f, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(headers)
-                writer.writerows(rows)
+            df = pd.DataFrame(rows, columns=headers)
+            df.to_csv(f, index=False, encoding='utf-8')
             async_logger.info("Spreadsheet exported successfully.")
             messagebox.showinfo("Export Successful", f"Spreadsheet successfully saved to:\n{f}", parent=self)
         except Exception as e:
@@ -1011,10 +1009,8 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
             ])
 
         try:
-            with open(f, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(headers)
-                writer.writerows(rows)
+            df = pd.DataFrame(rows, columns=headers)
+            df.to_csv(f, index=False, encoding='utf-8')
             async_logger.info("Complex flows exported successfully.")
             messagebox.showinfo("Export Successful", f"Complex flows successfully saved to:\n{f}", parent=self)
         except Exception as e:

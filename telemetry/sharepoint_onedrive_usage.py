@@ -15,7 +15,7 @@
 """Modular SharePoint and OneDrive usage telemetry scanners and visual interfaces."""
 
 import os
-import csv
+import pandas as pd
 import logging
 import threading
 import customtkinter as ctk
@@ -54,31 +54,16 @@ def parse_sharepoint_csv(filepath):
         usage_logger.error(f"Error: Could not find SharePoint report {filepath}")
         raise FileNotFoundError(f"SharePoint Site Usage report not found.")
 
-    total_sites = 0
-    total_storage = 0
-    total_files = 0
-    active_files = 0
+    cols = ["Is Deleted", "Storage Used (Byte)", "File Count", "Active File Count"]
+    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    with open(filepath, mode="r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row.get("Is Deleted", "").strip().upper() != "TRUE":
-                total_sites += 1
-                
-                try:
-                    total_storage += int(row.get("Storage Used (Byte)", 0) or 0)
-                except ValueError:
-                    pass
-                
-                try:
-                    total_files += int(row.get("File Count", 0) or 0)
-                except ValueError:
-                    pass
-                
-                try:
-                    active_files += int(row.get("Active File Count", 0) or 0)
-                except ValueError:
-                    pass
+    mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+    active_df = df[mask]
+
+    total_sites = len(active_df)
+    total_storage = int(pd.to_numeric(active_df["Storage Used (Byte)"], errors='coerce').fillna(0).sum())
+    total_files = int(pd.to_numeric(active_df["File Count"], errors='coerce').fillna(0).sum())
+    active_files = int(pd.to_numeric(active_df["Active File Count"], errors='coerce').fillna(0).sum())
 
     usage_logger.info(f"SharePoint parsing complete: sites={total_sites}, storage={format_bytes(total_storage)}, files={total_files}, active_files={active_files}")
     return {
@@ -97,31 +82,16 @@ def parse_onedrive_csv(filepath):
         usage_logger.error(f"Error: Could not find OneDrive report {filepath}")
         raise FileNotFoundError(f"OneDrive Account Usage report not found.")
 
-    total_accounts = 0
-    total_storage = 0
-    total_files = 0
-    active_files = 0
+    cols = ["Is Deleted", "Storage Used (Byte)", "File Count", "Active File Count"]
+    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    with open(filepath, mode="r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row.get("Is Deleted", "").strip().upper() != "TRUE":
-                total_accounts += 1
-                
-                try:
-                    total_storage += int(row.get("Storage Used (Byte)", 0) or 0)
-                except ValueError:
-                    pass
-                
-                try:
-                    total_files += int(row.get("File Count", 0) or 0)
-                except ValueError:
-                    pass
-                
-                try:
-                    active_files += int(row.get("Active File Count", 0) or 0)
-                except ValueError:
-                    pass
+    mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+    active_df = df[mask]
+
+    total_accounts = len(active_df)
+    total_storage = int(pd.to_numeric(active_df["Storage Used (Byte)"], errors='coerce').fillna(0).sum())
+    total_files = int(pd.to_numeric(active_df["File Count"], errors='coerce').fillna(0).sum())
+    active_files = int(pd.to_numeric(active_df["Active File Count"], errors='coerce').fillna(0).sum())
 
     usage_logger.info(f"OneDrive parsing complete: accounts={total_accounts}, storage={format_bytes(total_storage)}, files={total_files}, active_files={active_files}")
     return {
@@ -140,18 +110,14 @@ def parse_onedrive_activity_csv(filepath):
         usage_logger.error(f"Error: Could not find OneDrive Activity report {filepath}")
         raise FileNotFoundError(f"OneDrive Activity User Detail report not found.")
 
-    sync_users = 0
+    cols = ["Is Deleted", "Synced File Count"]
+    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    with open(filepath, mode="r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row.get("Is Deleted", "").strip().upper() != "TRUE":
-                try:
-                    synced_count = int(row.get("Synced File Count", 0) or 0)
-                    if synced_count > 0:
-                        sync_users += 1
-                except ValueError:
-                    pass
+    mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+    active_df = df[mask]
+
+    synced_series = pd.to_numeric(active_df["Synced File Count"], errors='coerce').fillna(0)
+    sync_users = int((synced_series > 0).sum())
 
     usage_logger.info(f"OneDrive Activity parsing complete: sync_users={sync_users}")
     return {
@@ -165,15 +131,14 @@ def parse_onenote_users_csv(filepath):
         usage_logger.error(f"Error: Could not find M365 App User Detail report {filepath}")
         raise FileNotFoundError(f"M365 App User Detail report not found.")
 
-    onenote_users = 0
+    cols = ["Is Deleted", "OneNote"]
+    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    with open(filepath, mode="r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row.get("Is Deleted", "").strip().upper() != "TRUE":
-                val = row.get("OneNote", "").strip().lower()
-                if val in ["yes", "true"]:
-                     onenote_users += 1
+    mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+    active_df = df[mask]
+
+    onenote_series = active_df["OneNote"].astype(str).str.strip().str.lower()
+    onenote_users = int(onenote_series.isin(["yes", "true"]).sum())
 
     usage_logger.info(f"OneNote Users parsing complete: onenote_users={onenote_users}")
     return {

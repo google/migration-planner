@@ -15,7 +15,7 @@
 """Aggregations and data pipelines for O365 active user counts and details."""
 
 import os
-import csv
+import pandas as pd
 import logging
 from datetime import datetime, date
 
@@ -47,59 +47,26 @@ def process_active_user_detail(filepath):
         usage_logger.error(f"Error: Could not find the file {filepath} to process.")
         raise FileNotFoundError(f"Report file {os.path.basename(filepath)} not found. Download may have failed.")
 
-    exchange_online_usage = [0, 0, 0] # 30d, 90d, 180d
-    onedrive_usage = [0, 0, 0]
-    sharepoint_usage = [0, 0, 0]
-    teams_usage = [0, 0, 0]
-    current_date = date.today()
+    current_date = pd.Timestamp.today().normalize()
 
-    with open(filepath, mode="r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            # Exchange Online
-            if row.get("Has Exchange License", "").strip().upper() == "TRUE":
-                dt_str = row.get("Exchange Last Activity Date", "").strip()
-                if dt_str:
-                    try:
-                        days_diff = (current_date - datetime.strptime(dt_str, "%Y-%m-%d").date()).days
-                        if days_diff < 180: exchange_online_usage[2] += 1
-                        if days_diff < 90: exchange_online_usage[1] += 1
-                        if days_diff < 30: exchange_online_usage[0] += 1
-                    except ValueError: pass
+    df = pd.read_csv(filepath, encoding="utf-8-sig")
 
-            # OneDrive
-            if row.get("Has OneDrive License", "").strip().upper() == "TRUE":
-                dt_str = row.get("OneDrive Last Activity Date", "").strip()
-                if dt_str:
-                    try:
-                        days_diff = (current_date - datetime.strptime(dt_str, "%Y-%m-%d").date()).days
-                        if days_diff < 180: onedrive_usage[2] += 1
-                        if days_diff < 90: onedrive_usage[1] += 1
-                        if days_diff < 30: onedrive_usage[0] += 1
-                    except ValueError: pass
+    def aggregate_column(df, has_license_col, date_col):
+        if has_license_col not in df.columns or date_col not in df.columns:
+            return [0, 0, 0]
+        mask = df[has_license_col].astype(str).str.strip().str.upper() == "TRUE"
+        dates_series = pd.to_datetime(df.loc[mask, date_col], errors='coerce')
+        days_diff = (current_date - dates_series).dt.days
+        d180 = int((days_diff < 180).sum())
+        d90 = int((days_diff < 90).sum())
+        d30 = int((days_diff < 30).sum())
+        return [d30, d90, d180]
 
-            # SharePoint
-            if row.get("Has SharePoint License", "").strip().upper() == "TRUE":
-                dt_str = row.get("SharePoint Last Activity Date", "").strip()
-                if dt_str:
-                    try:
-                        days_diff = (current_date - datetime.strptime(dt_str, "%Y-%m-%d").date()).days
-                        if days_diff < 180: sharepoint_usage[2] += 1
-                        if days_diff < 90: sharepoint_usage[1] += 1
-                        if days_diff < 30: sharepoint_usage[0] += 1
-                    except ValueError: pass
+    exchange_online_usage = aggregate_column(df, "Has Exchange License", "Exchange Last Activity Date")
+    onedrive_usage = aggregate_column(df, "Has OneDrive License", "OneDrive Last Activity Date")
+    sharepoint_usage = aggregate_column(df, "Has SharePoint License", "SharePoint Last Activity Date")
+    teams_usage = aggregate_column(df, "Has Teams License", "Teams Last Activity Date")
 
-            # Teams
-            if row.get("Has Teams License", "").strip().upper() == "TRUE":
-                dt_str = row.get("Teams Last Activity Date", "").strip()
-                if dt_str:
-                    try:
-                        days_diff = (current_date - datetime.strptime(dt_str, "%Y-%m-%d").date()).days
-                        if days_diff < 180: teams_usage[2] += 1
-                        if days_diff < 90: teams_usage[1] += 1
-                        if days_diff < 30: teams_usage[0] += 1
-                    except ValueError: pass
-                    
     usage_logger.info("Successfully processed O365 active user data.")
     return [
         ("Exchange Online", exchange_online_usage[0], exchange_online_usage[1], exchange_online_usage[2]),
@@ -115,28 +82,23 @@ def process_active_user_counts(filepath):
         usage_logger.error(f"Error: Could not find the file {filepath} to process.")
         raise FileNotFoundError(f"Report file {os.path.basename(filepath)} not found.")
 
-    dates, office365, exchange, onedrive, sharepoint, teams = [], [], [], [], [], []
+    df = pd.read_csv(filepath, encoding="utf-8-sig")
+    
+    if "Report Date" in df.columns:
+        df = df.sort_values(by="Report Date").fillna(0)
+    
+    dates = df["Report Date"].astype(str).tolist() if "Report Date" in df.columns else []
+    
+    def get_column_list(col_name):
+        if col_name in df.columns:
+            return pd.to_numeric(df[col_name], errors='coerce').fillna(0).astype(int).tolist()
+        return [0] * len(dates)
 
-    with open(filepath, mode="r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        # Sort chronologically by "Report Date" to ensure line graph renders left-to-right correctly
-        rows = sorted(list(reader), key=lambda x: x.get("Report Date", ""))
-        
-        for row in rows:
-            dt = row.get("Report Date", "").strip()
-            if not dt: continue
-            
-            dates.append(dt)
-            
-            def get_int(val):
-                try: return int(val) if val else 0
-                except ValueError: return 0
-            
-            office365.append(get_int(row.get("Office 365")))
-            exchange.append(get_int(row.get("Exchange")))
-            onedrive.append(get_int(row.get("OneDrive")))
-            sharepoint.append(get_int(row.get("SharePoint")))
-            teams.append(get_int(row.get("Teams")))
+    office365 = get_column_list("Office 365")
+    exchange = get_column_list("Exchange")
+    onedrive = get_column_list("OneDrive")
+    sharepoint = get_column_list("SharePoint")
+    teams = get_column_list("Teams")
 
     usage_logger.info("Successfully processed O365 active user counts data.")
     return {
@@ -167,16 +129,17 @@ def process_m365_app_user_detail(filepath):
         "Excel (Web)", "PowerPoint (Web)", "OneNote (Web)", "Teams (Web)"
     ]
     
-    counters = {col: 0 for col in columns_to_track}
-
-    with open(filepath, mode="r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            for col in columns_to_track:
-                val = row.get(col, "").strip().lower()
-                if val in ["yes", "true"]:
-                    counters[col] += 1
-                    
+    df = pd.read_csv(filepath, encoding="utf-8-sig")
+    
+    counters = {}
+    for col in columns_to_track:
+        if col in df.columns:
+            col_series = df[col].astype(str).str.strip().str.lower()
+            count = int(col_series.isin(["yes", "true"]).sum())
+            counters[col] = count
+        else:
+            counters[col] = 0
+            
     usage_logger.info("Successfully processed M365 App user data.")
     return [(col, count) for col, count in counters.items()]
 

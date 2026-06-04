@@ -57,7 +57,11 @@ def parse_mailbox_usage_csv(filepath: str) -> dict:
         usage_logger.error(f"Error: Could not find Mailbox report {filepath}")
         raise FileNotFoundError("Mailbox Usage report not found.")
 
-    df = pd.read_csv(filepath)
+    cols = ["Storage Used (Byte)", "Item Count"]
+    headers = pd.read_csv(filepath, nrows=0).columns.tolist()
+    if "Is Deleted" in headers:
+        cols.append("Is Deleted")
+    df = pd.read_csv(filepath, usecols=cols)
 
     # Clean data (remove rows where storage or item count might be NaN)
     # Also ignore deleted mailboxes if they exist in the report
