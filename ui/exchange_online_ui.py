@@ -1682,7 +1682,7 @@ class MigrationEstimatorTool(ctk.CTk):
       except:
         return 0
     
-    def _is_valid_email(self, val):
+    def _is_valid_email( val):
       return bool(re.match(r'^[^@]+@[^@]+\.[^@]+$', val))
 
     for u in all_users:
