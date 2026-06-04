@@ -372,18 +372,43 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
+        # Height control slider for Power Automate Chart (packed above the chart dynamically)
+        self.pa_height_var = ctk.DoubleVar(value=400)
+        self.pa_slider_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+
+        self.slider_pa_height = ctk.CTkSlider(
+            self.pa_slider_frame, from_=200, to=800, number_of_steps=60,
+            variable=self.pa_height_var, width=120, height=16,
+            command=self._on_pa_height_slider_change
+        )
+        self.slider_pa_height.pack(side="right")
+
+        self.lbl_pa_height = ctk.CTkLabel(self.pa_slider_frame, text="Height: 400px", font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB)
+        self.lbl_pa_height.pack(side="right", padx=(0, 10))
+
+        self.pa_chart_container = ctk.CTkFrame(
+            self.inner_pad, fg_color=COLOR_SURFACE,
+            border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8,
+            height=400
+        )
+        self.pa_chart_container.pack_propagate(False)
+
         self.reset_view()
 
     def reset_view(self):
         self.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
+        self.pa_slider_frame.pack_forget()
+        self.pa_chart_container.pack_forget()
         self.btn_export_pa.configure(state="disabled")
         self.last_complex_flows = []
         
         for w in self.state_frame.winfo_children():
             w.destroy()
         for w in self.grid_frame.winfo_children():
+            w.destroy()
+        for w in self.pa_chart_container.winfo_children():
             w.destroy()
 
     def _set_state_loading(self, msg="Loading..."):
@@ -416,6 +441,8 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         
         self.pack(fill="x", expand=True, pady=10)
         self.grid_frame.pack_forget()
+        self.pa_slider_frame.pack_forget()
+        self.pa_chart_container.pack_forget()
         
         self._set_state_loading("Scanning Power Automate flows...")
         
@@ -504,14 +531,16 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
             self.btn_export_pa.configure(state="disabled")
 
         if total_flows > 0:
-            charts_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
-            charts_frame.pack(fill="x", pady=20)
+            self.pa_slider_frame.pack(fill="x", pady=(10, 0))
+            self.pa_chart_container.pack(fill="x", pady=(5, 20))
+            for w in self.pa_chart_container.winfo_children():
+                w.destroy()
             
             if not MATPLOTLIB_AVAILABLE:
-                ctk.CTkLabel(charts_frame, text="Matplotlib is required to render charts.\nPlease install it using 'pip install matplotlib'.", text_color=COLOR_ERROR).pack(pady=15)
+                ctk.CTkLabel(self.pa_chart_container, text="Matplotlib is required to render charts.\nPlease install it using 'pip install matplotlib'.", text_color=COLOR_ERROR).pack(pady=15)
             else:
                 try:
-                    fig, ax = plt.subplots(figsize=(12, 7), dpi=100)
+                    fig, ax = plt.subplots(figsize=(10, 4), dpi=100)
                     fig.patch.set_facecolor(COLOR_SURFACE)
                     ax.set_facecolor(COLOR_SURFACE)
                     
@@ -548,19 +577,19 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
                     rects1 = ax.bar(x, actives, width, label='Active', color=color_active)
                     rects2 = ax.bar([i + width for i in x], inactives, width, label='Inactive', color=color_inactive)
                     
-                    ax.set_ylabel('Count', color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
-                    ax.set_title('Power Automate Flows Breakdown', color=COLOR_TEXT_MAIN, fontsize=18, fontweight='bold')
+                    ax.set_ylabel('Count', color=COLOR_TEXT_MAIN, fontsize=10, fontweight='bold')
+                    ax.set_title('Power Automate Flows Breakdown', color=COLOR_TEXT_MAIN, fontsize=12, fontweight='bold')
                     ax.set_xticks([i + width/2 for i in x])
-                    ax.set_xticklabels(categories, color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
-                    ax.legend(facecolor=COLOR_SURFACE, edgecolor=COLOR_OUTLINE_LIGHT, labelcolor=COLOR_TEXT_MAIN, prop={'weight':'bold', 'size':12})
+                    ax.set_xticklabels(categories, color=COLOR_TEXT_MAIN, fontsize=10, fontweight='bold')
+                    ax.legend(facecolor=COLOR_SURFACE, edgecolor=COLOR_OUTLINE_LIGHT, labelcolor=COLOR_TEXT_MAIN, prop={'weight':'bold', 'size':9})
                     
-                    ax.bar_label(rects1, padding=3, color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
-                    ax.bar_label(rects2, padding=3, color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
+                    ax.bar_label(rects1, padding=3, color=COLOR_TEXT_MAIN, fontsize=9, fontweight='bold')
+                    ax.bar_label(rects2, padding=3, color=COLOR_TEXT_MAIN, fontsize=9, fontweight='bold')
                     
                     for spine in ax.spines.values():
                         spine.set_color(COLOR_OUTLINE_LIGHT)
                     
-                    ax.tick_params(axis='y', colors=COLOR_TEXT_MAIN, labelsize=12)
+                    ax.tick_params(axis='y', colors=COLOR_TEXT_MAIN, labelsize=9)
                     for label in ax.get_yticklabels():
                         label.set_fontweight('bold')
                     
@@ -568,9 +597,9 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
                     ax.set_ylim(0, max(max_val + 3, int(max_val * 1.3)))
                     
                     fig.tight_layout()
-                    canvas = FigureCanvasTkAgg(fig, master=charts_frame)
+                    canvas = FigureCanvasTkAgg(fig, master=self.pa_chart_container)
                     canvas.draw()
-                    canvas.get_tk_widget().pack(fill="x", padx=50, pady=10)
+                    canvas.get_tk_widget().pack(fill="both", expand=True, padx=20, pady=10)
                     
                 except Exception as e:
                     usage_logger.error(f"Error drawing Power Automate charts: {e}", exc_info=True)
@@ -620,3 +649,8 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         except Exception as e:
             usage_logger.error("Failed writing export spreadsheet to disk.", exc_info=True)
             messagebox.showerror("Export Error", f"Failed to save file:\n{e}", parent=self)
+
+    def _on_pa_height_slider_change(self, val):
+        height_val = int(val)
+        self.lbl_pa_height.configure(text=f"Height: {height_val}px")
+        self.pa_chart_container.configure(height=height_val)
