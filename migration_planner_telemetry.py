@@ -192,7 +192,14 @@ class TelemetryApp(ctk.CTk):
         self.stored_client = client
         self.stored_secret = secret
 
-        logger.info("Credentials validated and cached in memory.")
+        logger.info("Credentials validated and cached in memory. Updating log directories...")
+
+        # Update log directory to use sub-folder based on tenant and client
+        from telemetry.license_usage import update_log_directory as update_license_log_dir
+        from core.cert_auth import update_log_directory as update_cert_log_dir
+        
+        update_license_log_dir(tenant, client)
+        update_cert_log_dir(tenant, client)
 
         from core.cert_auth import check_certificate_exists, generate_certificate, load_certificate
 
@@ -305,6 +312,13 @@ class TelemetryApp(ctk.CTk):
 
         # Clears variables inside nested dashboards
         self.reports_page.clear_session_data()
+
+        # Revert log directories to default
+        from telemetry.license_usage import update_log_directory as update_license_log_dir
+        from core.cert_auth import update_log_directory as update_cert_log_dir
+        
+        update_license_log_dir()
+        update_cert_log_dir()
 
         # Clean up cert screen UI and restore normal entry layout
         if hasattr(self, "cert_container") and self.cert_container:

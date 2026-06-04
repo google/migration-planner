@@ -26,7 +26,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import pkcs12
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 def setup_logging() -> None:
     """Configures file logging to telemetry/logs/certificate_auth_log.txt."""
@@ -46,6 +46,31 @@ def setup_logging() -> None:
     logger.propagate = True
 
 setup_logging()
+
+
+def update_log_directory(tenant_id: str = None, client_id: str = None) -> None:
+    """Updates the log directory dynamically once tenant and client ID are known, or reverts to default."""
+    # Find existing FileHandlers on the logger and remove them
+    for h in list(logger.handlers):
+        if isinstance(h, logging.FileHandler):
+            h.close()
+            logger.removeHandler(h)
+            
+    root = get_project_root()
+    if tenant_id and client_id:
+        log_dir = os.path.join(root, "telemetry", "logs", f"{tenant_id}_{client_id}")
+    else:
+        log_dir = os.path.join(root, "telemetry", "logs")
+        
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "certificate_auth_log.txt")
+    
+    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    file_handler.setFormatter(formatter)
+    
+    logger.addHandler(file_handler)
+
 
 def get_project_root() -> str:
     """Helper to locate the root path of migration-planner."""

@@ -55,15 +55,43 @@ _queue_listener.start()
 
 # Configure the root logger to send all records to the log queue and clear other handlers (stdout/stderr)
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.DEBUG)
+root_logger.setLevel(logging.WARNING)
 for h in list(root_logger.handlers):
     root_logger.removeHandler(h)
 root_logger.addHandler(QueueHandler(_log_queue))
 
+# Set logger level to INFO for our own application packages/loggers
 async_logger = logging.getLogger("LicenseUsageAsyncLogger")
-async_logger.setLevel(logging.DEBUG)
-# Note: Since the root logger now routes everything to queue, async_logger can simply propagate.
+async_logger.setLevel(logging.INFO)
 async_logger.propagate = True
+
+logging.getLogger("core").setLevel(logging.INFO)
+logging.getLogger("util").setLevel(logging.INFO)
+logging.getLogger("chat").setLevel(logging.INFO)
+logging.getLogger("PowerShellClient").setLevel(logging.INFO)
+
+
+def update_log_directory(tenant_id: Optional[str] = None, client_id: Optional[str] = None) -> None:
+    """Updates the log directory dynamically once tenant and client ID are known, or reverts to default."""
+    global _file_handler, _queue_listener
+    
+    _queue_listener.stop()
+    _file_handler.close()
+    
+    if tenant_id and client_id:
+        new_log_dir = os.path.join(_current_dir, 'logs', f"{tenant_id}_{client_id}")
+    else:
+        new_log_dir = os.path.join(_current_dir, 'logs')
+        
+    os.makedirs(new_log_dir, exist_ok=True)
+    new_log_file_path = os.path.join(new_log_dir, 'license_log.txt')
+    
+    _file_handler = logging.FileHandler(new_log_file_path, mode='a', encoding='utf-8')
+    _file_handler.setFormatter(_formatter)
+    
+    _queue_listener = QueueListener(_log_queue, _file_handler)
+    _queue_listener.start()
+
 
 
 # =================================================================================
