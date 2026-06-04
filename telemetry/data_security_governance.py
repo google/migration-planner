@@ -153,7 +153,7 @@ def fetch_retention_policies_data(client_id, client_secret, tenant_id) -> dict:
         from core.powershell.client import PowerShellClient
         from core.powershell.retention import RetentionService
         
-        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret)
+        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret, cert_tenant_id=tenant_id)
         retention_service = RetentionService(ps_client)
         policies = retention_service.fetch_retention_policies()
         return {"policies": policies, "error": None}
