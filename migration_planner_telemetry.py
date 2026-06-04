@@ -550,8 +550,6 @@ class SidebarFrame(ctk.CTkFrame):
         self.menu_buttons = []
         self.menu_data = [
             ("Usage and adoption", "📊", True),
-            ("Workforce analysis", "👥", False),
-            ("Cost savings plan", "💰", False),
             ("Migration planner", "🚀", False)
         ]
 
