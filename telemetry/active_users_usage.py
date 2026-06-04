@@ -49,7 +49,15 @@ def process_active_user_detail(filepath):
 
     current_date = pd.Timestamp.today().normalize()
 
-    df = pd.read_csv(filepath, encoding="utf-8-sig")
+    headers = pd.read_csv(filepath, nrows=0).columns.tolist()
+    expected = [
+        "Has Exchange License", "Exchange Last Activity Date",
+        "Has OneDrive License", "OneDrive Last Activity Date",
+        "Has SharePoint License", "SharePoint Last Activity Date",
+        "Has Teams License", "Teams Last Activity Date"
+    ]
+    cols = [c for c in expected if c in headers]
+    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
     def aggregate_column(df, has_license_col, date_col):
         if has_license_col not in df.columns or date_col not in df.columns:
@@ -82,7 +90,10 @@ def process_active_user_counts(filepath):
         usage_logger.error(f"Error: Could not find the file {filepath} to process.")
         raise FileNotFoundError(f"Report file {os.path.basename(filepath)} not found.")
 
-    df = pd.read_csv(filepath, encoding="utf-8-sig")
+    headers = pd.read_csv(filepath, nrows=0).columns.tolist()
+    expected = ["Report Date", "Office 365", "Exchange", "OneDrive", "SharePoint", "Teams"]
+    cols = [c for c in expected if c in headers]
+    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
     
     if "Report Date" in df.columns:
         df = df.sort_values(by="Report Date").fillna(0)
@@ -129,7 +140,9 @@ def process_m365_app_user_detail(filepath):
         "Excel (Web)", "PowerPoint (Web)", "OneNote (Web)", "Teams (Web)"
     ]
     
-    df = pd.read_csv(filepath, encoding="utf-8-sig")
+    headers = pd.read_csv(filepath, nrows=0).columns.tolist()
+    cols = [c for c in columns_to_track if c in headers]
+    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
     
     counters = {}
     for col in columns_to_track:

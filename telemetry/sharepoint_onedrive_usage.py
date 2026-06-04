@@ -54,16 +54,21 @@ def parse_sharepoint_csv(filepath):
         usage_logger.error(f"Error: Could not find SharePoint report {filepath}")
         raise FileNotFoundError(f"SharePoint Site Usage report not found.")
 
-    cols = ["Is Deleted", "Storage Used (Byte)", "File Count", "Active File Count"]
+    headers = pd.read_csv(filepath, nrows=0).columns.tolist()
+    expected = ["Is Deleted", "Storage Used (Byte)", "File Count", "Active File Count"]
+    cols = [c for c in expected if c in headers]
     df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
-    active_df = df[mask]
+    if "Is Deleted" in df.columns:
+        mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+        active_df = df[mask]
+    else:
+        active_df = df
 
     total_sites = len(active_df)
-    total_storage = int(pd.to_numeric(active_df["Storage Used (Byte)"], errors='coerce').fillna(0).sum())
-    total_files = int(pd.to_numeric(active_df["File Count"], errors='coerce').fillna(0).sum())
-    active_files = int(pd.to_numeric(active_df["Active File Count"], errors='coerce').fillna(0).sum())
+    total_storage = int(pd.to_numeric(active_df["Storage Used (Byte)"], errors='coerce').fillna(0).sum()) if "Storage Used (Byte)" in active_df.columns else 0
+    total_files = int(pd.to_numeric(active_df["File Count"], errors='coerce').fillna(0).sum()) if "File Count" in active_df.columns else 0
+    active_files = int(pd.to_numeric(active_df["Active File Count"], errors='coerce').fillna(0).sum()) if "Active File Count" in active_df.columns else 0
 
     usage_logger.info(f"SharePoint parsing complete: sites={total_sites}, storage={format_bytes(total_storage)}, files={total_files}, active_files={active_files}")
     return {
@@ -82,16 +87,21 @@ def parse_onedrive_csv(filepath):
         usage_logger.error(f"Error: Could not find OneDrive report {filepath}")
         raise FileNotFoundError(f"OneDrive Account Usage report not found.")
 
-    cols = ["Is Deleted", "Storage Used (Byte)", "File Count", "Active File Count"]
+    headers = pd.read_csv(filepath, nrows=0).columns.tolist()
+    expected = ["Is Deleted", "Storage Used (Byte)", "File Count", "Active File Count"]
+    cols = [c for c in expected if c in headers]
     df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
-    active_df = df[mask]
+    if "Is Deleted" in df.columns:
+        mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+        active_df = df[mask]
+    else:
+        active_df = df
 
     total_accounts = len(active_df)
-    total_storage = int(pd.to_numeric(active_df["Storage Used (Byte)"], errors='coerce').fillna(0).sum())
-    total_files = int(pd.to_numeric(active_df["File Count"], errors='coerce').fillna(0).sum())
-    active_files = int(pd.to_numeric(active_df["Active File Count"], errors='coerce').fillna(0).sum())
+    total_storage = int(pd.to_numeric(active_df["Storage Used (Byte)"], errors='coerce').fillna(0).sum()) if "Storage Used (Byte)" in active_df.columns else 0
+    total_files = int(pd.to_numeric(active_df["File Count"], errors='coerce').fillna(0).sum()) if "File Count" in active_df.columns else 0
+    active_files = int(pd.to_numeric(active_df["Active File Count"], errors='coerce').fillna(0).sum()) if "Active File Count" in active_df.columns else 0
 
     usage_logger.info(f"OneDrive parsing complete: accounts={total_accounts}, storage={format_bytes(total_storage)}, files={total_files}, active_files={active_files}")
     return {
@@ -110,14 +120,22 @@ def parse_onedrive_activity_csv(filepath):
         usage_logger.error(f"Error: Could not find OneDrive Activity report {filepath}")
         raise FileNotFoundError(f"OneDrive Activity User Detail report not found.")
 
-    cols = ["Is Deleted", "Synced File Count"]
+    headers = pd.read_csv(filepath, nrows=0).columns.tolist()
+    expected = ["Is Deleted", "Synced File Count"]
+    cols = [c for c in expected if c in headers]
     df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
-    active_df = df[mask]
+    if "Is Deleted" in df.columns:
+        mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+        active_df = df[mask]
+    else:
+        active_df = df
 
-    synced_series = pd.to_numeric(active_df["Synced File Count"], errors='coerce').fillna(0)
-    sync_users = int((synced_series > 0).sum())
+    if "Synced File Count" in active_df.columns:
+        synced_series = pd.to_numeric(active_df["Synced File Count"], errors='coerce').fillna(0)
+        sync_users = int((synced_series > 0).sum())
+    else:
+        sync_users = 0
 
     usage_logger.info(f"OneDrive Activity parsing complete: sync_users={sync_users}")
     return {
@@ -131,14 +149,22 @@ def parse_onenote_users_csv(filepath):
         usage_logger.error(f"Error: Could not find M365 App User Detail report {filepath}")
         raise FileNotFoundError(f"M365 App User Detail report not found.")
 
-    cols = ["Is Deleted", "OneNote"]
+    headers = pd.read_csv(filepath, nrows=0).columns.tolist()
+    expected = ["Is Deleted", "OneNote"]
+    cols = [c for c in expected if c in headers]
     df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
-    active_df = df[mask]
+    if "Is Deleted" in df.columns:
+        mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+        active_df = df[mask]
+    else:
+        active_df = df
 
-    onenote_series = active_df["OneNote"].astype(str).str.strip().str.lower()
-    onenote_users = int(onenote_series.isin(["yes", "true"]).sum())
+    if "OneNote" in active_df.columns:
+        onenote_series = active_df["OneNote"].astype(str).str.strip().str.lower()
+        onenote_users = int(onenote_series.isin(["yes", "true"]).sum())
+    else:
+        onenote_users = 0
 
     usage_logger.info(f"OneNote Users parsing complete: onenote_users={onenote_users}")
     return {
