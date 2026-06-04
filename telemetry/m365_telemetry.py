@@ -119,7 +119,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.lic_client_secrets = ctk.StringVar()
 
         self.on_all_done_callback = None
-        self.telemetry_semaphore = threading.Semaphore(3)
+        self.telemetry_semaphore = threading.Semaphore(6)
 
         self.build_ui()
 
