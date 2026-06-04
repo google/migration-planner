@@ -19,9 +19,15 @@ import logging
 import threading
 import customtkinter as ctk
 import webbrowser
+from tkinter import messagebox, filedialog
+from datetime import datetime
+import pandas as pd
 
 from core.graph.client import GraphClient
 from core.graph.security import SecurityService
+from core.graph.directory import DirectoryService
+from core.powershell.client import PowerShellClient
+from core.powershell.retention import RetentionService
 
 # Bind to the async logger initialized in license_usage.py
 usage_logger = logging.getLogger("LicenseUsageAsyncLogger")
@@ -59,7 +65,6 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
     # Fetch tenant primary domain name from organization endpoint
     tenant_domain = tenant_id
     try:
-        from core.graph.directory import DirectoryService
         dir_svc = DirectoryService(client)
         tenant_domain = dir_svc.get_tenant_primary_domain()
         usage_logger.info(f"Retrieved primary tenant domain for Connect-IPPSSession: {tenant_domain}")
@@ -72,10 +77,7 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
     policies = None
     policies_error = None
     try:
-        from core.powershell.client import PowerShellClient
-        from core.powershell.retention import RetentionService
-        
-        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret)
+        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret, cert_tenant_id=tenant_id)
         retention_service = RetentionService(ps_client)
         policies = retention_service.fetch_retention_policies()
     except Exception as e:
@@ -659,14 +661,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def export_labels_csv(self):
         """Prompts the user to save sensitivity labels as a detailed CSV file."""
         if not hasattr(self, "last_labels_data") or not self.last_labels_data:
-            from tkinter import messagebox
             messagebox.showinfo("No Data", "There is no sensitivity labels data to export. Please run a scan first.", parent=self)
             return
             
-        from tkinter import filedialog, messagebox
-        from datetime import datetime
-        import pandas as pd
-        
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         f = filedialog.asksaveasfilename(
             initialfile=f"sensitivity_labels_{ts}.csv",
@@ -720,14 +717,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def export_retention_csv(self):
         """Prompts the user to save retention policies as a detailed CSV file."""
         if not hasattr(self, "last_policies_data") or not self.last_policies_data:
-            from tkinter import messagebox
             messagebox.showinfo("No Data", "There is no retention policies data to export. Please run a scan first.", parent=self)
             return
             
-        from tkinter import filedialog, messagebox
-        from datetime import datetime
-        import pandas as pd
-        
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         f = filedialog.asksaveasfilename(
             initialfile=f"retention_policies_{ts}.csv",

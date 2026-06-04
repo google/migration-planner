@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class PowerAutomateScanner:
     def __init__(self, tenant_id, client_id, client_secret):
@@ -141,7 +142,6 @@ class PowerAutomateScanner:
             self.logger.info(f"    -> Cloud Flows: {len(cloud_flows)} total found, {len(active_cloud_flows)} are currently active.")
             
             # Fetch details in parallel using ThreadPoolExecutor
-            from concurrent.futures import ThreadPoolExecutor, as_completed
             
             def fetch_and_process_flow_detail(flow_summary):
                 flow_id = flow_summary.get("name")

@@ -186,7 +186,7 @@ def run_o365_pipeline(client_id, client_secret, tenant_id):
     client, service = _get_reports_service(client_id, client_secret, tenant_id)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-    reports_dir = os.path.join(script_dir, "reports")
+    reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
     
     service.download_o365_active_user_detail(reports_dir)
     client.close()
@@ -200,7 +200,7 @@ def run_o365_trend_pipeline(client_id, client_secret, tenant_id):
         client, service = _get_reports_service(client_id, client_secret, tenant_id)
         
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-        reports_dir = os.path.join(script_dir, "reports")
+        reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
         
         service.download_o365_active_user_counts(reports_dir)
         client.close()
@@ -216,7 +216,7 @@ def run_m365_pipeline(client_id, client_secret, tenant_id):
     client, service = _get_reports_service(client_id, client_secret, tenant_id)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-    reports_dir = os.path.join(script_dir, "reports")
+    reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
     
     service.download_m365_app_details(reports_dir)
     client.close()

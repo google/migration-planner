@@ -51,29 +51,32 @@ def get_project_root() -> str:
     """Helper to locate the root path of migration-planner."""
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-def get_cert_paths(cert_dir: str = "certificate") -> Tuple[str, str, str]:
+def get_cert_paths(cert_dir: str = "certificate", tenant_id: str = None, client_id: str = None) -> Tuple[str, str, str]:
     """Returns absolute paths for cert directory, certificate.pem, and passkey.pfx."""
     root = get_project_root()
-    dir_path = os.path.join(root, cert_dir)
+    if tenant_id and client_id:
+        dir_path = os.path.join(root, cert_dir, f"{tenant_id}_{client_id}")
+    else:
+        dir_path = os.path.join(root, cert_dir)
     pem_path = os.path.join(dir_path, "certificate.pem")
     pfx_path = os.path.join(dir_path, "passkey.pfx")
     return dir_path, pem_path, pfx_path
 
-def check_certificate_exists(cert_dir: str = "certificate") -> bool:
+def check_certificate_exists(cert_dir: str = "certificate", tenant_id: str = None, client_id: str = None) -> bool:
     """Checks if the certificate directory exists and contains a valid cert.pfx file."""
-    _, _, pfx_path = get_cert_paths(cert_dir)
+    _, _, pfx_path = get_cert_paths(cert_dir, tenant_id, client_id)
     exists = os.path.exists(pfx_path)
     logger.info("Checking if certificate exists at %s: %s", pfx_path, exists)
     return exists
 
-def generate_certificate(client_secret: str, cert_dir: str = "certificate", common_name: str = "LocalAppHybridAuth") -> Tuple[str, str]:
+def generate_certificate(client_secret: str, cert_dir: str = "certificate", common_name: str = "LocalAppHybridAuth", tenant_id: str = None, client_id: str = None) -> Tuple[str, str]:
     """Generates a self-signed certificate and PFX bundle using client_secret as the password.
     
     Returns:
         Tuple containing absolute paths to the generated cert.pem and cert.pfx files.
     """
     logger.info("Initializing certificate generation flow...")
-    dir_path, pem_path, pfx_path = get_cert_paths(cert_dir)
+    dir_path, pem_path, pfx_path = get_cert_paths(cert_dir, tenant_id, client_id)
     
     os.makedirs(dir_path, exist_ok=True)
     logger.info("Certificate directory confirmed: %s", dir_path)
@@ -124,14 +127,14 @@ def generate_certificate(client_secret: str, cert_dir: str = "certificate", comm
     logger.info("Certificate generation complete! Files written successfully.")
     return pem_path, pfx_path
 
-def load_certificate(client_secret: str, cert_dir: str = "certificate") -> Tuple[str, str]:
+def load_certificate(client_secret: str, cert_dir: str = "certificate", tenant_id: str = None, client_id: str = None) -> Tuple[str, str]:
     """Decrypts PFX bundle using client_secret, extracting private key PEM and SHA1 thumbprint.
     
     Returns:
         Tuple containing private_key_pem (str) and thumbprint (str).
     """
     logger.info("Loading certificate files...")
-    _, _, pfx_path = get_cert_paths(cert_dir)
+    _, _, pfx_path = get_cert_paths(cert_dir, tenant_id, client_id)
     
     if not os.path.exists(pfx_path):
         raise FileNotFoundError(f"PFX certificate file not found at {pfx_path}")

@@ -19,6 +19,7 @@ from telemetry.sharepoint_onedrive_usage import SharePointUsageFrame, OneDriveUs
 from telemetry.mailbox_usage import MailboxUsageFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
 from telemetry.power_automate import PowerAutomateScanner
+from telemetry.styles import *
 
 # Import unified core service layer
 from core.graph.client import GraphClient
@@ -68,8 +69,6 @@ async_logger.propagate = True
 # =================================================================================
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
-
-from telemetry.styles import *
 
 
 class LicenseUsageTab(ctk.CTkScrollableFrame):

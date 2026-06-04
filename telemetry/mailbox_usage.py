@@ -110,7 +110,7 @@ def run_mailbox_usage_pipeline(client_id: str, client_secret: str, tenant_id: st
     service = ReportsService(client)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-    reports_dir = os.path.join(script_dir, "reports")
+    reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
     
     service.download_mailbox_usage_detail(reports_dir)
     usage_logger.info("Mailbox Usage CSV download completed. Initiating parser...")

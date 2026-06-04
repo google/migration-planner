@@ -200,7 +200,7 @@ def run_sharepoint_pipeline(client_id, client_secret, tenant_id) -> dict:
     service = ReportsService(client)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-    reports_dir = os.path.join(script_dir, "reports")
+    reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
     
     service.download_sharepoint_details(reports_dir)
     usage_logger.info("SharePoint Site Usage CSV download completed. Initiating parser...")
@@ -226,7 +226,7 @@ def run_onedrive_pipeline(client_id, client_secret, tenant_id) -> dict:
     service = ReportsService(client)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-    reports_dir = os.path.join(script_dir, "reports")
+    reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
     
     service.download_onedrive_details(reports_dir)
     usage_logger.info("OneDrive account, activity, and OneNote CSV downloads completed. Initiating parsers...")

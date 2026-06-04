@@ -196,10 +196,10 @@ class TelemetryApp(ctk.CTk):
 
         from core.cert_auth import check_certificate_exists, generate_certificate, load_certificate
 
-        if check_certificate_exists():
+        if check_certificate_exists(tenant_id=tenant, client_id=client):
             try:
                 # Decrypt the PFX certificate using the client secret
-                load_certificate(secret)
+                load_certificate(secret, tenant_id=tenant, client_id=client)
             except Exception as e:
                 from tkinter import messagebox
                 messagebox.showerror(
@@ -212,7 +212,7 @@ class TelemetryApp(ctk.CTk):
         else:
             try:
                 # Generate new certificate and pfx encrypted with the client secret
-                pem_path, _ = generate_certificate(secret)
+                pem_path, _ = generate_certificate(secret, tenant_id=tenant, client_id=client)
                 # Setup instructions UI requesting the user to upload it to Entra
                 self.setup_cert_instructions_ui(pem_path)
             except Exception as e:
@@ -274,7 +274,7 @@ class TelemetryApp(ctk.CTk):
         from core.cert_auth import load_certificate
         try:
             # Verify we can unlock/read the cert successfully
-            load_certificate(self.stored_secret)
+            load_certificate(self.stored_secret, tenant_id=self.stored_tenant, client_id=self.stored_client)
         except Exception as e:
             from tkinter import messagebox
             messagebox.showerror(

@@ -419,7 +419,9 @@ class DashboardView(ft.Container):
                 o365_data = usage.run_o365_pipeline(self.client, self.secret, self.tenant)
             except Exception as o365_err:
                 script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                local_file = os.path.join(script_dir, "telemetry", "reports", "Office365ActiveUserDetail(180d).csv")
+                local_file = os.path.join(script_dir, "telemetry", "reports", f"{self.tenant}_{self.client}", "Office365ActiveUserDetail(180d).csv")
+                if not os.path.exists(local_file):
+                    local_file = os.path.join(script_dir, "telemetry", "reports", "Office365ActiveUserDetail(180d).csv")
                 if os.path.exists(local_file):
                     print(f"Falling back to local O365 file: {local_file}")
                     o365_data = usage.process_active_user_detail(local_file)
@@ -466,7 +468,9 @@ class DashboardView(ft.Container):
                 trend_data = usage.run_o365_trend_pipeline(self.client, self.secret, self.tenant)
             except Exception as trend_err:
                 script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                local_file = os.path.join(script_dir, "telemetry", "reports", "Office365ActiveUserCounts(30d).csv")
+                local_file = os.path.join(script_dir, "telemetry", "reports", f"{self.tenant}_{self.client}", "Office365ActiveUserCounts(30d).csv")
+                if not os.path.exists(local_file):
+                    local_file = os.path.join(script_dir, "telemetry", "reports", "Office365ActiveUserCounts(30d).csv")
                 if os.path.exists(local_file):
                     print(f"Falling back to local trend file: {local_file}")
                     trend_data = usage.process_active_user_counts(local_file)
@@ -529,7 +533,9 @@ class DashboardView(ft.Container):
                 m365_data = usage.run_m365_pipeline(self.client, self.secret, self.tenant)
             except Exception as m365_err:
                 script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                local_file = os.path.join(script_dir, "telemetry", "reports", "M365AppUserDetail(180d).csv")
+                local_file = os.path.join(script_dir, "telemetry", "reports", f"{self.tenant}_{self.client}", "M365AppUserDetail(180d).csv")
+                if not os.path.exists(local_file):
+                    local_file = os.path.join(script_dir, "telemetry", "reports", "M365AppUserDetail(180d).csv")
                 if os.path.exists(local_file):
                     print(f"Falling back to local M365 file: {local_file}")
                     m365_data = usage.process_m365_app_user_detail(local_file)

@@ -32,8 +32,8 @@ pip install msal cryptography pandas
 
 The telemetry planner uses local certificate-based authentication for connecting securely to Microsoft APIs:
 
-1. When running the Telemetry tool, it checks for a directory named `certificate` containing `passkey.pfx` at the root of `migration-planner`.
-2. If this file does not exist, the app automatically generates a self-signed public certificate (`certificate.pem`) and an encrypted private key bundle (`passkey.pfx`) using the provided Client Secret as the password.
+1. When running the Telemetry tool, it checks for a directory named `certificate/{tenantId}_{clientId}` containing `passkey.pfx` under the root of `migration-planner`.
+2. If this file does not exist, the app automatically generates a self-signed public certificate (`certificate.pem`) and an encrypted private key bundle (`passkey.pfx`) under the dynamic `certificate/{tenantId}_{clientId}` directory using the provided Client Secret as the password.
 3. You will be prompted in the UI to upload `certificate.pem` to Microsoft Entra ID:
    - Navigate to the **Microsoft Entra ID Portal** > **App registrations** > [Select your Application].
    - Click **Certificates & secrets** > **Certificates** tab > **Upload certificate**.

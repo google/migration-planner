@@ -58,10 +58,10 @@ def main(page: ft.Page):
         page.session.store.set("client", client)
         page.session.store.set("secret", secret)
         
-        if check_certificate_exists():
+        if check_certificate_exists(tenant_id=tenant, client_id=client):
             try:
                 # Decrypt the PFX certificate using the client secret
-                load_certificate(secret)
+                load_certificate(secret, tenant_id=tenant, client_id=client)
                 show_dashboard()
             except Exception as e:
                 show_error_dialog(
@@ -72,7 +72,7 @@ def main(page: ft.Page):
         else:
             try:
                 # Generate new certificate and pfx encrypted with the client secret
-                pem_path, _ = generate_certificate(secret)
+                pem_path, _ = generate_certificate(secret, tenant_id=tenant, client_id=client)
                 # Show instructions UI
                 show_cert_instructions(pem_path)
             except Exception as e:
@@ -83,9 +83,11 @@ def main(page: ft.Page):
                 show_dashboard()
 
     def handle_cert_continue():
+        tenant = page.session.store.get("tenant")
+        client = page.session.store.get("client")
         secret = page.session.store.get("secret")
         try:
-            load_certificate(secret)
+            load_certificate(secret, tenant_id=tenant, client_id=client)
         except Exception as e:
             show_error_dialog(
                 "Certificate Verification Error",
