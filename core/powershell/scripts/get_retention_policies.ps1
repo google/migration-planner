@@ -59,7 +59,9 @@ try {
             $trigger = "N/A"
             
             $rule = $null
-            if ($ruleMap.ContainsKey($policy.Name)) {
+            if ($policy.Guid -and $ruleMap.ContainsKey($policy.Guid.ToString())) {
+                $rule = $ruleMap[$policy.Guid.ToString()]
+            } elseif ($ruleMap.ContainsKey($policy.Name)) {
                 $rule = $ruleMap[$policy.Name]
             } elseif ($ruleMap.ContainsKey($policy.Identity.ToString())) {
                 $rule = $ruleMap[$policy.Identity.ToString()]

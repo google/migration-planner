@@ -16,7 +16,7 @@ from telemetry import active_users_usage as usage
 from telemetry.power_automate import PowerAutomateScanner
 from telemetry.mailbox_usage import run_mailbox_usage_pipeline
 from telemetry.sharepoint_onedrive_usage import run_sharepoint_pipeline, run_onedrive_pipeline
-from telemetry.data_security_governance import run_security_governance_pipeline
+from telemetry.data_security_governance import run_security_governance_pipeline, format_dlp_workloads, analyze_thick_client_enforcement
 
 class DashboardView(ft.Container):
     def __init__(self, tenant, client, secret, on_disconnect):
@@ -33,6 +33,7 @@ class DashboardView(ft.Container):
         # Saved data for CSV exports
         self.last_licenses_items = []
         self.last_complex_flows = []
+        self.last_dlp_policies_data = []
         
         # Saved data for Sensitivity Labels pagination
         self.flattened_labels = []
@@ -117,6 +118,24 @@ class DashboardView(ft.Container):
         )
         self.retention_section = self.create_card("Retention Compliance Policies", action_control=self.purview_btn, on_retry=self.handle_retry_security_gov)
         
+        # 9b. DLP Compliance Policies Card (with Purview Link & Export Button)
+        self.dlp_purview_btn = ft.TextButton(
+            content=ft.Text("Open Microsoft Purview Portal ↗", color=COLOR_PRIMARY, weight=ft.FontWeight.BOLD),
+            on_click=lambda e: e.page.launch_url("https://purview.microsoft.com/datalossprevention/policies")
+        )
+        self.export_dlp_btn = ft.IconButton(
+            icon=ft.Icons.DOWNLOAD,
+            icon_color=COLOR_PRIMARY,
+            tooltip="Export DLP Policies",
+            disabled=True,
+            on_click=self.handle_export_dlp
+        )
+        self.dlp_section = self.create_card(
+            "DLP Compliance Policies",
+            action_control=ft.Row([self.dlp_purview_btn, self.export_dlp_btn], spacing=10),
+            on_retry=self.handle_retry_security_gov
+        )
+        
         # 10. Power Automate Card (with Export Button)
         self.export_pa_btn = ft.IconButton(
             icon=ft.Icons.DOWNLOAD,
@@ -138,6 +157,7 @@ class DashboardView(ft.Container):
                 self.onedrive_section,
                 self.labels_section,
                 self.retention_section,
+                self.dlp_section,
                 self.pa_section
             ],
             scroll=ft.ScrollMode.AUTO,
@@ -274,6 +294,8 @@ class DashboardView(ft.Container):
         self.labels_section.update()
         self.set_loading(self.retention_section, "Retrieving Retention policies...")
         self.retention_section.update()
+        self.set_loading(self.dlp_section, "Retrieving DLP policies...")
+        self.dlp_section.update()
         
         threading.Thread(target=self.fetch_security_gov, daemon=True).start()
 
@@ -333,11 +355,13 @@ class DashboardView(ft.Container):
         self.onedrive_section.update()
         threading.Thread(target=self.fetch_onedrive, daemon=True).start()
         
-        # 8 & 9. Sensitivity Labels & Retention Policies
+        # 8 & 9. Sensitivity Labels & Retention Policies & DLP Policies
         self.set_loading(self.labels_section, "Retrieving Sensitivity labels...")
         self.labels_section.update()
         self.set_loading(self.retention_section, "Retrieving Retention policies...")
         self.retention_section.update()
+        self.set_loading(self.dlp_section, "Retrieving DLP policies...")
+        self.dlp_section.update()
         threading.Thread(target=self.fetch_security_gov, daemon=True).start()
         
         # 10. Power Automate
@@ -780,18 +804,79 @@ class DashboardView(ft.Container):
                 )
                 self.retention_section.content_container.content = ft.Column([table], scroll=ft.ScrollMode.AUTO, height=300)
             
+            # 3. Populate DLP Policies
+            dlp_policies = data.get("dlp_policies")
+            dlp_policies_error = data.get("dlp_policies_error")
+            self.last_dlp_policies_data = dlp_policies
+            
+            if dlp_policies_error:
+                msg = dlp_policies_error
+                if "is not installed or not in PATH" in dlp_policies_error.lower():
+                    msg = "PowerShell Core ('pwsh') is not installed or configured on this machine."
+                elif "exchangeonlinemanagement" in dlp_policies_error.lower():
+                    msg = "ExchangeOnlineManagement PowerShell module is missing."
+                elif "get-dlpcompliancypolicy" in dlp_policies_error.lower() and "not recognized" in dlp_policies_error.lower():
+                    msg = "DLP Compliance Management permissions required. Please assign the correct role in Microsoft Purview."
+                self.dlp_section.content_container.content = ft.Text(f"Error loading policies: {msg}", color=COLOR_ERROR)
+                self.export_dlp_btn.disabled = True
+            elif not dlp_policies:
+                self.dlp_section.content_container.content = ft.Text("No DLP Compliance Policies found.", color=COLOR_TEXT_SUB)
+                self.export_dlp_btn.disabled = True
+            else:
+                self.export_dlp_btn.disabled = False
+                policies_list = dlp_policies if isinstance(dlp_policies, list) else [dlp_policies]
+                rows = []
+                for policy in policies_list:
+                    workloads_str = format_dlp_workloads(policy)
+                    thick_client_status = analyze_thick_client_enforcement(policy)
+                    
+                    enabled_val = policy.get("Enabled", True)
+                    is_enabled = enabled_val.lower() == "true" if isinstance(enabled_val, str) else bool(enabled_val)
+                    status_str = "🟢 Enabled" if is_enabled else "🔴 Disabled"
+                    
+                    rows.append(ft.DataRow(cells=[
+                        ft.DataCell(ft.Column([
+                            ft.Text(policy.get("Name", "N/A"), weight=ft.FontWeight.BOLD),
+                            ft.Text(policy.get("Comment", ""), size=11, color=COLOR_TEXT_SUB) if policy.get("Comment") else ft.Container()
+                        ], alignment=ft.MainAxisAlignment.CENTER)),
+                        ft.DataCell(ft.Text(workloads_str)),
+                        ft.DataCell(ft.Text(policy.get("Mode", "Enforce"))),
+                        ft.DataCell(ft.Text(thick_client_status)),
+                        ft.DataCell(ft.Text(status_str))
+                    ]))
+                
+                table = ft.DataTable(
+                    columns=[
+                        ft.DataColumn(ft.Text("Policy Name", weight=ft.FontWeight.BOLD)),
+                        ft.DataColumn(ft.Text("Workloads", weight=ft.FontWeight.BOLD)),
+                        ft.DataColumn(ft.Text("Mode", weight=ft.FontWeight.BOLD)),
+                        ft.DataColumn(ft.Text("Thick Client DLP Enforcement", weight=ft.FontWeight.BOLD)),
+                        ft.DataColumn(ft.Text("Status", weight=ft.FontWeight.BOLD)),
+                    ],
+                    rows=rows,
+                    border=ft.Border.all(1, COLOR_OUTLINE_LIGHT),
+                    border_radius=8,
+                    heading_row_color=COLOR_TONAL_BG,
+                )
+                self.dlp_section.content_container.content = ft.Column([table], scroll=ft.ScrollMode.AUTO, height=300)
+            
             self.mark_complete("security_gov", "success")
         except Exception as e:
             self.set_error(self.labels_section, str(e))
             self.set_error(self.retention_section, str(e))
+            self.set_error(self.dlp_section, str(e))
             self.labels_pagination_row.visible = False
+            self.export_dlp_btn.disabled = True
             self.mark_complete("security_gov", "error")
         finally:
             self.clear_loading(self.labels_section)
             self.clear_loading(self.retention_section)
+            self.clear_loading(self.dlp_section)
             if self.page:
                 self.labels_section.update()
                 self.retention_section.update()
+                self.dlp_section.update()
+                self.export_dlp_btn.update()
 
     def render_labels_page(self):
         total_items = len(self.flattened_labels)
@@ -988,3 +1073,58 @@ class DashboardView(ft.Container):
         e.page.update()
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         picker.save_file(file_name=f"complex_flows_{ts}.csv")
+
+    def handle_export_dlp(self, e):
+        def on_save_result(save_event: ft.FilePickerResultEvent):
+            if save_event.path:
+                try:
+                    headers = [
+                        "Policy Name", "Identity", "Description / Comment", "Workloads", "Mode", 
+                        "Distribution Status", "Is Enabled", "Thick Client DLP Enforcement",
+                        "Exchange Locations", "SharePoint Locations", "OneDrive Locations", 
+                        "Teams Locations", "Devices Locations", "Rules Configured"
+                    ]
+                    rows = []
+                    policies_list = self.last_dlp_policies_data if isinstance(self.last_dlp_policies_data, list) else [self.last_dlp_policies_data]
+                    
+                    for policy in policies_list:
+                        workloads_str = format_dlp_workloads(policy)
+                        thick_client_status = analyze_thick_client_enforcement(policy)
+                        
+                        # Format rules details
+                        rules = policy.get("Rules", [])
+                        rules_details = []
+                        for r in rules:
+                            actions_str = ", ".join(r.get("Actions", []))
+                            rules_details.append(f"Rule: {r.get('Name')} (Enabled: {r.get('Enabled')}) - Actions: [{actions_str}]")
+                        rules_str = "\n".join(rules_details)
+                        
+                        rows.append([
+                            policy.get("Name", "N/A"),
+                            policy.get("Identity", "N/A"),
+                            policy.get("Comment", "N/A"),
+                            workloads_str,
+                            policy.get("Mode", "N/A"),
+                            policy.get("DistributionStatus", "N/A"),
+                            str(policy.get("Enabled", True)),
+                            thick_client_status,
+                            ", ".join(policy.get("ExchangeLocation") or []),
+                            ", ".join(policy.get("SharePointLocation") or []),
+                            ", ".join(policy.get("OneDriveLocation") or []),
+                            ", ".join(policy.get("TeamsLocation") or []),
+                            ", ".join(policy.get("DevicesLocation") or []),
+                            rules_str
+                        ])
+
+                    with open(save_event.path, 'w', newline='', encoding='utf-8') as csvfile:
+                        writer = csv.writer(csvfile)
+                        writer.writerow(headers)
+                        writer.writerows(rows)
+                except Exception as ex:
+                    print(f"Failed to export DLP policies: {ex}")
+        
+        picker = ft.FilePicker(on_result=on_save_result)
+        e.page.overlay.append(picker)
+        e.page.update()
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        picker.save_file(file_name=f"dlp_compliance_policies_{ts}.csv")
