@@ -13,6 +13,8 @@ from datetime import datetime
 from tkinter import filedialog, messagebox
 from typing import Any, Dict, List, Optional
 import customtkinter as ctk
+import webbrowser
+
 
 from telemetry import active_users_usage as usage
 from telemetry.sharepoint_onedrive_usage import SharePointUsageFrame, OneDriveUsageFrame
@@ -166,6 +168,19 @@ class LicenseUsageTab(ctk.CTkScrollableFrame):
         lic_header = ctk.CTkFrame(self.lic_inner, fg_color="transparent")
         lic_header.pack(fill="x", pady=(0, 10))
         ctk.CTkLabel(lic_header, text="Subscribed SKUs Inventory Summary", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        
+        self.lic_reference_link = ctk.CTkLabel(
+            lic_header,
+            text="Service Plan Reference ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.lic_reference_link.pack(side="left", padx=(15, 0))
+        self.lic_reference_link.bind("<Button-1>", lambda e: webbrowser.open("https://learn.microsoft.com/en-us/entra/identity/users/licensing-service-plan-reference"))
+        self.lic_reference_link.bind("<Enter>", lambda e: self.lic_reference_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.lic_reference_link.bind("<Leave>", lambda e: self.lic_reference_link.configure(text_color=COLOR_PRIMARY))
+
         ctk.CTkLabel(lic_header, text="* To view specific services offered, export the spreadsheet.", font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB).pack(side="left", padx=(10, 0))
 
         self.btn_export_lic = ctk.CTkButton(lic_header, text="Export Spreadsheet", width=140, height=32, corner_radius=16, font=FONT_BODY_BOLD, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, command=self.export_licenses_spreadsheet, state="disabled")

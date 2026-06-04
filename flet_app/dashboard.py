@@ -75,7 +75,18 @@ class DashboardView(ft.Container):
             disabled=True,
             on_click=self.handle_export_skus
         )
-        self.sku_section = self.create_card("Subscribed SKUs Inventory Summary", action_control=self.export_sku_btn, on_retry=self.handle_retry_skus)
+        self.sku_link = ft.TextButton(
+            content=ft.Text("Service Plan Reference ↗", color=COLOR_PRIMARY, weight=ft.FontWeight.BOLD),
+            on_click=lambda e: e.page.launch_url("https://learn.microsoft.com/en-us/entra/identity/users/licensing-service-plan-reference")
+        )
+        sku_actions = ft.Row(
+            controls=[
+                self.sku_link,
+                self.export_sku_btn
+            ],
+            spacing=5
+        )
+        self.sku_section = self.create_card("Subscribed SKUs Inventory Summary", action_control=sku_actions, on_retry=self.handle_retry_skus)
         
         # 2. O365 Usage Card
         self.o365_section = self.create_card("O365 Active Users Usage", on_retry=self.handle_retry_o365)
