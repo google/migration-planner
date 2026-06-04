@@ -1,5 +1,6 @@
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
+import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import queue
 import threading
@@ -1680,6 +1681,9 @@ class MigrationEstimatorTool(ctk.CTk):
         return int(float(val))
       except:
         return 0
+    
+    def _is_valid_email( val):
+      return bool(re.match(r'^[^@]+@[^@]+\.[^@]+$', val))
 
     for u in all_users:
       upn = u["userPrincipalName"]
@@ -1687,11 +1691,11 @@ class MigrationEstimatorTool(ctk.CTk):
       otherAliases = []
       if "proxyAddresses" in u:
         for alias in u["proxyAddresses"]:
-          alias = str(alias).lower().strip()
-          if alias.startswith("smtp:"):
-            alias = alias[5:]
-          if alias != key:
-            otherAliases.append(alias)
+          alias_str = str(alias).strip()
+          if alias_str.lower().startswith("smtp:"):
+            email_alias = alias_str[5:].lower().strip()
+            if email_alias != key and _is_valid_email(email_alias):
+              otherAliases.append(email_alias)
 
       row = {
           "User Principal Name / Group Mail": upn,
