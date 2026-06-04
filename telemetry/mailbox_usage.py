@@ -23,6 +23,9 @@ import customtkinter as ctk
 # Import unified core service layer
 from core.graph.client import GraphClient
 from core.graph.reports import ReportsService
+from core.graph.directory import DirectoryService
+from core.powershell.client import PowerShellClient
+from core.powershell.mailbox import MailboxStatsService
 
 # Bind to the async logger initialized in license_usage.py
 usage_logger = logging.getLogger("LicenseUsageAsyncLogger")
@@ -109,6 +112,14 @@ def run_mailbox_usage_pipeline(client_id: str, client_secret: str, tenant_id: st
     client.authenticate()
     service = ReportsService(client)
     
+    tenant_domain = tenant_id
+    try:
+        dir_svc = DirectoryService(client)
+        tenant_domain = dir_svc.get_tenant_primary_domain()
+        usage_logger.info(f"Retrieved primary tenant domain for Connect-ExchangeOnline: {tenant_domain}")
+    except Exception as e:
+        usage_logger.warning(f"Could not retrieve tenant domain via Graph. Falling back to Tenant ID Guid: {e}")
+
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
     
@@ -117,6 +128,42 @@ def run_mailbox_usage_pipeline(client_id: str, client_secret: str, tenant_id: st
     client.close()
     
     data = parse_mailbox_usage_csv(os.path.join(reports_dir, "MailboxUsageDetail(180d).csv"))
+    
+    shared_count = 0
+    shared_bytes = 0
+    pf_count = 0
+    pf_bytes = 0
+    powershell_error = None
+    
+    try:
+        usage_logger.info("Running PowerShell script for Shared Mailboxes and Public Folders stats...")
+        ps_client = PowerShellClient(
+            tenant_id=tenant_domain,
+            client_id=client_id,
+            client_secret=client_secret,
+            cert_tenant_id=tenant_id
+        )
+        pb_service = MailboxStatsService(ps_client)
+        stats = pb_service.fetch_mailbox_and_folder_stats()
+        
+        shared_count = stats.get("SharedMailboxesCount", 0)
+        shared_bytes = stats.get("SharedMailboxesTotalBytes", 0)
+        pf_count = stats.get("PublicFoldersCount", 0)
+        pf_bytes = stats.get("PublicFoldersTotalBytes", 0)
+    except Exception as e:
+        usage_logger.error("Failed to fetch Shared Mailbox / Public Folder stats via PowerShell", exc_info=True)
+        powershell_error = str(e)
+
+    data.update({
+        "shared_mailboxes_count": shared_count,
+        "shared_mailboxes_total_bytes": shared_bytes,
+        "shared_mailboxes_total_formatted": format_bytes(shared_bytes) if not powershell_error else "Error/Unavailable",
+        "public_folders_count": pf_count,
+        "public_folders_total_bytes": pf_bytes,
+        "public_folders_total_formatted": format_bytes(pf_bytes) if not powershell_error else "Error/Unavailable",
+        "powershell_error": powershell_error
+    })
+
     usage_logger.info("Mailbox Usage Telemetry Pipeline completed successfully.")
     return data
 
@@ -146,6 +193,7 @@ class MailboxUsageFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.inner_pad, text="Exchange Online Mailbox Usage Telemetry", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
         
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.warning_label = ctk.CTkLabel(self.inner_pad, text="", font=FONT_BODY_MEDIUM, text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=750)
         self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
         self.reset_view()
@@ -155,6 +203,8 @@ class MailboxUsageFrame(ctk.CTkFrame):
         self.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
+        if hasattr(self, "warning_label"):
+            self.warning_label.pack_forget()
         
         for w in self.state_frame.winfo_children():
             w.destroy()
@@ -217,6 +267,20 @@ class MailboxUsageFrame(ctk.CTkFrame):
         for w in self.grid_frame.winfo_children():
             w.destroy()
 
+        if data.get("powershell_error"):
+            err_msg = data["powershell_error"]
+            if "powershell" in err_msg.lower() or "pwsh" in err_msg.lower():
+                friendly_msg = "PowerShell Core ('pwsh') not installed/configured. Cannot retrieve shared mailbox or public folder statistics."
+            elif "exchangeonlinemanagement" in err_msg.lower():
+                friendly_msg = "ExchangeOnlineManagement PowerShell module is missing. Run: Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser"
+            else:
+                friendly_msg = f"Failed to retrieve shared mailbox or public folder statistics: {err_msg}"
+            
+            self.warning_label.configure(text=f"⚠️ Warning: {friendly_msg}")
+            self.warning_label.pack(anchor="w", pady=(0, 10))
+        else:
+            self.warning_label.pack_forget()
+
         self.grid_frame.pack(fill="x", expand=True)
 
         self.grid_frame.grid_columnconfigure(0, weight=3)
@@ -235,6 +299,29 @@ class MailboxUsageFrame(ctk.CTkFrame):
             ("Total Number of Emails", f"{data.get('total_emails', 0):,} Emails"),
             ("Average Emails per User", f"{data.get('average_emails', 0.0):,.0f} Emails")
         ]
+
+        if data.get("powershell_error"):
+            err_msg = data["powershell_error"]
+            if "powershell" in err_msg.lower() or "pwsh" in err_msg.lower():
+                friendly_val = "Error (pwsh not installed)"
+            elif "exchangeonlinemanagement" in err_msg.lower():
+                friendly_val = "Error (ExchangeOnlineManagement module missing)"
+            else:
+                friendly_val = "Error (PowerShell failed)"
+            
+            rows_data += [
+                ("Shared Mailboxes Count", friendly_val),
+                ("Total Shared Mailbox Size", friendly_val),
+                ("Public Folders Count", friendly_val),
+                ("Total Public Folder Size", friendly_val)
+            ]
+        else:
+            rows_data += [
+                ("Shared Mailboxes Count", f"{data.get('shared_mailboxes_count', 0):,} Shared Mailboxes"),
+                ("Total Shared Mailbox Size", data.get("shared_mailboxes_total_formatted", "0.00 Bytes")),
+                ("Public Folders Count", f"{data.get('public_folders_count', 0):,} Public Folders"),
+                ("Total Public Folder Size", data.get("public_folders_total_formatted", "0.00 Bytes"))
+            ]
 
         for r_idx, (metric_name, val) in enumerate(rows_data, start=1):
             bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
