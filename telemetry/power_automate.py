@@ -1,10 +1,50 @@
-import requests
-import json
-import logging
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Modular Power Automate telemetry scanner, analysis pipelines, and visual interfaces."""
+
 import os
 import time
+import json
+import logging
+import threading
+import requests
+import pandas as pd
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from tkinter import filedialog, messagebox
+from typing import Any, Dict, List
+import customtkinter as ctk
+
+# Safely import matplotlib to embed plots in Tkinter
+try:
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+
+# Import shared styles
+from telemetry.styles import *
+
+# Bind to the async logger initialized in m365_telemetry.py
+usage_logger = logging.getLogger("M365TelemetryAsyncLogger")
+
+
+# =================================================================================
+# SCANNER LOGIC / PIPELINE
+# =================================================================================
 
 class PowerAutomateScanner:
     def __init__(self, tenant_id, client_id, client_secret):
@@ -12,7 +52,6 @@ class PowerAutomateScanner:
         self.client_id = client_id
         self.client_secret = client_secret
         
-        # Setup logging directory and file inside telemetry/logs
         self.log_dir = os.path.join("telemetry", "logs")
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
@@ -22,8 +61,8 @@ class PowerAutomateScanner:
         self.access_token = None
 
     def _setup_logger(self):
-        """Configures logging to propagate to the central LicenseUsageAsyncLogger."""
-        self.logger = logging.getLogger("LicenseUsageAsyncLogger.PowerAutomateScanner")
+        """Configures logging to propagate to the central M365TelemetryAsyncLogger."""
+        self.logger = logging.getLogger("M365TelemetryAsyncLogger.PowerAutomateScanner")
 
     def _get_access_token(self, scope):
         """Fetches OAuth 2.0 token for a given scope."""
@@ -293,3 +332,291 @@ class PowerAutomateScanner:
         self.logger.info("Step End: Analysis complete.")
         self.logger.info("Main Process End: Power Automate Telemetry scan finished.")
         return results
+
+
+# =================================================================================
+# MODULAR UI COMPONENT
+# =================================================================================
+
+class PowerAutomateUsageFrame(ctk.CTkFrame):
+    """Self-contained component wrapping Power Automate UI and export controls."""
+    
+    def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
+        super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
+        self.log_msg = log_callback
+        self.get_credentials = credentials_callback
+        self.on_status_change = status_change_callback
+        self.status = None  # 'loading', 'success', 'error', None
+        self.last_complex_flows = []
+        
+        self.build_ui()
+
+    def build_ui(self):
+        self.pack(fill="x", expand=True, pady=10)
+        
+        self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
+        self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        pa_header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        pa_header.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(pa_header, text="Power Automate", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        
+        self.btn_export_pa = ctk.CTkButton(
+            pa_header, text="Export Complex Flows", width=160, height=32, corner_radius=16,
+            font=FONT_BODY_BOLD, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
+            command=self.export_complex_flows, state="disabled"
+        )
+        self.btn_export_pa.pack(side="right")
+
+        self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+
+        self.reset_view()
+
+    def reset_view(self):
+        self.pack_forget()
+        self.state_frame.pack_forget()
+        self.grid_frame.pack_forget()
+        self.btn_export_pa.configure(state="disabled")
+        self.last_complex_flows = []
+        
+        for w in self.state_frame.winfo_children():
+            w.destroy()
+        for w in self.grid_frame.winfo_children():
+            w.destroy()
+
+    def _set_state_loading(self, msg="Loading..."):
+        for w in self.state_frame.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(self.state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.state_frame.pack(fill="x", expand=True)
+
+    def _set_state_error(self, error_msg):
+        for w in self.state_frame.winfo_children():
+            w.destroy()
+
+        display_msg = error_msg
+        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
+            display_msg = "Management Link / Flow read permissions required."
+
+        ctk.CTkLabel(self.state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 10))
+        ctk.CTkButton(self.state_frame, text="Try Again", command=self._retry_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
+        self.state_frame.pack(fill="x", expand=True)
+
+    def _retry_fetch(self):
+        tenant, clients, secrets = self.get_credentials()
+        if tenant:
+            self.trigger_fetch(tenant, clients[0], secrets[0])
+
+    def trigger_fetch(self, tenant, client_id, client_secret):
+        usage_logger.info("Power Automate trigger_fetch called. Spawning background worker thread...")
+        self.status = "loading"
+        self.on_status_change()
+        
+        self.pack(fill="x", expand=True, pady=10)
+        self.grid_frame.pack_forget()
+        
+        self._set_state_loading("Scanning Power Automate flows...")
+        
+        threading.Thread(
+            target=self._execute_worker,
+            args=(tenant, client_id, client_secret),
+            daemon=True
+        ).start()
+
+    def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
+        try:
+            scanner = PowerAutomateScanner(tenant, client_id, client_secret)
+            results = scanner.scan_flows()
+            usage_logger.info("Successfully completed Power Automate scan.")
+            self.after(0, self._render_success, results)
+        except Exception as e:
+            usage_logger.error("Exception caught in PowerAutomateUsage worker.", exc_info=True)
+            self.after(0, self._render_error, str(e))
+
+    def _render_success(self, results: dict):
+        self.state_frame.pack_forget()
+        for w in self.grid_frame.winfo_children():
+            w.destroy()
+
+        self.grid_frame.pack(fill="x", expand=True)
+
+        if not results:
+            empty_cell = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+            empty_cell.pack(fill="x", expand=True, pady=15)
+            ctk.CTkLabel(empty_cell, text="No Power Automate data found.", text_color=COLOR_TEXT_SUB).pack()
+            self.status = "success"
+            self.on_status_change()
+            return
+
+        total_envs = results.get("total_environments", 0)
+        counts = results.get("counts", {})
+        active_counts = results.get("active_counts", {})
+        tier_counts = results.get("tier_counts", {})
+        active_tier_counts = results.get("active_tier_counts", {})
+        premium_conns = results.get("premium_connectors", [])
+        custom_conns = results.get("custom_connectors", [])
+        complex_flows = results.get("complex_logic_flows", [])
+
+        total_flows = counts.get("Cloud Flows", 0) + counts.get("Desktop Flows", 0)
+
+        summary_frame = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        summary_frame.pack(fill="x", pady=20)
+        
+        for i in range(2):
+            summary_frame.grid_columnconfigure(i, weight=1)
+
+        headers_pa = ["Metric", "Value"]
+        for col_idx, head_text in enumerate(headers_pa):
+            cell = ctk.CTkFrame(summary_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        prem_str = ", ".join(premium_conns) if premium_conns else "0"
+        cust_str = ", ".join(custom_conns) if custom_conns else "0"
+
+        mapping = [
+            ("Total Environments Scanned", total_envs),
+            ("Total Flows (Active + Inactive)", total_flows),
+            ("Premium Connectors In Use", prem_str),
+            ("Custom Connectors In Use", cust_str),
+        ]
+
+        r_idx = 1
+        for label, val in mapping:
+            bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
+            
+            c0 = ctk.CTkFrame(summary_frame, fg_color=bg_style, corner_radius=0)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c0, text=label, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="nw")
+
+            c1 = ctk.CTkFrame(summary_frame, fg_color=bg_style, corner_radius=0)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c1, text=str(val), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, wraplength=400).pack(padx=10, pady=6, anchor="nw")
+            
+            r_idx += 1
+
+        self.last_complex_flows = complex_flows
+        if complex_flows:
+            self.btn_export_pa.configure(state="normal")
+        else:
+            self.btn_export_pa.configure(state="disabled")
+
+        if total_flows > 0:
+            charts_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+            charts_frame.pack(fill="x", pady=20)
+            
+            if not MATPLOTLIB_AVAILABLE:
+                ctk.CTkLabel(charts_frame, text="Matplotlib is required to render charts.\nPlease install it using 'pip install matplotlib'.", text_color=COLOR_ERROR).pack(pady=15)
+            else:
+                try:
+                    fig, ax = plt.subplots(figsize=(12, 7), dpi=100)
+                    fig.patch.set_facecolor(COLOR_SURFACE)
+                    ax.set_facecolor(COLOR_SURFACE)
+                    
+                    categories = ['Cloud Flows', 'Desktop Flows', 'Personal Flows', 'Enterprise Flows', 'Complex Flows']
+                    
+                    c_total = counts.get("Cloud Flows", 0)
+                    c_active = active_counts.get("Cloud Flows", 0)
+                    c_inactive = c_total - c_active
+                    
+                    d_total = counts.get("Desktop Flows", 0)
+                    d_active = active_counts.get("Desktop Flows", 0)
+                    d_inactive = d_total - d_active
+                    
+                    p_total = tier_counts.get("Personal Productivity", 0)
+                    p_active = active_tier_counts.get("Personal Productivity", 0)
+                    p_inactive = p_total - p_active
+                    
+                    e_total = tier_counts.get("Enterprise/Departmental", 0)
+                    e_active = active_tier_counts.get("Enterprise/Departmental", 0)
+                    e_inactive = e_total - e_active
+                    
+                    complex_active = sum(1 for f in complex_flows if f.get("Active") == "Yes")
+                    complex_inactive = len(complex_flows) - complex_active
+                    
+                    actives = [c_active, d_active, p_active, e_active, complex_active]
+                    inactives = [c_inactive, d_inactive, p_inactive, e_inactive, complex_inactive]
+                    
+                    x = range(len(categories))
+                    width = 0.15
+                    
+                    color_active = COLOR_PRIMARY
+                    color_inactive = COLOR_TONAL_BG
+                    
+                    rects1 = ax.bar(x, actives, width, label='Active', color=color_active)
+                    rects2 = ax.bar([i + width for i in x], inactives, width, label='Inactive', color=color_inactive)
+                    
+                    ax.set_ylabel('Count', color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
+                    ax.set_title('Power Automate Flows Breakdown', color=COLOR_TEXT_MAIN, fontsize=18, fontweight='bold')
+                    ax.set_xticks([i + width/2 for i in x])
+                    ax.set_xticklabels(categories, color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
+                    ax.legend(facecolor=COLOR_SURFACE, edgecolor=COLOR_OUTLINE_LIGHT, labelcolor=COLOR_TEXT_MAIN, prop={'weight':'bold', 'size':12})
+                    
+                    ax.bar_label(rects1, padding=3, color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
+                    ax.bar_label(rects2, padding=3, color=COLOR_TEXT_MAIN, fontsize=14, fontweight='bold')
+                    
+                    for spine in ax.spines.values():
+                        spine.set_color(COLOR_OUTLINE_LIGHT)
+                    
+                    ax.tick_params(axis='y', colors=COLOR_TEXT_MAIN, labelsize=12)
+                    for label in ax.get_yticklabels():
+                        label.set_fontweight('bold')
+                    
+                    max_val = max(max(actives), max(inactives))
+                    ax.set_ylim(0, max(max_val + 3, int(max_val * 1.3)))
+                    
+                    fig.tight_layout()
+                    canvas = FigureCanvasTkAgg(fig, master=charts_frame)
+                    canvas.draw()
+                    canvas.get_tk_widget().pack(fill="x", padx=50, pady=10)
+                    
+                except Exception as e:
+                    usage_logger.error(f"Error drawing Power Automate charts: {e}", exc_info=True)
+
+        self.status = "success"
+        self.on_status_change()
+
+    def _render_error(self, err_msg):
+        usage_logger.warning(f"Power Automate fetch failed: {err_msg}")
+        self._set_state_error(err_msg)
+        self.status = "error"
+        self.on_status_change()
+
+    def export_complex_flows(self):
+        usage_logger.info("Exporting complex flows to local spreadsheet requested.")
+        if not self.last_complex_flows:
+            return
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"complex_flows_{ts}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV Spreadsheet", "*.csv")]
+        )
+
+        if not f:
+            return
+
+        headers = ["Environment", "Name", "Type", "Tier", "Active", "Reason"]
+        rows = []
+
+        for flow in self.last_complex_flows:
+            rows.append([
+                flow.get("Environment"),
+                flow.get("Name"),
+                flow.get("Type"),
+                flow.get("Tier"),
+                flow.get("Active"),
+                flow.get("Reason")
+            ])
+
+        try:
+            df = pd.DataFrame(rows, columns=headers)
+            df.to_csv(f, index=False, encoding='utf-8')
+            usage_logger.info("Complex flows exported successfully.")
+            messagebox.showinfo("Export Successful", f"Complex flows successfully saved to:\n{f}", parent=self)
+        except Exception as e:
+            usage_logger.error("Failed writing export spreadsheet to disk.", exc_info=True)
+            messagebox.showerror("Export Error", f"Failed to save file:\n{e}", parent=self)

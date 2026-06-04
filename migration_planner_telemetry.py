@@ -3,13 +3,13 @@
 
 import os
 import customtkinter as ctk
-from telemetry.license_usage import LicenseUsageTab, async_logger
+from telemetry.m365_telemetry import M365TelemetryTab, async_logger
 import logging
 from telemetry.power_automate import PowerAutomateScanner
 from telemetry.styles import *
 
 # Orchestrator logging
-logger = logging.getLogger("LicenseUsageAsyncLogger.TelemetryOrchestrator")
+logger = logging.getLogger("M365TelemetryAsyncLogger.TelemetryOrchestrator")
 
 
 class TelemetryApp(ctk.CTk):
@@ -25,7 +25,7 @@ class TelemetryApp(ctk.CTk):
         # to prevent CustomTkinter 'after script' errors when closing.
         self.protocol("WM_DELETE_WINDOW", self.on_closing)  # CITATION: self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        # Initialize variables required by the LicenseUsageTab
+        # Initialize variables required by the M365TelemetryTab
         self.retries = ctk.IntVar(value=30)  # CITATION: self.retries = ctk.IntVar(value=30)
         self.backoff = ctk.IntVar(value=2)  # CITATION: self.backoff = ctk.IntVar(value=2)
 
@@ -195,7 +195,7 @@ class TelemetryApp(ctk.CTk):
         logger.info("Credentials validated and cached in memory. Updating log directories...")
 
         # Update log directory to use sub-folder based on tenant and client
-        from telemetry.license_usage import update_log_directory as update_license_log_dir
+        from telemetry.m365_telemetry import update_log_directory as update_license_log_dir
         from core.cert_auth import update_log_directory as update_cert_log_dir
         
         update_license_log_dir(tenant, client)
@@ -314,7 +314,7 @@ class TelemetryApp(ctk.CTk):
         self.reports_page.clear_session_data()
 
         # Revert log directories to default
-        from telemetry.license_usage import update_log_directory as update_license_log_dir
+        from telemetry.m365_telemetry import update_log_directory as update_license_log_dir
         from core.cert_auth import update_log_directory as update_cert_log_dir
         
         update_license_log_dir()
@@ -411,20 +411,20 @@ class ReportsPage(ctk.CTkFrame):
 
 
         # Initialize the telemetry view (No TabView layout)
-        self.license_usage_view = LicenseUsageTab(  # CITATION: self.license_usage_view = LicenseUsageTab(
+        self.m365_telemetry_view = M365TelemetryTab(
             master=self.dashboard_container, 
             log_callback=controller.log_msg, 
             retries_var=retries_var, 
             backoff_var=backoff_var
         )
-        self.license_usage_view.pack(fill="both", expand=True)  # CITATION: self.license_usage_view.pack(fill="both", expand=True, padx=15, pady=15)
-        self.license_usage_view.on_all_done_callback = self.on_telemetry_fetch_completed
+        self.m365_telemetry_view.pack(fill="both", expand=True)
+        self.m365_telemetry_view.on_all_done_callback = self.on_telemetry_fetch_completed
 
         # Adapt layout recursively to hide original inputs from view
         self.adapt_embedded_view()
 
     def adapt_embedded_view(self):
-        """Traverses LicenseUsageTab to identify and hide native login components."""
+        """Traverses M365TelemetryTab to identify and hide native login components."""
         self.embedded_entries = []
         self.embedded_submit_btn = None
         self.embedded_labels = []
@@ -444,7 +444,7 @@ class ReportsPage(ctk.CTkFrame):
             for child in widget.winfo_children():
                 find_widgets_recursive(child)
 
-        find_widgets_recursive(self.license_usage_view)
+        find_widgets_recursive(self.m365_telemetry_view)
 
         # Remove the target widgets from layout grids/packs programmatically
         for entry in self.embedded_entries:
@@ -459,9 +459,9 @@ class ReportsPage(ctk.CTkFrame):
             self.embedded_submit_btn.pack_forget()
             self.embedded_submit_btn.grid_forget()
 
-        if hasattr(self.license_usage_view, "inputs_frame"):
-            self.license_usage_view.inputs_frame.pack_forget()
-            self.license_usage_view.inputs_frame.grid_forget()
+        if hasattr(self.m365_telemetry_view, "inputs_frame"):
+            self.m365_telemetry_view.inputs_frame.pack_forget()
+            self.m365_telemetry_view.inputs_frame.grid_forget()
 
     def on_fetch_report_clicked(self):
         """Stage 2: Migrates stored variables into the hidden entries and clicks the submit thread."""
@@ -493,7 +493,7 @@ class ReportsPage(ctk.CTkFrame):
             self.embedded_submit_btn.invoke()
 
     def on_telemetry_fetch_completed(self, success: bool):
-        """Callback from LicenseUsageTab when all parallel reports complete."""
+        """Callback from M365TelemetryTab when all parallel reports complete."""
         self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color="#1E3A8A")
 
     def clear_session_data(self):

@@ -24,8 +24,8 @@ import customtkinter as ctk
 from core.graph.client import GraphClient
 from core.graph.reports import ReportsService
 
-# Bind to the async logger initialized in license_usage.py
-usage_logger = logging.getLogger("LicenseUsageAsyncLogger")
+# Bind to the async logger initialized in m365_telemetry.py
+usage_logger = logging.getLogger("M365TelemetryAsyncLogger")
 
 # =================================================================================
 # CONSTANTS & STYLES (Imported from shared styles)

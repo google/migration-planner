@@ -29,8 +29,8 @@ from core.graph.directory import DirectoryService
 from core.powershell.client import PowerShellClient
 from core.powershell.retention import RetentionService
 
-# Bind to the async logger initialized in license_usage.py
-usage_logger = logging.getLogger("LicenseUsageAsyncLogger")
+# Bind to the async logger initialized in m365_telemetry.py
+usage_logger = logging.getLogger("M365TelemetryAsyncLogger")
 
 # Import shared styles
 from telemetry.styles import *
