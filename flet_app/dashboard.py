@@ -115,18 +115,52 @@ class DashboardView(ft.Container):
             alignment=ft.MainAxisAlignment.CENTER,
             visible=False
         )
+        self.purview_labels_btn = ft.TextButton(
+            content=ft.Text("Open Purview Sensitivity Label Portal ↗", color=COLOR_PRIMARY, weight=ft.FontWeight.BOLD),
+            on_click=lambda e: e.page.launch_url("https://purview.microsoft.com/informationprotection/informationprotectionlabels/sensitivitylabels")
+        )
         self.labels_section = self.create_card(
             "Sensitivity Labels", 
+            action_control=self.purview_labels_btn,
             bottom_control=self.labels_pagination_row,
-            on_retry=self.handle_retry_security_gov
+            on_retry=self.handle_retry_labels
         )
         
         # 9. Retention Policies Card (with Purview Link)
         self.purview_btn = ft.TextButton(
-            content=ft.Text("Open Microsoft Purview Portal ↗", color=COLOR_PRIMARY, weight=ft.FontWeight.BOLD),
+            content=ft.Text("Open Purview Retention Policy Portal ↗", color=COLOR_PRIMARY, weight=ft.FontWeight.BOLD),
             on_click=lambda e: e.page.launch_url("https://purview.microsoft.com/datalifecyclemanagement/retention")
         )
-        self.retention_section = self.create_card("Retention Compliance Policies", action_control=self.purview_btn, on_retry=self.handle_retry_security_gov)
+        self.retention_section = self.create_card("Retention Compliance Policies", action_control=self.purview_btn, on_retry=self.handle_retry_retention)
+        
+        # 9c. eDiscovery Cases Card (Instructional)
+        self.ediscovery_portal_btn = ft.TextButton(
+            content=ft.Text("Open Purview eDiscovery Portal ↗", color=COLOR_PRIMARY, weight=ft.FontWeight.BOLD),
+            on_click=lambda e: e.page.launch_url("https://purview.microsoft.com/ediscovery/casespage")
+        )
+        self.ediscovery_permissions_btn = ft.TextButton(
+            content=ft.Text("Open Purview Permissions Settings ↗", color=COLOR_PRIMARY, weight=ft.FontWeight.BOLD),
+            on_click=lambda e: e.page.launch_url("https://purview.microsoft.com/settings/purviewpermissions")
+        )
+        
+        self.ediscovery_section = self.create_card(
+            "eDiscovery Cases",
+            action_control=self.ediscovery_portal_btn
+        )
+        
+        self.ediscovery_section.content_container.content = ft.Column([
+            ft.Text(
+                "eDiscovery cases cannot be scanned directly under standard Application permissions. "
+                "To view your active cases, please navigate to Microsoft Purview on behalf of a user who has the eDiscovery Manager role.",
+                color=COLOR_TEXT_MAIN,
+                size=14
+            ),
+            ft.Divider(height=10, color="transparent"),
+            ft.Row([
+                ft.Text("To assign the eDiscovery Manager role, go to:", color=COLOR_TEXT_SUB, size=13),
+                self.ediscovery_permissions_btn
+            ], alignment=ft.MainAxisAlignment.START, spacing=5)
+        ], spacing=10)
         
         # 10. Power Automate Card (with Export Button)
         self.export_pa_btn = ft.IconButton(
@@ -149,6 +183,7 @@ class DashboardView(ft.Container):
                 self.onedrive_section,
                 self.labels_section,
                 self.retention_section,
+                self.ediscovery_section,
                 self.pa_section
             ],
             scroll=ft.ScrollMode.AUTO,
@@ -276,17 +311,11 @@ class DashboardView(ft.Container):
     def handle_retry_onedrive(self, e):
         self.start_individual_fetch("onedrive", self.onedrive_section, "Downloading OneDrive reports...", self.fetch_onedrive)
 
-    def handle_retry_security_gov(self, e):
-        self.fetch_btn.disabled = True
-        self.fetch_btn.update()
-        self.fetch_statuses["security_gov"] = "pending"
-        
-        self.set_loading(self.labels_section, "Retrieving Sensitivity labels...")
-        self.labels_section.update()
-        self.set_loading(self.retention_section, "Retrieving Retention policies...")
-        self.retention_section.update()
-        
-        threading.Thread(target=self.fetch_security_gov, daemon=True).start()
+    def handle_retry_labels(self, e):
+        self.start_individual_fetch("labels", self.labels_section, "Retrieving Sensitivity labels...", self.fetch_labels)
+
+    def handle_retry_retention(self, e):
+        self.start_individual_fetch("retention", self.retention_section, "Retrieving Retention policies...", self.fetch_retention)
 
     def handle_retry_pa(self, e):
         self.start_individual_fetch("pa", self.pa_section, "Scanning Power Automate flows...", self.fetch_pa)
@@ -305,7 +334,8 @@ class DashboardView(ft.Container):
             "mailbox": "pending",
             "sharepoint": "pending",
             "onedrive": "pending",
-            "security_gov": "pending",
+            "labels": "pending",
+            "retention": "pending",
             "pa": "pending"
         }
         
@@ -347,9 +377,11 @@ class DashboardView(ft.Container):
         # 8 & 9. Sensitivity Labels & Retention Policies
         self.set_loading(self.labels_section, "Retrieving Sensitivity labels...")
         self.labels_section.update()
+        threading.Thread(target=self.fetch_labels, daemon=True).start()
+        
         self.set_loading(self.retention_section, "Retrieving Retention policies...")
         self.retention_section.update()
-        threading.Thread(target=self.fetch_security_gov, daemon=True).start()
+        threading.Thread(target=self.fetch_retention, daemon=True).start()
         
         # 10. Power Automate
         self.set_loading(self.pa_section, "Scanning Power Automate flows...")
@@ -688,23 +720,23 @@ class DashboardView(ft.Container):
             if self.page:
                 self.onedrive_section.update()
 
-    def fetch_security_gov(self):
+    def fetch_labels(self):
         try:
-            data = run_security_governance_pipeline(self.client, self.secret, self.tenant)
+            from telemetry.data_security_governance import fetch_sensitivity_labels_data
+            res = fetch_sensitivity_labels_data(self.client, self.secret, self.tenant)
+            labels = res.get("labels")
+            err = res.get("error")
             
-            labels = data.get("labels")
-            labels_error = data.get("labels_error")
-            policies = data.get("policies")
-            policies_error = data.get("policies_error")
-            
-            # 1. Populate Sensitivity Labels pagination data
+            # Populate Sensitivity Labels pagination data
             self.flattened_labels = []
-            if labels_error:
-                self.labels_section.content_container.content = ft.Text(f"Error loading labels: {labels_error}", color=COLOR_ERROR)
+            if err:
+                self.labels_section.content_container.content = ft.Text(f"Error loading labels: {err}", color=COLOR_ERROR)
                 self.labels_pagination_row.visible = False
+                self.mark_complete("labels", "error")
             elif not labels:
                 self.labels_section.content_container.content = ft.Text("No Sensitivity Labels configured in this tenant.", color=COLOR_TEXT_SUB)
                 self.labels_pagination_row.visible = False
+                self.mark_complete("labels", "success")
             else:
                 for parent in labels:
                     self.flattened_labels.append({
@@ -733,17 +765,35 @@ class DashboardView(ft.Container):
                             })
                 self.current_labels_page = 0
                 self.render_labels_page()
+                self.mark_complete("labels", "success")
+        except Exception as e:
+            self.set_error(self.labels_section, str(e))
+            self.labels_pagination_row.visible = False
+            self.mark_complete("labels", "error")
+        finally:
+            self.clear_loading(self.labels_section)
+            if self.page:
+                self.labels_section.update()
+
+    def fetch_retention(self):
+        try:
+            from telemetry.data_security_governance import fetch_retention_policies_data
+            res = fetch_retention_policies_data(self.client, self.secret, self.tenant)
+            policies = res.get("policies")
+            err = res.get("error")
             
-            # 2. Populate Retention Policies
-            if policies_error:
-                msg = policies_error
-                if "powershell" in policies_error.lower() or "pwsh" in policies_error.lower():
+            # Populate Retention Policies
+            if err:
+                msg = err
+                if "powershell" in err.lower() or "pwsh" in err.lower():
                     msg = "PowerShell Core ('pwsh') is not installed or configured on this machine."
-                elif "exchangeonlinemanagement" in policies_error.lower():
+                elif "exchangeonlinemanagement" in err.lower():
                     msg = "ExchangeOnlineManagement PowerShell module is missing."
                 self.retention_section.content_container.content = ft.Text(f"Error loading policies: {msg}", color=COLOR_ERROR)
+                self.mark_complete("retention", "error")
             elif not policies:
                 self.retention_section.content_container.content = ft.Text("No Retention Compliance Policies found.", color=COLOR_TEXT_SUB)
+                self.mark_complete("retention", "success")
             else:
                 policies_list = policies if isinstance(policies, list) else [policies]
                 rows = []
@@ -776,7 +826,6 @@ class DashboardView(ft.Container):
                         ], alignment=ft.MainAxisAlignment.CENTER)),
                         ft.DataCell(ft.Text(policy.get("Workload", "N/A"))),
                         ft.DataCell(ft.Text(duration_str)),
-                        ft.DataCell(ft.Text(policy.get("Mode", "Enforce"))),
                         ft.DataCell(ft.Text(policy.get("DistributionStatus", "Success"))),
                         ft.DataCell(ft.Text(status_str))
                     ]))
@@ -786,7 +835,6 @@ class DashboardView(ft.Container):
                         ft.DataColumn(ft.Text("Policy Name", weight=ft.FontWeight.BOLD)),
                         ft.DataColumn(ft.Text("Workloads", weight=ft.FontWeight.BOLD)),
                         ft.DataColumn(ft.Text("Duration", weight=ft.FontWeight.BOLD)),
-                        ft.DataColumn(ft.Text("Mode", weight=ft.FontWeight.BOLD)),
                         ft.DataColumn(ft.Text("Distribution", weight=ft.FontWeight.BOLD)),
                         ft.DataColumn(ft.Text("Status", weight=ft.FontWeight.BOLD)),
                     ],
@@ -796,18 +844,13 @@ class DashboardView(ft.Container):
                     heading_row_color=COLOR_TONAL_BG,
                 )
                 self.retention_section.content_container.content = ft.Column([table], scroll=ft.ScrollMode.AUTO, height=300)
-            
-            self.mark_complete("security_gov", "success")
+                self.mark_complete("retention", "success")
         except Exception as e:
-            self.set_error(self.labels_section, str(e))
             self.set_error(self.retention_section, str(e))
-            self.labels_pagination_row.visible = False
-            self.mark_complete("security_gov", "error")
+            self.mark_complete("retention", "error")
         finally:
-            self.clear_loading(self.labels_section)
             self.clear_loading(self.retention_section)
             if self.page:
-                self.labels_section.update()
                 self.retention_section.update()
 
     def render_labels_page(self):
