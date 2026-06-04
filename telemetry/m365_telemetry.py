@@ -45,7 +45,7 @@ _log_dir = os.path.join(_current_dir, 'logs')
 os.makedirs(_log_dir, exist_ok=True)
 
 _log_queue = queue.Queue(-1)
-_log_file_path = os.path.join(_log_dir, 'license_log.txt')
+_log_file_path = os.path.join(_log_dir, 'telemetry_log.txt')
 _file_handler = logging.FileHandler(_log_file_path, mode='a', encoding='utf-8')
 _formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 _file_handler.setFormatter(_formatter)
@@ -84,7 +84,7 @@ def update_log_directory(tenant_id: Optional[str] = None, client_id: Optional[st
         new_log_dir = os.path.join(_current_dir, 'logs')
 
     os.makedirs(new_log_dir, exist_ok=True)
-    new_log_file_path = os.path.join(new_log_dir, 'license_log.txt')
+    new_log_file_path = os.path.join(new_log_dir, 'telemetry_log.txt')
 
     _file_handler = logging.FileHandler(new_log_file_path, mode='a', encoding='utf-8')
     _file_handler.setFormatter(_formatter)
