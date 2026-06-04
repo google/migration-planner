@@ -193,60 +193,62 @@ class PowerAutomateScanner:
                     return None
                 return (flow_summary, flow_detail, is_active)
             
-            processed_details = []
             with ThreadPoolExecutor(max_workers=15) as executor:
                 futures = {executor.submit(fetch_and_process_flow_detail, f): f for f in cloud_flows}
                 for future in as_completed(futures):
                     res = future.result()
-                    if res:
-                        processed_details.append(res)
-            
-            for flow_summary, flow_detail, is_active in processed_details:
-                props = flow_detail.get("properties", {})
-                name = props.get("displayName", "Unnamed Flow")
-                
-                is_managed = "workflowEntityId" in props or not is_default
-                if is_managed:
-                    tier_counts["Enterprise/Departmental"] += 1
-                    tier = "Enterprise"
-                    if is_active:
-                        active_tier_counts["Enterprise/Departmental"] += 1
-                else:
-                    tier_counts["Personal Productivity"] += 1
-                    tier = "Personal"
-                    if is_active:
-                        active_tier_counts["Personal Productivity"] += 1
-
-                conn_refs = props.get("connectionReferences", {})
-                for conn_key, conn_val in conn_refs.items():
-                    api_obj = conn_val.get("api", {})
-                    api_id = api_obj.get("id", "")
-                    conn_name = api_id.split("/")[-1] if "/" in api_id else api_id
+                    if not res:
+                        continue
                     
-                    if api_obj.get("tier") == "Premium" or any(kw in conn_name.lower() for kw in PREMIUM_KEYWORDS):
-                        premium_connectors_found.add(conn_name)
-                        self.logger.info(f"      [!] Premium connector found: {conn_name} in flow {name}")
-                    if "custom" in api_id.lower() or api_obj.get("type") == "Microsoft.PowerApps/apis/custom":
-                        custom_connectors_found.add(conn_name)
-                        self.logger.info(f"      [!] Custom connector found: {conn_name} in flow {name}")
-
-                actions_str = json.dumps(props)
-                has_nested_loops = actions_str.count('"type": "Foreach"') > 0 or actions_str.count('"type": "Until"') > 0
-                has_multi_approvals = "shared_approvals" in actions_str or "Approval" in actions_str
-                has_advanced_expressions = "@" in actions_str and any(exp in actions_str for exp in ["concat(", "split(", "base64("])
-
-                if has_nested_loops or has_multi_approvals or has_advanced_expressions:
-                    self.logger.info(f"      [!] Complex logic detected in Cloud Flow: {name}")
-                    reasons = []
-                    if has_nested_loops: reasons.append("Nested Loops")
-                    if has_multi_approvals: reasons.append("Multi Approvals")
-                    if has_advanced_expressions: reasons.append("Advanced Expressions")
+                    flow_summary, flow_detail, is_active = res
+                    props = flow_detail.get("properties", {})
+                    name = props.get("displayName", "Unnamed Flow")
                     
-                    complex_logic_flows.append({
-                        "Environment": env_display, "Name": name, "Type": "Cloud Flow", "Tier": tier,
-                        "Active": "Yes" if is_active else "No",
-                        "Reason": ", ".join(reasons)
-                    })
+                    is_managed = "workflowEntityId" in props or not is_default
+                    if is_managed:
+                        tier_counts["Enterprise/Departmental"] += 1
+                        tier = "Enterprise"
+                        if is_active:
+                            active_tier_counts["Enterprise/Departmental"] += 1
+                    else:
+                        tier_counts["Personal Productivity"] += 1
+                        tier = "Personal"
+                        if is_active:
+                            active_tier_counts["Personal Productivity"] += 1
+
+                    conn_refs = props.get("connectionReferences", {})
+                    for conn_key, conn_val in conn_refs.items():
+                        api_obj = conn_val.get("api", {})
+                        api_id = api_obj.get("id", "")
+                        conn_name = api_id.split("/")[-1] if "/" in api_id else api_id
+                        
+                        if api_obj.get("tier") == "Premium" or any(kw in conn_name.lower() for kw in PREMIUM_KEYWORDS):
+                            premium_connectors_found.add(conn_name)
+                            self.logger.info(f"      [!] Premium connector found: {conn_name} in flow {name}")
+                        if "custom" in api_id.lower() or api_obj.get("type") == "Microsoft.PowerApps/apis/custom":
+                            custom_connectors_found.add(conn_name)
+                            self.logger.info(f"      [!] Custom connector found: {conn_name} in flow {name}")
+
+                    actions_str = json.dumps(props)
+                    has_nested_loops = actions_str.count('"type": "Foreach"') > 0 or actions_str.count('"type": "Until"') > 0
+                    has_multi_approvals = "shared_approvals" in actions_str or "Approval" in actions_str
+                    has_advanced_expressions = "@" in actions_str and any(exp in actions_str for exp in ["concat(", "split(", "base64("])
+
+                    if has_nested_loops or has_multi_approvals or has_advanced_expressions:
+                        self.logger.info(f"      [!] Complex logic detected in Cloud Flow: {name}")
+                        reasons = []
+                        if has_nested_loops: reasons.append("Nested Loops")
+                        if has_multi_approvals: reasons.append("Multi Approvals")
+                        if has_advanced_expressions: reasons.append("Advanced Expressions")
+                        
+                        complex_logic_flows.append({
+                            "Environment": env_display, "Name": name, "Type": "Cloud Flow", "Tier": tier,
+                            "Active": "Yes" if is_active else "No",
+                            "Reason": ", ".join(reasons)
+                        })
+                    
+                    del flow_detail
+                    del res
 
             # ==========================================
             # 2. FETCH DESKTOP FLOWS
@@ -600,9 +602,14 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
                     canvas = FigureCanvasTkAgg(fig, master=self.pa_chart_container)
                     canvas.draw()
                     canvas.get_tk_widget().pack(fill="both", expand=True, padx=20, pady=10)
+                    plt.close(fig)
                     
                 except Exception as e:
                     usage_logger.error(f"Error drawing Power Automate charts: {e}", exc_info=True)
+                    try:
+                        plt.close(fig)
+                    except:
+                        pass
 
         self.status = "success"
         self.on_status_change()

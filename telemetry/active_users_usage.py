@@ -78,25 +78,37 @@ def process_active_user_detail(filepath):
         "Has Teams License", "Teams Last Activity Date"
     ]
     cols = [c for c in expected if c in headers]
-    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    def aggregate_column(df, has_license_col, date_col):
-        if has_license_col not in df.columns or date_col not in df.columns:
+    exchange_online_usage = [0, 0, 0]
+    onedrive_usage = [0, 0, 0]
+    sharepoint_usage = [0, 0, 0]
+    teams_usage = [0, 0, 0]
+
+    def process_chunk_col(chunk, has_license_col, date_col):
+        if has_license_col not in chunk.columns or date_col not in chunk.columns:
             return [0, 0, 0]
-        mask = df[has_license_col].astype(str).str.strip().str.upper() == "TRUE"
-        dates_series = pd.to_datetime(df.loc[mask, date_col], errors='coerce')
+        mask = chunk[has_license_col].astype(str).str.strip().str.upper() == "TRUE"
+        dates_series = pd.to_datetime(chunk.loc[mask, date_col], errors='coerce')
         days_diff = (current_date - dates_series).dt.days
         d180 = int((days_diff < 180).sum())
         d90 = int((days_diff < 90).sum())
         d30 = int((days_diff < 30).sum())
         return [d30, d90, d180]
 
-    exchange_online_usage = aggregate_column(df, "Has Exchange License", "Exchange Last Activity Date")
-    onedrive_usage = aggregate_column(df, "Has OneDrive License", "OneDrive Last Activity Date")
-    sharepoint_usage = aggregate_column(df, "Has SharePoint License", "SharePoint Last Activity Date")
-    teams_usage = aggregate_column(df, "Has Teams License", "Teams Last Activity Date")
+    for chunk in pd.read_csv(filepath, usecols=cols, chunksize=10000, encoding="utf-8-sig"):
+        e_chunk = process_chunk_col(chunk, "Has Exchange License", "Exchange Last Activity Date")
+        exchange_online_usage = [x + y for x, y in zip(exchange_online_usage, e_chunk)]
 
-    usage_logger.info("Successfully processed O365 active user data.")
+        od_chunk = process_chunk_col(chunk, "Has OneDrive License", "OneDrive Last Activity Date")
+        onedrive_usage = [x + y for x, y in zip(onedrive_usage, od_chunk)]
+
+        sp_chunk = process_chunk_col(chunk, "Has SharePoint License", "SharePoint Last Activity Date")
+        sharepoint_usage = [x + y for x, y in zip(sharepoint_usage, sp_chunk)]
+
+        t_chunk = process_chunk_col(chunk, "Has Teams License", "Teams Last Activity Date")
+        teams_usage = [x + y for x, y in zip(teams_usage, t_chunk)]
+
+    usage_logger.info("Successfully processed O365 active user data in chunks.")
     return [
         ("Exchange Online", exchange_online_usage[0], exchange_online_usage[1], exchange_online_usage[2]),
         ("OneDrive", onedrive_usage[0], onedrive_usage[1], onedrive_usage[2]),
@@ -165,18 +177,17 @@ def process_m365_app_user_detail(filepath):
     
     headers = pd.read_csv(filepath, nrows=0).columns.tolist()
     cols = [c for c in columns_to_track if c in headers]
-    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
     
-    counters = {}
-    for col in columns_to_track:
-        if col in df.columns:
-            col_series = df[col].astype(str).str.strip().str.lower()
-            count = int(col_series.isin(["yes", "true"]).sum())
-            counters[col] = count
-        else:
-            counters[col] = 0
+    counters = {col: 0 for col in columns_to_track}
+
+    for chunk in pd.read_csv(filepath, usecols=cols, chunksize=10000, encoding="utf-8-sig"):
+        for col in columns_to_track:
+            if col in chunk.columns:
+                col_series = chunk[col].astype(str).str.strip().str.lower()
+                count = int(col_series.isin(["yes", "true"]).sum())
+                counters[col] += count
             
-    usage_logger.info("Successfully processed M365 App user data.")
+    usage_logger.info("Successfully processed M365 App user data in chunks.")
     return [(col, count) for col, count in counters.items()]
 
 
@@ -512,8 +523,13 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
                 canvas = FigureCanvasTkAgg(fig, master=self.grid_frame)
                 canvas.draw()
                 canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
+                plt.close(fig)
             except Exception as e:
                 usage_logger.error(f"Error drawing matplotlib plot: {e}", exc_info=True)
+                try:
+                    plt.close(fig)
+                except:
+                    pass
                 empty_cell = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
                 empty_cell.pack(fill="x", expand=True, pady=15)
                 ctk.CTkLabel(empty_cell, text="Failed to render trend graph (Matplotlib constraint).", text_color=COLOR_ERROR).pack()

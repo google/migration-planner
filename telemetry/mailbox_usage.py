@@ -51,7 +51,7 @@ def format_bytes(num_bytes: float) -> str:
     return f"{num_bytes:,.2f} EB"
 
 def parse_mailbox_usage_csv(filepath: str) -> dict:
-    """Streams the Mailbox Usage Detail CSV and aggregates metrics using pandas."""
+    """Streams the Mailbox Usage Detail CSV and aggregates metrics in chunks using pandas."""
     usage_logger.info(f"Processing Mailbox Usage file: {os.path.basename(filepath)}")
     if not os.path.exists(filepath):
         usage_logger.error(f"Error: Could not find Mailbox report {filepath}")
@@ -61,30 +61,25 @@ def parse_mailbox_usage_csv(filepath: str) -> dict:
     headers = pd.read_csv(filepath, nrows=0).columns.tolist()
     if "Is Deleted" in headers:
         cols.append("Is Deleted")
-    df = pd.read_csv(filepath, usecols=cols)
 
-    # Clean data (remove rows where storage or item count might be NaN)
-    # Also ignore deleted mailboxes if they exist in the report
-    if "Is Deleted" in df.columns:
-        df = df[df["Is Deleted"] != True]
-        df = df[df["Is Deleted"] != "True"]
-        df = df[df["Is Deleted"] != "TRUE"]
+    total_mailboxes = 0
+    total_bytes = 0
+    total_emails = 0
 
-    df = df.dropna(subset=['Storage Used (Byte)', 'Item Count'])
+    for chunk in pd.read_csv(filepath, usecols=cols, chunksize=10000):
+        if "Is Deleted" in chunk.columns:
+            active_chunk = chunk[~chunk["Is Deleted"].astype(str).str.strip().str.upper().isin(["TRUE", "1"])]
+        else:
+            active_chunk = chunk
 
-    total_mailboxes = len(df)
-    
-    # 1. Total size in bytes and formatted
-    total_bytes = df['Storage Used (Byte)'].sum()
-    
-    # 2. Average mailbox size in bytes and formatted
-    avg_bytes = df['Storage Used (Byte)'].mean() if total_mailboxes > 0 else 0.0
+        active_chunk = active_chunk.dropna(subset=['Storage Used (Byte)', 'Item Count'])
+        
+        total_mailboxes += len(active_chunk)
+        total_bytes += int(active_chunk['Storage Used (Byte)'].sum())
+        total_emails += int(active_chunk['Item Count'].sum())
 
-    # 3. Total number of emails (Items)
-    total_emails = df['Item Count'].sum()
-
-    # 4. Average number of emails per user
-    avg_emails = df['Item Count'].mean() if total_mailboxes > 0 else 0.0
+    avg_bytes = (total_bytes / total_mailboxes) if total_mailboxes > 0 else 0.0
+    avg_emails = (total_emails / total_mailboxes) if total_mailboxes > 0 else 0.0
 
     usage_logger.info(
         f"Mailbox parsing complete: mailboxes={total_mailboxes}, "

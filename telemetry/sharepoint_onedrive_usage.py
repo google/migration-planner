@@ -48,7 +48,7 @@ def format_bytes(num_bytes: int) -> str:
     return f"{num_bytes:,.2f} EB"
 
 def parse_sharepoint_csv(filepath):
-    """Streams the SharePoint Site Usage Detail CSV and aggregates metrics."""
+    """Streams the SharePoint Site Usage Detail CSV and aggregates metrics in chunks."""
     usage_logger.info(f"Processing SharePoint Site Usage file: {os.path.basename(filepath)}")
     if not os.path.exists(filepath):
         usage_logger.error(f"Error: Could not find SharePoint report {filepath}")
@@ -57,18 +57,26 @@ def parse_sharepoint_csv(filepath):
     headers = pd.read_csv(filepath, nrows=0).columns.tolist()
     expected = ["Is Deleted", "Storage Used (Byte)", "File Count", "Active File Count"]
     cols = [c for c in expected if c in headers]
-    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    if "Is Deleted" in df.columns:
-        mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
-        active_df = df[mask]
-    else:
-        active_df = df
+    total_sites = 0
+    total_storage = 0
+    total_files = 0
+    active_files = 0
 
-    total_sites = len(active_df)
-    total_storage = int(pd.to_numeric(active_df["Storage Used (Byte)"], errors='coerce').fillna(0).sum()) if "Storage Used (Byte)" in active_df.columns else 0
-    total_files = int(pd.to_numeric(active_df["File Count"], errors='coerce').fillna(0).sum()) if "File Count" in active_df.columns else 0
-    active_files = int(pd.to_numeric(active_df["Active File Count"], errors='coerce').fillna(0).sum()) if "Active File Count" in active_df.columns else 0
+    for chunk in pd.read_csv(filepath, usecols=cols, chunksize=10000, encoding="utf-8-sig"):
+        if "Is Deleted" in chunk.columns:
+            mask = chunk["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+            active_chunk = chunk[mask]
+        else:
+            active_chunk = chunk
+
+        total_sites += len(active_chunk)
+        if "Storage Used (Byte)" in active_chunk.columns:
+            total_storage += int(pd.to_numeric(active_chunk["Storage Used (Byte)"], errors='coerce').fillna(0).sum())
+        if "File Count" in active_chunk.columns:
+            total_files += int(pd.to_numeric(active_chunk["File Count"], errors='coerce').fillna(0).sum())
+        if "Active File Count" in active_chunk.columns:
+            active_files += int(pd.to_numeric(active_chunk["Active File Count"], errors='coerce').fillna(0).sum())
 
     usage_logger.info(f"SharePoint parsing complete: sites={total_sites}, storage={format_bytes(total_storage)}, files={total_files}, active_files={active_files}")
     return {
@@ -81,7 +89,7 @@ def parse_sharepoint_csv(filepath):
     }
 
 def parse_onedrive_csv(filepath):
-    """Streams the OneDrive Account Usage Detail CSV and aggregates metrics."""
+    """Streams the OneDrive Account Usage Detail CSV and aggregates metrics in chunks."""
     usage_logger.info(f"Processing OneDrive Account Usage file: {os.path.basename(filepath)}")
     if not os.path.exists(filepath):
         usage_logger.error(f"Error: Could not find OneDrive report {filepath}")
@@ -90,18 +98,26 @@ def parse_onedrive_csv(filepath):
     headers = pd.read_csv(filepath, nrows=0).columns.tolist()
     expected = ["Is Deleted", "Storage Used (Byte)", "File Count", "Active File Count"]
     cols = [c for c in expected if c in headers]
-    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    if "Is Deleted" in df.columns:
-        mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
-        active_df = df[mask]
-    else:
-        active_df = df
+    total_accounts = 0
+    total_storage = 0
+    total_files = 0
+    active_files = 0
 
-    total_accounts = len(active_df)
-    total_storage = int(pd.to_numeric(active_df["Storage Used (Byte)"], errors='coerce').fillna(0).sum()) if "Storage Used (Byte)" in active_df.columns else 0
-    total_files = int(pd.to_numeric(active_df["File Count"], errors='coerce').fillna(0).sum()) if "File Count" in active_df.columns else 0
-    active_files = int(pd.to_numeric(active_df["Active File Count"], errors='coerce').fillna(0).sum()) if "Active File Count" in active_df.columns else 0
+    for chunk in pd.read_csv(filepath, usecols=cols, chunksize=10000, encoding="utf-8-sig"):
+        if "Is Deleted" in chunk.columns:
+            mask = chunk["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+            active_chunk = chunk[mask]
+        else:
+            active_chunk = chunk
+
+        total_accounts += len(active_chunk)
+        if "Storage Used (Byte)" in active_chunk.columns:
+            total_storage += int(pd.to_numeric(active_chunk["Storage Used (Byte)"], errors='coerce').fillna(0).sum())
+        if "File Count" in active_chunk.columns:
+            total_files += int(pd.to_numeric(active_chunk["File Count"], errors='coerce').fillna(0).sum())
+        if "Active File Count" in active_chunk.columns:
+            active_files += int(pd.to_numeric(active_chunk["Active File Count"], errors='coerce').fillna(0).sum())
 
     usage_logger.info(f"OneDrive parsing complete: accounts={total_accounts}, storage={format_bytes(total_storage)}, files={total_files}, active_files={active_files}")
     return {
@@ -114,7 +130,7 @@ def parse_onedrive_csv(filepath):
     }
 
 def parse_onedrive_activity_csv(filepath):
-    """Streams the OneDrive Activity User Detail CSV and aggregates active sync client users."""
+    """Streams the OneDrive Activity User Detail CSV and aggregates active sync client users in chunks."""
     usage_logger.info(f"Processing OneDrive Activity User Detail file: {os.path.basename(filepath)}")
     if not os.path.exists(filepath):
         usage_logger.error(f"Error: Could not find OneDrive Activity report {filepath}")
@@ -123,19 +139,19 @@ def parse_onedrive_activity_csv(filepath):
     headers = pd.read_csv(filepath, nrows=0).columns.tolist()
     expected = ["Is Deleted", "Synced File Count"]
     cols = [c for c in expected if c in headers]
-    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    if "Is Deleted" in df.columns:
-        mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
-        active_df = df[mask]
-    else:
-        active_df = df
+    sync_users = 0
 
-    if "Synced File Count" in active_df.columns:
-        synced_series = pd.to_numeric(active_df["Synced File Count"], errors='coerce').fillna(0)
-        sync_users = int((synced_series > 0).sum())
-    else:
-        sync_users = 0
+    for chunk in pd.read_csv(filepath, usecols=cols, chunksize=10000, encoding="utf-8-sig"):
+        if "Is Deleted" in chunk.columns:
+            mask = chunk["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+            active_chunk = chunk[mask]
+        else:
+            active_chunk = chunk
+
+        if "Synced File Count" in active_chunk.columns:
+            synced_series = pd.to_numeric(active_chunk["Synced File Count"], errors='coerce').fillna(0)
+            sync_users += int((synced_series > 0).sum())
 
     usage_logger.info(f"OneDrive Activity parsing complete: sync_users={sync_users}")
     return {
@@ -143,7 +159,7 @@ def parse_onedrive_activity_csv(filepath):
     }
 
 def parse_onenote_users_csv(filepath):
-    """Streams the M365 App User Detail CSV and counts unique active OneNote users."""
+    """Streams the M365 App User Detail CSV and counts unique active OneNote users in chunks."""
     usage_logger.info(f"Processing OneNote Users file: {os.path.basename(filepath)}")
     if not os.path.exists(filepath):
         usage_logger.error(f"Error: Could not find M365 App User Detail report {filepath}")
@@ -152,19 +168,19 @@ def parse_onenote_users_csv(filepath):
     headers = pd.read_csv(filepath, nrows=0).columns.tolist()
     expected = ["Is Deleted", "OneNote"]
     cols = [c for c in expected if c in headers]
-    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
 
-    if "Is Deleted" in df.columns:
-        mask = df["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
-        active_df = df[mask]
-    else:
-        active_df = df
+    onenote_users = 0
 
-    if "OneNote" in active_df.columns:
-        onenote_series = active_df["OneNote"].astype(str).str.strip().str.lower()
-        onenote_users = int(onenote_series.isin(["yes", "true"]).sum())
-    else:
-        onenote_users = 0
+    for chunk in pd.read_csv(filepath, usecols=cols, chunksize=10000, encoding="utf-8-sig"):
+        if "Is Deleted" in chunk.columns:
+            mask = chunk["Is Deleted"].astype(str).str.strip().str.upper() != "TRUE"
+            active_chunk = chunk[mask]
+        else:
+            active_chunk = chunk
+
+        if "OneNote" in active_chunk.columns:
+            onenote_series = active_chunk["OneNote"].astype(str).str.strip().str.lower()
+            onenote_users += int(onenote_series.isin(["yes", "true"]).sum())
 
     usage_logger.info(f"OneNote Users parsing complete: onenote_users={onenote_users}")
     return {
