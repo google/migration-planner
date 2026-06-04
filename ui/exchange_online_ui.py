@@ -1684,9 +1684,19 @@ class MigrationEstimatorTool(ctk.CTk):
     for u in all_users:
       upn = u["userPrincipalName"]
       key = str(upn).lower().strip()
+      otherAliases = []
+      if "proxyAddresses" in u:
+        for alias in u["proxyAddresses"]:
+          alias = str(alias).lower().strip()
+          if alias.startswith("smtp:"):
+            alias = alias[5:]
+          if alias != key:
+            otherAliases.append(alias)
+
       row = {
           "User Principal Name / Group Mail": upn,
           "User ID / Group ID": u["id"],
+          "Other Aliases": ';'.join(otherAliases),
           "Type": "User",
           "Email Count": 0,
           "Contact Count": 0,
@@ -2351,7 +2361,7 @@ class MigrationEstimatorTool(ctk.CTk):
     }
     df_output = df.rename(columns=output_map)
 
-    final_columns = ["Email Id", "Suggested Batch", "Type"]
+    final_columns = ["Email Id", "Other Aliases", "Suggested Batch", "Type"]
     if config.scan_email:
       final_columns.append("Email Count")
     if config.scan_contact:
@@ -2821,7 +2831,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
   def _get_all_users_graph(self, manager):
     users = []
-    url = f"{GRAPH_BASE_URL}/users?$select=id,userPrincipalName&$top=999"
+    url = f"{GRAPH_BASE_URL}/users?$select=id,userPrincipalName,proxyAddresses&$top=999"
     token_data = manager.get_valid_token_slot(self.log_msg)
     token = token_data["token"]
     session = manager.get_session()
