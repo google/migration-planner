@@ -96,6 +96,71 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
         "policies_error": policies_error
     }
 
+def fetch_sensitivity_labels_data(client_id, client_secret, tenant_id) -> dict:
+    """Fetch sensitivity labels and sort them."""
+    usage_logger.info("Starting Sensitivity Labels fetch...")
+    client = GraphClient(
+        tenant_id=tenant_id,
+        client_ids=client_id,
+        client_secrets=client_secret,
+        concurrency=1,
+        retries=3,
+        backoff=2
+    )
+    try:
+        client.authenticate()
+        service = SecurityService(client)
+        labels = service.fetch_sensitivity_labels()
+        # Sort labels by priority descending
+        labels.sort(key=lambda x: x.get("priority", 0), reverse=True)
+        return {"labels": labels, "error": None}
+    except Exception as e:
+        usage_logger.error("Failed to fetch sensitivity labels", exc_info=True)
+        return {"labels": None, "error": str(e)}
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+def fetch_retention_policies_data(client_id, client_secret, tenant_id) -> dict:
+    """Fetch retention policies via PowerShell client."""
+    usage_logger.info("Starting Retention Policies fetch...")
+    client = GraphClient(
+        tenant_id=tenant_id,
+        client_ids=client_id,
+        client_secrets=client_secret,
+        concurrency=1,
+        retries=3,
+        backoff=2
+    )
+    tenant_domain = tenant_id
+    try:
+        client.authenticate()
+        from core.graph.directory import DirectoryService
+        dir_svc = DirectoryService(client)
+        tenant_domain = dir_svc.get_tenant_primary_domain()
+        usage_logger.info(f"Retrieved primary tenant domain: {tenant_domain}")
+    except Exception as e:
+        usage_logger.warning(f"Could not retrieve tenant domain. Falling back to Tenant ID Guid: {e}")
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+            
+    try:
+        from core.powershell.client import PowerShellClient
+        from core.powershell.retention import RetentionService
+        
+        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret)
+        retention_service = RetentionService(ps_client)
+        policies = retention_service.fetch_retention_policies()
+        return {"policies": policies, "error": None}
+    except Exception as e:
+        usage_logger.error("Failed to fetch retention policies via PowerShell", exc_info=True)
+        return {"policies": None, "error": str(e)}
+
 
 class DataSecurityGovernanceFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping Data Security & Governance UI."""
@@ -126,8 +191,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.main_title = ctk.CTkLabel(self.inner_pad, text="Data Security & Governance", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
         self.main_title.pack(anchor="w", pady=(0, 10))
         
-        self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        
         # Sensitivity Labels section header
         self.labels_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.labels_title = ctk.CTkLabel(
@@ -137,6 +200,18 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             text_color=COLOR_TEXT_MAIN
         )
         self.labels_title.pack(side="left", anchor="w")
+        
+        self.labels_link = ctk.CTkLabel(
+            self.labels_header_frame,
+            text="Open Purview Sensitivity Label Portal ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.labels_link.pack(side="left", anchor="w", padx=(15, 0))
+        self.labels_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/informationprotection/informationprotectionlabels/sensitivitylabels"))
+        self.labels_link.bind("<Enter>", lambda e: self.labels_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.labels_link.bind("<Leave>", lambda e: self.labels_link.configure(text_color=COLOR_PRIMARY))
         
         self.btn_export_labels = ctk.CTkButton(
             self.labels_header_frame,
@@ -158,11 +233,13 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         # Grid for Sensitivity Labels
         self.labels_grid = ctk.CTkFrame(
             self.inner_pad,
-            fg_color=COLOR_OUTLINE_LIGHT,
+            fg_color=COLOR_SURFACE,
             border_color=COLOR_OUTLINE_LIGHT,
             border_width=1,
             corner_radius=8
         )
+        
+        # Pagination controls frame (centered below the grid)
         
         # Pagination controls frame (centered below the grid)
         self.pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
@@ -213,7 +290,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         self.retention_link = ctk.CTkLabel(
             self.retention_header_frame,
-            text="Open Microsoft Purview Portal ↗",
+            text="Open Purview Retention Policy Portal ↗",
             font=FONT_BODY_BOLD,
             text_color=COLOR_PRIMARY,
             cursor="hand2"
@@ -247,20 +324,88 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             corner_radius=8
         )
         
+        # eDiscovery Cases section (Instructional Guidance)
+        
+        # eDiscovery Cases section (Instructional Guidance)
+        self.ediscovery_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.ediscovery_title = ctk.CTkLabel(
+            self.ediscovery_header_frame,
+            text="eDiscovery Cases",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.ediscovery_title.pack(side="left", anchor="w")
+        
+        self.ediscovery_body_frame = ctk.CTkFrame(
+            self.inner_pad,
+            fg_color=COLOR_SURFACE,
+            border_color=COLOR_OUTLINE_LIGHT,
+            border_width=1,
+            corner_radius=8
+        )
+        
+        self.ediscovery_content = ctk.CTkFrame(self.ediscovery_body_frame, fg_color="transparent")
+        self.ediscovery_content.pack(fill="x", padx=20, pady=20)
+        
+        lbl_inst1 = ctk.CTkLabel(
+            self.ediscovery_content,
+            text="eDiscovery cases cannot be scanned directly under standard Application permissions. To view your active cases, please navigate to Microsoft Purview:",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            justify="left",
+            wraplength=700
+        )
+        lbl_inst1.pack(anchor="w", pady=(0, 8))
+        
+        lbl_cases_link = ctk.CTkLabel(
+            self.ediscovery_content,
+            text="🔗 Open Purview eDiscovery Cases Portal",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        lbl_cases_link.pack(anchor="w", pady=(0, 15))
+        lbl_cases_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/ediscovery/casespage"))
+        lbl_cases_link.bind("<Enter>", lambda e: lbl_cases_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        lbl_cases_link.bind("<Leave>", lambda e: lbl_cases_link.configure(text_color=COLOR_PRIMARY))
+        
+        lbl_inst2 = ctk.CTkLabel(
+            self.ediscovery_content,
+            text="Note: Accessing eDiscovery cases requires your administrator account to have the eDiscovery Manager role assigned in the tenant permissions page:",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_SUB,
+            justify="left",
+            wraplength=700
+        )
+        lbl_inst2.pack(anchor="w", pady=(0, 8))
+        
+        lbl_roles_link = ctk.CTkLabel(
+            self.ediscovery_content,
+            text="🔗 Assign eDiscovery Manager Role in Purview Settings",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        lbl_roles_link.pack(anchor="w")
+        lbl_roles_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/settings/purviewpermissions"))
+        lbl_roles_link.bind("<Enter>", lambda e: lbl_roles_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        lbl_roles_link.bind("<Leave>", lambda e: lbl_roles_link.configure(text_color=COLOR_PRIMARY))
+        
         self.reset_view()
 
     def reset_view(self):
         """Resets and hides grids."""
         self.pack_forget()
-        self.state_frame.pack_forget()
+        self.labels_header_frame.pack_forget()
         self.labels_grid.pack_forget()
         self.pagination_frame.pack_forget()
-        self.labels_header_frame.pack_forget()
+        
         self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
         
-        for w in self.state_frame.winfo_children():
-            w.destroy()
+        self.ediscovery_header_frame.pack_forget()
+        self.ediscovery_body_frame.pack_forget()
+        
         for w in self.labels_grid.winfo_children():
             w.destroy()
         for w in self.retention_grid.winfo_children():
@@ -268,29 +413,47 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             
         self.flattened_rows = []
         self.current_page = 0
+        self.last_labels_data = None
+        self.last_policies_data = None
         
-        if hasattr(self, "btn_export_labels"):
-            self.btn_export_labels.configure(state="disabled")
-        if hasattr(self, "btn_export_retention"):
-            self.btn_export_retention.configure(state="disabled")
+        self.btn_export_labels.configure(state="disabled")
+        self.btn_export_retention.configure(state="disabled")
 
-    def _set_state_loading(self, msg="Loading..."):
-        for w in self.state_frame.winfo_children():
+    def _set_labels_loading(self, msg="Loading..."):
+        for w in self.labels_grid.winfo_children():
             w.destroy()
-        ctk.CTkLabel(self.state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
-        self.state_frame.pack(fill="x", expand=True)
+        self.labels_state_frame = ctk.CTkFrame(self.labels_grid, fg_color="transparent")
+        ctk.CTkLabel(self.labels_state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.labels_state_frame.pack(fill="x", expand=True)
 
-    def _set_state_error(self, error_msg):
-        for w in self.state_frame.winfo_children():
+    def _set_labels_error(self, error_msg):
+        for w in self.labels_grid.winfo_children():
             w.destroy()
-
+        self.labels_state_frame = ctk.CTkFrame(self.labels_grid, fg_color="transparent")
         display_msg = error_msg
         if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
             display_msg = "Information Protection permission required.\nPlease grant the 'SensitivityLabels.Read.All' application permission to your App Registration in Microsoft Entra ID."
+        ctk.CTkLabel(self.labels_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
+        self.labels_state_frame.pack(fill="x", expand=True)
 
-        ctk.CTkLabel(self.state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 10))
-        ctk.CTkButton(self.state_frame, text="Try Again", command=self._retry_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
-        self.state_frame.pack(fill="x", expand=True)
+    def _set_retention_loading(self, msg="Loading..."):
+        for w in self.retention_grid.winfo_children():
+            w.destroy()
+        self.retention_state_frame = ctk.CTkFrame(self.retention_grid, fg_color="transparent")
+        ctk.CTkLabel(self.retention_state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.retention_state_frame.pack(fill="x", expand=True)
+
+    def _set_retention_error(self, error_msg):
+        for w in self.retention_grid.winfo_children():
+            w.destroy()
+        self.retention_state_frame = ctk.CTkFrame(self.retention_grid, fg_color="transparent")
+        display_msg = error_msg
+        if "is not installed or not in PATH" in error_msg.lower() or "pwsh" in error_msg.lower():
+            display_msg = "PowerShell Core ('pwsh') is not installed or configured on this machine."
+        elif "exchangeonlinemanagement" in error_msg.lower():
+            display_msg = "ExchangeOnlineManagement PowerShell module is missing."
+        ctk.CTkLabel(self.retention_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
+        self.retention_state_frame.pack(fill="x", expand=True)
 
     def _retry_fetch(self):
         tenant, clients, secrets = self.get_credentials()
@@ -299,127 +462,154 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         """Triggers parallel fetches inside isolated background threads."""
-        usage_logger.info("Data Security & Governance trigger_fetch called. Spawning background worker thread...")
+        usage_logger.info("Data Security & Governance trigger_fetch called. Spawning background worker threads...")
         self.status = "loading"
         self.on_status_change()
         
         self.pack(fill="x", expand=True, pady=(20, 10))
-        self.labels_grid.pack_forget()
-        self.labels_header_frame.pack_forget()
-        self.retention_header_frame.pack_forget()
-        self.retention_grid.pack_forget()
         
-        self._set_state_loading("Retrieving tenant Security & Compliance policies...")
+        # Pack Sensitivity Labels Section
+        self.labels_header_frame.pack(fill="x", pady=(0, 10))
+        self.labels_grid.pack(fill="x", expand=True, pady=(0, 15))
+        self.pagination_frame.pack_forget()
+        self._set_labels_loading("Retrieving Sensitivity labels...")
+        
+        # Pack Retention Policies Section
+        self.retention_header_frame.pack(fill="x", pady=(20, 10))
+        self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
+        self._set_retention_loading("Retrieving Retention policies...")
+        
+        # Pack eDiscovery Cases Section (static, show immediately)
+        self.ediscovery_header_frame.pack(fill="x", pady=(20, 10))
+        self.ediscovery_body_frame.pack(fill="x", expand=True, pady=(0, 15))
         
         self.btn_export_labels.configure(state="disabled")
         self.btn_export_retention.configure(state="disabled")
         
+        self.labels_status = "loading"
+        self.retention_status = "loading"
+        
         threading.Thread(
-            target=self._execute_worker,
+            target=self._execute_labels_worker,
+            args=(tenant, client_id, client_secret),
+            daemon=True
+        ).start()
+        
+        threading.Thread(
+            target=self._execute_retention_worker,
             args=(tenant, client_id, client_secret),
             daemon=True
         ).start()
 
-    def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
-        usage_logger.info("Executing thread: _execute_security_governance_worker")
-        try:
-            data = run_security_governance_pipeline(client_id, client_secret, tenant)
-            usage_logger.info("Successfully completed Data Security & Governance policy fetch.")
-            self.after(0, self._render_success, data)
-        except Exception as e:
-            usage_logger.error("Exception caught in Data Security & Governance worker.", exc_info=True)
-            self.after(0, self._render_error, str(e))
+    def _execute_labels_worker(self, tenant: str, client_id: str, client_secret: str):
+        usage_logger.info("Executing thread: _execute_labels_worker")
+        res = fetch_sensitivity_labels_data(client_id, client_secret, tenant)
+        self.after(0, self._handle_labels_result, res)
 
-    def _render_success(self, data: dict):
-        self.state_frame.pack_forget()
+    def _execute_retention_worker(self, tenant: str, client_id: str, client_secret: str):
+        usage_logger.info("Executing thread: _execute_retention_worker")
+        res = fetch_retention_policies_data(client_id, client_secret, tenant)
+        self.after(0, self._handle_retention_result, res)
+
+    def _handle_labels_result(self, result: dict):
         for w in self.labels_grid.winfo_children():
             w.destroy()
-        for w in self.retention_grid.winfo_children():
-            w.destroy()
-
-        labels = data.get("labels")
-        labels_error = data.get("labels_error")
-        policies = data.get("policies")
-        policies_error = data.get("policies_error")
-
+            
+        labels = result.get("labels")
+        err = result.get("error")
         self.last_labels_data = labels
-        self.last_policies_data = policies
-
-        usage_logger.info(f"Sensitivity Labels fetched successfully. Total labels to render: {len(labels) if labels else 0}")
-        self.status = "success"
-
-        # 1. Render Sensitivity Labels Grid
-        self.labels_header_frame.pack(fill="x", pady=(0, 10))
-        self.labels_grid.pack(fill="x", expand=True, pady=(0, 15))
-
-        if labels_error:
-            ctk.CTkLabel(self.labels_grid, text=f"✖ Failed to load Sensitivity Labels: {labels_error}", font=FONT_BODY_MEDIUM, text_color=COLOR_ERROR).pack(padx=20, pady=20)
-            self.pagination_frame.pack_forget()
-            self.btn_export_labels.configure(state="disabled")
-        elif labels is None or not labels:
-            ctk.CTkLabel(self.labels_grid, text="No Sensitivity Labels configured in this tenant.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(padx=20, pady=20)
-            self.pagination_frame.pack_forget()
+        
+        if err:
+            self.labels_status = "error"
+            self._set_labels_error(err)
             self.btn_export_labels.configure(state="disabled")
         else:
-            self.btn_export_labels.configure(state="normal")
-            # Define column weights for proper proportional spacing
-            self.labels_grid.grid_columnconfigure(0, weight=2)  # Label Name
-            self.labels_grid.grid_columnconfigure(1, weight=3)  # Description
-            self.labels_grid.grid_columnconfigure(2, weight=1)  # Protection
-            self.labels_grid.grid_columnconfigure(3, weight=1)  # Mode
-            self.labels_grid.grid_columnconfigure(4, weight=1)  # Priority
-            self.labels_grid.grid_columnconfigure(5, weight=2)  # Applicable To
-            self.labels_grid.grid_columnconfigure(6, weight=1)  # Status
-
-            headers = ["Sensitivity Label", "Description", "Protection", "Mode", "Priority", "Applicable Targets", "Status"]
-            for col_idx, head_text in enumerate(headers):
-                cell = ctk.CTkFrame(self.labels_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
-                cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
-                ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
-
-            # Flatten parent labels and their sorted sublabels
-            self.flattened_rows = []
-            for parent in labels:
-                self.flattened_rows.append({
-                    "name": parent.get("name", "N/A"),
-                    "description": parent.get("description", "") or parent.get("toolTip", "") or "N/A",
-                    "hasProtection": parent.get("hasProtection", False),
-                    "applicationMode": parent.get("applicationMode", "N/A") or "N/A",
-                    "priority": parent.get("priority", 0),
-                    "applicableTo": parent.get("applicableTo", ""),
-                    "isEnabled": parent.get("isEnabled", True),
-                    "is_sublabel": False
-                })
-                
-                sublabels = parent.get("sublabels", [])
-                if sublabels:
-                    # Sort sublabels by priority descending
-                    sublabels_sorted = sorted(sublabels, key=lambda x: x.get("priority", 0), reverse=True)
-                    for sub in sublabels_sorted:
-                        self.flattened_rows.append({
-                            "name": f"    ↳  {sub.get('name', 'N/A')}",
-                            "description": sub.get("description", "") or sub.get("toolTip", "") or "N/A",
-                            "hasProtection": sub.get("hasProtection", False),
-                            "applicationMode": sub.get("applicationMode", "N/A") or "N/A",
-                            "priority": sub.get("priority", 0),
-                            "applicableTo": sub.get("applicableTo", ""),
-                            "isEnabled": sub.get("isEnabled", True),
-                            "is_sublabel": True
-                        })
-
-            self.current_page = 0
-            self._display_current_page()
-
-            if len(self.flattened_rows) > self.ITEMS_PER_PAGE:
-                self.pagination_frame.pack(pady=(5, 10))
-            else:
+            self.labels_status = "success"
+            
+            if not labels:
+                ctk.CTkLabel(self.labels_grid, text="No Sensitivity Labels configured in this tenant.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(padx=20, pady=20)
                 self.pagination_frame.pack_forget()
+                self.btn_export_labels.configure(state="disabled")
+            else:
+                self.btn_export_labels.configure(state="normal")
+                # Define column weights for proper proportional spacing
+                self.labels_grid.grid_columnconfigure(0, weight=2)  # Label Name
+                self.labels_grid.grid_columnconfigure(1, weight=3)  # Description
+                self.labels_grid.grid_columnconfigure(2, weight=1)  # Protection
+                self.labels_grid.grid_columnconfigure(3, weight=1)  # Mode
+                self.labels_grid.grid_columnconfigure(4, weight=1)  # Priority
+                self.labels_grid.grid_columnconfigure(5, weight=2)  # Applicable To
+                self.labels_grid.grid_columnconfigure(6, weight=1)  # Status
+                
+                headers = ["Sensitivity Label", "Description", "Protection", "Mode", "Priority", "Applicable Targets", "Status"]
+                for col_idx, head_text in enumerate(headers):
+                    cell = ctk.CTkFrame(self.labels_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+                    cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+                    ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+                    
+                # Flatten parent labels and their sorted sublabels
+                self.flattened_rows = []
+                for parent in labels:
+                    self.flattened_rows.append({
+                        "name": parent.get("name", "N/A"),
+                        "description": parent.get("description", "") or parent.get("toolTip", "") or "N/A",
+                        "hasProtection": parent.get("hasProtection", False),
+                        "applicationMode": parent.get("applicationMode", "N/A") or "N/A",
+                        "priority": parent.get("priority", 0),
+                        "applicableTo": parent.get("applicableTo", ""),
+                        "isEnabled": parent.get("isEnabled", True),
+                        "is_sublabel": False
+                    })
+                    sublabels = parent.get("sublabels", [])
+                    if sublabels:
+                        sublabels_sorted = sorted(sublabels, key=lambda x: x.get("priority", 0), reverse=True)
+                        for sub in sublabels_sorted:
+                            self.flattened_rows.append({
+                                "name": f"    ↳  {sub.get('name', 'N/A')}",
+                                "description": sub.get("description", "") or sub.get("toolTip", "") or "N/A",
+                                "hasProtection": sub.get("hasProtection", False),
+                                "applicationMode": sub.get("applicationMode", "N/A") or "N/A",
+                                "priority": sub.get("priority", 0),
+                                "applicableTo": sub.get("applicableTo", ""),
+                                "isEnabled": sub.get("isEnabled", True),
+                                "is_sublabel": True
+                            })
+                            
+                self.current_page = 0
+                self._display_current_page()
+                
+                if len(self.flattened_rows) > self.ITEMS_PER_PAGE:
+                    self.pagination_frame.pack(pady=(5, 10))
+                else:
+                    self.pagination_frame.pack_forget()
+                    
+        self._check_overall_status()
 
-        # 2. Render Retention Policies Grid
-        self.retention_header_frame.pack(fill="x", pady=(20, 10))
-        self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
-        self._render_retention_policies(policies, policies_error)
+    def _handle_retention_result(self, result: dict):
+        for w in self.retention_grid.winfo_children():
+            w.destroy()
+            
+        policies = result.get("policies")
+        err = result.get("error")
+        self.last_policies_data = policies
+        
+        if err:
+            self.retention_status = "error"
+            self._set_retention_error(err)
+            self.btn_export_retention.configure(state="disabled")
+        else:
+            self.retention_status = "success"
+            self._render_retention_policies(policies, None)
+            
+        self._check_overall_status()
 
+    def _check_overall_status(self):
+        if self.labels_status == "loading" or self.retention_status == "loading":
+            self.status = "loading"
+        elif self.labels_status == "error" and self.retention_status == "error":
+            self.status = "error"
+        else:
+            self.status = "success"
         self.on_status_change()
 
     def _display_current_page(self):
@@ -562,11 +752,10 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self.retention_grid.grid_columnconfigure(0, weight=3)  # Policy Name
             self.retention_grid.grid_columnconfigure(1, weight=3)  # Workloads
             self.retention_grid.grid_columnconfigure(2, weight=2)  # Duration & Trigger
-            self.retention_grid.grid_columnconfigure(3, weight=1)  # Mode
-            self.retention_grid.grid_columnconfigure(4, weight=1)  # Distribution
-            self.retention_grid.grid_columnconfigure(5, weight=1)  # Status
+            self.retention_grid.grid_columnconfigure(3, weight=1)  # Distribution
+            self.retention_grid.grid_columnconfigure(4, weight=1)  # Status
 
-            headers = ["Policy Name", "Workloads", "Duration", "Mode", "Distribution", "Status"]
+            headers = ["Policy Name", "Workloads", "Duration", "Distribution", "Status"]
             for col_idx, head_text in enumerate(headers):
                 cell = ctk.CTkFrame(self.retention_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
                 cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
@@ -648,15 +837,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
                 c3 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c3, text=mode, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                ctk.CTkLabel(c3, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
                 c4 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
                 c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c4, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
-
-                c5 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
-                c5.grid(row=r_idx, column=5, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c5, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+                ctk.CTkLabel(c4, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
     def export_labels_csv(self):
         """Prompts the user to save sensitivity labels as a detailed CSV file."""
