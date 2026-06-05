@@ -32,6 +32,7 @@ from telemetry.power_automate import PowerAutomateUsageFrame
 # Import existing modular views
 from telemetry.sharepoint_onedrive_usage import SharePointUsageFrame, OneDriveUsageFrame
 from telemetry.mailbox_usage import MailboxUsageFrame
+from telemetry.calendar_telemetry import CalendarTelemetryFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
 
 from telemetry.styles import *
@@ -217,7 +218,15 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
-        # 5b. SharePoint Telemetry Section
+        # 5b. Exchange Online Calendar Telemetry Section
+        self.calendar_view = CalendarTelemetryFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done
+        )
+
+        # 5c. SharePoint Telemetry Section
         self.sharepoint_view = SharePointUsageFrame(
             master=self,
             log_callback=self.log_msg,
@@ -226,7 +235,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
-        # 5c. OneDrive Telemetry Section
+        # 5d. OneDrive Telemetry Section
         self.onedrive_view = OneDriveUsageFrame(
             master=self,
             log_callback=self.log_msg,
@@ -261,6 +270,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.active_users_trend_view.reset_view()
         self.m365_apps_view.reset_view()
         self.mailbox_view.reset_view()
+        self.calendar_view.reset_view()
         self.sharepoint_view.reset_view()
         self.onedrive_view.reset_view()
         self.security_gov_view.reset_view()
@@ -290,6 +300,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.onedrive_view.status,
             self.security_gov_view.status,
             self.power_automate_view.status,
+            self.calendar_view.status,
         ]
 
         if "loading" in states:
@@ -324,6 +335,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.active_users_trend_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.m365_apps_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.mailbox_view.trigger_fetch(tenant, clients[0], secrets[0])
+        self.calendar_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.sharepoint_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.onedrive_view.trigger_fetch(tenant, clients[0], secrets[0])
         self.security_gov_view.trigger_fetch(tenant, clients[0], secrets[0])

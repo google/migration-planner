@@ -40,6 +40,24 @@ The telemetry planner uses local certificate-based authentication for connecting
    - Select and upload the generated `certificate.pem` file.
 4. Click **Continue** in the application interface to complete the connection flow.
 
+### 4. Entra ID App & PowerShell Permissions (Calendar & Mailbox Telemetry)
+
+For the core telemetry scanners (Calendar Telemetry, Active Users, Mailbox/SharePoint Usage, etc.) to query successfully:
+
+#### A. Microsoft Graph API Permissions (Application Scopes)
+Ensure the following **Application** API permissions are granted and admin-consented in your App Registration:
+- `Place.Read.All`: Used to list meeting rooms and resource device counts.
+- `User.Read.All`: Used to read user directory identities to aggregate settings.
+- `Calendars.ReadBasic.All`: Used to audit organizational calendar permissions.
+- `Reports.Read.All`: Used to retrieve active user trends and mailbox/SharePoint usage reports.
+- `Directory.Read.All`: Used to read tenant organization configuration data.
+
+#### B. Exchange Online PowerShell Roles
+The certificate-based PowerShell client requires administrative roles to read Exchange policies (OWA, default apps, sharing policies). 
+In the **Microsoft Entra ID Portal** > **Roles and administrators**, assign one of the following directory roles to your App Registration:
+- **Global Reader** (Recommended, read-only)
+- **Exchange Administrator**
+
 ## Logging
 Logs are appended to `telemetry/logs/power_automate_log.txt`.
 
