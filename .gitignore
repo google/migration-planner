@@ -10,3 +10,14 @@ env/
 outputs/
 data/
 test_*.py
+
+# Generated application artifacts
+certificate/
+certificates/
+telemetry/reports/
+telemetry/logs/
+
+# macOS Finder metadata
+.DS_Store
+.DS_Store?
+._*
