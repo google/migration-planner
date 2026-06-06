@@ -15,11 +15,11 @@ class EstimatorFactory:
   def __init__(
     self,
     config: ScanConfig,
-    client: GraphClient = None,
     manager: TokenManager = None,
     logger = None,
     stop_event = None,
-    id_to_display_name = None
+    id_to_display_name = None,
+    client: GraphClient = None,
   ):
     self.client = client
     self.manager = manager
@@ -45,15 +45,14 @@ class EstimatorFactory:
       else:
         if self.isEmpty(self.config.client_ids) or self.isEmpty(self.config.client_secrets) or self.isEmpty(self.config.tenant_id):
           raise Exception("Missing credentials for tenant scan!!")
-        self.client = GraphClient(
-            self.config.tenant_id,
-            self.config.client_ids,
-            self.config.client_secrets,
-            self.config.concurrency,
-            self.config.retries,
-            self.config.backoff
+        self.manager = TokenManager(
+          self.config.tenant_id,
+          self.config.client_ids,
+          self.config.client_secrets,
+          self.config.concurrency,
+          self.config.retries,
+          self.config.backoff,
         )
-        self.manager = self.client.token_manager
     
     return self.manager
 

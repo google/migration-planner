@@ -57,7 +57,7 @@ class ChatEstimator(Estimator):
       with DatabaseManager("data/chat_migration_v2.db") as db:
         with AuditLogger("outputs") as auditor:
           metrics = MetricsRegistry()
-          client = GraphBatchClient()
+          client = GraphBatchClient(log_func=self.logger)
 
           service = ChatScannerService(
               db=db,
