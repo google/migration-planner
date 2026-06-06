@@ -595,6 +595,34 @@ class SidebarFrame(ctk.CTkFrame):
         )
         self.disconnect_btn.pack(side="left", fill="x", expand=True)
 
+        # RAM Usage Display Row (packed second with side="bottom", placing it directly above disconnect_row)
+        self.ram_row = ctk.CTkFrame(self, fg_color="transparent")
+        self.ram_row.pack(fill="x", side="bottom", padx=20, pady=(0, 10))
+
+        self.ram_symbol = ctk.CTkLabel(
+            self.ram_row,
+            text="💾",
+            font=ctk.CTkFont(family="Segoe UI", size=14),
+            text_color=COLOR_TEXT_SUB
+        )
+        self.ram_symbol.pack(side="left", padx=(12, 6))
+
+        self.ram_lbl = ctk.CTkLabel(
+            self.ram_row,
+            text="RAM: Checking...",
+            anchor="w",
+            height=38,
+            text_color=COLOR_TEXT_SUB,
+            font=FONT_BODY_MEDIUM
+        )
+        self.ram_lbl.pack(side="left", fill="x", expand=True)
+
+        self._last_ram_log_time = 0
+        # Start periodic RAM usage updates
+        self.update_ram_usage()
+
+
+
     def render_navigation_menu(self):
         """Builds clean selection widgets mapping Workspace items."""
         for item in self.menu_buttons:
@@ -656,6 +684,7 @@ class SidebarFrame(ctk.CTkFrame):
             for row, btn, icon in self.menu_buttons:
                 btn.configure(text="")
             self.disconnect_btn.configure(text="")
+            self.ram_lbl.configure(text="")
             logger.info("Sidebar collapsed.")
         else:
             # Return layout to expanded parameters (380px)
@@ -669,7 +698,39 @@ class SidebarFrame(ctk.CTkFrame):
             for idx, (row, btn, icon) in enumerate(self.menu_buttons):
                 btn.configure(text=self.menu_data[idx][0])
             self.disconnect_btn.configure(text="Disconnect")
+            self.update_ram_label_immediate()
             logger.info("Sidebar expanded.")
+
+    def update_ram_label_immediate(self):
+        """Updates the RAM label text immediately without waiting for the timer."""
+        try:
+            import psutil
+            process = psutil.Process(os.getpid())
+            ram_mb = process.memory_info().rss / (1024 * 1024)
+            if self.is_expanded:
+                self.ram_lbl.configure(text=f"RAM: {ram_mb:.1f} MB")
+            else:
+                self.ram_lbl.configure(text="")
+
+            # Log RAM usage to log file every 10 seconds
+            import time
+            now = time.time()
+            if now - self._last_ram_log_time >= 10:
+                logger.info(f"App memory consumption: {ram_mb:.1f} MB")
+                self._last_ram_log_time = now
+        except Exception as e:
+            logger.error(f"Error checking RAM usage: {e}")
+            if self.is_expanded:
+                self.ram_lbl.configure(text="RAM: N/A")
+            else:
+                self.ram_lbl.configure(text="")
+
+
+    def update_ram_usage(self):
+        """Periodically updates the displayed RAM usage of the current process."""
+        self.update_ram_label_immediate()
+        self._ram_timer_id = self.after(2000, self.update_ram_usage)
+
 
 
 def collect_power_automate_telemetry(tenant_id, client_id, client_secret, env_url):  # CITATION: def collect_power_automate_telemetry(tenant_id, client_id, client_secret, env_url):

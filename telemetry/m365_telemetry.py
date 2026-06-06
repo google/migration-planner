@@ -120,9 +120,19 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.lic_client_secrets = ctk.StringVar()
 
         self.on_all_done_callback = None
-        self.telemetry_semaphore = threading.Semaphore(6)
+        self.telemetry_semaphore = threading.Semaphore(3)
 
         self.build_ui()
+
+        # Batching orchestration for sequential loading of sections in groups of 3
+        self.batches = [
+            [self.subscribed_skus_view, self.active_users_view, self.active_users_trend_view],
+            [self.m365_apps_view, self.mailbox_view, self.calendar_view],
+            [self.sharepoint_view, self.onedrive_view, self.security_gov_view],
+            [self.power_automate_view]
+        ]
+        self.current_batch_index = 0
+
 
         # Bind mouse wheel globally to scroll this tab when hovered
         self.bind_all("<MouseWheel>", self._handle_global_mousewheel, add="+")
@@ -223,7 +233,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
         )
 
         # 5c. SharePoint Telemetry Section
@@ -289,26 +300,32 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         return tenant, clients, secrets
 
     def _check_all_done(self):
-        """Checks if all sections have resolved (success or error) and updates main UI."""
-        states = [
-            self.subscribed_skus_view.status,
-            self.active_users_view.status,
-            self.active_users_trend_view.status,
-            self.m365_apps_view.status,
-            self.mailbox_view.status,
-            self.sharepoint_view.status,
-            self.onedrive_view.status,
-            self.security_gov_view.status,
-            self.power_automate_view.status,
-            self.calendar_view.status,
-        ]
-
-        if "loading" in states:
+        """Checks if all sections of the current batch have resolved, then triggers next batch or finishes."""
+        if not hasattr(self, "batches"):
             return
 
+        current_views = self.batches[self.current_batch_index]
+        batch_states = [view.status for view in current_views]
+
+        if "loading" in batch_states:
+            return
+
+        # Current batch completed. Check if there are more batches to run
+        if self.current_batch_index < len(self.batches) - 1:
+            self.current_batch_index += 1
+            self.trigger_current_batch()
+            return
+
+        # All batches have finished. Make sure no individual retries are still loading
+        all_views = [view for batch in self.batches for view in batch]
+        global_states = [v.status for v in all_views]
+        if "loading" in global_states:
+            return
+
+        # Re-enable the submit button
         self.btn_lic_submit.configure(state="normal", text="Submit")
 
-        success = all(s == "success" for s in states)
+        success = all(s == "success" for s in global_states)
         if success:
             self.lbl_lic_status.configure(text="✔ All Inventory and Usage Reports Pulled Successfully!", text_color=COLOR_SUCCESS)
         else:
@@ -317,9 +334,24 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         if hasattr(self, "on_all_done_callback") and self.on_all_done_callback:
             self.on_all_done_callback(success)
 
+    def trigger_current_batch(self):
+        """Triggers the fetches for the current batch of sections."""
+        tenant, clients, secrets = self._get_credentials()
+        if not tenant:
+            return
+
+        current_views = self.batches[self.current_batch_index]
+        async_logger.info(f"Triggering batch {self.current_batch_index + 1} with {len(current_views)} views.")
+
+        for view in current_views:
+            if isinstance(view, SubscribedSKUsFrame):
+                view.trigger_fetch(tenant, clients, secrets)
+            else:
+                view.trigger_fetch(tenant, clients[0], secrets[0])
+
     def authenticate_licenses_tab(self):
-        """Master full parallel fetch."""
-        async_logger.info("Master Submit triggered. Restarting all fetches.")
+        """Master full parallel fetch in sequential batches of 3."""
+        async_logger.info("Master Submit triggered. Restarting all fetches in sequential batches of 3.")
 
         tenant, clients, secrets = self._get_credentials()
         if not tenant:
@@ -328,18 +360,14 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             return
 
         self.btn_lic_submit.configure(state="disabled", text="Submitting...")
-        self.lbl_lic_status.configure(text="Querying Microsoft Graph APIs and Reports in parallel...", text_color=COLOR_TEXT_SUB)
+        self.lbl_lic_status.configure(text="Querying Microsoft Graph APIs and Reports in sequential batches of 3...", text_color=COLOR_TEXT_SUB)
 
-        self.subscribed_skus_view.trigger_fetch(tenant, clients, secrets)
-        self.active_users_view.trigger_fetch(tenant, clients[0], secrets[0])
-        self.active_users_trend_view.trigger_fetch(tenant, clients[0], secrets[0])
-        self.m365_apps_view.trigger_fetch(tenant, clients[0], secrets[0])
-        self.mailbox_view.trigger_fetch(tenant, clients[0], secrets[0])
-        self.calendar_view.trigger_fetch(tenant, clients[0], secrets[0])
-        self.sharepoint_view.trigger_fetch(tenant, clients[0], secrets[0])
-        self.onedrive_view.trigger_fetch(tenant, clients[0], secrets[0])
-        self.security_gov_view.trigger_fetch(tenant, clients[0], secrets[0])
-        self.power_automate_view.trigger_fetch(tenant, clients[0], secrets[0])
+        # Reset all views first
+        self._hide_all_grids()
+
+        self.current_batch_index = 0
+        self.trigger_current_batch()
+
 
     def is_descendant(self, parent, widget) -> bool:
         """Recursively checks if a widget (or its Tkinter path name) is a descendant of parent."""

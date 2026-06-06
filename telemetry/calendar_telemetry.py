@@ -106,6 +106,7 @@ class CalendarTelemetryFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping Exchange Online Calendar Environment Telemetry UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
+        self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -181,6 +182,8 @@ class CalendarTelemetryFrame(ctk.CTkFrame):
 
     def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
         calendar_logger.info("Executing thread: _execute_calendar_worker")
+        if self.semaphore:
+            self.semaphore.acquire()
         try:
             data = run_calendar_telemetry_pipeline(client_id, client_secret, tenant)
             calendar_logger.info("Successfully completed Calendar telemetry data fetch.")
@@ -188,6 +191,9 @@ class CalendarTelemetryFrame(ctk.CTkFrame):
         except Exception as e:
             calendar_logger.error("Exception caught in Calendar worker.", exc_info=True)
             self.after(0, self._render_error, str(e))
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
     def _render_success(self, data: dict):
         calendar_logger.info("Calendar data successfully retrieved. Rendering UI grid.")

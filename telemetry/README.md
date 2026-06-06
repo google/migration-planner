@@ -2,14 +2,18 @@
 
 ## Prerequisites
 
-The certificate authentication flow and reports parsing require the following Python libraries:
-* `msal`
-* `cryptography`
+The certificate authentication flow, reports parsing, and user interface require the following Python libraries:
+* `customtkinter`
+* `requests`
 * `pandas`
+* `psutil`
+* `matplotlib`
+* `cryptography`
+* `msal`
 
 You can install them via pip:
 ```bash
-pip install msal cryptography pandas
+pip install customtkinter requests pandas psutil matplotlib cryptography msal
 ```
 
 
