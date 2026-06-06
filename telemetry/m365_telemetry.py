@@ -276,16 +276,32 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self._hide_all_grids()
 
     def _hide_all_grids(self):
-        self.subscribed_skus_view.reset_view()
-        self.active_users_view.reset_view()
-        self.active_users_trend_view.reset_view()
-        self.m365_apps_view.reset_view()
-        self.mailbox_view.reset_view()
-        self.calendar_view.reset_view()
-        self.sharepoint_view.reset_view()
-        self.onedrive_view.reset_view()
-        self.security_gov_view.reset_view()
-        self.power_automate_view.reset_view()
+        views = [
+            self.subscribed_skus_view,
+            self.active_users_view,
+            self.active_users_trend_view,
+            self.m365_apps_view,
+            self.mailbox_view,
+            self.calendar_view,
+            self.sharepoint_view,
+            self.onedrive_view,
+            self.security_gov_view,
+            self.power_automate_view
+        ]
+        for view in views:
+            view.reset_view()
+            view.status = None
+
+    def reset_tab(self):
+        """Resets the coordinator status, credentials variables, submission button, and hides all grids."""
+        async_logger.info("Resetting M365TelemetryTab coordinator and hiding all sub-grids.")
+        self.lic_tenant_id.set("")
+        self.lic_client_ids.set("")
+        self.lic_client_secrets.set("")
+        self.btn_lic_submit.configure(state="normal", text="Submit")
+        self.lbl_lic_status.configure(text="")
+        self.current_batch_index = 0
+        self._hide_all_grids()
 
     def _get_credentials(self):
         tenant = self.lic_tenant_id.get().strip()

@@ -505,6 +505,9 @@ class ReportsPage(ctk.CTkFrame):
         # Reset Fetch Report button state
         self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color="#1E3A8A")
 
+        # Reset the telemetry coordinator tab and hide all grids
+        self.m365_telemetry_view.reset_tab()
+
 
 class SidebarFrame(ctk.CTkFrame):
     """Collapsible Left Navigation Sidebar, matching Workspace Deal Assistant styling."""
