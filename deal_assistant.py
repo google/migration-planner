@@ -8,6 +8,258 @@ import logging
 from telemetry.power_automate import PowerAutomateScanner
 from telemetry.styles import *
 
+import queue
+import threading
+import ui.exchange_online_ui
+import ui.chats_ui
+import ui.files_ui
+
+# Create custom helper base class to embed CTk windows as CTkFrames
+class EmbeddedCTkFrameHelper(ctk.CTkFrame):
+    _current_master = None
+
+    def __init__(self, master=None, *args, **kwargs):
+        actual_master = getattr(EmbeddedCTkFrameHelper, "_current_master", master)
+        super().__init__(actual_master, *args, **kwargs)
+
+    def title(self, *args, **kwargs):
+        pass
+
+    def geometry(self, *args, **kwargs):
+        pass
+
+    def protocol(self, *args, **kwargs):
+        pass
+
+    def attributes(self, *args, **kwargs):
+        pass
+
+
+# Patch estimator tool base classes in-memory
+ui.exchange_online_ui.MigrationEstimatorTool.__bases__ = (EmbeddedCTkFrameHelper,)
+ui.chats_ui.ChatMigrationEstimatorTool.__bases__ = (EmbeddedCTkFrameHelper,)
+
+
+class EmbeddedExchangeOnlineTool(ui.exchange_online_ui.MigrationEstimatorTool):
+    def __init__(self, master, controller, *args, **kwargs):
+        EmbeddedCTkFrameHelper._current_master = master
+        self.controller = controller
+        super().__init__()
+        
+        # Populate credentials
+        self.tenant_id.set(self.controller.stored_tenant)
+        self.client_ids.set(self.controller.stored_client)
+        self.client_secrets.set(self.controller.stored_secret)
+
+    def create_entry(self, parent, label, var, show=None):
+        if label in ["Tenant ID", "Client ID", "Client Secret"]:
+            if parent.winfo_exists():
+                parent.pack_forget()
+                if parent.master and parent.master.winfo_exists():
+                    parent.master.pack_forget()
+            return
+        super().create_entry(parent, label, var, show)
+
+    def go_back_to_selector(self):
+        if hasattr(self, "_back_callback") and self._back_callback:
+            self._back_callback()
+
+
+class EmbeddedChatTool(ui.chats_ui.ChatMigrationEstimatorTool):
+    def __init__(self, master, controller, *args, **kwargs):
+        EmbeddedCTkFrameHelper._current_master = master
+        self.controller = controller
+        super().__init__()
+        
+        # Populate credentials
+        self.tenant_id.set(self.controller.stored_tenant)
+        self.client_ids.set(self.controller.stored_client)
+        self.client_secrets.set(self.controller.stored_secret)
+
+    def create_entry(self, parent, label, var, show=None):
+        if label in ["Tenant ID", "Client ID", "Client Secret"]:
+            if parent.winfo_exists():
+                parent.pack_forget()
+                if parent.master and parent.master.winfo_exists():
+                    parent.master.pack_forget()
+            return
+        super().create_entry(parent, label, var, show)
+
+    def go_back_to_selector(self):
+        if hasattr(self, "_back_callback") and self._back_callback:
+            self._back_callback()
+
+
+class EmbeddedFilesTool(ui.files_ui.FileMigrationEstimatorTool):
+    def __init__(self, master, controller, *args, **kwargs):
+        EmbeddedCTkFrameHelper._current_master = master
+        self.controller = controller
+        super().__init__()
+        
+        # Populate credentials
+        self.tenant_id.set(self.controller.stored_tenant)
+        self.client_ids.set(self.controller.stored_client)
+        self.client_secrets.set(self.controller.stored_secret)
+
+    def create_entry(self, parent, label, var, show=None):
+        if label in ["Tenant ID", "Client ID", "Client Secret"]:
+            if parent.winfo_exists():
+                parent.pack_forget()
+                if parent.master and parent.master.winfo_exists():
+                    parent.master.pack_forget()
+            return
+        super().create_entry(parent, label, var, show)
+
+    def go_back_to_selector(self):
+        if hasattr(self, "_back_callback") and self._back_callback:
+            self._back_callback()
+
+
+class MigrationPlannerView(ctk.CTkFrame):
+    """Container for the Migration Planner workload selector and tool views."""
+
+    def __init__(self, master, controller, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.controller = controller
+
+        # Workload selector frame
+        self.selector_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.selector_frame.pack(fill="both", expand=True)
+
+        self.setup_selector_ui()
+
+        # Active tool frame container
+        self.active_tool_frame = None
+
+    def setup_selector_ui(self):
+        # Title of selector
+        ctk.CTkLabel(
+            self.selector_frame,
+            text="Select Workload to Estimate",
+            font=FONT_HEADER_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+        ).pack(pady=(40, 10), anchor="w", padx=40)
+
+        ctk.CTkLabel(
+            self.selector_frame,
+            text="Plan your migration by estimating data size and timelines for your workloads.",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_SUB,
+        ).pack(pady=(0, 30), anchor="w", padx=40)
+
+        # Card container grid
+        self.cards_container = ctk.CTkFrame(self.selector_frame, fg_color="transparent")
+        self.cards_container.pack(fill="x", padx=40)
+
+        self.cards_container.grid_columnconfigure((0, 1, 2), weight=1, uniform="equal")
+
+        # Card 1: Exchange
+        self.create_workload_card(
+            parent=self.cards_container,
+            column=0,
+            icon="📩",
+            title="Exchange Online",
+            desc="Estimate migration time and resource sizes for mailboxes, calendars, and contacts.",
+            callback=lambda: self.launch_tool("Exchange")
+        )
+
+        # Card 2: Chat
+        self.create_workload_card(
+            parent=self.cards_container,
+            column=1,
+            icon="💬",
+            title="Chat (Teams)",
+            desc="Plan Teams private chats, group channels, and message history migration.",
+            callback=lambda: self.launch_tool("Chat")
+        )
+
+        # Card 3: Files
+        self.create_workload_card(
+            parent=self.cards_container,
+            column=2,
+            icon="📁",
+            title="Files (SharePoint/OneDrive)",
+            desc="Analyze OneDrive personal sites and SharePoint team site collections.",
+            callback=lambda: self.launch_tool("Files")
+        )
+
+    def create_workload_card(self, parent, column, icon, title, desc, callback):
+        card = ctk.CTkFrame(
+            parent,
+            fg_color=COLOR_SURFACE,
+            corner_radius=12,
+            border_width=1,
+            border_color=COLOR_OUTLINE_LIGHT
+        )
+        card.grid(row=0, column=column, padx=10, pady=10, sticky="nsew")
+
+        # Icon
+        ctk.CTkLabel(
+            card,
+            text=icon,
+            font=ctk.CTkFont(size=36),
+            text_color=COLOR_PRIMARY
+        ).pack(pady=(25, 10))
+
+        # Title
+        ctk.CTkLabel(
+            card,
+            text=title,
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_TEXT_MAIN
+        ).pack(pady=(0, 10))
+
+        # Description
+        ctk.CTkLabel(
+            card,
+            text=desc,
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_SUB,
+            wraplength=220,
+            justify="center"
+        ).pack(fill="both", expand=True, padx=20, pady=(0, 20))
+
+        # Launch Button
+        btn = ctk.CTkButton(
+            card,
+            text="Open Planner",
+            command=callback,
+            height=36,
+            corner_radius=8,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            font=FONT_BODY_BOLD
+        )
+        btn.pack(pady=(0, 25), padx=20, fill="x")
+
+    def launch_tool(self, workload):
+        # Hide selector
+        self.selector_frame.pack_forget()
+
+        # Clean old tool if any
+        if self.active_tool_frame:
+            self.active_tool_frame.destroy()
+            self.active_tool_frame = None
+
+        # Instantiate the embedded tool
+        if workload == "Exchange":
+            self.active_tool_frame = EmbeddedExchangeOnlineTool(self, self.controller)
+        elif workload == "Chat":
+            self.active_tool_frame = EmbeddedChatTool(self, self.controller)
+        elif workload == "Files":
+            self.active_tool_frame = EmbeddedFilesTool(self, self.controller)
+
+        if self.active_tool_frame:
+            self.active_tool_frame._back_callback = self.show_selector
+            self.active_tool_frame.pack(fill="both", expand=True)
+
+    def show_selector(self):
+        if self.active_tool_frame:
+            self.active_tool_frame.pack_forget()
+            self.active_tool_frame.destroy()
+            self.active_tool_frame = None
+        self.selector_frame.pack(fill="both", expand=True)
+
 # Orchestrator logging
 logger = logging.getLogger("M365TelemetryAsyncLogger.TelemetryOrchestrator")
 
@@ -362,7 +614,11 @@ class ReportsPage(ctk.CTkFrame):
         self.controller = controller
 
         # 1. Left Collapsible Navigation Sidebar
-        self.sidebar = SidebarFrame(self, disconnect_callback=self.controller.on_disconnect_clicked)
+        self.sidebar = SidebarFrame(
+            self,
+            disconnect_callback=self.controller.on_disconnect_clicked,
+            selection_callback=self.on_sidebar_selection_changed
+        )
         self.sidebar.pack(side="left", fill="y", padx=(0, 10))
 
         # 2. Right-hand Main Dashboard Container
@@ -420,8 +676,28 @@ class ReportsPage(ctk.CTkFrame):
         self.m365_telemetry_view.pack(fill="both", expand=True)
         self.m365_telemetry_view.on_all_done_callback = self.on_telemetry_fetch_completed
 
+        # Initialize the migration planner view (initially hidden)
+        self.migration_planner_view = MigrationPlannerView(
+            master=self.dashboard_container,
+            controller=self.controller
+        )
+
         # Adapt layout recursively to hide original inputs from view
         self.adapt_embedded_view()
+
+    def on_sidebar_selection_changed(self, label):
+        if label == "Usage and adoption":
+            # Show Telemetry, Hide Migration Planner
+            self.migration_planner_view.pack_forget()
+            self.nav_title.configure(text="Usage Report")
+            self.fetch_btn.pack(side="right", padx=20, pady=17)
+            self.m365_telemetry_view.pack(fill="both", expand=True)
+        elif label == "Migration planner":
+            # Show Migration Planner, Hide Telemetry
+            self.m365_telemetry_view.pack_forget()
+            self.fetch_btn.pack_forget()
+            self.nav_title.configure(text="Migration Planner")
+            self.migration_planner_view.pack(fill="both", expand=True)
 
     def adapt_embedded_view(self):
         """Traverses M365TelemetryTab to identify and hide native login components."""
@@ -508,15 +784,24 @@ class ReportsPage(ctk.CTkFrame):
         # Reset the telemetry coordinator tab and hide all grids
         self.m365_telemetry_view.reset_tab()
 
+        # Reset migration planner view back to selector screen
+        self.migration_planner_view.show_selector()
+
+        # Reset the sidebar selection state
+        self.sidebar.reset_selection()
+        # Switch back UI elements to default Usage report view
+        self.on_sidebar_selection_changed("Usage and adoption")
+
 
 class SidebarFrame(ctk.CTkFrame):
     """Collapsible Left Navigation Sidebar, matching Workspace Deal Assistant styling."""
 
-    def __init__(self, master, disconnect_callback, **kwargs):
+    def __init__(self, master, disconnect_callback, selection_callback, **kwargs):
         # Increased initial width to 380px to avoid text truncation of longer menu items
         super().__init__(master, width=380, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE_LIGHT, **kwargs)
         self.pack_propagate(False)  # Lock sidebar panel dimensions
         self.disconnect_callback = disconnect_callback
+        self.selection_callback = selection_callback
         self.is_expanded = True
 
         # Header Branding Section
@@ -624,6 +909,19 @@ class SidebarFrame(ctk.CTkFrame):
         # Start periodic RAM usage updates
         self.update_ram_usage()
 
+    def reset_selection(self):
+        self.menu_data = [
+            ("Usage and adoption", "📊", True),
+            ("Migration planner", "🚀", False)
+        ]
+        self.render_navigation_menu()
+
+    def on_menu_item_clicked(self, label):
+        for i, (m_label, m_icon, m_active) in enumerate(self.menu_data):
+            self.menu_data[i] = (m_label, m_icon, m_label == label)
+        self.render_navigation_menu()
+        self.selection_callback(label)
+
 
 
     def render_navigation_menu(self):
@@ -666,8 +964,9 @@ class SidebarFrame(ctk.CTkFrame):
                 fg_color=btn_fg,
                 text_color=text_color,
                 hover_color=hover_color,
-                state="normal" if is_active else "disabled",
-                font=ctk.CTkFont(family="Segoe UI", size=13, weight=weight)
+                state="normal",
+                font=ctk.CTkFont(family="Segoe UI", size=13, weight=weight),
+                command=lambda l=label: self.on_menu_item_clicked(l)
             )
             btn.pack(side="left", fill="x", expand=True)
             self.menu_buttons.append((row_frame, btn, icon_lbl))
