@@ -331,6 +331,7 @@ class ActiveUsersUsageFrame(ctk.CTkFrame):
                 self.semaphore.release()
 
     def _render_success(self, o365_data: list):
+        self.o365_data = o365_data
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -381,6 +382,7 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
         self.get_credentials = credentials_callback
         self.on_status_change = status_change_callback
         self.status = None  # 'loading', 'success', 'error', None
+        self.trend_data = {}
         
         self.build_ui()
 
@@ -425,6 +427,7 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
         self.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
+        self.trend_data = {}
         
         for w in self.state_frame.winfo_children():
             w.destroy()
@@ -485,6 +488,7 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
                 self.semaphore.release()
 
     def _render_success(self, trend_data: dict):
+        self.trend_data = trend_data
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -651,6 +655,7 @@ class M365AppUsageFrame(ctk.CTkFrame):
                 self.semaphore.release()
 
     def _render_success(self, m365_data: list):
+        self.m365_data = m365_data
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()

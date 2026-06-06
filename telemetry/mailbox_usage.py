@@ -267,6 +267,7 @@ class MailboxUsageFrame(ctk.CTkFrame):
                 self.semaphore.release()
 
     def _render_success(self, data: dict):
+        self.last_data = data
         usage_logger.info("Mailbox Usage data successfully retrieved. Rendering UI grid.")
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():

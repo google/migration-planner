@@ -351,6 +351,7 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         self.on_status_change = status_change_callback
         self.status = None  # 'loading', 'success', 'error', None
         self.last_complex_flows = []
+        self.last_results = {}
         
         self.build_ui()
 
@@ -406,6 +407,7 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         self.pa_chart_container.pack_forget()
         self.btn_export_pa.configure(state="disabled")
         self.last_complex_flows = []
+        self.last_results = {}
         
         for w in self.state_frame.winfo_children():
             w.destroy()
@@ -471,6 +473,7 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
                 self.semaphore.release()
 
     def _render_success(self, results: dict):
+        self.last_results = results
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -605,6 +608,7 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
                     ax.set_ylim(0, max(max_val + 3, int(max_val * 1.3)))
                     
                     fig.tight_layout()
+
                     canvas = FigureCanvasTkAgg(fig, master=self.pa_chart_container)
                     canvas.draw()
                     canvas.get_tk_widget().pack(fill="both", expand=True, padx=20, pady=10)

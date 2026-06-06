@@ -384,6 +384,22 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.current_batch_index = 0
         self.trigger_current_batch()
 
+    def get_all_telemetry_data(self) -> dict:
+        """Retrieves cached telemetry data and charts from all sub-views."""
+        return {
+            "tenant_id": self.lic_tenant_id.get().strip(),
+            "skus": getattr(self.subscribed_skus_view, "last_licenses_items", []),
+            "o365_usage": getattr(self.active_users_view, "o365_data", []),
+            "o365_trend": getattr(self.active_users_trend_view, "trend_data", {}),
+            "m365_apps": getattr(self.m365_apps_view, "m365_data", []),
+            "mailbox": getattr(self.mailbox_view, "last_data", {}),
+            "calendar": getattr(self.calendar_view, "last_data", {}),
+            "sharepoint": getattr(self.sharepoint_view, "last_data", {}),
+            "onedrive": getattr(self.onedrive_view, "last_data", {}),
+            "security_labels": getattr(self.security_gov_view, "last_labels_data", []),
+            "retention_policies": getattr(self.security_gov_view, "last_policies_data", []),
+            "power_automate": getattr(self.power_automate_view, "last_results", {})
+        }
 
     def is_descendant(self, parent, widget) -> bool:
         """Recursively checks if a widget (or its Tkinter path name) is a descendant of parent."""

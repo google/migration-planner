@@ -665,6 +665,24 @@ class ReportsPage(ctk.CTkFrame):
         )
         self.fetch_btn.pack(side="right", padx=20, pady=17)
 
+        # 4. Download PDF button next to Fetch Report
+        self.pdf_btn = ctk.CTkButton(
+            self.nav_header,
+            text="Download PDF",
+            command=self.on_download_pdf_clicked,
+            width=150,
+            height=36,
+            corner_radius=8,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLOR_PRIMARY,
+            text_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER,
+            font=FONT_BODY_BOLD,
+            state="disabled"
+        )
+        self.pdf_btn.pack(side="right", padx=(0, 20), pady=17)
+
 
         # Initialize the telemetry view (No TabView layout)
         self.m365_telemetry_view = M365TelemetryTab(
@@ -691,11 +709,13 @@ class ReportsPage(ctk.CTkFrame):
             self.migration_planner_view.pack_forget()
             self.nav_title.configure(text="Usage Report")
             self.fetch_btn.pack(side="right", padx=20, pady=17)
+            self.pdf_btn.pack(side="right", padx=(0, 20), pady=17)
             self.m365_telemetry_view.pack(fill="both", expand=True)
         elif label == "Migration planner":
             # Show Migration Planner, Hide Telemetry
             self.m365_telemetry_view.pack_forget()
             self.fetch_btn.pack_forget()
+            self.pdf_btn.pack_forget()
             self.nav_title.configure(text="Migration Planner")
             self.migration_planner_view.pack(fill="both", expand=True)
 
@@ -752,6 +772,7 @@ class ReportsPage(ctk.CTkFrame):
         logger.info("Fetch Report triggered. Invoking background parallel audits...")
         # Disable the trigger button and update visual text during background thread audit
         self.fetch_btn.configure(state="disabled", text="Fetching...", fg_color="#64748B")
+        self.pdf_btn.configure(state="disabled")
 
         # Map credentials into the hidden layout entries dynamically
         if len(self.embedded_entries) >= 3:
@@ -771,6 +792,35 @@ class ReportsPage(ctk.CTkFrame):
     def on_telemetry_fetch_completed(self, success: bool):
         """Callback from M365TelemetryTab when all parallel reports complete."""
         self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color="#1E3A8A")
+        if success:
+            self.pdf_btn.configure(state="normal")
+        else:
+            self.pdf_btn.configure(state="disabled")
+
+    def on_download_pdf_clicked(self):
+        """Prompts the user to save the M365 usage report as a detailed PDF file."""
+        from tkinter import filedialog, messagebox
+        import datetime
+        from telemetry.pdf_report import generate_pdf_report
+        
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"m365_usage_report_{ts}.pdf",
+            defaultextension=".pdf",
+            filetypes=[("PDF Documents", "*.pdf"), ("All Files", "*.*")],
+            parent=self
+        )
+        if not f:
+            return
+            
+        data = self.m365_telemetry_view.get_all_telemetry_data()
+        
+        try:
+            generate_pdf_report(data, f)
+            messagebox.showinfo("Export Successful", f"PDF report successfully saved to:\n{f}", parent=self)
+        except Exception as e:
+            logger.error("Failed to generate PDF report", exc_info=True)
+            messagebox.showerror("Export Failed", f"Failed to generate PDF report: {e}", parent=self)
 
     def clear_session_data(self):
         """Wipes the cached parameters from telemetry objects and resets the Fetch button."""
@@ -780,6 +830,7 @@ class ReportsPage(ctk.CTkFrame):
         
         # Reset Fetch Report button state
         self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color="#1E3A8A")
+        self.pdf_btn.configure(state="disabled")
 
         # Reset the telemetry coordinator tab and hide all grids
         self.m365_telemetry_view.reset_tab()
