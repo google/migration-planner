@@ -29,7 +29,7 @@ from core.graph.reports import ReportsService
 
 # Safely import matplotlib to embed plots in Tkinter
 try:
-    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
@@ -509,7 +509,8 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
             ctk.CTkLabel(empty_cell, text="No O365 trend data found.", text_color=COLOR_TEXT_SUB).pack()
         else:
             try:
-                fig, ax = plt.subplots(figsize=(8, 4), dpi=100)
+                fig = Figure(figsize=(8, 4), dpi=100)
+                ax = fig.add_subplot(111)
                 fig.patch.set_facecolor(COLOR_SURFACE)
                 ax.set_facecolor(COLOR_SURFACE)
 
@@ -539,13 +540,8 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
                 canvas = FigureCanvasTkAgg(fig, master=self.grid_frame)
                 canvas.draw()
                 canvas.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
-                plt.close(fig)
             except Exception as e:
                 usage_logger.error(f"Error drawing matplotlib plot: {e}", exc_info=True)
-                try:
-                    plt.close(fig)
-                except:
-                    pass
                 empty_cell = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
                 empty_cell.pack(fill="x", expand=True, pady=15)
                 ctk.CTkLabel(empty_cell, text="Failed to render trend graph (Matplotlib constraint).", text_color=COLOR_ERROR).pack()

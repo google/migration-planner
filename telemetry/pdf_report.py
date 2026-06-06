@@ -85,15 +85,15 @@ def format_prepaid_units(item: dict) -> str:
 
 def generate_trend_chart_bytes(trend_data: dict) -> io.BytesIO:
     """Generates the O365 Active User Trend Chart on-the-fly to minimize persistent memory footprint."""
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
     
     dates = trend_data.get("dates", [])
     if not dates:
         return None
         
-    fig, ax = plt.subplots(figsize=(6.5, 3.2), dpi=150)
+    fig = Figure(figsize=(6.5, 3.2), dpi=150)
+    ax = fig.add_subplot(111)
     fig.patch.set_facecolor("#FFFFFF")
     ax.set_facecolor("#FFFFFF")
     
@@ -119,17 +119,16 @@ def generate_trend_chart_bytes(trend_data: dict) -> io.BytesIO:
     fig.tight_layout()
     
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=150)
+    canvas = FigureCanvasAgg(fig)
+    canvas.print_png(buf)
     buf.seek(0)
-    plt.close(fig)
     return buf
 
 
 def generate_pa_chart_bytes(pa: dict) -> io.BytesIO:
     """Generates the Power Automate Flows breakdown bar chart on-the-fly."""
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
     
     counts = pa.get("counts", {})
     if not counts:
@@ -140,7 +139,8 @@ def generate_pa_chart_bytes(pa: dict) -> io.BytesIO:
     active_tier_counts = pa.get("active_tier_counts", {})
     complex_flows = pa.get("complex_logic_flows", [])
     
-    fig, ax = plt.subplots(figsize=(6.5, 3.2), dpi=150)
+    fig = Figure(figsize=(6.5, 3.2), dpi=150)
+    ax = fig.add_subplot(111)
     fig.patch.set_facecolor("#FFFFFF")
     ax.set_facecolor("#FFFFFF")
     
@@ -193,9 +193,9 @@ def generate_pa_chart_bytes(pa: dict) -> io.BytesIO:
     
     fig.tight_layout()
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=150)
+    canvas = FigureCanvasAgg(fig)
+    canvas.print_png(buf)
     buf.seek(0)
-    plt.close(fig)
     return buf
 
 

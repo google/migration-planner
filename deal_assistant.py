@@ -760,7 +760,7 @@ class ReportsPage(ctk.CTkFrame):
             self.m365_telemetry_view.inputs_frame.grid_forget()
 
     def on_fetch_report_clicked(self):
-        """Stage 2: Migrates stored variables into the hidden entries and clicks the submit thread."""
+        """Stage 2: Migrates stored variables into the telemetry coordinator and triggers fetch directly."""
         tenant = self.controller.stored_tenant
         client = self.controller.stored_client
         secret = self.controller.stored_secret
@@ -774,20 +774,13 @@ class ReportsPage(ctk.CTkFrame):
         self.fetch_btn.configure(state="disabled", text="Fetching...", fg_color="#64748B")
         self.pdf_btn.configure(state="disabled")
 
-        # Map credentials into the hidden layout entries dynamically
-        if len(self.embedded_entries) >= 3:
-            self.embedded_entries[0].delete(0, "end")
-            self.embedded_entries[0].insert(0, tenant)
+        # Set variables of m365_telemetry_view directly
+        self.m365_telemetry_view.lic_tenant_id.set(tenant)
+        self.m365_telemetry_view.lic_client_ids.set(client)
+        self.m365_telemetry_view.lic_client_secrets.set(secret)
 
-            self.embedded_entries[1].delete(0, "end")
-            self.embedded_entries[1].insert(0, client)
-
-            self.embedded_entries[2].delete(0, "end")
-            self.embedded_entries[2].insert(0, secret)
-
-        # Programmatically trigger the hidden connection submit button
-        if self.embedded_submit_btn:
-            self.embedded_submit_btn.invoke()
+        # Directly call the fetch command
+        self.m365_telemetry_view.authenticate_licenses_tab()
 
     def on_telemetry_fetch_completed(self, success: bool):
         """Callback from M365TelemetryTab when all parallel reports complete."""

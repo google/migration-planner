@@ -137,13 +137,16 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         
         self._set_state_loading("Fetching subscribed SKUs...")
         
+        retries_val = self.retries.get() if self.retries else 5
+        backoff_val = self.backoff.get() if self.backoff else 2
+        
         threading.Thread(
             target=self._execute_worker,
-            args=(tenant, clients, secrets),
+            args=(tenant, clients, secrets, retries_val, backoff_val),
             daemon=True
         ).start()
 
-    def _execute_worker(self, tenant: str, clients: List[str], secrets: List[str]):
+    def _execute_worker(self, tenant: str, clients: List[str], secrets: List[str], retries_val: int, backoff_val: int):
         usage_logger.info("Executing thread: _execute_sku_worker")
         if self.semaphore:
             self.semaphore.acquire()
@@ -152,9 +155,6 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
             client_secret = secrets[0]
             
             self.log_msg(f"Authenticating app {client_id[:5]}...")
-            
-            retries_val = self.retries.get() if self.retries else 5
-            backoff_val = self.backoff.get() if self.backoff else 2
             
             client = GraphClient(
                 tenant_id=tenant,

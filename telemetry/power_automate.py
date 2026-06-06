@@ -29,7 +29,7 @@ import customtkinter as ctk
 
 # Safely import matplotlib to embed plots in Tkinter
 try:
-    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
@@ -551,7 +551,8 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
                 ctk.CTkLabel(self.pa_chart_container, text="Matplotlib is required to render charts.\nPlease install it using 'pip install matplotlib'.", text_color=COLOR_ERROR).pack(pady=15)
             else:
                 try:
-                    fig, ax = plt.subplots(figsize=(10, 4), dpi=100)
+                    fig = Figure(figsize=(10, 4), dpi=100)
+                    ax = fig.add_subplot(111)
                     fig.patch.set_facecolor(COLOR_SURFACE)
                     ax.set_facecolor(COLOR_SURFACE)
                     
@@ -612,14 +613,9 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
                     canvas = FigureCanvasTkAgg(fig, master=self.pa_chart_container)
                     canvas.draw()
                     canvas.get_tk_widget().pack(fill="both", expand=True, padx=20, pady=10)
-                    plt.close(fig)
                     
                 except Exception as e:
                     usage_logger.error(f"Error drawing Power Automate charts: {e}", exc_info=True)
-                    try:
-                        plt.close(fig)
-                    except:
-                        pass
 
         self.status = "success"
         self.on_status_change()
