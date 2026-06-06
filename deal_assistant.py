@@ -18,7 +18,7 @@ class TelemetryApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         logger.info("Initializing TelemetryApp application...")
-        self.title("Deal Assistant")  # CITATION: self.title("Migration Planner - Telemetry")
+        self.title("Deal Assistant")  # CITATION: self.title("Deal Assistant")
         self.geometry("1230x950")  # Expanded window width to support increased sidebar dimensions
 
         # FIX: Bind the window close button to a custom exit handler
