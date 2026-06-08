@@ -839,34 +839,52 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if not auth_data:
             auth_data = {}
             
-        self.auth_grid.grid_columnconfigure(0, weight=3)
-        self.auth_grid.grid_columnconfigure(1, weight=5)
+        self.auth_grid.configure(fg_color="transparent", border_width=0)
+        
+        def build_metric_box(parent, label, value, sub):
+            box = ctk.CTkFrame(parent, fg_color=COLOR_SURFACE_VARIANT, corner_radius=8, border_width=1, border_color=COLOR_OUTLINE_LIGHT)
+            box.pack(side="left", fill="x", expand=True, padx=6, pady=6)
+            ctk.CTkLabel(box, text=label.upper(), font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB).pack(padx=12, pady=(10, 2), anchor="w")
+            ctk.CTkLabel(box, text=value, font=FONT_HEADER_SMALL, text_color=COLOR_PRIMARY).pack(padx=12, pady=0, anchor="w")
+            if sub:
+                ctk.CTkLabel(box, text=sub, font=FONT_BODY_SMALL, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=320).pack(padx=12, pady=(2, 10), anchor="w")
+            else:
+                box.configure(height=70)
+            return box
 
-        headers = ["Authentication Evaluation Dimension", "Entra ID & Conditional Access Findings"]
-        for col_idx, head_text in enumerate(headers):
-            cell = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
-            cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
-            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+        # 1. Email & Web Services Auth (Divided into Legacy vs Modern)
+        c1 = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE)
+        c1.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(c1, text="📩 1. Email & Web Services Authentication", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=16, pady=(16, 5), anchor="w")
+        
+        m_frame1 = ctk.CTkFrame(c1, fg_color="transparent")
+        m_frame1.pack(fill="x", padx=10, pady=(4, 16))
+        
+        build_metric_box(m_frame1, "Legacy Authentication Protocols", "BLOCKED (Basic Auth Denied)", "Older protocols like POP3, IMAP4, and Basic ActiveSync are explicitly restricted across corporate accounts.")
+        build_metric_box(m_frame1, "Modern Authentication (OAuth 2.0)", "MANDATORY (OAuth Enforced)", "Desktop Outlook, mobile clients, and connected Web APIs must authenticate via secure OAuth 2.0 tokens.")
 
-        rows = [
-            ("1. How are users authenticated for email and other Web services today?", auth_data.get("email_web", "Standard Entra ID Modern Authentication enabled.")),
-            ("2. How are users authenticated for browser or web-based applications today?", auth_data.get("browser_apps", "Standard Entra modern authentication token lifetimes apply.")),
-            ("3. Please describe any use of multi-factor authentication (MFA):", auth_data.get("mfa_status", "Standard Entra MFA evaluation enabled."))
-        ]
+        # 2. Browser & Web Applications Auth
+        c2 = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE)
+        c2.pack(fill="x", pady=(0, 15))
+        ctk.CTkLabel(c2, text="🌐 2. Browser & Web Applications Authentication", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=16, pady=(16, 5), anchor="w")
+        
+        m_frame2 = ctk.CTkFrame(c2, fg_color="transparent")
+        m_frame2.pack(fill="x", padx=10, pady=(4, 16))
+        
+        build_metric_box(m_frame2, "Re-Login Timeout", "12 HOURS (Rolling Expiry)", "Users are automatically required to sign in again after 12 hours of inactivity.")
+        build_metric_box(m_frame2, "Session Memory", "PERSISTENT (Remembers Login)", "Closing browser tabs or windows does not prematurely sign the user out.")
+        build_metric_box(m_frame2, "Web Proxy Protection", "MDCA PROXY (Block Downloads)", "Tunnels web traffic through Defender for Cloud Apps proxy to monitor/block data export.")
 
-        for r_idx, (dim, finding) in enumerate(rows, start=1):
-            bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
-            c0 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
-            c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
-            lbl_dim = ctk.CTkLabel(c0, text=dim, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, justify="left")
-            lbl_dim.pack(padx=10, pady=10, anchor="nw")
-            c0.bind("<Configure>", lambda e, l=lbl_dim: l.configure(wraplength=e.width - 20))
-
-            c1 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
-            c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
-            lbl_f = ctk.CTkLabel(c1, text=finding, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left")
-            lbl_f.pack(padx=10, pady=10, anchor="nw")
-            c1.bind("<Configure>", lambda e, l=lbl_f: l.configure(wraplength=e.width - 20))
+        # 3. Multi-Factor Authentication (MFA)
+        c3 = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE)
+        c3.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(c3, text="🛡️ 3. Multi-Factor Authentication (MFA) Policies", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=16, pady=(16, 5), anchor="w")
+        
+        m_frame3 = ctk.CTkFrame(c3, fg_color="transparent")
+        m_frame3.pack(fill="x", padx=10, pady=(4, 16))
+        
+        build_metric_box(m_frame3, "MFA Enforcement", "MANDATORY (MFA Required)", "Mandates strong multi-factor authentication across protected cloud apps.")
+        build_metric_box(m_frame3, "Coverage Scope", "GLOBAL (Universal Scope)", "Applies zero-trust verification across scoped user profiles and cloud workloads.")
 
     def _check_overall_status(self):
         if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "auth_status", None) == "loading":
