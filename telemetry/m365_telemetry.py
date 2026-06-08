@@ -383,7 +383,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "skus": getattr(self.subscribed_skus_view, "last_licenses_items", []),
             "directory": {
                 "domains": getattr(self.directory_view, "last_domains", []),
-                "group_counts": getattr(self.directory_view, "last_group_counts", {})
+                "group_counts": getattr(self.directory_view, "last_group_counts", {}),
+                "user_counts": getattr(self.directory_view, "last_user_counts", {})
             },
             "o365_usage": getattr(self.active_users_view, "o365_data", []),
             "o365_trend": getattr(self.active_users_trend_view, "trend_data", {}),

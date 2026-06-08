@@ -83,10 +83,10 @@ class DirectoryService:
             self.client.release_token(token_slot)
 
     def get_directory_telemetry(self, log_callback=None) -> Dict[str, Any]:
-        """Queries Microsoft Graph API in a single batch to fetch both domains list and group counts."""
+        """Queries Microsoft Graph API in a single batch to fetch both domains list, user counts, and group counts."""
         logger.info("Fetching directory telemetry data using Graph API batch...")
         if log_callback:
-            log_callback("Querying Microsoft Graph API for directory domains and group counts...")
+            log_callback("Querying Microsoft Graph API for directory domains, users, and groups...")
 
         batch_requests = [
             {
@@ -129,6 +129,36 @@ class DirectoryService:
                 "method": "GET",
                 "url": "/groups?$filter=groupTypes/any(s:s eq 'DynamicMembership')&$count=true&$top=1&$select=id",
                 "headers": {"ConsistencyLevel": "eventual"}
+            },
+            {
+                "id": "users_total",
+                "method": "GET",
+                "url": "/users?$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
+            },
+            {
+                "id": "users_enabled",
+                "method": "GET",
+                "url": "/users?$filter=accountEnabled eq true&$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
+            },
+            {
+                "id": "users_disabled",
+                "method": "GET",
+                "url": "/users?$filter=accountEnabled eq false&$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
+            },
+            {
+                "id": "users_member",
+                "method": "GET",
+                "url": "/users?$filter=userType eq 'Member'&$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
+            },
+            {
+                "id": "users_guest",
+                "method": "GET",
+                "url": "/users?$filter=userType eq 'Guest'&$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
             }
         ]
 
@@ -149,6 +179,14 @@ class DirectoryService:
             "m365": 0,
             "dynamic": 0
         }
+        
+        user_counts = {
+            "users_total": 0,
+            "users_enabled": 0,
+            "users_disabled": 0,
+            "users_member": 0,
+            "users_guest": 0
+        }
 
         for resp in responses:
             resp_id = resp.get("id")
@@ -163,10 +201,23 @@ class DirectoryService:
             elif resp_id in counts:
                 count_val = body.get("@odata.count", 0)
                 counts[resp_id] = count_val
+            elif resp_id in user_counts:
+                count_val = body.get("@odata.count", 0)
+                user_counts[resp_id] = count_val
+
+        # Normalize user counts dictionary keys for the UI
+        normalized_user_counts = {
+            "total": user_counts["users_total"],
+            "enabled": user_counts["users_enabled"],
+            "disabled": user_counts["users_disabled"],
+            "member": user_counts["users_member"],
+            "guest": user_counts["users_guest"]
+        }
 
         return {
             "domains": domains_list,
-            "group_counts": counts
+            "group_counts": counts,
+            "user_counts": normalized_user_counts
         }
 
 

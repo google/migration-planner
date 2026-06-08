@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Modular Directory Domains & Groups summary telemetry scanners and visual interfaces."""
+"""Modular Directory Domains, Users & Groups summary telemetry scanners and visual interfaces."""
 
 import logging
 import threading
@@ -30,7 +30,7 @@ usage_logger = logging.getLogger("M365TelemetryAsyncLogger")
 from telemetry.styles import *
 
 class DirectoryFrame(ctk.CTkFrame):
-    """Self-contained customtkinter component wrapping Directory summary (e.g. Domains & Groups) UI."""
+    """Self-contained customtkinter component wrapping Directory summary (e.g. Domains, Users & Groups) UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, retries_var=None, backoff_var=None, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
@@ -42,6 +42,7 @@ class DirectoryFrame(ctk.CTkFrame):
         self.backoff = backoff_var
         self.status = None  # 'loading', 'success', 'error', None
         self.last_group_counts = {}
+        self.last_user_counts = {}
         self.last_domains = []
         
         self.build_ui()
@@ -75,14 +76,14 @@ class DirectoryFrame(ctk.CTkFrame):
         # Divider between sections
         self.divider = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
         
-        # Groups sub-heading & grid
-        self.groups_title = ctk.CTkLabel(
+        # Groups & Users sub-heading & grid
+        self.groups_users_title = ctk.CTkLabel(
             self.inner_pad,
-            text="Groups",
+            text="Groups & Users",
             font=FONT_HEADER_SMALL,
             text_color=COLOR_TEXT_MAIN
         )
-        self.groups_grid = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.groups_users_grid = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
         self.reset_view()
 
@@ -93,16 +94,17 @@ class DirectoryFrame(ctk.CTkFrame):
         self.domains_title.pack_forget()
         self.domains_grid.pack_forget()
         self.divider.pack_forget()
-        self.groups_title.pack_forget()
-        self.groups_grid.pack_forget()
+        self.groups_users_title.pack_forget()
+        self.groups_users_grid.pack_forget()
         self.last_group_counts = {}
+        self.last_user_counts = {}
         self.last_domains = []
         
         for w in self.state_frame.winfo_children():
             w.destroy()
         for w in self.domains_grid.winfo_children():
             w.destroy()
-        for w in self.groups_grid.winfo_children():
+        for w in self.groups_users_grid.winfo_children():
             w.destroy()
 
     def _set_state_loading(self, msg="Loading..."):
@@ -137,9 +139,9 @@ class DirectoryFrame(ctk.CTkFrame):
         self.pack(fill="x", expand=True, pady=10)
         self.domains_grid.pack_forget()
         self.divider.pack_forget()
-        self.groups_grid.pack_forget()
+        self.groups_users_grid.pack_forget()
         
-        self._set_state_loading("Fetching directory domains and group counts...")
+        self._set_state_loading("Fetching directory domains, users, and group counts...")
         
         retries_val = self.retries.get() if self.retries else 5
         backoff_val = self.backoff.get() if self.backoff else 2
@@ -169,7 +171,7 @@ class DirectoryFrame(ctk.CTkFrame):
             required_scopes = ["Directory.Read.All"]
             client.authenticate(required_scopes=required_scopes)
             
-            self.log_msg("Querying directory domains and group counts from Microsoft Graph...")
+            self.log_msg("Querying directory domains, users, and group counts from Microsoft Graph...")
             dir_service = DirectoryService(client)
             telemetry_data = dir_service.get_directory_telemetry(self.log_msg)
             client.close()
@@ -184,12 +186,12 @@ class DirectoryFrame(ctk.CTkFrame):
                 self.semaphore.release()
 
     def _render_success(self, telemetry_dict: Dict[str, Any]):
-        usage_logger.info("Executing UI render for Directory domains & groups tables.")
+        usage_logger.info("Executing UI render for Directory domains, users & groups tables.")
         self.state_frame.pack_forget()
         
         for w in self.domains_grid.winfo_children():
             w.destroy()
-        for w in self.groups_grid.winfo_children():
+        for w in self.groups_users_grid.winfo_children():
             w.destroy()
 
         # Display UI titles and tables
@@ -198,8 +200,8 @@ class DirectoryFrame(ctk.CTkFrame):
         
         self.divider.pack(fill="x", pady=15)
         
-        self.groups_title.pack(anchor="w", pady=(10, 10))
-        self.groups_grid.pack(fill="x", expand=True, pady=(0, 10))
+        self.groups_users_title.pack(anchor="w", pady=(10, 10))
+        self.groups_users_grid.pack(fill="x", expand=True, pady=(0, 10))
 
         # ----------------------------------------------------
         # RENDER DOMAINS GRID
@@ -256,41 +258,61 @@ class DirectoryFrame(ctk.CTkFrame):
                 ctk.CTkLabel(c4, text=services_str, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=250).pack(padx=10, pady=8, anchor="nw")
 
         # ----------------------------------------------------
-        # RENDER GROUPS GRID
+        # RENDER GROUPS & USERS GRID
         # ----------------------------------------------------
-        self.groups_grid.grid_columnconfigure(0, weight=2)
-        self.groups_grid.grid_columnconfigure(1, weight=1)
+        self.groups_users_grid.grid_columnconfigure(0, weight=3)
+        self.groups_users_grid.grid_columnconfigure(1, weight=1)
 
-        groups_headers = ["Group Category", "Count"]
-        for col_idx, head_text in enumerate(groups_headers):
-            cell = ctk.CTkFrame(self.groups_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+        groups_users_headers = ["Category", "Count"]
+        for col_idx, head_text in enumerate(groups_users_headers):
+            cell = ctk.CTkFrame(self.groups_users_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
         counts_dict = telemetry_dict.get("group_counts", {})
         self.last_group_counts = counts_dict
 
-        group_type_labels = [
-            ("total", "Total Groups"),
-            ("m365", "Microsoft 365 Groups (Unified)"),
-            ("security", "Security Groups (Static, non-mail-enabled)"),
-            ("mail_enabled_security", "Mail-enabled Security Groups"),
-            ("distribution", "Distribution Groups"),
-            ("dynamic", "Dynamic Groups (Dynamic Membership)")
+        user_counts_dict = telemetry_dict.get("user_counts", {})
+        self.last_user_counts = user_counts_dict
+
+        rows_data = [
+            # User statistics
+            ("Total Users", user_counts_dict.get("total", 0), True),
+            ("Enabled Users", user_counts_dict.get("enabled", 0), False),
+            ("Disabled Users", user_counts_dict.get("disabled", 0), False),
+            ("Member Users", user_counts_dict.get("member", 0), False),
+            ("Guest Users", user_counts_dict.get("guest", 0), False),
+            # Divider separator row
+            (None, None, False),
+            # Group statistics
+            ("Total Groups", counts_dict.get("total", 0), True),
+            ("Microsoft 365 Groups (Unified)", counts_dict.get("m365", 0), False),
+            ("Security Groups (Static, non-mail-enabled)", counts_dict.get("security", 0), False),
+            ("Mail-enabled Security Groups", counts_dict.get("mail_enabled_security", 0), False),
+            ("Distribution Groups", counts_dict.get("distribution", 0), False),
+            ("Dynamic Groups (Dynamic Membership)", counts_dict.get("dynamic", 0), False)
         ]
 
         current_row = 1
-        for key, display_label in group_type_labels:
+        for item in rows_data:
+            metric_name, val, is_bold = item
+            if metric_name is None:
+                for c_idx in range(2):
+                    c = ctk.CTkFrame(self.groups_users_grid, fg_color=COLOR_OUTLINE_LIGHT, corner_radius=0, height=2)
+                    c.grid(row=current_row, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
+                current_row += 1
+                continue
+
             bg_style = COLOR_SURFACE if current_row % 2 == 0 else COLOR_SURFACE_VARIANT
-            count_val = counts_dict.get(key, 0)
+            font_style = FONT_BODY_BOLD if is_bold else FONT_BODY_MEDIUM
 
-            c0 = ctk.CTkFrame(self.groups_grid, fg_color=bg_style, corner_radius=0)
+            c0 = ctk.CTkFrame(self.groups_users_grid, fg_color=bg_style, corner_radius=0)
             c0.grid(row=current_row, column=0, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkLabel(c0, text=display_label, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
+            ctk.CTkLabel(c0, text=metric_name, font=font_style, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
-            c1 = ctk.CTkFrame(self.groups_grid, fg_color=bg_style, corner_radius=0)
+            c1 = ctk.CTkFrame(self.groups_users_grid, fg_color=bg_style, corner_radius=0)
             c1.grid(row=current_row, column=1, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkLabel(c1, text=f"{count_val:,}", text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
+            ctk.CTkLabel(c1, text=f"{val:,}", font=font_style, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
             current_row += 1
 

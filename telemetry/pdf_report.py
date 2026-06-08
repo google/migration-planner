@@ -440,43 +440,69 @@ def generate_pdf_report(data: dict, filepath: str):
             
         story.append(Spacer(1, 15))
         
-        # 2. Groups Table
-        story.append(Paragraph("Groups", h2_style))
-        story.append(Paragraph("This section displays counts of different directory group categories configured in Microsoft Entra ID.", body_style))
+        # 2. Groups & Users Table
+        story.append(Paragraph("Groups & Users", h2_style))
+        story.append(Paragraph("This section displays counts of different directory user and group categories configured in Microsoft Entra ID.", body_style))
         story.append(Spacer(1, 8))
         
         group_counts = dir_data.get("group_counts", {})
+        user_counts = dir_data.get("user_counts", {})
+        
         dir_table_data = [[
-            Paragraph("Group Category", table_cell_header),
+            Paragraph("Category", table_cell_header),
             Paragraph("Count", table_cell_header)
         ]]
         
-        group_type_labels = [
-            ("total", "Total Groups"),
-            ("m365", "Microsoft 365 Groups (Unified)"),
-            ("security", "Security Groups (Static, non-mail-enabled)"),
-            ("mail_enabled_security", "Mail-enabled Security Groups"),
-            ("distribution", "Distribution Groups"),
-            ("dynamic", "Dynamic Groups (Dynamic Membership)")
+        rows_spec = [
+            # User statistics
+            ("Total Users", user_counts.get("total", 0), True),
+            ("Enabled Users", user_counts.get("enabled", 0), False),
+            ("Disabled Users", user_counts.get("disabled", 0), False),
+            ("Member Users", user_counts.get("member", 0), False),
+            ("Guest Users", user_counts.get("guest", 0), False),
+            # Spacing placeholder
+            ("", "", False),
+            # Group statistics
+            ("Total Groups", group_counts.get("total", 0), True),
+            ("Microsoft 365 Groups (Unified)", group_counts.get("m365", 0), False),
+            ("Security Groups (Static, non-mail-enabled)", group_counts.get("security", 0), False),
+            ("Mail-enabled Security Groups", group_counts.get("mail_enabled_security", 0), False),
+            ("Distribution Groups", group_counts.get("distribution", 0), False),
+            ("Dynamic Groups (Dynamic Membership)", group_counts.get("dynamic", 0), False)
         ]
-        
-        for key, display_label in group_type_labels:
-            count_val = group_counts.get(key, 0)
+
+        row_backgrounds = []
+        for idx, item in enumerate(rows_spec, start=1):
+            metric_name, val, is_bold = item
+            if metric_name == "":
+                dir_table_data.append([Paragraph("", table_cell_style), Paragraph("", table_cell_style)])
+                # Divider background color
+                row_backgrounds.append((idx, colors.HexColor("#CBD5E1")))
+                continue
+                
+            cell_bold = table_cell_bold if is_bold else table_cell_style
             dir_table_data.append([
-                Paragraph(display_label, table_cell_bold),
-                Paragraph(f"{count_val:,}", table_cell_style)
+                Paragraph(metric_name, cell_bold),
+                Paragraph(f"{val:,}", table_cell_style)
             ])
+            # Alternate row background
+            bg = colors.white if idx % 2 == 0 else colors.HexColor("#F8FAFC")
+            row_backgrounds.append((idx, bg))
             
-        dir_table = Table(dir_table_data, colWidths=[300, 200])
-        dir_table.setStyle(TableStyle([
+        dir_table_style = [
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
-        ]))
+        ]
+        
+        for r_idx, bg_color in row_backgrounds:
+            dir_table_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), bg_color))
+            
+        dir_table = Table(dir_table_data, colWidths=[300, 200])
+        dir_table.setStyle(TableStyle(dir_table_style))
         story.append(dir_table)
     story.append(Spacer(1, 15))
 
