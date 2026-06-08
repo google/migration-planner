@@ -72,4 +72,29 @@ class SecurityService:
         finally:
             self.client.release_token(token_slot)
 
+    def fetch_sso_service_principals(self) -> list[dict]:
+        """Fetches Microsoft Entra Enterprise Applications (Service Principals) to analyze Single Sign-On."""
+        url = "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,appDisplayName,preferredSingleSignOnMode&$top=100"
+        token_slot = self.client.get_active_token()
+        session = self.client.get_session()
+        
+        headers = {
+            "Authorization": f"Bearer {token_slot['token']}",
+            "Accept": "application/json"
+        }
+        try:
+            logger.info("Querying Entra ID Service Principals for Single Sign-On modes...")
+            resp = session.get(url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("value", [])
+            elif resp.status_code in [401, 403]:
+                logger.error("Service Principals endpoint permission error: %d %s", resp.status_code, resp.text)
+                raise PermissionError("Application.Read.All permission required.")
+            else:
+                logger.error("Service Principals endpoint failed with status %d: %s", resp.status_code, resp.text)
+                raise ConnectionError(f"Microsoft Graph API request failed with status {resp.status_code}")
+        finally:
+            self.client.release_token(token_slot)
+
 

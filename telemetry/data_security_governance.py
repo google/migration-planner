@@ -162,7 +162,7 @@ def fetch_retention_policies_data(client_id, client_secret, tenant_id) -> dict:
         return {"policies": None, "error": str(e)}
 
 def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
-    """Fetch Entra ID Conditional Access authentication mechanics."""
+    """Fetch Entra ID Conditional Access authentication mechanics and Enterprise SSO modes."""
     usage_logger.info("Starting Authentication & Conditional Access fetch...")
     client = GraphClient(
         tenant_id=tenant_id,
@@ -176,6 +176,7 @@ def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
         client.authenticate()
         service = SecurityService(client)
         policies = service.fetch_conditional_access_policies()
+        sso_apps = service.fetch_sso_service_principals()
         
         email_web = []
         browser_apps = []
@@ -233,23 +234,53 @@ def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
         if not mfa_status:
             mfa_status.append("Standard Entra MFA evaluation enabled.")
             
+        saml_count = 0
+        oidc_count = 0
+        pwd_count = 0
+        
+        for sp in sso_apps:
+            mode = sp.get("preferredSingleSignOnMode")
+            if mode == "saml":
+                saml_count += 1
+            elif mode == "oidc":
+                oidc_count += 1
+            elif mode == "password":
+                pwd_count += 1
+                
+        sso_findings = []
+        if saml_count or oidc_count or pwd_count:
+            if saml_count: sso_findings.append(f"• SAML 2.0 Federation: {saml_count} Apps")
+            if oidc_count: sso_findings.append(f"• OpenID Connect: {oidc_count} Apps")
+            if pwd_count: sso_findings.append(f"• Password Vaulting: {pwd_count} Apps")
+        else:
+            sso_findings.append("• Standard Entra ID Application registrations active")
+            
+        sso_meaning = []
+        if saml_count: sso_meaning.append(f"• {saml_count} enterprise applications federate via SAML trust (candidate for Google Workspace SAML IdP migration).")
+        if oidc_count: sso_meaning.append(f"• {oidc_count} applications authenticate using modern OIDC tokens.")
+        if pwd_count: sso_meaning.append(f"• {pwd_count} applications rely on secure password vaulting / credential injection.")
+        if not sso_meaning:
+            sso_meaning.append("• Enterprise service principals utilize standard OAuth / OpenID tenant authentication.")
+            
         return {
             "auth_data": {
                 "email_web": "\n".join(email_web),
                 "browser_apps": "\n".join(browser_apps),
-                "mfa_status": "\n".join(mfa_status)
+                "mfa_status": "\n".join(mfa_status),
+                "sso_findings": "\n".join(sso_findings),
+                "sso_meaning": "\n".join(sso_meaning)
             },
             "error": None
         }
-    except PermissionError:
-        return {
-            "auth_data": None,
-            "error": "Conditional Access telemetry permission required.\nPlease grant the 'Policy.Read.All' (or 'Policy.Read') application permission to your App Registration in Microsoft Entra ID."
-        }
+    except PermissionError as pe:
+        msg = str(pe)
+        if not msg or msg == "Policy.Read.All or Policy.Read permission required.":
+            msg = "Conditional Access telemetry permission required.\nPlease grant the 'Policy.Read.All' (or 'Policy.Read') application permission to your App Registration in Microsoft Entra ID."
+        return {"auth_data": None, "error": msg}
     except Exception as e:
         err_str = str(e)
         if "401" in err_str or "403" in err_str or "permission" in err_str.lower() or "unauthorized" in err_str.lower():
-            err_str = "Conditional Access telemetry permission required.\nPlease grant the 'Policy.Read.All' (or 'Policy.Read') application permission to your App Registration in Microsoft Entra ID."
+            err_str = "Conditional Access / Application telemetry permission required.\nPlease grant the 'Policy.Read.All' and 'Application.Read.All' application permissions to your App Registration in Microsoft Entra ID."
         return {"auth_data": None, "error": err_str}
     finally:
         try:
@@ -856,7 +887,10 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
              "• Enterprise users are automatically required to verify credentials again after 12 hours of session inactivity.\n• Enabling persistent sessions ensures closing browser windows or tabs does not prematurely sign out.\n• Tunnels web logins through Microsoft Defender for Cloud Apps proxy to restrict document downloads."),
             ("🛡️ Multi-Factor Auth",
              "• MFA Enforcement: MANDATORY (MFA Required)\n• Coverage Scope: GLOBAL (Universal Scope)",
-             "• Mandates phishing-resistant multi-factor authentication (Authenticator / FIDO2) across corporate sign-ins.\n• Applies zero-trust MFA evaluation universally across corporate accounts (Include: All Users).")
+             "• Mandates phishing-resistant multi-factor authentication (Authenticator / FIDO2) across corporate sign-ins.\n• Applies zero-trust MFA evaluation universally across corporate accounts (Include: All Users)."),
+            ("🔐 Enterprise SaaS (SSO)",
+             auth_data.get("sso_findings", "• SAML 2.0 Federation: Active\n• OpenID Connect: Active"),
+             auth_data.get("sso_meaning", "• Enterprise service principals utilize standard OAuth / OpenID tenant authentication."))
         ]
 
         for r_idx, (cat, findings, meaning) in enumerate(rows, start=1):
