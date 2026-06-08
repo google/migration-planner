@@ -678,7 +678,6 @@ def generate_pdf_report(data: dict, filepath: str):
         ("Room & Resource Reservation Enabled", str(reserve_val)),
         ("Calendar Resource Pools (Rooms/Devices)", calendar.get("NamingConvention") or "None found"),
         ("Calendar Attachment Link Permissions", str(att_val)),
-        ("Integrated Calendar Connectors", calendar.get("IntegratedCalendarApps") or "None found"),
     ]
     
     for label, val in exchange_rows:
@@ -698,6 +697,67 @@ def generate_pdf_report(data: dict, filepath: str):
         ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
     ]))
     story.append(ex_table)
+    story.append(Spacer(1, 15))
+
+    # 3.1b Integrated Apps
+    story.append(Paragraph("Integrated Apps", h2_style))
+    story.append(Paragraph("This section lists all organization-wide apps deployed in Exchange Online by administrators and their enabled status.", body_style))
+    story.append(Spacer(1, 8))
+    
+    org_apps = calendar.get("OrganizationApps", [])
+    apps_error = calendar.get("AppsError")
+    
+    if apps_error:
+        story.append(Paragraph(f"Error querying organization apps: {apps_error}", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    elif not org_apps:
+        story.append(Paragraph("No organization-wide apps found in Exchange Online.", body_style))
+    else:
+        apps_table_data = [[
+            Paragraph("App Display Name", table_cell_header),
+            Paragraph("Status", table_cell_header),
+            Paragraph("App Display Name", table_cell_header),
+            Paragraph("Status", table_cell_header)
+        ]]
+        half = (len(org_apps) + 1) // 2
+        left_col = org_apps[:half]
+        right_col = org_apps[half:]
+        
+        for r_idx in range(half):
+            row_items = []
+            if r_idx < len(left_col):
+                app = left_col[r_idx]
+                enabled_str = "Enabled" if app.get("Enabled") else "Disabled"
+                row_items.extend([app.get("DisplayName", "-"), enabled_str])
+            else:
+                row_items.extend(["", ""])
+                
+            if r_idx < len(right_col):
+                app = right_col[r_idx]
+                enabled_str = "Enabled" if app.get("Enabled") else "Disabled"
+                row_items.extend([app.get("DisplayName", "-"), enabled_str])
+            else:
+                row_items.extend(["", ""])
+                
+            apps_table_data.append([
+                Paragraph(row_items[0], table_cell_bold if row_items[0] else table_cell_style),
+                Paragraph(row_items[1], table_cell_style),
+                Paragraph(row_items[2], table_cell_bold if row_items[2] else table_cell_style),
+                Paragraph(row_items[3], table_cell_style)
+            ])
+            
+        apps_table = Table(apps_table_data, colWidths=[180, 70, 180, 70])
+        apps_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(apps_table)
+        
+    story.append(Spacer(1, 15))
     story.append(PageBreak())
 
     # 3.2 SharePoint & OneDrive Storage

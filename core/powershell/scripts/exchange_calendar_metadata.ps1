@@ -58,10 +58,19 @@ try {
         $owaPolicyError = $_.Exception.Message
     }
 
-    $orgApps = @()
+    $orgAppsData = @()
     $appsError = $null
     try {
-        $orgApps = @(Get-App -OrganizationApp | Where-Object { $_.Enabled -eq $true })
+        $orgApps = @(Get-App -OrganizationApp -ErrorAction Stop)
+        if ($orgApps) {
+            foreach ($app in $orgApps) {
+                $orgAppsData += [PSCustomObject]@{
+                    DisplayName = $app.DisplayName
+                    AppId = $app.AppId
+                    Enabled = $app.Enabled
+                }
+            }
+        }
     } catch {
         $appsError = $_.Exception.Message
     }
@@ -74,7 +83,7 @@ try {
         EquipmentError         = $equipmentError
         CanShareAttachments    = $canShareAttachments
         OwaPolicyError         = $owaPolicyError
-        IntegratedCalendarApps = if ($orgApps) { (($orgApps.DisplayName | Sort-Object -Unique) -join ", ") } else { $null }
+        OrganizationApps       = $orgAppsData
         AppsError              = $appsError
     }
     $result | ConvertTo-Json

@@ -12,15 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Uber container section wrapping Mailbox and Calendar telemetry frames under a single Exchange Online card."""
+"""Uber container section wrapping Mailbox, Calendar, and Organization Apps telemetry frames under a single Exchange Online card."""
 
 import customtkinter as ctk
 from telemetry.styles import *
 from telemetry.mailbox_usage import MailboxUsageFrame
 from telemetry.calendar_telemetry import CalendarTelemetryFrame
+from telemetry.exchange_apps import ExchangeAppsFrame
 
 class ExchangeOnlineFrame(ctk.CTkFrame):
-    """Uber section container hosting Mailbox and Calendar telemetry frames vertically stacked."""
+    """Uber section container hosting Mailbox, Calendar, and Apps telemetry frames vertically stacked."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
@@ -33,7 +34,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.build_ui()
 
     def build_ui(self):
-        """Instantiates and stacks existing mailbox and calendar frames."""
+        """Instantiates and stacks existing mailbox, calendar, and apps frames."""
         self.pack(fill="x", expand=True, pady=10)
 
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
@@ -58,7 +59,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.mailbox_view.configure(fg_color="transparent", border_width=0)
         self.mailbox_view.pack(fill="x", expand=True, pady=(0, 5))
 
-        # Separator line
+        # Separator line 1
         self.divider = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
         self.divider.pack(fill="x", pady=10)
 
@@ -73,31 +74,51 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.calendar_view.configure(fg_color="transparent", border_width=0)
         self.calendar_view.pack(fill="x", expand=True, pady=(0, 5))
 
+        # Separator line 2
+        self.divider2 = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
+        self.divider2.pack(fill="x", pady=10)
+
+        # Organization-wide Apps Sub-frame
+        self.apps_view = ExchangeAppsFrame(
+            master=self.inner_pad,
+            log_callback=self.log_msg,
+            credentials_callback=self.get_credentials,
+            status_change_callback=self._check_overall_status,
+            concurrency_semaphore=self.semaphore
+        )
+        self.apps_view.configure(fg_color="transparent", border_width=0)
+        self.apps_view.pack(fill="x", expand=True, pady=(0, 5))
+
         self.reset_view()
 
     def reset_view(self):
-        """Resets both sub-views and hides container."""
+        """Resets all sub-views and hides container."""
         self.pack_forget()
         self.mailbox_view.reset_view()
         self.calendar_view.reset_view()
+        self.apps_view.reset_view()
         self.divider.pack_forget()
+        self.divider2.pack_forget()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
-        """Displays container and delegates fetches to both sub-views."""
+        """Displays container and delegates fetches to all sub-views."""
         self.status = "loading"
         self.on_status_change()
 
         self.pack(fill="x", expand=True, pady=10)
         self.divider.pack(fill="x", pady=10)
+        self.divider2.pack(fill="x", pady=10)
 
         self.mailbox_view.trigger_fetch(tenant, client_id, client_secret)
         self.calendar_view.trigger_fetch(tenant, client_id, client_secret)
+        self.apps_view.trigger_fetch(tenant, client_id, client_secret)
 
     def _check_overall_status(self):
         """Updates main container status based on sub-frame statuses."""
-        if self.mailbox_view.status == "loading" or self.calendar_view.status == "loading":
+        sub_statuses = [self.mailbox_view.status, self.calendar_view.status, self.apps_view.status]
+        if "loading" in sub_statuses:
             self.status = "loading"
-        elif self.mailbox_view.status == "success" or self.calendar_view.status == "success":
+        elif "success" in sub_statuses:
             self.status = "success"
         else:
             self.status = "error"

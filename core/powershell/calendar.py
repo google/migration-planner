@@ -31,7 +31,7 @@ class CalendarStatsService:
                 "EquipmentError": None,
                 "CanShareAttachments": True,
                 "OwaPolicyError": None,
-                "IntegratedCalendarApps": None,
+                "OrganizationApps": [],
                 "AppsError": None
             }
 

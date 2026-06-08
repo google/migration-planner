@@ -44,7 +44,7 @@ def run_calendar_telemetry_pipeline(client_id: str, client_secret: str, tenant_i
     equipment_error = None
     can_share_attachments = True
     owa_policy_error = None
-    integrated_apps = None
+    org_apps = []
     apps_error = None
     powershell_error = None
     
@@ -67,7 +67,7 @@ def run_calendar_telemetry_pipeline(client_id: str, client_secret: str, tenant_i
         equipment_error = metadata.get("EquipmentError")
         can_share_attachments = metadata.get("CanShareAttachments", True)
         owa_policy_error = metadata.get("OwaPolicyError")
-        integrated_apps = metadata.get("IntegratedCalendarApps")
+        org_apps = metadata.get("OrganizationApps", [])
         apps_error = metadata.get("AppsError")
              
     except Exception as e:
@@ -86,6 +86,16 @@ def run_calendar_telemetry_pipeline(client_id: str, client_secret: str, tenant_i
         owa_policy_error = err_msg
         apps_error = err_msg
 
+    # Log individual component errors
+    if rooms_error:
+        calendar_logger.error(f"Exchange PowerShell error querying Room Mailboxes: {rooms_error}")
+    if equipment_error:
+        calendar_logger.error(f"Exchange PowerShell error querying Equipment Mailboxes: {equipment_error}")
+    if owa_policy_error:
+        calendar_logger.error(f"Exchange PowerShell error querying OWA Mailbox Policy: {owa_policy_error}")
+    if apps_error:
+        calendar_logger.error(f"Exchange PowerShell error querying Organization Apps: {apps_error}")
+
     total_resources = rooms_count + equipment_count
     
     return {
@@ -95,7 +105,8 @@ def run_calendar_telemetry_pipeline(client_id: str, client_secret: str, tenant_i
         "EquipmentCount": equipment_count,
         "RoomsError": rooms_error,
         "DevicesError": equipment_error,
-        "IntegratedCalendarApps": apps_error if apps_error else (integrated_apps if integrated_apps else "None found"),
+        "OrganizationApps": org_apps,
+        "AppsError": apps_error,
         "NamingConvention": rooms_error if rooms_error else (rooms_naming if rooms_naming else "None found"),
         "CanShareAttachments": owa_policy_error if owa_policy_error else can_share_attachments,
         "powershell_error": powershell_error
@@ -254,7 +265,6 @@ class CalendarTelemetryFrame(ctk.CTkFrame):
         rows_data = [
             ("Room & Resource Reservation", reserve_val),
             ("Calendar Resources", res_val),
-            ("Integrated Calendar Apps", data.get("IntegratedCalendarApps") or "None found"),
             ("Resource Naming Convention", data.get("NamingConvention") or "None found"),
             ("Calendar Attachments Enabled", attachments_val),
         ]
