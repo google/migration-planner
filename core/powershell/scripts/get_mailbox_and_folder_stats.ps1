@@ -27,14 +27,17 @@ if ($CertificatePassword) {
 }
 
 try {
+    $errors = @{}
+
     # 1. Query Shared Mailboxes
-    $sharedCount = 0
-    $sharedTotalBytes = [long]0
+    $sharedCount = $null
+    $sharedTotalBytes = $null
     try {
-        $sharedMailboxes = Get-Mailbox -RecipientTypeDetails SharedMailbox -ResultSize Unlimited -ErrorAction SilentlyContinue
+        $sharedMailboxes = Get-Mailbox -RecipientTypeDetails SharedMailbox -ResultSize Unlimited -ErrorAction Stop
         if ($sharedMailboxes) {
-            $sharedStats = @($sharedMailboxes | Get-MailboxStatistics -ErrorAction SilentlyContinue)
+            $sharedStats = @($sharedMailboxes | Get-MailboxStatistics -ErrorAction Stop)
             $sharedCount = @($sharedMailboxes).Count
+            $sharedTotalBytes = [long]0
             foreach ($stat in $sharedStats) {
                 if ($stat.TotalItemSize -and $stat.TotalItemSize.Value) {
                     try {
@@ -50,26 +53,46 @@ try {
                     $sharedTotalBytes += $bytes
                 }
             }
+        } else {
+            $sharedCount = 0
+            $sharedTotalBytes = 0
         }
     } catch {
-        # Log or handle
+        $errors["SharedMailboxes"] = $_.Exception.Message
     }
 
     # 2. Query Public Folders
-    $pfCount = 0
+    $pfCount = $null
     try {
-        $pfs = Get-PublicFolder -Recurse -ResultSize Unlimited -ErrorAction SilentlyContinue
+        $pfs = Get-PublicFolder -Recurse -ResultSize Unlimited -ErrorAction Stop
         if ($pfs) {
             $pfCount = @($pfs).Count
+        } else {
+            $pfCount = 0
         }
     } catch {
-        $pfCount = 0
+        $errors["PublicFolders"] = $_.Exception.Message
     }
 
-    $pfTotalBytes = [long]0
+    # 2b. Query Mail-Enabled Public Folders
+    $mailPfCount = $null
     try {
-        $pfStats = Get-PublicFolderStatistics -ResultSize Unlimited -ErrorAction SilentlyContinue
+        $mailPfs = Get-MailPublicFolder -ResultSize Unlimited -ErrorAction Stop
+        if ($mailPfs) {
+            $mailPfCount = @($mailPfs).Count
+        } else {
+            $mailPfCount = 0
+        }
+    } catch {
+        $errors["MailPublicFolders"] = $_.Exception.Message
+    }
+
+    # 2c. Query Public Folder Stats (Size)
+    $pfTotalBytes = $null
+    try {
+        $pfStats = Get-PublicFolderStatistics -ResultSize Unlimited -ErrorAction Stop
         if ($pfStats) {
+            $pfTotalBytes = [long]0
             foreach ($stat in @($pfStats)) {
                 if ($stat.TotalItemSize -and $stat.TotalItemSize.Value) {
                     try {
@@ -85,9 +108,11 @@ try {
                     $pfTotalBytes += $bytes
                 }
             }
+        } else {
+            $pfTotalBytes = 0
         }
     } catch {
-        # Log or handle
+        $errors["PublicFolderStats"] = $_.Exception.Message
     }
 
     # Output results as JSON
@@ -96,6 +121,8 @@ try {
         SharedMailboxesTotalBytes = $sharedTotalBytes
         PublicFoldersCount = $pfCount
         PublicFoldersTotalBytes = $pfTotalBytes
+        MailPublicFoldersCount = $mailPfCount
+        Errors = $errors
     }
     $result | ConvertTo-Json
 }

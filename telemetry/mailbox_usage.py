@@ -128,10 +128,11 @@ def run_mailbox_usage_pipeline(client_id: str, client_secret: str, tenant_id: st
     
     data = parse_mailbox_usage_csv(os.path.join(reports_dir, "MailboxUsageDetail(180d).csv"))
     
-    shared_count = 0
-    shared_bytes = 0
-    pf_count = 0
-    pf_bytes = 0
+    shared_count = None
+    shared_bytes = None
+    pf_count = None
+    pf_bytes = None
+    mail_pf_count = None
     powershell_error = None
     
     try:
@@ -145,10 +146,18 @@ def run_mailbox_usage_pipeline(client_id: str, client_secret: str, tenant_id: st
         pb_service = MailboxStatsService(ps_client)
         stats = pb_service.fetch_mailbox_and_folder_stats()
         
-        shared_count = stats.get("SharedMailboxesCount", 0)
-        shared_bytes = stats.get("SharedMailboxesTotalBytes", 0)
-        pf_count = stats.get("PublicFoldersCount", 0)
-        pf_bytes = stats.get("PublicFoldersTotalBytes", 0)
+        shared_count = stats.get("SharedMailboxesCount")
+        shared_bytes = stats.get("SharedMailboxesTotalBytes")
+        pf_count = stats.get("PublicFoldersCount")
+        pf_bytes = stats.get("PublicFoldersTotalBytes")
+        mail_pf_count = stats.get("MailPublicFoldersCount")
+        
+        # Parse and log individual command errors
+        errors = stats.get("Errors", {})
+        if errors:
+            for component, err_msg in errors.items():
+                usage_logger.error(f"PowerShell error querying {component}: {err_msg}")
+            powershell_error = ", ".join(f"{k}: {v}" for k, v in errors.items())
     except Exception as e:
         usage_logger.error("Failed to fetch Shared Mailbox / Public Folder stats via PowerShell", exc_info=True)
         powershell_error = str(e)
@@ -156,10 +165,11 @@ def run_mailbox_usage_pipeline(client_id: str, client_secret: str, tenant_id: st
     data.update({
         "shared_mailboxes_count": shared_count,
         "shared_mailboxes_total_bytes": shared_bytes,
-        "shared_mailboxes_total_formatted": format_bytes(shared_bytes) if not powershell_error else "Error/Unavailable",
+        "shared_mailboxes_total_formatted": format_bytes(shared_bytes) if shared_bytes is not None else "Error/Unavailable",
         "public_folders_count": pf_count,
         "public_folders_total_bytes": pf_bytes,
-        "public_folders_total_formatted": format_bytes(pf_bytes) if not powershell_error else "Error/Unavailable",
+        "public_folders_total_formatted": format_bytes(pf_bytes) if pf_bytes is not None else "Error/Unavailable",
+        "mail_public_folders_count": mail_pf_count,
         "powershell_error": powershell_error
     })
 
@@ -306,28 +316,26 @@ class MailboxUsageFrame(ctk.CTkFrame):
             ("Average Emails per User", f"{data.get('average_emails', 0.0):,.0f} Emails")
         ]
 
-        if data.get("powershell_error"):
-            err_msg = data["powershell_error"]
-            if "powershell" in err_msg.lower() or "pwsh" in err_msg.lower():
-                friendly_val = "Error (pwsh not installed)"
-            elif "exchangeonlinemanagement" in err_msg.lower():
-                friendly_val = "Error (ExchangeOnlineManagement module missing)"
-            else:
-                friendly_val = "Error (PowerShell failed)"
-            
-            rows_data += [
-                ("Shared Mailboxes Count", friendly_val),
-                ("Total Shared Mailbox Size", friendly_val),
-                ("Public Folders Count", friendly_val),
-                ("Total Public Folder Size", friendly_val)
-            ]
-        else:
-            rows_data += [
-                ("Shared Mailboxes Count", f"{data.get('shared_mailboxes_count', 0):,} Shared Mailboxes"),
-                ("Total Shared Mailbox Size", data.get("shared_mailboxes_total_formatted", "0.00 Bytes")),
-                ("Public Folders Count", f"{data.get('public_folders_count', 0):,} Public Folders"),
-                ("Total Public Folder Size", data.get("public_folders_total_formatted", "0.00 Bytes"))
-            ]
+        # PowerShell retrieved stats (with individual error handling)
+        s_count = data.get("shared_mailboxes_count")
+        s_count_str = f"{s_count:,} Shared Mailboxes" if s_count is not None else "Error/Unavailable"
+        s_size_str = data.get("shared_mailboxes_total_formatted", "Error/Unavailable")
+        
+        pf_count = data.get("public_folders_count")
+        pf_count_str = f"{pf_count:,} Public Folders" if pf_count is not None else "Error/Unavailable"
+        
+        mail_pf_count = data.get("mail_public_folders_count")
+        mail_pf_count_str = f"{mail_pf_count:,} Public Folders" if mail_pf_count is not None else "Error/Unavailable"
+        
+        pf_size_str = data.get("public_folders_total_formatted", "Error/Unavailable")
+
+        rows_data += [
+            ("Shared Mailboxes Count", s_count_str),
+            ("Total Shared Mailbox Size", s_size_str),
+            ("Public Folders Count", pf_count_str),
+            ("Mail-enabled Public Folders Count", mail_pf_count_str),
+            ("Total Public Folder Size", pf_size_str)
+        ]
 
         for r_idx, (metric_name, val) in enumerate(rows_data, start=1):
             bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT

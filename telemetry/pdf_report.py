@@ -647,19 +647,25 @@ def generate_pdf_report(data: dict, filepath: str):
         ("Average Emails per Mailbox", f"{mailbox.get('average_emails', 0.0):,.0f} Emails"),
     ]
     
-    if mailbox.get("powershell_error"):
-        exchange_rows += [
-            ("Shared Mailboxes Count", "PowerShell Unavailable"),
-            ("Total Shared Mailbox Size", "PowerShell Unavailable"),
-            ("Public Folders Count", "PowerShell Unavailable"),
-        ]
-    else:
-        exchange_rows += [
-            ("Shared Mailboxes Count", f"{mailbox.get('shared_mailboxes_count', 0):,} Shared Mailboxes"),
-            ("Total Shared Mailbox Size", mailbox.get("shared_mailboxes_total_formatted", "0.00 Bytes")),
-            ("Public Folders Count", f"{mailbox.get('public_folders_count', 0):,} Public Folders"),
-            ("Total Public Folder Size", mailbox.get("public_folders_total_formatted", "0.00 Bytes")),
-        ]
+    s_count = mailbox.get('shared_mailboxes_count')
+    s_count_str = f"{s_count:,} Shared Mailboxes" if s_count is not None else "Error/Unavailable"
+    s_size_str = mailbox.get("shared_mailboxes_total_formatted", "Error/Unavailable")
+    
+    pf_count = mailbox.get('public_folders_count')
+    pf_count_str = f"{pf_count:,} Public Folders" if pf_count is not None else "Error/Unavailable"
+    
+    mail_pf_count = mailbox.get('mail_public_folders_count')
+    mail_pf_count_str = f"{mail_pf_count:,} Public Folders" if mail_pf_count is not None else "Error/Unavailable"
+    
+    pf_size_str = mailbox.get("public_folders_total_formatted", "Error/Unavailable")
+
+    exchange_rows += [
+        ("Shared Mailboxes Count", s_count_str),
+        ("Total Shared Mailbox Size", s_size_str),
+        ("Public Folders Count", pf_count_str),
+        ("Mail-enabled Public Folders Count", mail_pf_count_str),
+        ("Total Public Folder Size", pf_size_str),
+    ]
         
     # Add calendar properties
     reserve_val = calendar.get("CanUsersReserveRooms")
