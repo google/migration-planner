@@ -838,47 +838,45 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _render_authentication_card(self, auth_data: dict):
         self.auth_grid.configure(fg_color=COLOR_SURFACE, border_width=1, border_color=COLOR_OUTLINE_LIGHT, corner_radius=8)
         self.auth_grid.grid_columnconfigure(0, weight=2)
-        self.auth_grid.grid_columnconfigure(1, weight=2)
-        self.auth_grid.grid_columnconfigure(2, weight=2)
-        self.auth_grid.grid_columnconfigure(3, weight=4)
+        self.auth_grid.grid_columnconfigure(1, weight=3)
+        self.auth_grid.grid_columnconfigure(2, weight=5)
 
-        headers = ["Authentication Category", "Assessment Dimension", "Surfaced Technical Metric", "Operational Meaning (What This Denotes)"]
+        headers = ["Authentication Category", "Surfaced Technical Findings", "Operational Reality (What This Denotes)"]
         for col_idx, head_text in enumerate(headers):
             cell = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
         rows = [
-            ("📩 Email & Web Services", "Legacy Authentication Protocols", "BLOCKED (Basic Auth Denied)", "Explicitly restricts unencrypted POP3, IMAP4, and Basic ActiveSync across corporate accounts. External mail apps must support OAuth."),
-            ("📩 Email & Web Services", "Modern Authentication (OAuth 2.0)", "MANDATORY (OAuth Enforced)", "Outlook Desktop, mobile clients, and connected Web APIs enforce token-based modern authentication with device compliance evaluation."),
-            ("🌐 Browser & Web Apps", "Re-Login Timeout", "12 HOURS (Rolling Expiry)", "Enterprise users are automatically required to verify credentials again after 12 hours of session inactivity."),
-            ("🌐 Browser & Web Apps", "Session Memory", "PERSISTENT (Remembers Login)", "Enabling persistent sessions ensures closing browser windows or tabs does not prematurely sign the user out."),
-            ("🌐 Browser & Web Apps", "Web Proxy Protection", "MDCA PROXY (Block Downloads)", "Tunnels web logins through Microsoft Defender for Cloud Apps proxy to monitor and restrict document downloads."),
-            ("🛡️ Multi-Factor Auth", "MFA Enforcement Status", "MANDATORY (MFA Required)", "Mandates phishing-resistant multi-factor authentication (Authenticator / FIDO2) across corporate sign-ins."),
-            ("🛡️ Multi-Factor Auth", "MFA Coverage Scope", "GLOBAL (Universal Scope)", "Applies zero-trust MFA evaluation universally across corporate accounts (Include: All Users).")
+            ("📩 Email & Web Services",
+             "• Legacy Protocols: BLOCKED (Basic Auth Denied)\n• Modern Auth: MANDATORY (OAuth Enforced)",
+             "• Explicitly restricts unencrypted POP3, IMAP4, and Basic ActiveSync across corporate accounts.\n• Outlook Desktop, mobile clients, and connected Web APIs enforce token-based modern authentication."),
+            ("🌐 Browser & Web Apps",
+             "• Re-Login Timeout: 12 HOURS (Rolling Expiry)\n• Session Memory: PERSISTENT (Remembers Login)\n• Web Proxy Protection: MDCA PROXY (Block Downloads)",
+             "• Enterprise users are automatically required to verify credentials again after 12 hours of session inactivity.\n• Enabling persistent sessions ensures closing browser windows or tabs does not prematurely sign out.\n• Tunnels web logins through Microsoft Defender for Cloud Apps proxy to restrict document downloads."),
+            ("🛡️ Multi-Factor Auth",
+             "• MFA Enforcement: MANDATORY (MFA Required)\n• Coverage Scope: GLOBAL (Universal Scope)",
+             "• Mandates phishing-resistant multi-factor authentication (Authenticator / FIDO2) across corporate sign-ins.\n• Applies zero-trust MFA evaluation universally across corporate accounts (Include: All Users).")
         ]
 
-        for r_idx, (cat, dim, metric, meaning) in enumerate(rows, start=1):
+        for r_idx, (cat, findings, meaning) in enumerate(rows, start=1):
             bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
             
             c0 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
             c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkLabel(c0, text=cat, font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(padx=10, pady=8, anchor="w")
+            ctk.CTkLabel(c0, text=cat, font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(padx=10, pady=12, anchor="nw")
 
             c1 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
             c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkLabel(c1, text=dim, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="w")
+            lbl_f = ctk.CTkLabel(c1, text=findings, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, justify="left")
+            lbl_f.pack(padx=10, pady=12, anchor="nw")
 
             c2 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
             c2.grid(row=r_idx, column=2, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkLabel(c2, text=metric, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="w")
-
-            c3 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
-            c3.grid(row=r_idx, column=3, sticky="nsew", padx=0, pady=(0, 1))
-            lbl_mean = ctk.CTkLabel(c3, text=meaning, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, justify="left")
-            lbl_mean.pack(padx=10, pady=8, anchor="w")
+            lbl_m = ctk.CTkLabel(c2, text=meaning, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, justify="left")
+            lbl_m.pack(padx=10, pady=12, anchor="nw")
             
-            c3.bind("<Configure>", lambda e, l=lbl_mean: l.configure(wraplength=e.width - 20))
+            c2.bind("<Configure>", lambda e, l=lbl_m: l.configure(wraplength=e.width - 20))
 
     def _check_overall_status(self):
         if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "auth_status", None) == "loading":
