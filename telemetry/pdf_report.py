@@ -352,7 +352,7 @@ def generate_pdf_report(data: dict, filepath: str):
     # =========================================================================
     # SECTION 1: SUBSCRIBED SKUS INVENTORY
     # =========================================================================
-    story.append(Paragraph("1. Subscribed SKUs Inventory Summary", h1_style))
+    story.append(Paragraph("1. Subscribed SKUs", h1_style))
     story.append(Paragraph("This section outlines the licensing packages (SKUs) currently configured and active in your Microsoft Entra ID tenant scope, displaying total enabled vs. consumed license counts.", body_style))
     story.append(Spacer(1, 8))
     

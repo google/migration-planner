@@ -15,6 +15,7 @@ from core.graph.directory import DirectoryService
 from telemetry import active_users_usage as usage
 from telemetry.power_automate import PowerAutomateScanner
 from telemetry.mailbox_usage import run_mailbox_usage_pipeline
+from telemetry.calendar_telemetry import run_calendar_telemetry_pipeline
 from telemetry.sharepoint_onedrive_usage import run_sharepoint_pipeline, run_onedrive_pipeline
 from telemetry.data_security_governance import run_security_governance_pipeline
 
@@ -86,7 +87,7 @@ class DashboardView(ft.Container):
             ],
             spacing=5
         )
-        self.sku_section = self.create_card("Subscribed SKUs Inventory Summary", action_control=sku_actions, on_retry=self.handle_retry_skus)
+        self.sku_section = self.create_card("Subscribed SKUs", action_control=sku_actions, on_retry=self.handle_retry_skus)
         
         # 2. O365 Usage Card
         self.o365_section = self.create_card("O365 Active Users Usage", on_retry=self.handle_retry_o365)
@@ -97,14 +98,37 @@ class DashboardView(ft.Container):
         # 4. M365 App Usage Card
         self.m365_section = self.create_card("M365 App Usage (180 Days)", on_retry=self.handle_retry_m365)
         
-        # 5. Mailbox Card
-        self.mailbox_section = self.create_card("Exchange Online Mailbox Usage Telemetry", on_retry=self.handle_retry_mailbox)
+        # 5. Exchange Online Card (Combined Emails and Calendar Sections)
+        self.emails_container = ft.Container(content=ft.Text("No data yet.", color=COLOR_TEXT_SUB))
+        self.calendar_container = ft.Container(content=ft.Text("No data yet.", color=COLOR_TEXT_SUB))
+        self.exchange_layout = ft.Column(
+            controls=[
+                ft.Text("Exchange Online Email", size=16, weight=ft.FontWeight.BOLD, color=COLOR_PRIMARY),
+                self.emails_container,
+                ft.Divider(height=10, color="transparent"),
+                ft.Text("Exchange Online Calendar", size=16, weight=ft.FontWeight.BOLD, color=COLOR_PRIMARY),
+                self.calendar_container
+            ],
+            spacing=5
+        )
+        self.exchange_section = self.create_card("Exchange Online", on_retry=self.handle_retry_exchange)
+        self.exchange_section.content_container.content = self.exchange_layout
         
-        # 6. SharePoint Card
-        self.sharepoint_section = self.create_card("SharePoint Site Usage Telemetry (180 Days)", on_retry=self.handle_retry_sharepoint)
-        
-        # 7. OneDrive Card
-        self.onedrive_section = self.create_card("OneDrive Usage Telemetry (180 Days)", on_retry=self.handle_retry_onedrive)
+        # 6. Files Card (Combined SharePoint and OneDrive Sections)
+        self.sharepoint_container = ft.Container(content=ft.Text("No data yet.", color=COLOR_TEXT_SUB))
+        self.onedrive_container = ft.Container(content=ft.Text("No data yet.", color=COLOR_TEXT_SUB))
+        self.files_layout = ft.Column(
+            controls=[
+                ft.Text("SharePoint Site Usage (180 Days)", size=16, weight=ft.FontWeight.BOLD, color=COLOR_PRIMARY),
+                self.sharepoint_container,
+                ft.Divider(height=10, color="transparent"),
+                ft.Text("OneDrive Usage (180 Days)", size=16, weight=ft.FontWeight.BOLD, color=COLOR_PRIMARY),
+                self.onedrive_container
+            ],
+            spacing=5
+        )
+        self.files_section = self.create_card("Files", on_retry=self.handle_retry_files)
+        self.files_section.content_container.content = self.files_layout
         
         # 8. Sensitivity Labels Card (with Pagination Controls)
         self.labels_pagination_info = ft.Text("Page 1 of 1", size=13, color=COLOR_TEXT_MAIN)
@@ -178,9 +202,8 @@ class DashboardView(ft.Container):
                 self.o365_section,
                 self.trend_section,
                 self.m365_section,
-                self.mailbox_section,
-                self.sharepoint_section,
-                self.onedrive_section,
+                self.exchange_section,
+                self.files_section,
                 self.labels_section,
                 self.retention_section,
                 self.ediscovery_section,
@@ -264,6 +287,12 @@ class DashboardView(ft.Container):
                 card.retry_btn.update()
             except Exception:
                 pass
+
+    def set_tab_loading(self, tab_container, message):
+        tab_container.content = ft.Column([
+            ft.ProgressRing(width=30, height=30),
+            ft.Text(message, color=COLOR_TEXT_SUB, size=13)
+        ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
         
     def set_error(self, card, message):
         card.content_container.content = ft.Text(f"Error: {message}", color=COLOR_ERROR)
@@ -302,14 +331,27 @@ class DashboardView(ft.Container):
     def handle_retry_m365(self, e):
         self.start_individual_fetch("m365", self.m365_section, "Downloading M365 App reports...", self.fetch_m365)
 
-    def handle_retry_mailbox(self, e):
-        self.start_individual_fetch("mailbox", self.mailbox_section, "Downloading Mailbox reports...", self.fetch_mailbox)
+    def handle_retry_exchange(self, e):
+        self.fetch_btn.disabled = True
+        self.fetch_btn.update()
+        self.fetch_statuses["mailbox"] = "pending"
+        self.fetch_statuses["calendar"] = "pending"
+        self.set_tab_loading(self.emails_container, "Downloading Mailbox reports...")
+        self.set_tab_loading(self.calendar_container, "Querying Calendar settings...")
+        self.exchange_section.update()
+        threading.Thread(target=self.fetch_mailbox, daemon=True).start()
+        threading.Thread(target=self.fetch_calendar, daemon=True).start()
 
-    def handle_retry_sharepoint(self, e):
-        self.start_individual_fetch("sharepoint", self.sharepoint_section, "Downloading SharePoint reports...", self.fetch_sharepoint)
-
-    def handle_retry_onedrive(self, e):
-        self.start_individual_fetch("onedrive", self.onedrive_section, "Downloading OneDrive reports...", self.fetch_onedrive)
+    def handle_retry_files(self, e):
+        self.fetch_btn.disabled = True
+        self.fetch_btn.update()
+        self.fetch_statuses["sharepoint"] = "pending"
+        self.fetch_statuses["onedrive"] = "pending"
+        self.set_tab_loading(self.sharepoint_container, "Downloading SharePoint reports...")
+        self.set_tab_loading(self.onedrive_container, "Downloading OneDrive reports...")
+        self.files_section.update()
+        threading.Thread(target=self.fetch_sharepoint, daemon=True).start()
+        threading.Thread(target=self.fetch_onedrive, daemon=True).start()
 
     def handle_retry_labels(self, e):
         self.start_individual_fetch("labels", self.labels_section, "Retrieving Sensitivity labels...", self.fetch_labels)
@@ -332,6 +374,7 @@ class DashboardView(ft.Container):
             "trend": "pending",
             "m365": "pending",
             "mailbox": "pending",
+            "calendar": "pending",
             "sharepoint": "pending",
             "onedrive": "pending",
             "labels": "pending",
@@ -359,19 +402,18 @@ class DashboardView(ft.Container):
         self.m365_section.update()
         threading.Thread(target=self.fetch_m365, daemon=True).start()
         
-        # 5. Mailbox
-        self.set_loading(self.mailbox_section, "Downloading Mailbox reports...")
-        self.mailbox_section.update()
+        # 5. Exchange Online (Mailbox & Calendar)
+        self.set_tab_loading(self.emails_container, "Downloading Mailbox reports...")
+        self.set_tab_loading(self.calendar_container, "Querying Calendar settings...")
+        self.exchange_section.update()
         threading.Thread(target=self.fetch_mailbox, daemon=True).start()
+        threading.Thread(target=self.fetch_calendar, daemon=True).start()
         
-        # 6. SharePoint
-        self.set_loading(self.sharepoint_section, "Downloading SharePoint reports...")
-        self.sharepoint_section.update()
+        # 6. Files (SharePoint & OneDrive)
+        self.set_tab_loading(self.sharepoint_container, "Downloading SharePoint reports...")
+        self.set_tab_loading(self.onedrive_container, "Downloading OneDrive reports...")
+        self.files_section.update()
         threading.Thread(target=self.fetch_sharepoint, daemon=True).start()
-        
-        # 7. OneDrive
-        self.set_loading(self.onedrive_section, "Downloading OneDrive reports...")
-        self.onedrive_section.update()
         threading.Thread(target=self.fetch_onedrive, daemon=True).start()
         
         # 8 & 9. Sensitivity Labels & Retention Policies
@@ -390,6 +432,16 @@ class DashboardView(ft.Container):
 
     def mark_complete(self, key, status):
         self.fetch_statuses[key] = status
+        if key in ["mailbox", "calendar"]:
+            if self.fetch_statuses.get("mailbox") != "pending" and self.fetch_statuses.get("calendar") != "pending":
+                self.clear_loading(self.exchange_section)
+                if self.page:
+                    self.exchange_section.update()
+        elif key in ["sharepoint", "onedrive"]:
+            if self.fetch_statuses.get("sharepoint") != "pending" and self.fetch_statuses.get("onedrive") != "pending":
+                self.clear_loading(self.files_section)
+                if self.page:
+                    self.files_section.update()
         self.check_all_done()
 
     def check_all_done(self):
@@ -625,6 +677,14 @@ class DashboardView(ft.Container):
                 ("Total Number of Emails", f"{data.get('total_emails', 0):,} Emails"),
                 ("Average Emails per User", f"{data.get('average_emails', 0.0):,.0f} Emails")
             ]
+            if data.get("has_powershell"):
+                rows_data += [
+                    ("Shared Mailboxes Count", f"{data.get('shared_mailboxes_count', 0):,} Shared Mailboxes"),
+                    ("Total Shared Mailbox Size", data.get('shared_mailboxes_total_formatted', "0.00 Bytes")),
+                    ("Public Folders Count", f"{data.get('public_folders_count', 0):,} Public Folders"),
+                    ("Total Public Folder Size", data.get('public_folders_total_formatted', "0.00 Bytes"))
+                ]
+
             rows = [ft.DataRow(cells=[
                 ft.DataCell(ft.Text(str(r[0]), weight=ft.FontWeight.BOLD)), 
                 ft.DataCell(ft.Text(str(r[1])))
@@ -640,15 +700,91 @@ class DashboardView(ft.Container):
                 border_radius=8,
                 heading_row_color=COLOR_TONAL_BG,
             )
-            self.mailbox_section.content_container.content = table
+
+            # Check warnings
+            if data.get("powershell_error"):
+                self.emails_container.content = ft.Column([
+                    ft.Text(f"⚠️ Warning: PowerShell stats failed. {data['powershell_error']}", color=COLOR_WARNING, size=13),
+                    table
+                ], scroll=ft.ScrollMode.AUTO, height=300)
+            else:
+                self.emails_container.content = ft.Column([table], scroll=ft.ScrollMode.AUTO, height=300)
+
             self.mark_complete("mailbox", "success")
         except Exception as e:
-            self.set_error(self.mailbox_section, str(e))
+            self.emails_container.content = ft.Text(f"Error: {e}", color=COLOR_ERROR)
             self.mark_complete("mailbox", "error")
         finally:
-            self.clear_loading(self.mailbox_section)
             if self.page:
-                self.mailbox_section.update()
+                self.emails_container.update()
+
+    def fetch_calendar(self):
+        try:
+            data = run_calendar_telemetry_pipeline(self.client, self.secret, self.tenant)
+            
+            rooms_err = data.get("RoomsError")
+            devs_err = data.get("DevicesError")
+            rooms_count = data.get("RoomsCount", 0)
+            equip_count = data.get("EquipmentCount", 0)
+            
+            if rooms_err and devs_err:
+                res_val = rooms_err
+            else:
+                r_str = "Error" if rooms_err else str(rooms_count)
+                e_str = "Error" if devs_err else str(equip_count)
+                tot = "Error" if (rooms_err or devs_err) else str(rooms_count + equip_count)
+                res_val = f"Total: {tot} ({r_str} Rooms, {e_str} Equipment)"
+
+            reserve_val = data.get("CanUsersReserveRooms")
+            if isinstance(reserve_val, bool):
+                 reserve_val = "Yes" if reserve_val else "No"
+
+            att_val = data.get("CanShareAttachments")
+            if isinstance(att_val, bool):
+                attachments_val = "Yes" if att_val else "No"
+            else:
+                attachments_val = att_val
+
+            rows_data = [
+                ("Room & Resource Reservation", reserve_val),
+                ("Calendar Resources", res_val),
+                ("Integrated Calendar Apps", data.get("IntegratedCalendarApps") or "None found"),
+                ("Resource Naming Convention", data.get("NamingConvention") or "None found"),
+                ("Calendar Attachments Enabled", attachments_val),
+            ]
+
+            rows = [ft.DataRow(cells=[
+                ft.DataCell(ft.Text(str(r[0]), weight=ft.FontWeight.BOLD)), 
+                ft.DataCell(ft.Text(str(r[1])))
+            ]) for r in rows_data]
+            
+            table = ft.DataTable(
+                columns=[
+                    ft.DataColumn(ft.Text("Calendar Configuration / Metric", weight=ft.FontWeight.BOLD)),
+                    ft.DataColumn(ft.Text("Value / Configuration", weight=ft.FontWeight.BOLD)),
+                ],
+                rows=rows,
+                border=ft.Border.all(1, COLOR_OUTLINE_LIGHT),
+                border_radius=8,
+                heading_row_color=COLOR_TONAL_BG,
+            )
+
+            # Check for warnings
+            if data.get("powershell_error"):
+                self.calendar_container.content = ft.Column([
+                    ft.Text(f"⚠️ Warning: Exchange PowerShell query failed: {data['powershell_error']}", color=COLOR_WARNING, size=13),
+                    table
+                ], scroll=ft.ScrollMode.AUTO, height=300)
+            else:
+                self.calendar_container.content = ft.Column([table], scroll=ft.ScrollMode.AUTO, height=300)
+
+            self.mark_complete("calendar", "success")
+        except Exception as e:
+            self.calendar_container.content = ft.Text(f"Error: {e}", color=COLOR_ERROR)
+            self.mark_complete("calendar", "error")
+        finally:
+            if self.page:
+                self.calendar_container.update()
 
     def fetch_sharepoint(self):
         try:
@@ -674,15 +810,14 @@ class DashboardView(ft.Container):
                 border_radius=8,
                 heading_row_color=COLOR_TONAL_BG,
             )
-            self.sharepoint_section.content_container.content = table
+            self.sharepoint_container.content = ft.Column([table], scroll=ft.ScrollMode.AUTO, height=200)
             self.mark_complete("sharepoint", "success")
         except Exception as e:
-            self.set_error(self.sharepoint_section, str(e))
+            self.sharepoint_container.content = ft.Text(f"Error: {e}", color=COLOR_ERROR)
             self.mark_complete("sharepoint", "error")
         finally:
-            self.clear_loading(self.sharepoint_section)
             if self.page:
-                self.sharepoint_section.update()
+                self.sharepoint_container.update()
 
     def fetch_onedrive(self):
         try:
@@ -710,15 +845,14 @@ class DashboardView(ft.Container):
                 border_radius=8,
                 heading_row_color=COLOR_TONAL_BG,
             )
-            self.onedrive_section.content_container.content = table
+            self.onedrive_container.content = ft.Column([table], scroll=ft.ScrollMode.AUTO, height=250)
             self.mark_complete("onedrive", "success")
         except Exception as e:
-            self.set_error(self.onedrive_section, str(e))
+            self.onedrive_container.content = ft.Text(f"Error: {e}", color=COLOR_ERROR)
             self.mark_complete("onedrive", "error")
         finally:
-            self.clear_loading(self.onedrive_section)
             if self.page:
-                self.onedrive_section.update()
+                self.onedrive_container.update()
 
     def fetch_labels(self):
         try:

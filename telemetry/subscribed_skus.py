@@ -61,7 +61,7 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         
         lic_header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         lic_header.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(lic_header, text="Subscribed SKUs Inventory Summary", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        ctk.CTkLabel(lic_header, text="Subscribed SKUs", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         
         self.lic_reference_link = ctk.CTkLabel(
             lic_header,

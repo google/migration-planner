@@ -30,9 +30,8 @@ from telemetry.active_users_usage import ActiveUsersUsageFrame, ActiveUsersTrend
 from telemetry.power_automate import PowerAutomateUsageFrame
 
 # Import existing modular views
-from telemetry.sharepoint_onedrive_usage import SharePointUsageFrame, OneDriveUsageFrame
-from telemetry.mailbox_usage import MailboxUsageFrame
-from telemetry.calendar_telemetry import CalendarTelemetryFrame
+from telemetry.files_telemetry import FilesTelemetryFrame
+from telemetry.exchange_online import ExchangeOnlineFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
 
 from telemetry.styles import *
@@ -127,9 +126,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         # Batching orchestration for sequential loading of sections in groups of 3
         self.batches = [
             [self.subscribed_skus_view, self.active_users_view, self.active_users_trend_view],
-            [self.m365_apps_view, self.mailbox_view, self.calendar_view],
-            [self.sharepoint_view, self.onedrive_view, self.security_gov_view],
-            [self.power_automate_view]
+            [self.m365_apps_view, self.exchange_online_view, self.files_view],
+            [self.security_gov_view, self.power_automate_view]
         ]
         self.current_batch_index = 0
 
@@ -219,8 +217,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
-        # 5a. Exchange Online Mailbox Usage
-        self.mailbox_view = MailboxUsageFrame(
+        # 5. Exchange Online Usage Section
+        self.exchange_online_view = ExchangeOnlineFrame(
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
@@ -228,26 +226,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
-        # 5b. Exchange Online Calendar Telemetry Section
-        self.calendar_view = CalendarTelemetryFrame(
-            master=self,
-            log_callback=self.log_msg,
-            credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done,
-            concurrency_semaphore=self.telemetry_semaphore
-        )
-
-        # 5c. SharePoint Telemetry Section
-        self.sharepoint_view = SharePointUsageFrame(
-            master=self,
-            log_callback=self.log_msg,
-            credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done,
-            concurrency_semaphore=self.telemetry_semaphore
-        )
-
-        # 5d. OneDrive Telemetry Section
-        self.onedrive_view = OneDriveUsageFrame(
+        # 5c. Files (SharePoint & OneDrive) Section
+        self.files_view = FilesTelemetryFrame(
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
@@ -281,10 +261,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.active_users_view,
             self.active_users_trend_view,
             self.m365_apps_view,
-            self.mailbox_view,
-            self.calendar_view,
-            self.sharepoint_view,
-            self.onedrive_view,
+            self.exchange_online_view,
+            self.files_view,
             self.security_gov_view,
             self.power_automate_view
         ]
@@ -392,10 +370,10 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "o365_usage": getattr(self.active_users_view, "o365_data", []),
             "o365_trend": getattr(self.active_users_trend_view, "trend_data", {}),
             "m365_apps": getattr(self.m365_apps_view, "m365_data", []),
-            "mailbox": getattr(self.mailbox_view, "last_data", {}),
-            "calendar": getattr(self.calendar_view, "last_data", {}),
-            "sharepoint": getattr(self.sharepoint_view, "last_data", {}),
-            "onedrive": getattr(self.onedrive_view, "last_data", {}),
+            "mailbox": getattr(self.exchange_online_view.mailbox_view, "last_data", {}),
+            "calendar": getattr(self.exchange_online_view.calendar_view, "last_data", {}),
+            "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
+            "onedrive": getattr(self.files_view.onedrive_view, "last_data", {}),
             "security_labels": getattr(self.security_gov_view, "last_labels_data", []),
             "retention_policies": getattr(self.security_gov_view, "last_policies_data", []),
             "power_automate": getattr(self.power_automate_view, "last_results", {})

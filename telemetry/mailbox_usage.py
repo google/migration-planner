@@ -190,7 +190,7 @@ class MailboxUsageFrame(ctk.CTkFrame):
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
         
-        ctk.CTkLabel(self.inner_pad, text="Exchange Online Mailbox Usage Telemetry", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
+        ctk.CTkLabel(self.inner_pad, text="Exchange Online Mailbox Usage", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
         
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.warning_label = ctk.CTkLabel(self.inner_pad, text="", font=FONT_BODY_MEDIUM, text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=750)
