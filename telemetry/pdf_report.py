@@ -508,9 +508,10 @@ def generate_pdf_report(data: dict, filepath: str):
 
 
     # =========================================================================
-    # SECTION 2: ACTIVE USERS & APP USAGE
+    # SECTION 2: APP USAGE SUMMARY
     # =========================================================================
-    story.append(Paragraph("2. Active Users & Application Usage", h1_style))
+    story.append(Paragraph("2. App Usage Summary", h1_style))
+    story.append(Paragraph("Active Users Usage", h2_style))
     story.append(Paragraph("A breakdown of user activity across major Microsoft 365 services over the last 30, 90, and 180 days, representing actual adoption levels.", body_style))
     story.append(Spacer(1, 8))
     

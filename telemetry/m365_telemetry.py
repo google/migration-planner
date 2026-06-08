@@ -27,7 +27,7 @@ from logging.handlers import QueueHandler, QueueListener
 # Import modular view frames from their consolidated code/view modules
 from telemetry.subscribed_skus import SubscribedSKUsFrame
 from telemetry.directory import DirectoryFrame
-from telemetry.active_users_usage import ActiveUsersUsageFrame, ActiveUsersTrendFrame, M365AppUsageFrame
+from telemetry.app_usage_telemetry import AppUsageTelemetryFrame
 from telemetry.power_automate import PowerAutomateUsageFrame
 
 
@@ -127,9 +127,9 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # Batching orchestration for sequential loading of sections in groups of 3
         self.batches = [
-            [self.subscribed_skus_view, self.directory_view, self.active_users_view],
-            [self.active_users_trend_view, self.m365_apps_view, self.exchange_online_view],
-            [self.files_view, self.security_gov_view, self.power_automate_view]
+            [self.subscribed_skus_view, self.directory_view, self.app_usage_view],
+            [self.exchange_online_view, self.files_view, self.security_gov_view],
+            [self.power_automate_view]
         ]
         self.current_batch_index = 0
 
@@ -203,26 +203,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
-        # 2. O365 Active Users Section
-        self.active_users_view = ActiveUsersUsageFrame(
-            master=self,
-            log_callback=self.log_msg,
-            credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done,
-            concurrency_semaphore=self.telemetry_semaphore
-        )
-
-        # 3. O365 Usage Trend Graph Section
-        self.active_users_trend_view = ActiveUsersTrendFrame(
-            master=self,
-            log_callback=self.log_msg,
-            credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done,
-            concurrency_semaphore=self.telemetry_semaphore
-        )
-
-        # 4. M365 Apps Usage Section
-        self.m365_apps_view = M365AppUsageFrame(
+        # 2. App Usage Summary Section
+        self.app_usage_view = AppUsageTelemetryFrame(
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
@@ -272,9 +254,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         views = [
             self.subscribed_skus_view,
             self.directory_view,
-            self.active_users_view,
-            self.active_users_trend_view,
-            self.m365_apps_view,
+            self.app_usage_view,
             self.exchange_online_view,
             self.files_view,
             self.security_gov_view,
@@ -386,9 +366,9 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 "group_counts": getattr(self.directory_view, "last_group_counts", {}),
                 "user_counts": getattr(self.directory_view, "last_user_counts", {})
             },
-            "o365_usage": getattr(self.active_users_view, "o365_data", []),
-            "o365_trend": getattr(self.active_users_trend_view, "trend_data", {}),
-            "m365_apps": getattr(self.m365_apps_view, "m365_data", []),
+            "o365_usage": getattr(self.app_usage_view.active_users_view, "o365_data", []),
+            "o365_trend": getattr(self.app_usage_view.active_users_trend_view, "trend_data", {}),
+            "m365_apps": getattr(self.app_usage_view.m365_apps_view, "m365_data", []),
             "mailbox": getattr(self.exchange_online_view.mailbox_view, "last_data", {}),
             "calendar": getattr(self.exchange_online_view.calendar_view, "last_data", {}),
             "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
