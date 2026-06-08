@@ -495,38 +495,117 @@ class TelemetryApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.cert_container,
-            text="Certificate Upload Required",
-            font=ctk.CTkFont(size=18, weight="bold"),
-            text_color="#1E3A8A"
+            text="Certificate Upload",
+            font=FONT_HEADER_MEDIUM,
+            text_color=COLOR_PRIMARY
         ).pack(anchor="w", pady=(0, 15))
 
-        instructions_text = (
+        intro_text = (
             "A new security certificate has been generated for hybrid authentication.\n\n"
-            f"1. Locate the certificate file at:\n   {pem_path}\n\n"
-            "2. Upload this 'certificate.pem' file to your App Registration in the Microsoft Entra ID portal.\n"
-            "   (App Registration -> Certificates & secrets -> Certificates -> Upload certificate)\n\n"
-            "3. Once you have successfully uploaded the certificate, click the 'Continue' button below."
+            "Uploading this certificate is highly recommended, but optional:"
         )
-
-        self.cert_instr_lbl = ctk.CTkLabel(
+        self.cert_intro_lbl = ctk.CTkLabel(
             self.cert_container,
-            text=instructions_text,
-            font=ctk.CTkFont(size=13),
-            text_color="#374151",
+            text=intro_text,
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            justify="left",
+            wraplength=1000
+        )
+        self.cert_intro_lbl.pack(anchor="w", pady=(0, 10))
+
+        upload_statement = (
+            "• If you UPLOAD the certificate:\n"
+            "  All report sections will be fully functional."
+        )
+        self.cert_upload_lbl = ctk.CTkLabel(
+            self.cert_container,
+            text=upload_statement,
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_SUCCESS,
+            justify="left",
+            wraplength=1000
+        )
+        self.cert_upload_lbl.pack(anchor="w", pady=(0, 10))
+
+        skip_statement = (
+            "• If you SKIP uploading the certificate:\n"
+            "  You can still run the reports. However, sections relying on certificate-based authentication (such as detailed Calendar settings, "
+            "Shared/Public mailbox statistics, Retention Policies etc.) will be skipped and show as unavailable."
+        )
+        self.cert_skip_lbl = ctk.CTkLabel(
+            self.cert_container,
+            text=skip_statement,
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_ERROR,
+            justify="left",
+            wraplength=1000
+        )
+        self.cert_skip_lbl.pack(anchor="w", pady=(0, 10))
+
+        # Prominent Configuration Callout Card
+        self.cert_info_card = ctk.CTkFrame(
+            self.cert_container,
+            fg_color=COLOR_TONAL_BG,
+            border_width=1,
+            border_color=COLOR_OUTLINE_LIGHT,
+            corner_radius=8
+        )
+        self.cert_info_card.pack(fill="x", pady=(15, 25))
+
+        # Title of info card
+        self.cert_card_title = ctk.CTkLabel(
+            self.cert_info_card,
+            text="Upload Instructions",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_TONAL_TEXT,
             justify="left"
         )
-        self.cert_instr_lbl.pack(anchor="w", pady=(0, 25))
+        self.cert_card_title.pack(anchor="w", padx=15, pady=(15, 5))
+
+        # Instructions body
+        self.cert_footer_lbl = ctk.CTkLabel(
+            self.cert_info_card,
+            text=f"1. Locate the certificate file generated at:\n   {pem_path}\n\n2. Log in to the Microsoft Azure portal and navigate to the App Registration with Client ID:\n   {self.stored_client}\n\n3. Upload the certificate under:\n   Certificates & secrets -> Certificates -> Upload certificate",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            justify="left",
+            wraplength=970
+        )
+        self.cert_footer_lbl.pack(anchor="w", padx=15, pady=(0, 15))
 
         self.cert_continue_btn = ctk.CTkButton(
             self.cert_container,
-            text="I have uploaded the certificate. Continue",
+            text="Continue",
             command=self.on_cert_continue_clicked,
-            height=45,
-            fg_color="#1E3A8A",
-            hover_color="#172554",
-            font=ctk.CTkFont(size=14, weight="bold")
+            height=40,
+            corner_radius=20,
+            font=FONT_BODY_BOLD,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER
         )
         self.cert_continue_btn.pack(fill="x")
+
+        # Bind resize event to dynamically adjust text wrapping based on container width
+        self.cert_container.bind(
+            "<Configure>",
+            lambda event: self.adjust_cert_wraplengths(
+                event.width - 20
+            )
+        )
+
+    def adjust_cert_wraplengths(self, width):
+        w = max(200, width)
+        if hasattr(self, "cert_intro_lbl") and self.cert_intro_lbl.winfo_exists():
+            self.cert_intro_lbl.configure(wraplength=w)
+        if hasattr(self, "cert_upload_lbl") and self.cert_upload_lbl.winfo_exists():
+            self.cert_upload_lbl.configure(wraplength=w)
+        if hasattr(self, "cert_skip_lbl") and self.cert_skip_lbl.winfo_exists():
+            self.cert_skip_lbl.configure(wraplength=w)
+        if hasattr(self, "cert_card_title") and self.cert_card_title.winfo_exists():
+            self.cert_card_title.configure(wraplength=w - 30)
+        if hasattr(self, "cert_footer_lbl") and self.cert_footer_lbl.winfo_exists():
+            self.cert_footer_lbl.configure(wraplength=w - 30)
 
     def on_cert_continue_clicked(self):
         """Validates certificate after user claims to have uploaded it and transitions to reports."""

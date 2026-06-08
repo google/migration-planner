@@ -49,8 +49,9 @@ def main(page: ft.Page):
         page.update()
 
     def show_cert_instructions(pem_path):
+        client = page.session.store.get("client")
         page.controls.clear()
-        page.add(CertInstructionsView(pem_path=pem_path, on_continue=handle_cert_continue))
+        page.add(CertInstructionsView(pem_path=pem_path, client_id=client, on_continue=handle_cert_continue))
         page.update()
 
     def handle_connect(tenant, client, secret):
