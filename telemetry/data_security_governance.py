@@ -836,55 +836,49 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self._check_overall_status()
 
     def _render_authentication_card(self, auth_data: dict):
-        if not auth_data:
-            auth_data = {}
+        self.auth_grid.configure(fg_color=COLOR_SURFACE, border_width=1, border_color=COLOR_OUTLINE_LIGHT, corner_radius=8)
+        self.auth_grid.grid_columnconfigure(0, weight=2)
+        self.auth_grid.grid_columnconfigure(1, weight=2)
+        self.auth_grid.grid_columnconfigure(2, weight=2)
+        self.auth_grid.grid_columnconfigure(3, weight=4)
+
+        headers = ["Authentication Category", "Assessment Dimension", "Surfaced Technical Metric", "Operational Meaning (What This Denotes)"]
+        for col_idx, head_text in enumerate(headers):
+            cell = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        rows = [
+            ("📩 Email & Web Services", "Legacy Authentication Protocols", "BLOCKED (Basic Auth Denied)", "Explicitly restricts unencrypted POP3, IMAP4, and Basic ActiveSync across corporate accounts. External mail apps must support OAuth."),
+            ("📩 Email & Web Services", "Modern Authentication (OAuth 2.0)", "MANDATORY (OAuth Enforced)", "Outlook Desktop, mobile clients, and connected Web APIs enforce token-based modern authentication with device compliance evaluation."),
+            ("🌐 Browser & Web Apps", "Re-Login Timeout", "12 HOURS (Rolling Expiry)", "Enterprise users are automatically required to verify credentials again after 12 hours of session inactivity."),
+            ("🌐 Browser & Web Apps", "Session Memory", "PERSISTENT (Remembers Login)", "Enabling persistent sessions ensures closing browser windows or tabs does not prematurely sign the user out."),
+            ("🌐 Browser & Web Apps", "Web Proxy Protection", "MDCA PROXY (Block Downloads)", "Tunnels web logins through Microsoft Defender for Cloud Apps proxy to monitor and restrict document downloads."),
+            ("🛡️ Multi-Factor Auth", "MFA Enforcement Status", "MANDATORY (MFA Required)", "Mandates phishing-resistant multi-factor authentication (Authenticator / FIDO2) across corporate sign-ins."),
+            ("🛡️ Multi-Factor Auth", "MFA Coverage Scope", "GLOBAL (Universal Scope)", "Applies zero-trust MFA evaluation universally across corporate accounts (Include: All Users).")
+        ]
+
+        for r_idx, (cat, dim, metric, meaning) in enumerate(rows, start=1):
+            bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
             
-        self.auth_grid.configure(fg_color="transparent", border_width=0)
-        
-        def build_metric_box(parent, label, value, sub):
-            box = ctk.CTkFrame(parent, fg_color=COLOR_SURFACE_VARIANT, corner_radius=8, border_width=1, border_color=COLOR_OUTLINE_LIGHT)
-            box.pack(side="left", fill="x", expand=True, padx=6, pady=6)
-            ctk.CTkLabel(box, text=label.upper(), font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB).pack(padx=12, pady=(10, 2), anchor="w")
-            ctk.CTkLabel(box, text=value, font=FONT_HEADER_SMALL, text_color=COLOR_PRIMARY).pack(padx=12, pady=0, anchor="w")
-            if sub:
-                ctk.CTkLabel(box, text=sub, font=FONT_BODY_SMALL, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=320).pack(padx=12, pady=(2, 10), anchor="w")
-            else:
-                box.configure(height=70)
-            return box
+            c0 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c0, text=cat, font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(padx=10, pady=8, anchor="w")
 
-        # 1. Email & Web Services Auth (Divided into Legacy vs Modern)
-        c1 = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE)
-        c1.pack(fill="x", pady=(0, 15))
-        ctk.CTkLabel(c1, text="📩 1. Email & Web Services Authentication", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=16, pady=(16, 5), anchor="w")
-        
-        m_frame1 = ctk.CTkFrame(c1, fg_color="transparent")
-        m_frame1.pack(fill="x", padx=10, pady=(4, 16))
-        
-        build_metric_box(m_frame1, "Legacy Authentication Protocols", "BLOCKED (Basic Auth Denied)", "Older protocols like POP3, IMAP4, and Basic ActiveSync are explicitly restricted across corporate accounts.")
-        build_metric_box(m_frame1, "Modern Authentication (OAuth 2.0)", "MANDATORY (OAuth Enforced)", "Desktop Outlook, mobile clients, and connected Web APIs must authenticate via secure OAuth 2.0 tokens.")
+            c1 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c1, text=dim, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="w")
 
-        # 2. Browser & Web Applications Auth
-        c2 = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE)
-        c2.pack(fill="x", pady=(0, 15))
-        ctk.CTkLabel(c2, text="🌐 2. Browser & Web Applications Authentication", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=16, pady=(16, 5), anchor="w")
-        
-        m_frame2 = ctk.CTkFrame(c2, fg_color="transparent")
-        m_frame2.pack(fill="x", padx=10, pady=(4, 16))
-        
-        build_metric_box(m_frame2, "Re-Login Timeout", "12 HOURS (Rolling Expiry)", "Users are automatically required to sign in again after 12 hours of inactivity.")
-        build_metric_box(m_frame2, "Session Memory", "PERSISTENT (Remembers Login)", "Closing browser tabs or windows does not prematurely sign the user out.")
-        build_metric_box(m_frame2, "Web Proxy Protection", "MDCA PROXY (Block Downloads)", "Tunnels web traffic through Defender for Cloud Apps proxy to monitor/block data export.")
+            c2 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
+            c2.grid(row=r_idx, column=2, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c2, text=metric, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="w")
 
-        # 3. Multi-Factor Authentication (MFA)
-        c3 = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE)
-        c3.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(c3, text="🛡️ 3. Multi-Factor Authentication (MFA) Policies", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=16, pady=(16, 5), anchor="w")
-        
-        m_frame3 = ctk.CTkFrame(c3, fg_color="transparent")
-        m_frame3.pack(fill="x", padx=10, pady=(4, 16))
-        
-        build_metric_box(m_frame3, "MFA Enforcement", "MANDATORY (MFA Required)", "Mandates strong multi-factor authentication across protected cloud apps.")
-        build_metric_box(m_frame3, "Coverage Scope", "GLOBAL (Universal Scope)", "Applies zero-trust verification across scoped user profiles and cloud workloads.")
+            c3 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
+            c3.grid(row=r_idx, column=3, sticky="nsew", padx=0, pady=(0, 1))
+            lbl_mean = ctk.CTkLabel(c3, text=meaning, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, justify="left")
+            lbl_mean.pack(padx=10, pady=8, anchor="w")
+            
+            c3.bind("<Configure>", lambda e, l=lbl_mean: l.configure(wraplength=e.width - 20))
 
     def _check_overall_status(self):
         if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "auth_status", None) == "loading":
