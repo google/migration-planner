@@ -214,7 +214,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             
             for batch_id, responses in next_response_map.items():
                 batch = next_batch_id_to_batch_map[batch_id]
-                new_pending_next_items.extend(process_pagination_responses(batch, responses, mailbox_to_resp_map, "mailboxId", GRAPH_BETA_URL, failures, False))
+                new_pending_next_items.extend(process_pagination_responses(batch, responses, mailbox_to_resp_map, "mailboxId", GRAPH_BETA_URL, failures, True))
                 
             pending_next_items = new_pending_next_items
             

@@ -191,10 +191,10 @@ def process_pagination_responses(
     
     for req in batch:
         req_id = req["id"]
+        key = req["headers"][grouping_key]
+
         if req_id in batch_responses_map:
-            resp = batch_responses_map[req_id]
-            key = req["headers"][grouping_key]
-            
+            resp = batch_responses_map[req_id] 
             # Retrieve original response object
             orig_entry = orig_map[key]
             orig_resp = orig_entry["resp"] if isinstance(orig_entry, dict) and "resp" in orig_entry else orig_entry
@@ -220,6 +220,14 @@ def process_pagination_responses(
                     "statusCode" : resp["status"],
                     "message": resp["body"]["error"]["message"]
                 })
+        else:
+          failures.append({
+            "mailboxId": key,
+            "isPartial": is_partial,
+            "type": FailureType.NOT_FOUND,
+            "statusCode": None,
+            "message": "No response found for API Call."
+          })
                     
     return next_items
 
