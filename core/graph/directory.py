@@ -82,3 +82,92 @@ class DirectoryService:
         finally:
             self.client.release_token(token_slot)
 
+    def get_directory_telemetry(self, log_callback=None) -> Dict[str, Any]:
+        """Queries Microsoft Graph API in a single batch to fetch both domains list and group counts."""
+        logger.info("Fetching directory telemetry data using Graph API batch...")
+        if log_callback:
+            log_callback("Querying Microsoft Graph API for directory domains and group counts...")
+
+        batch_requests = [
+            {
+                "id": "domains",
+                "method": "GET",
+                "url": "/domains",
+            },
+            {
+                "id": "total",
+                "method": "GET",
+                "url": "/groups?$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
+            },
+            {
+                "id": "security",
+                "method": "GET",
+                "url": "/groups?$filter=securityEnabled eq true and mailEnabled eq false&$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
+            },
+            {
+                "id": "distribution",
+                "method": "GET",
+                "url": "/groups?$filter=mailEnabled eq true and securityEnabled eq false and NOT groupTypes/any(c:c eq 'Unified')&$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
+            },
+            {
+                "id": "mail_enabled_security",
+                "method": "GET",
+                "url": "/groups?$filter=mailEnabled eq true and securityEnabled eq true and NOT groupTypes/any(c:c eq 'Unified')&$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
+            },
+            {
+                "id": "m365",
+                "method": "GET",
+                "url": "/groups?$filter=groupTypes/any(c:c eq 'Unified')&$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
+            },
+            {
+                "id": "dynamic",
+                "method": "GET",
+                "url": "/groups?$filter=groupTypes/any(s:s eq 'DynamicMembership')&$count=true&$top=1&$select=id",
+                "headers": {"ConsistencyLevel": "eventual"}
+            }
+        ]
+
+        # Invoke the batch query via client's UrlInvoker
+        responses = self.client.url_invoker.invoke(
+            url="https://graph.microsoft.com/v1.0",
+            batch=batch_requests,
+            logger=log_callback or (lambda x: None),
+            context="DirectoryTelemetry"
+        )
+
+        domains_list = []
+        counts = {
+            "total": 0,
+            "security": 0,
+            "distribution": 0,
+            "mail_enabled_security": 0,
+            "m365": 0,
+            "dynamic": 0
+        }
+
+        for resp in responses:
+            resp_id = resp.get("id")
+            if resp.get("status", 0) != 200:
+                error_msg = resp.get("body", {}).get("error", {}).get("message", "Unknown error")
+                logger.error("Failed to fetch directory telemetry for %s: status %s, message: %s", resp_id, resp.get("status"), error_msg)
+                raise Exception(f"Failed to fetch directory telemetry for '{resp_id}': {error_msg}")
+
+            body = resp.get("body", {})
+            if resp_id == "domains":
+                domains_list = body.get("value", [])
+            elif resp_id in counts:
+                count_val = body.get("@odata.count", 0)
+                counts[resp_id] = count_val
+
+        return {
+            "domains": domains_list,
+            "group_counts": counts
+        }
+
+
+

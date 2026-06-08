@@ -388,6 +388,100 @@ def generate_pdf_report(data: dict, filepath: str):
     story.append(Spacer(1, 15))
 
     # =========================================================================
+    # SECTION 1b: DIRECTORY
+    # =========================================================================
+    story.append(Paragraph("1b. Directory", h1_style))
+
+    dir_data = data.get("directory", {})
+    if not dir_data:
+        story.append(Paragraph("No directory telemetry data was available.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        # 1. Domains Table
+        story.append(Paragraph("Domains", h2_style))
+        story.append(Paragraph("This section displays the configured internet domains associated with the tenant and their verified statuses.", body_style))
+        story.append(Spacer(1, 8))
+        
+        domains = dir_data.get("domains", [])
+        if not domains:
+            story.append(Paragraph("No domains discovered in directory scope.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+        else:
+            domains_table_data = [[
+                Paragraph("Domain ID", table_cell_header),
+                Paragraph("Admin Managed", table_cell_header),
+                Paragraph("Default", table_cell_header),
+                Paragraph("Verified", table_cell_header),
+                Paragraph("Supported Services", table_cell_header)
+            ]]
+            for item in domains:
+                admin_managed = "Yes" if item.get("isAdminManaged") else "No"
+                is_default = "Yes" if item.get("isDefault") else "No"
+                is_verified = "Yes" if item.get("isVerified") else "No"
+                services = item.get("supportedServices", [])
+                services_str = ", ".join(services) if services else "-"
+                
+                domains_table_data.append([
+                    Paragraph(item.get("id", "-"), table_cell_bold),
+                    Paragraph(admin_managed, table_cell_style),
+                    Paragraph(is_default, table_cell_style),
+                    Paragraph(is_verified, table_cell_style),
+                    Paragraph(services_str, table_cell_style)
+                ])
+            domains_table = Table(domains_table_data, colWidths=[140, 85, 55, 55, 165])
+            domains_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(domains_table)
+            
+        story.append(Spacer(1, 15))
+        
+        # 2. Groups Table
+        story.append(Paragraph("Groups", h2_style))
+        story.append(Paragraph("This section displays counts of different directory group categories configured in Microsoft Entra ID.", body_style))
+        story.append(Spacer(1, 8))
+        
+        group_counts = dir_data.get("group_counts", {})
+        dir_table_data = [[
+            Paragraph("Group Category", table_cell_header),
+            Paragraph("Count", table_cell_header)
+        ]]
+        
+        group_type_labels = [
+            ("total", "Total Groups"),
+            ("m365", "Microsoft 365 Groups (Unified)"),
+            ("security", "Security Groups (Static, non-mail-enabled)"),
+            ("mail_enabled_security", "Mail-enabled Security Groups"),
+            ("distribution", "Distribution Groups"),
+            ("dynamic", "Dynamic Groups (Dynamic Membership)")
+        ]
+        
+        for key, display_label in group_type_labels:
+            count_val = group_counts.get(key, 0)
+            dir_table_data.append([
+                Paragraph(display_label, table_cell_bold),
+                Paragraph(f"{count_val:,}", table_cell_style)
+            ])
+            
+        dir_table = Table(dir_table_data, colWidths=[300, 200])
+        dir_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(dir_table)
+    story.append(Spacer(1, 15))
+
+
+    # =========================================================================
     # SECTION 2: ACTIVE USERS & APP USAGE
     # =========================================================================
     story.append(Paragraph("2. Active Users & Application Usage", h1_style))
