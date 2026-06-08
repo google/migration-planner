@@ -783,6 +783,7 @@ class ReportsPage(ctk.CTkFrame):
         self.adapt_embedded_view()
 
     def on_sidebar_selection_changed(self, label):
+        import gc
         if label == "Usage and adoption":
             # Show Telemetry, Hide Migration Planner
             self.migration_planner_view.pack_forget()
@@ -790,6 +791,7 @@ class ReportsPage(ctk.CTkFrame):
             self.fetch_btn.pack(side="right", padx=20, pady=17)
             self.pdf_btn.pack(side="right", padx=(0, 20), pady=17)
             self.m365_telemetry_view.pack(fill="both", expand=True)
+            gc.collect()
         elif label == "Migration planner":
             # Show Migration Planner, Hide Telemetry
             self.m365_telemetry_view.pack_forget()
@@ -797,6 +799,7 @@ class ReportsPage(ctk.CTkFrame):
             self.pdf_btn.pack_forget()
             self.nav_title.configure(text="Migration Planner")
             self.migration_planner_view.pack(fill="both", expand=True)
+            gc.collect()
 
     def adapt_embedded_view(self):
         """Traverses M365TelemetryTab to identify and hide native login components."""

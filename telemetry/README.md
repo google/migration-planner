@@ -16,6 +16,12 @@ You can install them via pip:
 pip install customtkinter requests pandas psutil matplotlib cryptography msal
 ```
 
+## Architecture & Optimizations
+For large tenant scopes (e.g., millions of records or 100K+ flows), this module utilizes aggressive disk-caching mechanisms out-of-the-box, ensuring the application remains lightweight on RAM:
+- **SQLite UI Pagination**: Data grids are lazily fetched from `sqlite3` temp databases rather than hoarding UI components in Python lists.
+- **Disk Streaming Pipelines**: Complex parsing arrays are continuously streamed to local `.jsonl` temp files and pushed natively to `pandas.DataFrame` chunking logic for exports.
+- **Lazy Garbage Collection**: Core navigation state handles `gc.collect()` passively between UI tab cycles.
+
 
 ## Setup & Execution
 

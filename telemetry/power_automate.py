@@ -156,8 +156,11 @@ class PowerAutomateScanner:
         active_tier_counts = {"Personal Productivity": 0, "Enterprise/Departmental": 0}
         premium_connectors_found = set()
         custom_connectors_found = set()
-        complex_logic_flows = []
-        
+        import tempfile
+        import threading
+        cf_fd, complex_logic_flows_path = tempfile.mkstemp(suffix=".jsonl")
+        os.close(cf_fd)
+        complex_flows_lock = threading.Lock()
         PREMIUM_KEYWORDS = ['shared_sql', 'shared_httpaction', 'shared_salesforce', 'shared_oracle', 'shared_sap']
 
         for env in environments:
@@ -241,11 +244,14 @@ class PowerAutomateScanner:
                         if has_multi_approvals: reasons.append("Multi Approvals")
                         if has_advanced_expressions: reasons.append("Advanced Expressions")
                         
-                        complex_logic_flows.append({
+                        flow_dict = {
                             "Environment": env_display, "Name": name, "Type": "Cloud Flow", "Tier": tier,
                             "Active": "Yes" if is_active else "No",
                             "Reason": ", ".join(reasons)
-                        })
+                        }
+                        with complex_flows_lock:
+                            with open(complex_logic_flows_path, 'a', encoding='utf-8') as cf_f:
+                                cf_f.write(json.dumps(flow_dict) + '\n')
                     
                     del flow_detail
                     del res
@@ -310,16 +316,28 @@ class PowerAutomateScanner:
                                     if has_multi_approvals: reasons.append("Multi Approvals")
                                     if has_advanced_expressions: reasons.append("Advanced Expressions")
                                     
-                                    complex_logic_flows.append({
+                                    flow_dict = {
                                         "Environment": env_display, "Name": name, "Type": "Desktop Flow", "Tier": tier,
                                         "Active": "Yes" if is_active else "No",
                                         "Reason": ", ".join(reasons)
-                                    })
+                                    }
+                                    with complex_flows_lock:
+                                        with open(complex_logic_flows_path, 'a', encoding='utf-8') as cf_f:
+                                            cf_f.write(json.dumps(flow_dict) + '\n')
                             except Exception:
                                 pass
                 except Exception as e:
                     self.logger.error(f"      [X] Failed to authenticate against Dataverse instance {dv_url}: {e}")
 
+        complex_active_count = 0
+        complex_inactive_count = 0
+        with open(complex_logic_flows_path, 'r', encoding='utf-8') as f_cf:
+            for line in f_cf:
+                if json.loads(line).get("Active") == "Yes":
+                    complex_active_count += 1
+                else:
+                    complex_inactive_count += 1
+                    
         results = {
             "total_environments": len(environments),
             "counts": counts,
@@ -328,7 +346,9 @@ class PowerAutomateScanner:
             "active_tier_counts": active_tier_counts,
             "premium_connectors": list(premium_connectors_found),
             "custom_connectors": list(custom_connectors_found),
-            "complex_logic_flows": complex_logic_flows
+            "complex_logic_flows_path": complex_logic_flows_path,
+            "complex_active_count": complex_active_count,
+            "complex_inactive_count": complex_inactive_count
         }
 
         self.logger.info("Step End: Analysis complete.")
@@ -535,8 +555,9 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
             
             r_idx += 1
 
-        self.last_complex_flows = complex_flows
-        if complex_flows:
+        complex_flows_path = results.get("complex_logic_flows_path")
+        self.last_complex_flows_path = complex_flows_path
+        if complex_flows_path and os.path.exists(complex_flows_path) and os.path.getsize(complex_flows_path) > 0:
             self.btn_export_pa.configure(state="normal")
         else:
             self.btn_export_pa.configure(state="disabled")
@@ -574,8 +595,8 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
                     e_active = active_tier_counts.get("Enterprise/Departmental", 0)
                     e_inactive = e_total - e_active
                     
-                    complex_active = sum(1 for f in complex_flows if f.get("Active") == "Yes")
-                    complex_inactive = len(complex_flows) - complex_active
+                    complex_active = results.get("complex_active_count", 0)
+                    complex_inactive = results.get("complex_inactive_count", 0)
                     
                     actives = [c_active, d_active, p_active, e_active, complex_active]
                     inactives = [c_inactive, d_inactive, p_inactive, e_inactive, complex_inactive]
@@ -628,7 +649,7 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
 
     def export_complex_flows(self):
         usage_logger.info("Exporting complex flows to local spreadsheet requested.")
-        if not self.last_complex_flows:
+        if not hasattr(self, "last_complex_flows_path") or not self.last_complex_flows_path:
             return
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -642,24 +663,13 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
             return
 
         headers = ["Environment", "Name", "Type", "Tier", "Active", "Reason"]
-        rows = []
-
-        for flow in self.last_complex_flows:
-            rows.append([
-                flow.get("Environment"),
-                flow.get("Name"),
-                flow.get("Type"),
-                flow.get("Tier"),
-                flow.get("Active"),
-                flow.get("Reason")
-            ])
 
         try:
-            chunk_size = 1000
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i:i + chunk_size]
-                df = pd.DataFrame(chunk, columns=headers)
-                df.to_csv(f, mode='a' if i > 0 else 'w', header=(i == 0), index=False, encoding='utf-8')
+            import pandas as pd
+            df_iter = pd.read_json(self.last_complex_flows_path, lines=True, chunksize=1000)
+            for i, chunk in enumerate(df_iter):
+                chunk = chunk[headers]
+                chunk.to_csv(f, mode='a' if i > 0 else 'w', header=(i == 0), index=False, encoding='utf-8')
             usage_logger.info("Complex flows exported successfully.")
             messagebox.showinfo("Export Successful", f"Complex flows successfully saved to:\n{f}", parent=self)
         except Exception as e:

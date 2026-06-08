@@ -173,11 +173,33 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.on_status_change = status_change_callback
         self.status = None  # 'loading', 'success', 'error', None
         
-        self.flattened_rows = []
         self.current_page = 0
         self.ITEMS_PER_PAGE = 8
         self.last_labels_data = None
         self.last_policies_data = None
+        
+        import tempfile
+        import sqlite3
+        import atexit
+        self.db_fd, self.db_path = tempfile.mkstemp(suffix=".db")
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.cursor = self.conn.cursor()
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS labels 
+                               (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                                name TEXT, description TEXT, hasProtection INTEGER, 
+                                applicationMode TEXT, priority INTEGER, 
+                                applicableTo TEXT, isEnabled INTEGER, is_sublabel INTEGER)''')
+        self.conn.commit()
+        
+        def cleanup_db():
+            try:
+                self.conn.close()
+                import os
+                os.close(self.db_fd)
+                os.remove(self.db_path)
+            except Exception:
+                pass
+        atexit.register(cleanup_db)
         
         self.build_ui()
 
@@ -412,7 +434,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         for w in self.retention_grid.winfo_children():
             w.destroy()
             
-        self.flattened_rows = []
         self.current_page = 0
         self.last_labels_data = None
         self.last_policies_data = None
@@ -560,38 +581,38 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                     cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
                     
-                # Flatten parent labels and their sorted sublabels
-                self.flattened_rows = []
+                import sqlite3
+                self.cursor.execute("DELETE FROM labels")
                 for parent in labels:
-                    self.flattened_rows.append({
-                        "name": parent.get("name", "N/A"),
-                        "description": parent.get("description", "") or parent.get("toolTip", "") or "N/A",
-                        "hasProtection": parent.get("hasProtection", False),
-                        "applicationMode": parent.get("applicationMode", "N/A") or "N/A",
-                        "priority": parent.get("priority", 0),
-                        "applicableTo": parent.get("applicableTo", ""),
-                        "isEnabled": parent.get("isEnabled", True),
-                        "is_sublabel": False
-                    })
+                    self.cursor.execute("INSERT INTO labels (name, description, hasProtection, applicationMode, priority, applicableTo, isEnabled, is_sublabel) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (parent.get("name", "N/A"),
+                         parent.get("description", "") or parent.get("toolTip", "") or "N/A",
+                         1 if parent.get("hasProtection", False) else 0,
+                         parent.get("applicationMode", "N/A") or "N/A",
+                         parent.get("priority", 0),
+                         parent.get("applicableTo", ""),
+                         1 if parent.get("isEnabled", True) else 0,
+                         0))
                     sublabels = parent.get("sublabels", [])
                     if sublabels:
                         sublabels_sorted = sorted(sublabels, key=lambda x: x.get("priority", 0), reverse=True)
                         for sub in sublabels_sorted:
-                            self.flattened_rows.append({
-                                "name": f"    ↳  {sub.get('name', 'N/A')}",
-                                "description": sub.get("description", "") or sub.get("toolTip", "") or "N/A",
-                                "hasProtection": sub.get("hasProtection", False),
-                                "applicationMode": sub.get("applicationMode", "N/A") or "N/A",
-                                "priority": sub.get("priority", 0),
-                                "applicableTo": sub.get("applicableTo", ""),
-                                "isEnabled": sub.get("isEnabled", True),
-                                "is_sublabel": True
-                            })
-                            
+                            self.cursor.execute("INSERT INTO labels (name, description, hasProtection, applicationMode, priority, applicableTo, isEnabled, is_sublabel) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                (f"    ↳  {sub.get('name', 'N/A')}",
+                                 sub.get("description", "") or sub.get("toolTip", "") or "N/A",
+                                 1 if sub.get("hasProtection", False) else 0,
+                                 sub.get("applicationMode", "N/A") or "N/A",
+                                 sub.get("priority", 0),
+                                 sub.get("applicableTo", ""),
+                                 1 if sub.get("isEnabled", True) else 0,
+                                 1))
+                self.conn.commit()
                 self.current_page = 0
                 self._display_current_page()
                 
-                if len(self.flattened_rows) > self.ITEMS_PER_PAGE:
+                self.cursor.execute("SELECT COUNT(*) FROM labels")
+                total_items = self.cursor.fetchone()[0]
+                if total_items > self.ITEMS_PER_PAGE:
                     self.pagination_frame.pack(pady=(5, 10))
                 else:
                     self.pagination_frame.pack_forget()
@@ -634,7 +655,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         usage_logger.info(f"Displaying page {self.current_page + 1} of Sensitivity Labels.")
 
-        total_items = len(self.flattened_rows)
+        self.cursor.execute("SELECT COUNT(*) FROM labels")
+        total_items = self.cursor.fetchone()[0]
         total_pages = (total_items + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
         if total_pages < 1:
             total_pages = 1
@@ -646,22 +668,21 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self.current_page = 0
 
         start_idx = self.current_page * self.ITEMS_PER_PAGE
-        end_idx = min(start_idx + self.ITEMS_PER_PAGE, total_items)
-
-        page_items = self.flattened_rows[start_idx:end_idx]
+        self.cursor.execute("SELECT name, description, hasProtection, applicationMode, priority, applicableTo, isEnabled, is_sublabel FROM labels ORDER BY id LIMIT ? OFFSET ?", (self.ITEMS_PER_PAGE, start_idx))
+        page_items = self.cursor.fetchall()
 
         for offset, row_item in enumerate(page_items, start=1):
             r_idx = offset
             bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
             
-            name = row_item["name"]
-            desc = row_item["description"]
-            protection = "🛡️ Yes" if row_item["hasProtection"] else "🔓 No"
-            mode = str(row_item["applicationMode"]).capitalize()
-            priority = str(row_item["priority"])
-            applicable = ", ".join([x.capitalize() for x in row_item["applicableTo"].split(",") if x.strip()]) or "N/A"
-            status = "🟢 Enabled" if row_item["isEnabled"] else "🔴 Disabled"
-            is_sublabel = row_item["is_sublabel"]
+            name = row_item[0]
+            desc = row_item[1]
+            protection = "🛡️ Yes" if row_item[2] else "🔓 No"
+            mode = str(row_item[3]).capitalize()
+            priority = str(row_item[4])
+            applicable = ", ".join([x.capitalize() for x in row_item[5].split(",") if x.strip()]) or "N/A"
+            status = "🟢 Enabled" if row_item[6] else "🔴 Disabled"
+            is_sublabel = bool(row_item[7])
 
             name_color = COLOR_TEXT_MAIN if not is_sublabel else COLOR_TEXT_SUB
             name_font = FONT_BODY_BOLD if not is_sublabel else FONT_BODY_MEDIUM
@@ -720,7 +741,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self._display_current_page()
 
     def _next_page(self):
-        total_items = len(self.flattened_rows)
+        self.cursor.execute("SELECT COUNT(*) FROM labels")
+        total_items = self.cursor.fetchone()[0]
         total_pages = (total_items + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
         if self.current_page < total_pages - 1:
             self.current_page += 1
