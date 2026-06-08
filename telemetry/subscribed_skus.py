@@ -290,8 +290,11 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
                         rows.append(["", "", "", p_name, p_scope])
 
         try:
-            df = pd.DataFrame(rows, columns=headers)
-            df.to_csv(f, index=False, encoding='utf-8')
+            chunk_size = 1000
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i:i + chunk_size]
+                df = pd.DataFrame(chunk, columns=headers)
+                df.to_csv(f, mode='a' if i > 0 else 'w', header=(i == 0), index=False, encoding='utf-8')
             usage_logger.info("Spreadsheet exported successfully.")
             messagebox.showinfo("Export Successful", f"Spreadsheet successfully saved to:\n{f}", parent=self)
         except Exception as e:

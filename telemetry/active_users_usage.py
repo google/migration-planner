@@ -127,23 +127,30 @@ def process_active_user_counts(filepath):
     headers = pd.read_csv(filepath, nrows=0).columns.tolist()
     expected = ["Report Date", "Office 365", "Exchange", "OneDrive", "SharePoint", "Teams"]
     cols = [c for c in expected if c in headers]
-    df = pd.read_csv(filepath, usecols=cols, encoding="utf-8-sig")
-    
-    if "Report Date" in df.columns:
-        df = df.sort_values(by="Report Date").fillna(0)
-    
-    dates = df["Report Date"].astype(str).tolist() if "Report Date" in df.columns else []
-    
-    def get_column_list(col_name):
-        if col_name in df.columns:
-            return pd.to_numeric(df[col_name], errors='coerce').fillna(0).astype(int).tolist()
-        return [0] * len(dates)
+    dates = []
+    office365 = []
+    exchange = []
+    onedrive = []
+    sharepoint = []
+    teams = []
 
-    office365 = get_column_list("Office 365")
-    exchange = get_column_list("Exchange")
-    onedrive = get_column_list("OneDrive")
-    sharepoint = get_column_list("SharePoint")
-    teams = get_column_list("Teams")
+    for chunk in pd.read_csv(filepath, usecols=cols, chunksize=10000, encoding="utf-8-sig"):
+        if "Report Date" in chunk.columns:
+            chunk = chunk.sort_values(by="Report Date").fillna(0)
+            dates.extend(chunk["Report Date"].astype(str).tolist())
+        else:
+            dates.extend([""] * len(chunk))
+        
+        def extract_col(col_name):
+            if col_name in chunk.columns:
+                return pd.to_numeric(chunk[col_name], errors='coerce').fillna(0).astype(int).tolist()
+            return [0] * len(chunk)
+
+        office365.extend(extract_col("Office 365"))
+        exchange.extend(extract_col("Exchange"))
+        onedrive.extend(extract_col("OneDrive"))
+        sharepoint.extend(extract_col("SharePoint"))
+        teams.extend(extract_col("Teams"))
 
     usage_logger.info("Successfully processed O365 active user counts data.")
     return {

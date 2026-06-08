@@ -905,9 +905,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                     "Parent Label Name": parent_name
                 })
                 
-        df = pd.DataFrame(rows)
         try:
-            df.to_csv(f, index=False)
+            chunk_size = 1000
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i:i + chunk_size]
+                df = pd.DataFrame(chunk)
+                df.to_csv(f, mode='a' if i > 0 else 'w', header=(i == 0), index=False)
             messagebox.showinfo("Export Successful", f"Sensitivity labels exported successfully to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
@@ -962,9 +965,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 "Last Modified By": policy.get("LastModifiedBy", "N/A")
             })
             
-        df = pd.DataFrame(rows)
         try:
-            df.to_csv(f, index=False)
+            chunk_size = 1000
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i:i + chunk_size]
+                df = pd.DataFrame(chunk)
+                df.to_csv(f, mode='a' if i > 0 else 'w', header=(i == 0), index=False)
             messagebox.showinfo("Export Successful", f"Retention policies exported successfully to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
