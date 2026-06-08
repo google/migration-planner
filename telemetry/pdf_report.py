@@ -388,9 +388,9 @@ def generate_pdf_report(data: dict, filepath: str):
     story.append(Spacer(1, 15))
 
     # =========================================================================
-    # SECTION 1b: DIRECTORY
+    # SECTION 1b: DIRECTORY SUMMARY
     # =========================================================================
-    story.append(Paragraph("1b. Directory", h1_style))
+    story.append(Paragraph("1b. Directory Summary", h1_style))
 
     dir_data = data.get("directory", {})
     if not dir_data:
