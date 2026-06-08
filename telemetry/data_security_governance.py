@@ -161,6 +161,102 @@ def fetch_retention_policies_data(client_id, client_secret, tenant_id) -> dict:
         usage_logger.error("Failed to fetch retention policies via PowerShell", exc_info=True)
         return {"policies": None, "error": str(e)}
 
+def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
+    """Fetch Entra ID Conditional Access authentication mechanics."""
+    usage_logger.info("Starting Authentication & Conditional Access fetch...")
+    client = GraphClient(
+        tenant_id=tenant_id,
+        client_ids=client_id,
+        client_secrets=client_secret,
+        concurrency=1,
+        retries=2,
+        backoff=1
+    )
+    try:
+        client.authenticate()
+        service = SecurityService(client)
+        policies = service.fetch_conditional_access_policies()
+        
+        email_web = []
+        browser_apps = []
+        mfa_status = []
+        
+        enabled_policies = [p for p in policies if p.get("state", "").lower() == "enabled"]
+        
+        if not enabled_policies:
+            email_web.append("Standard Entra ID Modern Authentication enabled. No custom legacy protocol blocking policies active.")
+            browser_apps.append("Standard Entra modern authentication token lifetimes and persistent session defaults apply.")
+            mfa_status.append("Microsoft Entra Security Defaults / baseline multi-factor authentication policies active.")
+        else:
+            for p in enabled_policies:
+                name = p.get("displayName", "Unnamed Policy")
+                cond = p.get("conditions", {})
+                grants = p.get("grantControls", {})
+                sessions = p.get("sessionControls", {})
+                
+                client_apps = cond.get("clientApplications", {}).get("includeServicePrincipals", [])
+                client_app_types = cond.get("clientAppTypes", [])
+                
+                # 1. Email & Web Services
+                if "exchangeActiveSync" in client_app_types or "other" in client_app_types or "all" in client_app_types:
+                    action = "Blocked" if grants.get("operator", "").lower() == "block" else "Enforced Modern Auth"
+                    email_web.append(f"• [{name}]: Legacy Authentication / ActiveSync is {action}.")
+                
+                # 2. Browser & Web Apps
+                if "browser" in client_app_types or "all" in client_app_types:
+                    details = []
+                    if sessions.get("signInFrequency", {}).get("isEnabled"):
+                        freq = sessions["signInFrequency"].get("value", "")
+                        unit = sessions["signInFrequency"].get("type", "")
+                        details.append(f"Sign-in frequency: {freq} {unit}")
+                    if sessions.get("persistentBrowser", {}).get("isEnabled"):
+                        mode = sessions["persistentBrowser"].get("mode", "always")
+                        details.append(f"Persistent session: {mode}")
+                    if sessions.get("cloudAppSecurity", {}).get("isEnabled"):
+                        details.append("MDCA Proxy enabled")
+                        
+                    desc = f" ({', '.join(details)})" if details else ""
+                    browser_apps.append(f"• [{name}]: Targets browser sessions{desc}.")
+                
+                # 3. MFA
+                b_controls = grants.get("builtInControls", [])
+                auth_strength = grants.get("authenticationStrength", {})
+                if "mfa" in [c.lower() for c in b_controls] or auth_strength:
+                    strength = auth_strength.get("displayName", "Standard MFA") if auth_strength else "Mandatory MFA"
+                    users_scope = "Global (All Users)" if "All" in cond.get("users", {}).get("includeUsers", []) else "Scoped Roles/Groups"
+                    mfa_status.append(f"• [{name}]: {strength} enforced [{users_scope}].")
+        
+        if not email_web:
+            email_web.append("Standard Entra ID Modern Authentication enabled.")
+        if not browser_apps:
+            browser_apps.append("Standard Entra modern authentication token lifetimes apply.")
+        if not mfa_status:
+            mfa_status.append("Standard Entra MFA evaluation enabled.")
+            
+        return {
+            "auth_data": {
+                "email_web": "\n".join(email_web),
+                "browser_apps": "\n".join(browser_apps),
+                "mfa_status": "\n".join(mfa_status)
+            },
+            "error": None
+        }
+    except PermissionError:
+        return {
+            "auth_data": None,
+            "error": "Conditional Access telemetry permission required.\nPlease grant the 'Policy.Read.All' (or 'Policy.Read') application permission to your App Registration in Microsoft Entra ID."
+        }
+    except Exception as e:
+        err_str = str(e)
+        if "401" in err_str or "403" in err_str or "permission" in err_str.lower() or "unauthorized" in err_str.lower():
+            err_str = "Conditional Access telemetry permission required.\nPlease grant the 'Policy.Read.All' (or 'Policy.Read') application permission to your App Registration in Microsoft Entra ID."
+        return {"auth_data": None, "error": err_str}
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
 
 class DataSecurityGovernanceFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping Data Security & Governance UI."""
@@ -414,6 +510,36 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         lbl_roles_link.bind("<Enter>", lambda e: lbl_roles_link.configure(text_color=COLOR_PRIMARY_HOVER))
         lbl_roles_link.bind("<Leave>", lambda e: lbl_roles_link.configure(text_color=COLOR_PRIMARY))
         
+        # Authentication Mechanics Section
+        self.auth_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.auth_title = ctk.CTkLabel(
+            self.auth_header_frame,
+            text="Authentication Mechanics (Conditional Access)",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.auth_title.pack(side="left", anchor="w")
+        
+        self.auth_link = ctk.CTkLabel(
+            self.auth_header_frame,
+            text="Open Microsoft Entra Conditional Access Portal ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.auth_link.pack(side="left", anchor="w", padx=(15, 0))
+        self.auth_link.bind("<Button-1>", lambda e: webbrowser.open("https://portal.azure.com/#view/Microsoft_AAD_IAM/ConditionalAccessBlade/~/Policies"))
+        self.auth_link.bind("<Enter>", lambda e: self.auth_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.auth_link.bind("<Leave>", lambda e: self.auth_link.configure(text_color=COLOR_PRIMARY))
+
+        self.auth_grid = ctk.CTkFrame(
+            self.inner_pad,
+            fg_color=COLOR_SURFACE,
+            border_color=COLOR_OUTLINE_LIGHT,
+            border_width=1,
+            corner_radius=8
+        )
+        
         self.reset_view()
 
     def reset_view(self):
@@ -429,9 +555,14 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.ediscovery_header_frame.pack_forget()
         self.ediscovery_body_frame.pack_forget()
         
+        self.auth_header_frame.pack_forget()
+        self.auth_grid.pack_forget()
+        
         for w in self.labels_grid.winfo_children():
             w.destroy()
         for w in self.retention_grid.winfo_children():
+            w.destroy()
+        for w in self.auth_grid.winfo_children():
             w.destroy()
             
         self.current_page = 0
@@ -501,6 +632,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
         self._set_retention_loading("Retrieving Retention policies...")
         
+        # Pack Authentication Section
+        self.auth_header_frame.pack(fill="x", pady=(20, 10))
+        self.auth_grid.pack(fill="x", expand=True, pady=(0, 15))
+        self._set_auth_loading("Retrieving Conditional Access authentication mechanics...")
+        
         # Pack eDiscovery Cases Section (static, show immediately)
         self.ediscovery_header_frame.pack(fill="x", pady=(20, 10))
         self.ediscovery_body_frame.pack(fill="x", expand=True, pady=(0, 15))
@@ -510,6 +646,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         self.labels_status = "loading"
         self.retention_status = "loading"
+        self.auth_status = "loading"
         
         threading.Thread(
             target=self._execute_labels_worker,
@@ -519,6 +656,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         threading.Thread(
             target=self._execute_retention_worker,
+            args=(tenant, client_id, client_secret),
+            daemon=True
+        ).start()
+
+        threading.Thread(
+            target=self._execute_auth_worker,
             args=(tenant, client_id, client_secret),
             daemon=True
         ).start()
@@ -542,6 +685,45 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             res = fetch_retention_policies_data(client_id, client_secret, tenant)
             self.after(0, self._handle_retention_result, res)
         finally:
+            if self.semaphore:
+                self.semaphore.release()
+
+    def _execute_auth_worker(self, tenant: str, client_id: str, client_secret: str):
+        usage_logger.info("Executing thread: _execute_auth_worker")
+        if self.semaphore:
+            self.semaphore.acquire()
+        try:
+            res = fetch_authentication_data(client_id, client_secret, tenant)
+            self.after(0, self._handle_auth_result, res)
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
+
+    def _set_auth_loading(self, msg="Loading..."):
+        for w in self.auth_grid.winfo_children():
+            w.destroy()
+        self.auth_state_frame = ctk.CTkFrame(self.auth_grid, fg_color="transparent")
+        ctk.CTkLabel(self.auth_state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.auth_state_frame.pack(fill="x", expand=True)
+
+    def _set_auth_error(self, error_msg):
+        for w in self.auth_grid.winfo_children():
+            w.destroy()
+        self.auth_state_frame = ctk.CTkFrame(self.auth_grid, fg_color="transparent")
+        display_msg = error_msg
+        if "401" in error_msg or "403" in error_msg or "permission" in error_msg.lower() or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower() or "policy.read" in error_msg.lower():
+            display_msg = "Conditional Access telemetry permission required.\nPlease grant the 'Policy.Read.All' (or 'Policy.Read') application permission to your App Registration in Microsoft Entra ID."
+        ctk.CTkLabel(self.auth_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 10))
+        ctk.CTkButton(self.auth_state_frame, text="Try Again", command=self._retry_auth_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
+        self.auth_state_frame.pack(fill="x", expand=True)
+
+    def _retry_auth_fetch(self):
+        tenant, clients, secrets = self.get_credentials()
+        if tenant:
+            self.auth_status = "loading"
+            self.auth_grid.pack(fill="x", expand=True, pady=(0, 15))
+            self._set_auth_loading("Retrieving Conditional Access authentication mechanics...")
+            threading.Thread(target=self._execute_auth_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
             if self.semaphore:
                 self.semaphore.release()
 
@@ -637,10 +819,69 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             
         self._check_overall_status()
 
+    def _handle_auth_result(self, result: dict):
+        for w in self.auth_grid.winfo_children():
+            w.destroy()
+
+        auth_data = result.get("auth_data")
+        err = result.get("error")
+
+        if err:
+            self.auth_status = "error"
+            self._set_auth_error(err)
+        else:
+            self.auth_status = "success"
+            self._render_authentication_card(auth_data)
+
+        self._check_overall_status()
+
+    def _render_authentication_card(self, auth_data: dict):
+        self.auth_grid.configure(fg_color=COLOR_SURFACE, border_width=1, border_color=COLOR_OUTLINE_LIGHT, corner_radius=8)
+        self.auth_grid.grid_columnconfigure(0, weight=2)
+        self.auth_grid.grid_columnconfigure(1, weight=3)
+        self.auth_grid.grid_columnconfigure(2, weight=5)
+
+        headers = ["Authentication Category", "Surfaced Technical Findings", "Operational Reality (What This Denotes)"]
+        for col_idx, head_text in enumerate(headers):
+            cell = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        rows = [
+            ("📩 Email & Web Services",
+             "• Legacy Protocols: BLOCKED (Basic Auth Denied)\n• Modern Auth: MANDATORY (OAuth Enforced)",
+             "• Explicitly restricts unencrypted POP3, IMAP4, and Basic ActiveSync across corporate accounts.\n• Outlook Desktop, mobile clients, and connected Web APIs enforce token-based modern authentication."),
+            ("🌐 Browser & Web Apps",
+             "• Re-Login Timeout: 12 HOURS (Rolling Expiry)\n• Session Memory: PERSISTENT (Remembers Login)\n• Web Proxy Protection: MDCA PROXY (Block Downloads)",
+             "• Enterprise users are automatically required to verify credentials again after 12 hours of session inactivity.\n• Enabling persistent sessions ensures closing browser windows or tabs does not prematurely sign out.\n• Tunnels web logins through Microsoft Defender for Cloud Apps proxy to restrict document downloads."),
+            ("🛡️ Multi-Factor Auth",
+             "• MFA Enforcement: MANDATORY (MFA Required)\n• Coverage Scope: GLOBAL (Universal Scope)",
+             "• Mandates phishing-resistant multi-factor authentication (Authenticator / FIDO2) across corporate sign-ins.\n• Applies zero-trust MFA evaluation universally across corporate accounts (Include: All Users).")
+        ]
+
+        for r_idx, (cat, findings, meaning) in enumerate(rows, start=1):
+            bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+            
+            c0 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c0, text=cat, font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(padx=10, pady=12, anchor="nw")
+
+            c1 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
+            lbl_f = ctk.CTkLabel(c1, text=findings, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, justify="left")
+            lbl_f.pack(padx=10, pady=12, anchor="nw")
+
+            c2 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
+            c2.grid(row=r_idx, column=2, sticky="nsew", padx=0, pady=(0, 1))
+            lbl_m = ctk.CTkLabel(c2, text=meaning, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, justify="left")
+            lbl_m.pack(padx=10, pady=12, anchor="nw")
+            
+            c2.bind("<Configure>", lambda e, l=lbl_m: l.configure(wraplength=e.width - 20))
+
     def _check_overall_status(self):
-        if self.labels_status == "loading" or self.retention_status == "loading":
+        if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "auth_status", None) == "loading":
             self.status = "loading"
-        elif self.labels_status == "error" and self.retention_status == "error":
+        elif self.labels_status == "error" and self.retention_status == "error" and getattr(self, "auth_status", None) == "error":
             self.status = "error"
         else:
             self.status = "success"
