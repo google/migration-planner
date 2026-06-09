@@ -27,8 +27,8 @@ from telemetry.styles import *
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger")
 
 def parse_email_client_support_csv(filepath: str) -> dict:
-    """Parses the Email App Usage CSV to categorize Browser vs Non-Browser client adoption."""
-    usage_logger.info(f"Processing Email App Usage file: {os.path.basename(filepath)}")
+    """Parses the Email App Usage Counts CSV to categorize Browser vs Non-Browser client adoption."""
+    usage_logger.info(f"Processing Email App Usage Counts file: {os.path.basename(filepath)}")
     if not os.path.exists(filepath):
         usage_logger.warning(f"Email App Usage report {filepath} not found. Skipping client breakdown.")
         return {}
@@ -41,6 +41,10 @@ def parse_email_client_support_csv(filepath: str) -> dict:
                 
         if "Is Deleted" in df.columns:
             df = df[~df["Is Deleted"].astype(str).str.strip().str.upper().isin(["TRUE", "1"])]
+
+        if df.empty:
+            usage_logger.warning(f"Email App Usage report {filepath} is empty.")
+            return {}
 
         owa_users = int(df["Outlook For Web"].sum()) if "Outlook For Web" in df.columns else 0
 
@@ -80,8 +84,8 @@ def parse_email_client_support_csv(filepath: str) -> dict:
         return {}
 
 def run_email_client_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
-    """Pipeline specifically downloading getEmailAppUsageUserDetail reports and discovering PSTs."""
-    usage_logger.info("Starting Email Client Usage and PST Discovery Pipeline...")
+    """Pipeline specifically downloading getEmailAppUsageAppsUserCounts reports and discovering PSTs."""
+    usage_logger.info("Starting Email Environment & PST Discovery Pipeline...")
     client = GraphClient(
         tenant_id=tenant_id,
         client_ids=client_id,
@@ -119,6 +123,7 @@ def run_email_client_pipeline(client_id: str, client_secret: str, tenant_id: str
         "pst_cloud_data": pst_cloud,
         "pst_error": pst_error
     }
+
 
 class EmailClientSupportFrame(ctk.CTkFrame):
     """Self-contained CustomTkinter component rendering Email Environment UI."""
@@ -259,9 +264,9 @@ class EmailClientSupportFrame(ctk.CTkFrame):
             m_str = (f"• Outlook Mobile (iOS/Android): {m_out:,} Users\n"
                      f"• Native / Other Mobile Apps: {m_oth:,} Users")
 
-            p_str = (f"• IMAP4 Bi-Directional Sync: {p_imap:,} Users\n"
-                     f"• POP3 Local Download: {p_pop:,} Users\n"
-                     f"• SMTP Automated Relays: {p_smtp:,} Accounts")
+            p_str = (f"• IMAP4 App: {p_imap:,} Users\n"
+                     f"• POP3 App: {p_pop:,} Users\n"
+                     f"• SMTP App: {p_smtp:,} Accounts")
 
             rows_client = [
                 ("Supported Browser-Based Clients", f"• Outlook on the Web (OWA): {b_users:,} Users"),
