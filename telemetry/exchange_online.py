@@ -59,10 +59,6 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.mailbox_view.configure(fg_color="transparent", border_width=0)
         self.mailbox_view.pack(fill="x", expand=True, pady=(0, 5))
 
-        # Separator line 1
-        self.divider = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
-        self.divider.pack(fill="x", pady=10)
-
         # Calendar Telemetry Sub-frame
         self.calendar_view = CalendarTelemetryFrame(
             master=self.inner_pad,
@@ -73,10 +69,6 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         )
         self.calendar_view.configure(fg_color="transparent", border_width=0)
         self.calendar_view.pack(fill="x", expand=True, pady=(0, 5))
-
-        # Separator line 2
-        self.divider2 = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
-        self.divider2.pack(fill="x", pady=10)
 
         # Organization-wide Apps Sub-frame
         self.apps_view = ExchangeAppsFrame(
@@ -97,8 +89,6 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.mailbox_view.reset_view()
         self.calendar_view.reset_view()
         self.apps_view.reset_view()
-        self.divider.pack_forget()
-        self.divider2.pack_forget()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         """Displays container and delegates fetches to all sub-views."""
@@ -106,8 +96,6 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.on_status_change()
 
         self.pack(fill="x", expand=True, pady=10)
-        self.divider.pack(fill="x", pady=10)
-        self.divider2.pack(fill="x", pady=10)
 
         self.mailbox_view.trigger_fetch(tenant, client_id, client_secret)
         self.calendar_view.trigger_fetch(tenant, client_id, client_secret)
