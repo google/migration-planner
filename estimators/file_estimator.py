@@ -53,17 +53,17 @@ class FileEstimator(Estimator):
         """Calculates duration in HOURS based on batching throughput constraints."""
         items = data.get("items", {})
         batch_corpus_size = sum(item["size"] for item in items)
-        batch_resource_count = sum(item["files"] + item["folders"] + item["shortcuts"] for item in items)
-        
-        global_count_limit = data.get("FILES_GLOBAL_COUNT_LIMIT")
-        global_corpus_size_limit = data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT")
-        
-        # Since there is no per site throttling limit using the min of the global limits by count, corpus
-        seconds_by_count = batch_resource_count / global_count_limit
-        seconds_by_size = batch_corpus_size / global_corpus_size_limit
+        batch_resource_count = sum(item["files"] for item in items)
 
-        total_seconds = max(seconds_by_count, seconds_by_size)
-        return total_seconds / 3600.0
+        average_batch_file_size = batch_corpus_size / batch_resource_count if batch_resource_count > 0 else 0
+
+        max_qps_from_file_size = data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT") / average_batch_file_size if average_batch_file_size > 0 else data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT")
+        max_qps_from_license_counts = data.get("FILES_GLOBAL_COUNT_LIMIT")
+        
+        qps = min(max_qps_from_license_counts, max_qps_from_file_size)
+        
+        time_in_seconds =  batch_resource_count / qps
+        return time_in_seconds / 3600
 
     def calculate_resource_metrics(
         self, 

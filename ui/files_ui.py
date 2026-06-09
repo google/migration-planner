@@ -55,7 +55,7 @@ def get_bucket_column_header(low, high):
 class FileMigrationEstimatorTool(MigrationEstimatorTool):
   def __init__(self):
     try:
-      self.show_eta = os.environ.get("SHOW_ETA", "false").lower() == "true"
+      self.show_eta = os.environ.get("SHOW_ETA", "true").lower() == "true"
     except:
       self.show_eta = False
 
@@ -458,7 +458,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       df = pd.DataFrame(site_data)
       
       if self.show_eta:
-        df_final, batches_list, total_eta, buckets = self.calculate_migration_batches(df)
+        df_final, batches_list, total_eta, buckets = self.calculate_migration_batches(df, file_metrics.get("licenseMetrics", {}))
         
         file_metrics["batches"] = batches_list
         file_metrics["buckets"] = buckets
@@ -560,7 +560,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
   def build_results_view(self):
     super().build_results_view()
 
-  def calculate_migration_batches(self, df):
+  def calculate_migration_batches(self, df, licenseMetrics):
     # Ensure numeric columns
     if "Resource Count" not in df.columns:
       df["Resource Count"] = 0
@@ -594,6 +594,22 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     min_batches_seen = float("inf")
 
     def get_batch_eta(subset_df):
+      def _get_qps_from_license_count():
+        # Calculate number of licenses required
+        license_count = licenseMetrics.get("totalAllotedUnits", {}).get("User", 0) + licenseMetrics.get("totalAllotedUnits", {}).get("Company", 0)
+        if license_count <= 1000:
+          qps = 4.8
+        elif license_count <= 5000:
+          qps = 9.6
+        elif license_count <= 15000:
+          qps = 14.4
+        elif license_count <= 50000:
+          qps = 19.2
+        else:
+          qps = 24
+        
+        return qps
+
       estimator = self.factory.get_files_estimator()
       items = []
       for _, row in subset_df.iterrows():
@@ -606,7 +622,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         
       data = {
         "items": items,
-        "FILES_GLOBAL_COUNT_LIMIT": FILES_GLOBAL_COUNT_LIMIT,
+        "FILES_GLOBAL_COUNT_LIMIT": _get_qps_from_license_count(),
         "FILES_GLOBAL_CORPUS_SIZE_LIMIT": FILES_GLOBAL_CORPUS_SIZE_LIMIT,
       }
       return estimator.calculate_migration_eta(data)
