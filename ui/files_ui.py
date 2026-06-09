@@ -504,6 +504,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Create resolved copy of DataFrame for export to CSV and batches
       df_output = base_df.copy()
+      original_site_ids = df_output["Site Id"].copy()
       df_output["Site Id"] = df_output["Site Id"].apply(self._get_display_name)
       df_output["Corpus Size"] = df_output["Corpus Size"].apply(self.format_size)
       df_output.rename(columns={"Site Id": "Site URL/Name"}, inplace=True)
@@ -523,9 +524,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           if not batch:
             continue
           batch_data = df_output[df_output["Suggested Batch"] == batch].copy()
-          batch_export = batch_data[["Site URL/Name"]].rename(
-              columns={"Site URL/Name": "Source SharePoint Site ID/URL"}
-          )
+          mapping = file_metrics.get("siteIdToMail")
+          if mapping:
+            batch_orig_ids = original_site_ids.loc[batch_data.index]
+            entities = batch_orig_ids.map(mapping).fillna(batch_data["Site URL/Name"])
+            batch_export = pd.DataFrame({"Entity": entities})
+          else:
+            batch_export = batch_data[["Site URL/Name"]].rename(
+                columns={"Site URL/Name": "Entity"}
+            )
           safe_name = batch.replace(" ", "")
           batch_path = os.path.join(batches_dir, f"{safe_name}.csv")
           batch_export.to_csv(batch_path, index=False)
