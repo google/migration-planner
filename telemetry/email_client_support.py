@@ -37,7 +37,7 @@ def parse_email_client_support_csv(filepath: str) -> dict:
         df = pd.read_csv(filepath)
         for col in df.columns:
             if col not in ["Report Refresh Date", "User Principal Name", "Display Name", "Last Activity Date", "Is Deleted"]:
-                df[col] = df[col].astype(str).str.strip().str.upper().isin(["TRUE", "1"])
+                df[col] = df[col].astype(str).str.strip().str.upper().isin(["TRUE", "1", "UNDETERMINED"])
                 
         if "Is Deleted" in df.columns:
             df = df[~df["Is Deleted"].astype(str).str.strip().str.upper().isin(["TRUE", "1"])]
