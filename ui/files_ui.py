@@ -66,6 +66,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     super().setup_variables()
     self.include_personal_sites = ctk.BooleanVar(value=True)
     self.include_team_sites = ctk.BooleanVar(value=False)
+    self.eta_min_users = ctk.IntVar(value=1000)
+    self.eta_max_users = ctk.IntVar(value=5000)
 
   def _is_valid_email(self, val):
     return bool(re.match(r'^[^@]+@[^@]+\.[^@]+$', val))
@@ -166,10 +168,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
-
-    # Migration Plan Options
-    if self.show_eta:
-      ui_utils.build_migration_plan_options(self, ctk)
 
   def update_progress(self, msg):
     if isinstance(msg, str):
@@ -1262,7 +1260,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     if not self.include_personal_sites.get() and not self.include_team_sites.get():
       messagebox.showerror("Validation Error", "At least one site type (Personal (OneDrive) or SharePoint) must be selected!")
       return
-      
+
+    # ETA to be only shown for OneDrive sites atm
+    self.show_eta = (os.environ.get("SHOW_ETA", "true").lower() == "true") and (self.include_personal_sites.get() and not self.include_team_sites.get())  
+    
     if self.user_source.get() == "csv":
       self._validate_csv()
 
