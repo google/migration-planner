@@ -176,99 +176,36 @@ def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
         client.authenticate()
         service = SecurityService(client)
         policies = service.fetch_conditional_access_policies()
-        sso_apps = service.fetch_sso_service_principals()
+        ca_policies = []
         
-        email_web = []
-        browser_apps = []
-        mfa_status = []
-        
-        enabled_policies = [p for p in policies if p.get("state", "").lower() == "enabled"]
-        
-        if not enabled_policies:
-            email_web.append("Standard Entra ID Modern Authentication enabled. No custom legacy protocol blocking policies active.")
-            browser_apps.append("Standard Entra modern authentication token lifetimes and persistent session defaults apply.")
-            mfa_status.append("Microsoft Entra Security Defaults / baseline multi-factor authentication policies active.")
-        else:
-            for p in enabled_policies:
-                name = p.get("displayName", "Unnamed Policy")
-                cond = p.get("conditions", {})
-                grants = p.get("grantControls", {})
-                sessions = p.get("sessionControls", {})
-                
-                client_apps = cond.get("clientApplications", {}).get("includeServicePrincipals", [])
-                client_app_types = cond.get("clientAppTypes", [])
-                
-                # 1. Email & Web Services
-                if "exchangeActiveSync" in client_app_types or "other" in client_app_types or "all" in client_app_types:
-                    action = "Blocked" if grants.get("operator", "").lower() == "block" else "Enforced Modern Auth"
-                    email_web.append(f"• [{name}]: Legacy Authentication / ActiveSync is {action}.")
-                
-                # 2. Browser & Web Apps
-                if "browser" in client_app_types or "all" in client_app_types:
-                    details = []
-                    if sessions.get("signInFrequency", {}).get("isEnabled"):
-                        freq = sessions["signInFrequency"].get("value", "")
-                        unit = sessions["signInFrequency"].get("type", "")
-                        details.append(f"Sign-in frequency: {freq} {unit}")
-                    if sessions.get("persistentBrowser", {}).get("isEnabled"):
-                        mode = sessions["persistentBrowser"].get("mode", "always")
-                        details.append(f"Persistent session: {mode}")
-                    if sessions.get("cloudAppSecurity", {}).get("isEnabled"):
-                        details.append("MDCA Proxy enabled")
-                        
-                    desc = f" ({', '.join(details)})" if details else ""
-                    browser_apps.append(f"• [{name}]: Targets browser sessions{desc}.")
-                
-                # 3. MFA
-                b_controls = grants.get("builtInControls", [])
-                auth_strength = grants.get("authenticationStrength", {})
-                if "mfa" in [c.lower() for c in b_controls] or auth_strength:
-                    strength = auth_strength.get("displayName", "Standard MFA") if auth_strength else "Mandatory MFA"
-                    users_scope = "Global (All Users)" if "All" in cond.get("users", {}).get("includeUsers", []) else "Scoped Roles/Groups"
-                    mfa_status.append(f"• [{name}]: {strength} enforced [{users_scope}].")
-        
-        if not email_web:
-            email_web.append("Standard Entra ID Modern Authentication enabled.")
-        if not browser_apps:
-            browser_apps.append("Standard Entra modern authentication token lifetimes apply.")
-        if not mfa_status:
-            mfa_status.append("Standard Entra MFA evaluation enabled.")
+        for p in policies:
+            name = p.get("displayName", "N/A")
+            state = p.get("state", "N/A")
             
-        saml_count = 0
-        oidc_count = 0
-        pwd_count = 0
-        
-        for sp in sso_apps:
-            mode = sp.get("preferredSingleSignOnMode")
-            if mode == "saml":
-                saml_count += 1
-            elif mode == "oidc":
-                oidc_count += 1
-            elif mode == "password":
-                pwd_count += 1
-                
-        sso_findings = []
-        if saml_count or oidc_count or pwd_count:
-            if saml_count: sso_findings.append(f"• SAML 2.0 Federation: {saml_count} Apps")
-            if oidc_count: sso_findings.append(f"• OpenID Connect: {oidc_count} Apps")
-            if pwd_count: sso_findings.append(f"• Password Vaulting: {pwd_count} Apps")
-        else:
-            sso_findings.append("• Standard Entra ID Application registrations active")
+            cond = p.get("conditions") or {}
+            grants = p.get("grantControls") or {}
+            sessions = p.get("sessionControls") or {}
+
+            users_obj = cond.get("users") or {}
+            users_arr = users_obj.get("includeUsers") or ["N/A"]
             
-        sso_meaning = []
-        if saml_count: sso_meaning.append(f"• {saml_count} enterprise applications federate via SAML trust (candidate for Google Workspace SAML IdP migration).")
-        if oidc_count: sso_meaning.append(f"• {oidc_count} applications authenticate using modern OIDC tokens.")
-        if pwd_count: sso_meaning.append(f"• {pwd_count} applications rely on secure password vaulting / credential injection.")
-        if not sso_meaning:
-            sso_meaning.append("• Enterprise service principals utilize standard OAuth / OpenID tenant authentication.")
+            apps_arr = cond.get("clientAppTypes") or ["N/A"]
+
+            controls_arr = grants.get("builtInControls") or ["N/A"]
+            
+            session_keys = list(sessions.keys()) if sessions else ["N/A"]
+            
+            ca_policies.append({
+                "name": name,
+                "state": state,
+                "users": ", ".join(users_arr),
+                "apps": ", ".join(apps_arr),
+                "controls": ", ".join(controls_arr)
+            })
             
         return {
             "auth_data": {
-                "email_web": "\n".join(email_web),
-                "browser_apps": "\n".join(browser_apps),
-                "mfa_status": "\n".join(mfa_status),
-                "sso_findings": "\n".join(sso_findings),
-                "sso_meaning": "\n".join(sso_meaning)
+                "ca_policies": ca_policies
             },
             "error": None
         }
@@ -868,49 +805,41 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def _render_authentication_card(self, auth_data: dict):
         self.auth_grid.configure(fg_color=COLOR_SURFACE, border_width=1, border_color=COLOR_OUTLINE_LIGHT, corner_radius=8)
-        self.auth_grid.grid_columnconfigure(0, weight=2)
-        self.auth_grid.grid_columnconfigure(1, weight=3)
-        self.auth_grid.grid_columnconfigure(2, weight=5)
-
-        headers = ["Authentication Category", "Surfaced Technical Findings", "Operational Reality (What This Denotes)"]
+        
+        ca_policies = auth_data.get("ca_policies", [])
+        
+        headers = ["Policy Name", "State", "Target Users", "Target Apps", "Enforced Controls"]
+        for i in range(5):
+            self.auth_grid.grid_columnconfigure(i, weight=1)
+            
         for col_idx, head_text in enumerate(headers):
             cell = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
-        rows = [
-            ("📩 Email & Web Services",
-             "• Legacy Protocols: BLOCKED (Basic Auth Denied)\n• Modern Auth: MANDATORY (OAuth Enforced)",
-             "• Explicitly restricts unencrypted POP3, IMAP4, and Basic ActiveSync across corporate accounts.\n• Outlook Desktop, mobile clients, and connected Web APIs enforce token-based modern authentication."),
-            ("🌐 Browser & Web Apps",
-             "• Re-Login Timeout: 12 HOURS (Rolling Expiry)\n• Session Memory: PERSISTENT (Remembers Login)\n• Web Proxy Protection: MDCA PROXY (Block Downloads)",
-             "• Enterprise users are automatically required to verify credentials again after 12 hours of session inactivity.\n• Enabling persistent sessions ensures closing browser windows or tabs does not prematurely sign out.\n• Tunnels web logins through Microsoft Defender for Cloud Apps proxy to restrict document downloads."),
-            ("🛡️ Multi-Factor Auth",
-             "• MFA Enforcement: MANDATORY (MFA Required)\n• Coverage Scope: GLOBAL (Universal Scope)",
-             "• Mandates phishing-resistant multi-factor authentication (Authenticator / FIDO2) across corporate sign-ins.\n• Applies zero-trust MFA evaluation universally across corporate accounts (Include: All Users)."),
-            ("🔐 Enterprise SaaS (SSO)",
-             auth_data.get("sso_findings", "• SAML 2.0 Federation: Active\n• OpenID Connect: Active"),
-             auth_data.get("sso_meaning", "• Enterprise service principals utilize standard OAuth / OpenID tenant authentication."))
-        ]
+        if not ca_policies:
+            c0 = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_SURFACE, corner_radius=0)
+            c0.grid(row=1, column=0, columnspan=5, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c0, text="N/A (No Conditional Access Policies configured)", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=12, anchor="w")
+        else:
+            for r_idx, policy in enumerate(ca_policies, start=1):
+                bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+                
+                vals = [
+                    policy.get("name", "N/A"),
+                    policy.get("state", "N/A"),
+                    policy.get("users", "N/A"),
+                    policy.get("apps", "N/A"),
+                    policy.get("controls", "N/A")
+                ]
+                
+                for c_idx, val in enumerate(vals):
+                    c = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
+                    c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
+                    ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=180).pack(padx=10, pady=12, anchor="nw")
 
-        for r_idx, (cat, findings, meaning) in enumerate(rows, start=1):
-            bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
-            
-            c0 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
-            c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkLabel(c0, text=cat, font=FONT_BODY_BOLD, text_color=COLOR_PRIMARY).pack(padx=10, pady=12, anchor="nw")
 
-            c1 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
-            c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
-            lbl_f = ctk.CTkLabel(c1, text=findings, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, justify="left")
-            lbl_f.pack(padx=10, pady=12, anchor="nw")
 
-            c2 = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
-            c2.grid(row=r_idx, column=2, sticky="nsew", padx=0, pady=(0, 1))
-            lbl_m = ctk.CTkLabel(c2, text=meaning, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, justify="left")
-            lbl_m.pack(padx=10, pady=12, anchor="nw")
-            
-            c2.bind("<Configure>", lambda e, l=lbl_m: l.configure(wraplength=e.width - 20))
 
     def _check_overall_status(self):
         if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "auth_status", None) == "loading":
