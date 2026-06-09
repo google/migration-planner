@@ -97,4 +97,42 @@ class SecurityService:
         finally:
             self.client.release_token(token_slot)
 
+    def search_cloud_pst_files(self) -> dict:
+        """Queries Microsoft Graph Search API to locate cloud-stored PST archive files."""
+        url = "https://graph.microsoft.com/v1.0/search/query"
+        token_slot = self.client.get_active_token()
+        session = self.client.get_session()
+        
+        headers = {
+            "Authorization": f"Bearer {token_slot['token']}",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "requests": [
+                {
+                    "entityTypes": ["driveItem"],
+                    "query": {"queryString": "fileextension:pst"},
+                    "from": 0,
+                    "size": 50
+                }
+            ]
+        }
+        try:
+            logger.info("Executing Graph Search query for cloud PST archives...")
+            resp = session.post(url, json=payload, headers=headers)
+            if resp.status_code == 200:
+                return resp.json()
+            elif resp.status_code in [401, 403]:
+                logger.warning("Graph Search permission error: %d %s", resp.status_code, resp.text)
+                return {}
+            else:
+                logger.warning("Graph Search query failed with status %d: %s", resp.status_code, resp.text)
+                return {}
+        except Exception as e:
+            logger.warning("Exception during Graph Search query: %s", e)
+            return {}
+        finally:
+            self.client.release_token(token_slot)
+
 
