@@ -208,3 +208,8 @@ class ReportsService:
         finally:
             self.client.release_token(token_slot)
 
+    def download_email_app_usage_apps_user_counts(self, output_dir: str) -> None:
+        """Downloads Exchange email app usage apps user counts CSV report (180 days)."""
+        self.download_report("https://graph.microsoft.com/v1.0/reports/getEmailAppUsageAppsUserCounts(period='D180')", "EmailAppUsageAppsUserCounts(180d).csv", output_dir)
+
+

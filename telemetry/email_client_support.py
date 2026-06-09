@@ -27,33 +27,48 @@ from telemetry.styles import *
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger")
 
 def parse_email_client_support_csv(filepath: str) -> dict:
-    """Parses the Email App Usage CSV to categorize Browser vs Non-Browser client adoption."""
-    usage_logger.info(f"Processing Email App Usage file: {os.path.basename(filepath)}")
+    """Parses the Email App Usage Counts CSV to categorize Browser vs Non-Browser client adoption."""
+    usage_logger.info(f"Processing Email App Usage Counts file: {os.path.basename(filepath)}")
     if not os.path.exists(filepath):
         usage_logger.warning(f"Email App Usage report {filepath} not found. Skipping client breakdown.")
         return {}
 
     try:
         df = pd.read_csv(filepath)
-        for col in df.columns:
-            if col not in ["Report Refresh Date", "User Principal Name", "Display Name", "Last Activity Date", "Is Deleted"]:
-                df[col] = df[col].astype(str).str.strip().str.upper().isin(["TRUE", "1", "UNDETERMINED"])
-                
-        if "Is Deleted" in df.columns:
-            df = df[~df["Is Deleted"].astype(str).str.strip().str.upper().isin(["TRUE", "1"])]
+        if df.empty:
+            usage_logger.warning(f"Email App Usage report {filepath} is empty.")
+            return {}
 
-        owa_users = int(df["Outlook For Web"].sum()) if "Outlook For Web" in df.columns else 0
+        # Convert Report Refresh Date to datetime for sorting
+        if "Report Refresh Date" in df.columns:
+            df["Report Refresh Date"] = pd.to_datetime(df["Report Refresh Date"])
+            df = df.sort_values(by="Report Refresh Date", ascending=False)
+        
+        # Get the latest row
+        latest_row = df.iloc[0].fillna(0)
 
-        win_users = int(df["Outlook For Windows"].sum()) if "Outlook For Windows" in df.columns else 0
-        mac_users = int(df["Outlook For Mac"].sum()) if "Outlook For Mac" in df.columns else 0
-        mail_mac = int(df["Mail For Mac"].sum()) if "Mail For Mac" in df.columns else 0
+        # Helper to get numeric values safely
+        def get_val(col_name):
+            if col_name in latest_row:
+                val = latest_row[col_name]
+                try:
+                    return int(float(val))
+                except (ValueError, TypeError):
+                    return 0
+            return 0
+
+        owa_users = get_val("Outlook For Web")
+
+        win_users = get_val("Outlook For Windows")
+        mac_users = get_val("Outlook For Mac")
+        mail_mac = get_val("Mail For Mac")
         
-        mobile_users = int(df["Outlook For Mobile"].sum()) if "Outlook For Mobile" in df.columns else 0
-        other_mobile = int(df["Other For Mobile"].sum()) if "Other For Mobile" in df.columns else 0
+        mobile_users = get_val("Outlook For Mobile")
+        other_mobile = get_val("Other For Mobile")
         
-        pop3_users = int(df["POP3 App"].sum()) if "POP3 App" in df.columns else 0
-        imap4_users = int(df["IMAP4 App"].sum()) if "IMAP4 App" in df.columns else 0
-        smtp_users = int(df["SMTP App"].sum()) if "SMTP App" in df.columns else 0
+        pop3_users = get_val("POP3 App")
+        imap4_users = get_val("IMAP4 App")
+        smtp_users = get_val("SMTP App")
 
         total_desktop = win_users + mac_users + mail_mac
         total_mobile = mobile_users + other_mobile
@@ -80,8 +95,8 @@ def parse_email_client_support_csv(filepath: str) -> dict:
         return {}
 
 def run_email_client_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
-    """Pipeline specifically downloading getEmailAppUsageUserDetail reports and discovering PSTs."""
-    usage_logger.info("Starting Email Client Usage and PST Discovery Pipeline...")
+    """Pipeline specifically downloading getEmailAppUsageAppsUserCounts reports and discovering PSTs."""
+    usage_logger.info("Starting Email Environment & PST Discovery Pipeline...")
     client = GraphClient(
         tenant_id=tenant_id,
         client_ids=client_id,
@@ -99,8 +114,8 @@ def run_email_client_pipeline(client_id: str, client_secret: str, tenant_id: str
     client_stats = {}
     client_error = None
     try:
-        service.download_email_app_usage_detail(reports_dir)
-        client_stats = parse_email_client_support_csv(os.path.join(reports_dir, "EmailAppUsageUserDetail(180d).csv"))
+        service.download_email_app_usage_apps_user_counts(reports_dir)
+        client_stats = parse_email_client_support_csv(os.path.join(reports_dir, "EmailAppUsageAppsUserCounts(180d).csv"))
     except Exception as e:
         usage_logger.warning(f"Could not retrieve/parse Email App Usage report: {e}")
         client_error = str(e)
@@ -119,6 +134,7 @@ def run_email_client_pipeline(client_id: str, client_secret: str, tenant_id: str
         "pst_cloud_data": pst_cloud,
         "pst_error": pst_error
     }
+
 
 class EmailClientSupportFrame(ctk.CTkFrame):
     """Self-contained CustomTkinter component rendering Email Environment UI."""
@@ -259,9 +275,9 @@ class EmailClientSupportFrame(ctk.CTkFrame):
             m_str = (f"• Outlook Mobile (iOS/Android): {m_out:,} Users\n"
                      f"• Native / Other Mobile Apps: {m_oth:,} Users")
 
-            p_str = (f"• IMAP4 Bi-Directional Sync: {p_imap:,} Users\n"
-                     f"• POP3 Local Download: {p_pop:,} Users\n"
-                     f"• SMTP Automated Relays: {p_smtp:,} Accounts")
+            p_str = (f"• IMAP4 App: {p_imap:,} Users\n"
+                     f"• POP3 App: {p_pop:,} Users\n"
+                     f"• SMTP App: {p_smtp:,} Accounts")
 
             rows_client = [
                 ("Supported Browser-Based Clients", f"• Outlook on the Web (OWA): {b_users:,} Users"),

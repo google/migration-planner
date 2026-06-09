@@ -122,15 +122,22 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.lic_client_secrets = ctk.StringVar()
 
         self.on_all_done_callback = None
-        self.telemetry_semaphore = threading.Semaphore(3)
+        self.telemetry_semaphore = threading.Semaphore(1)
 
         self.build_ui()
 
-        # Batching orchestration for sequential loading of sections in groups
+        # Batching orchestration for sequential loading of sections one by one
         self.batches = [
-            [self.subscribed_skus_view, self.directory_view, self.active_users_view],
-            [self.active_users_trend_view, self.m365_apps_view, self.exchange_online_view],
-            [self.email_clients_view, self.files_view, self.security_gov_view, self.power_automate_view]
+            [self.subscribed_skus_view],
+            [self.directory_view],
+            [self.active_users_view],
+            [self.active_users_trend_view],
+            [self.m365_apps_view],
+            [self.exchange_online_view],
+            [self.email_clients_view],
+            [self.files_view],
+            [self.security_gov_view],
+            [self.power_automate_view]
         ]
         self.current_batch_index = 0
 
@@ -369,8 +376,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 view.trigger_fetch(tenant, clients[0], secrets[0])
 
     def authenticate_licenses_tab(self):
-        """Master full parallel fetch in sequential batches of 3."""
-        async_logger.info("Master Submit triggered. Restarting all fetches in sequential batches of 3.")
+        """Master full sequential fetch of sections."""
+        async_logger.info("Master Submit triggered. Restarting all fetches sequentially.")
 
         tenant, clients, secrets = self._get_credentials()
         if not tenant:
@@ -379,7 +386,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             return
 
         self.btn_lic_submit.configure(state="disabled", text="Submitting...")
-        self.lbl_lic_status.configure(text="Querying Microsoft Graph APIs and Reports in sequential batches of 3...", text_color=COLOR_TEXT_SUB)
+        self.lbl_lic_status.configure(text="Querying Microsoft Graph APIs and Reports sequentially...", text_color=COLOR_TEXT_SUB)
 
         # Reset all views first
         self._hide_all_grids()
