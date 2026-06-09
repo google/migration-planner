@@ -165,3 +165,46 @@ class ReportsService:
         """Downloads Exchange email app usage detail CSV report (180 days)."""
         self.download_report("https://graph.microsoft.com/v1.0/reports/getEmailAppUsageUserDetail(period='D180')", "EmailAppUsageUserDetail(180d).csv", output_dir)
 
+    def search_cloud_pst_files(self) -> dict:
+        """Queries Microsoft Graph Search API to locate cloud-stored PST archive files across all active regions."""
+        url = "https://graph.microsoft.com/v1.0/search/query"
+        token_slot = self.client.get_active_token()
+        session = self.client.get_session()
+        
+        headers = {
+            "Authorization": f"Bearer {token_slot['token']}",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+
+        total_hits = []
+        regions = ["NAM", "EUR", "APC"]
+        
+        try:
+            for region in regions:
+                payload = {
+                    "requests": [
+                        {
+                            "entityTypes": ["driveItem"],
+                            "query": {"queryString": "fileextension:pst"},
+                            "from": 0,
+                            "size": 50,
+                            "region": region
+                        }
+                    ]
+                }
+                logger.info(f"Executing Graph Search query for cloud PST archives in region: {region}...")
+                resp = session.post(url, json=payload, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if "value" in data:
+                        total_hits.extend(data["value"])
+                elif resp.status_code == 400 and "Only valid regions are" in resp.text:
+                    logger.info(f"Region {region} is not active for this tenant. Skipping.")
+                else:
+                    raise ConnectionError(f"Graph Search failed for region {region} (HTTP {resp.status_code}): {resp.text}")
+            
+            return {"value": total_hits}
+        finally:
+            self.client.release_token(token_slot)
+
