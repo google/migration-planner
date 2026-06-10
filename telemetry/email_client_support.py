@@ -144,6 +144,9 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
 
+        # Missing UI Header added here to match Exchange Online aesthetics
+        ctk.CTkLabel(self.inner_pad, text="Email Client Support & Legacy PST Data", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
+
         self.sub_title_1 = ctk.CTkLabel(self.inner_pad, text="Email Client Classification", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
@@ -225,8 +228,8 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         # Render Supported Email Clients
         self.sub_title_1.pack(anchor="w", pady=(5, 10))
         self.grid_frame.pack(fill="x", expand=True)
-        self.grid_frame.grid_columnconfigure(0, weight=2)
-        self.grid_frame.grid_columnconfigure(1, weight=5)
+        for i in range(2):
+            self.grid_frame.grid_columnconfigure(i, weight=1)
 
         headers_client = ["Email Client Classification", "Active User Counts (180-Day Telemetry)"]
         for col_idx, head_text in enumerate(headers_client):
