@@ -25,7 +25,7 @@ from core.graph.reports import ReportsService
 logger = logging.getLogger("M365TelemetryAsyncLogger.UserPersonaAnalysis")
 
 
-def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str, output_csv_path: str, reports_dir: str = None) -> str:
+def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str, output_csv_path: str, reports_dir: str = None, status_callback=None) -> str:
     """Runs the full pipeline to download M365 reports and generate the user activity dataset.
     
     Returns the path to the generated CSV dataset.
@@ -57,10 +57,16 @@ def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str
         ("https://graph.microsoft.com/v1.0/reports/getSharePointActivityUserDetail(period='D180')", "SharePointActivityUserDetail(180d).csv")
     ]
     
+    if status_callback:
+        status_callback("Fetching Reports")
+        
     logger.info("Downloading reports in batch concurrently...")
     reports_service.download_reports_batch(reports, reports_dir)
     logger.info("Reports download complete. Starting dataset generation...")
     
+    if status_callback:
+        status_callback("Aggregating Data")
+        
     # 3. Process and merge reports to create the dataset
     generate_user_activity_dataset(reports_dir, output_csv_path)
     

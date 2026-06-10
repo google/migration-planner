@@ -7,6 +7,7 @@ from telemetry.m365_telemetry import M365TelemetryTab, async_logger
 import logging
 from telemetry.power_automate import PowerAutomateScanner
 from telemetry.styles import *
+from telemetry.user_persona_analysis import run_user_persona_pipeline
 
 import queue
 import threading
@@ -326,7 +327,15 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             hover_color=COLOR_PRIMARY_HOVER,
             font=FONT_BODY_BOLD
         )
-        self.generate_btn.pack(pady=(0, 30))
+        self.generate_btn.pack(pady=(0, 20))
+
+        # Status loading label (hidden by default)
+        self.status_lbl = ctk.CTkLabel(
+            self.form_container,
+            text="",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_PRIMARY
+        )
 
         # Disclaimer Box (No hardcoded width for responsiveness, center-aligned)
         self.disclaimer_card = ctk.CTkFrame(
@@ -348,13 +357,91 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
         )
         self.disclaimer_lbl.pack(fill="both", expand=True, padx=20, pady=15)
 
+    def set_loading_state(self, is_loading):
+        if is_loading:
+            self.generate_btn.configure(state="disabled")
+            self.status_lbl.configure(text_color=COLOR_PRIMARY)
+            self.status_lbl.pack(pady=10)
+        else:
+            self.generate_btn.configure(state="normal")
+
+    def update_status(self, step):
+        if step == "Fetching Reports":
+            msg = "⏳ Fetching Reports..."
+        elif step == "Aggregating Data":
+            msg = "⏳ Aggregating Data..."
+        else:
+            msg = f"⏳ {step}..."
+            
+        self.controller.after(0, lambda: self.status_lbl.configure(text=msg, text_color=COLOR_PRIMARY))
+
+    def on_pipeline_success(self, output_csv):
+        self.set_loading_state(False)
+        self.status_lbl.configure(
+            text=f"✔ User Persona dataset generated successfully!\nSaved to: {output_csv}",
+            text_color=COLOR_SUCCESS
+        )
+        self.status_lbl.pack(pady=10)
+
+    def on_pipeline_error(self, err_msg):
+        self.set_loading_state(False)
+        self.status_lbl.configure(
+            text=f"✖ Failed to generate dataset: {err_msg}",
+            text_color=COLOR_ERROR
+        )
+        self.status_lbl.pack(pady=10)
+
     def on_generate_clicked(self):
-        from tkinter import messagebox
+        tenant = self.controller.stored_tenant
+        client = self.controller.stored_client
+        secret = self.controller.stored_secret
+
+        if not tenant or not client or not secret:
+            self.status_lbl.configure(
+                text="✖ Error: Please connect your Azure App Credentials on the welcome screen first.",
+                text_color=COLOR_ERROR
+            )
+            self.status_lbl.pack(pady=10)
+            return
+
         api_key = self.api_key_entry.get().strip()
         if not api_key:
-            messagebox.showwarning("Missing API Key", "Please enter a valid Gemini API Key.", parent=self)
-        else:
-            messagebox.showinfo("User Persona Analysis", "API Key received. Backend generation is not implemented yet.", parent=self)
+            self.status_lbl.configure(
+                text="✖ Warning: Please enter a valid Gemini API Key.",
+                text_color=COLOR_ERROR
+            )
+            self.status_lbl.pack(pady=10)
+            return
+
+        # Start loading state
+        self.set_loading_state(True)
+        self.update_status("Starting pipeline...")
+
+        # Run pipeline in a background thread
+        def run_thread():
+            try:
+                # Set output path
+                output_dir = os.path.join("telemetry", "reports", f"{tenant}_{client}")
+                output_csv = os.path.join(output_dir, "user_activity_data.csv")
+                
+                # Execute pipeline
+                run_user_persona_pipeline(
+                    tenant_id=tenant,
+                    client_id=client,
+                    client_secret=secret,
+                    output_csv_path=output_csv,
+                    status_callback=lambda step: self.update_status(step)
+                )
+                
+                # Success
+                self.controller.after(0, lambda: self.on_pipeline_success(output_csv))
+            except Exception as e:
+                logger.exception("Error generating user persona dataset")
+                self.controller.after(0, lambda err=str(e): self.on_pipeline_error(err))
+
+        import threading
+        threading.Thread(target=run_thread, daemon=True).start()
+
 
 
 
