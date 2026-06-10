@@ -10,10 +10,11 @@ The certificate authentication flow, reports parsing, and user interface require
 * `matplotlib`
 * `cryptography`
 * `msal`
+* `google-genai`
 
 You can install them via pip:
 ```bash
-pip install customtkinter requests pandas psutil matplotlib cryptography msal
+pip install customtkinter requests pandas psutil matplotlib cryptography msal google-genai
 ```
 
 ## Architecture & Optimizations

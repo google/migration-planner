@@ -2,6 +2,7 @@
 """Standalone application for the License Usage and Telemetry view."""
 
 import os
+import pandas as pd
 import customtkinter as ctk
 from telemetry.m365_telemetry import M365TelemetryTab, async_logger
 import logging
@@ -11,6 +12,8 @@ from telemetry.user_persona_analysis import run_user_persona_pipeline
 
 import queue
 import threading
+import tkinter as tk
+from tkinter import filedialog, messagebox
 import ui.exchange_online_ui
 import ui.chats_ui
 import ui.files_ui
@@ -268,6 +271,9 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
     def __init__(self, master, controller, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
         self.controller = controller
+        self.personas_list = []
+        self.output_csv = None
+        self.results_frame = None
 
         # Main container
         self.container = ctk.CTkFrame(self, fg_color="transparent")
@@ -276,9 +282,8 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
         self.setup_ui()
 
     def setup_ui(self):
-        import tkinter as tk
 
-        # API Key Form Card
+        # API Key Form Card (Top aligned, matches header width)
         self.form_card = ctk.CTkFrame(
             self.container,
             fg_color=COLOR_SURFACE,
@@ -286,10 +291,10 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             border_width=1,
             border_color=COLOR_OUTLINE_LIGHT
         )
-        self.form_card.pack(fill="x", side="top", pady=(5, 20))
+        self.form_card.pack(fill="x", side="top", pady=(5, 15))
 
         self.form_container = ctk.CTkFrame(self.form_card, fg_color="transparent")
-        self.form_container.pack(fill="x", expand=True, padx=40, pady=40)
+        self.form_container.pack(fill="x", expand=True, padx=40, pady=25)
 
         # API Key Input Label
         self.api_key_lbl = ctk.CTkLabel(
@@ -306,7 +311,7 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             highlightbackground=COLOR_OUTLINE, highlightcolor=COLOR_PRIMARY, highlightthickness=1,
             bd=0, background=COLOR_SURFACE
         )
-        self.api_key_border.pack(fill="x", expand=True, pady=(0, 25))
+        self.api_key_border.pack(fill="x", expand=True, pady=(0, 15))
         self.api_key_border.pack_propagate(False)
 
         self.api_key_entry = ctk.CTkEntry(
@@ -327,7 +332,7 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             hover_color=COLOR_PRIMARY_HOVER,
             font=FONT_BODY_BOLD
         )
-        self.generate_btn.pack(pady=(0, 20))
+        self.generate_btn.pack(pady=(0, 10))
 
         # Status loading label (hidden by default)
         self.status_lbl = ctk.CTkLabel(
@@ -337,15 +342,15 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             text_color=COLOR_PRIMARY
         )
 
-        # Disclaimer Box (No hardcoded width for responsiveness, center-aligned)
+        # Disclaimer Box always packed at bottom of self.container (No hardcoded width, center-aligned)
         self.disclaimer_card = ctk.CTkFrame(
-            self.form_container,
+            self.container,
             fg_color="#FFF9E6",
             corner_radius=8,
             border_width=1,
             border_color="#FFE0B2"
         )
-        self.disclaimer_card.pack(fill="x", expand=True, pady=10)
+        self.disclaimer_card.pack(fill="x", side="bottom", pady=20, padx=40)
 
         self.disclaimer_lbl = ctk.CTkLabel(
             self.disclaimer_card,
@@ -362,6 +367,8 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             self.generate_btn.configure(state="disabled")
             self.status_lbl.configure(text_color=COLOR_PRIMARY)
             self.status_lbl.pack(pady=10)
+            if self.results_frame:
+                self.results_frame.pack_forget()
         else:
             self.generate_btn.configure(state="normal")
 
@@ -370,18 +377,28 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             msg = "⏳ Fetching Reports..."
         elif step == "Aggregating Data":
             msg = "⏳ Aggregating Data..."
+        elif step == "Generating insights using Gemini":
+            msg = "⏳ Generating insights using Gemini..."
         else:
             msg = f"⏳ {step}..."
             
         self.controller.after(0, lambda: self.status_lbl.configure(text=msg, text_color=COLOR_PRIMARY))
 
-    def on_pipeline_success(self, output_csv):
+    def on_pipeline_success(self, result):
         self.set_loading_state(False)
-        self.status_lbl.configure(
-            text=f"✔ User Persona dataset generated successfully!\nSaved to: {output_csv}",
-            text_color=COLOR_SUCCESS
-        )
-        self.status_lbl.pack(pady=10)
+        self.status_lbl.pack_forget() # Hide the status label on success
+        
+        self.personas_list = result.get("personas", [])
+        self.output_csv = result.get("dataset_path")
+        
+        # Hide the input settings card
+        self.form_card.pack_forget()
+        
+        if self.results_frame:
+            self.results_frame.pack_forget()
+            self.results_frame.destroy()
+            
+        self.render_persona_results()
 
     def on_pipeline_error(self, err_msg):
         self.set_loading_state(False)
@@ -390,6 +407,183 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             text_color=COLOR_ERROR
         )
         self.status_lbl.pack(pady=10)
+
+    def show_regenerate_form(self):
+        if self.results_frame:
+            self.results_frame.pack_forget()
+        self.form_card.pack(fill="x", side="top", pady=(5, 15))
+
+    def render_persona_results(self):
+        if not self.personas_list or not self.output_csv:
+            return
+
+        # 1. Create a container frame for results
+        self.results_frame = ctk.CTkFrame(self.container, fg_color="transparent")
+        # Pack below the form card, above the disclaimer
+        self.results_frame.pack(fill="both", expand=True, padx=40, pady=(0, 10))
+
+        # Title / Export Header row
+        header_row = ctk.CTkFrame(self.results_frame, fg_color="transparent")
+        header_row.pack(fill="x", pady=(0, 10))
+
+        ctk.CTkLabel(
+            header_row,
+            text="Generated User Personas",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        ).pack(side="left")
+
+        # Export Button
+        btn_export = ctk.CTkButton(
+            header_row,
+            text="Export Assignments CSV",
+            command=self.export_assignments_csv,
+            width=180,
+            height=32,
+            corner_radius=16,
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER
+        )
+        btn_export.pack(side="right")
+
+        # Regenerate Button
+        btn_regenerate = ctk.CTkButton(
+            header_row,
+            text="Regenerate Response",
+            command=self.show_regenerate_form,
+            width=180,
+            height=32,
+            corner_radius=16,
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER
+        )
+        btn_regenerate.pack(side="right", padx=(0, 10))
+
+        # Export status label (empty initially)
+        self.export_status_lbl = ctk.CTkLabel(
+            header_row,
+            text="",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_SUCCESS
+        )
+        self.export_status_lbl.pack(side="right", padx=(0, 15))
+
+        # 2. Get user counts per persona from output CSV
+        try:
+            df = pd.read_csv(self.output_csv)
+            counts = df['Assigned_Persona_ID'].value_counts().to_dict()
+        except Exception as e:
+            logger.error(f"Failed to read user counts: {e}")
+            counts = {}
+
+        # 3. Create a scrollable frame for cards if there are many
+        cards_scroll = ctk.CTkScrollableFrame(
+            self.results_frame,
+            fg_color="transparent",
+            height=400
+        )
+        cards_scroll.pack(fill="both", expand=True)
+
+        # 4. Generate Persona Cards
+        for persona in self.personas_list:
+            p_id = persona.get("id")
+            p_title = persona.get("title", "Persona")
+            p_emoji = persona.get("emoji", "👤")
+            p_desc = persona.get("description", "")
+            p_patterns = persona.get("behavior_patterns", [])
+            p_count = counts.get(p_id, 0)
+
+            # Card Container
+            card = ctk.CTkFrame(
+                cards_scroll,
+                fg_color=COLOR_SURFACE,
+                border_width=1,
+                border_color=COLOR_OUTLINE_LIGHT,
+                corner_radius=8
+            )
+            card.pack(fill="x", pady=6, padx=2)
+
+            # Card Header (Title & User Count)
+            card_header = ctk.CTkFrame(card, fg_color="transparent")
+            card_header.pack(fill="x", padx=15, pady=(12, 6))
+
+            ctk.CTkLabel(
+                card_header,
+                text=f"{p_emoji} {p_title}",
+                font=FONT_HEADER_SMALL,
+                text_color=COLOR_PRIMARY
+            ).pack(side="left")
+
+            ctk.CTkLabel(
+                card_header,
+                text=f"{p_count} users assigned",
+                font=FONT_BODY_BOLD,
+                text_color=COLOR_TEXT_SUB
+            ).pack(side="right")
+
+            # Card Description
+            ctk.CTkLabel(
+                card,
+                text=p_desc,
+                font=FONT_BODY_MEDIUM,
+                text_color=COLOR_TEXT_MAIN,
+                justify="left",
+                anchor="w",
+                wraplength=700
+            ).pack(fill="x", padx=15, pady=(0, 10))
+
+            # Behavior Patterns Bullet points
+            if p_patterns:
+                patterns_frame = ctk.CTkFrame(card, fg_color="transparent")
+                patterns_frame.pack(fill="x", padx=15, pady=(0, 12))
+                
+                for pattern in p_patterns:
+                    ctk.CTkLabel(
+                        patterns_frame,
+                        text=f"• {pattern}",
+                        font=FONT_BODY_MEDIUM,
+                        text_color=COLOR_TEXT_MAIN,
+                        justify="left",
+                        anchor="w",
+                        wraplength=680
+                    ).pack(fill="x", pady=1)
+
+    def export_assignments_csv(self):
+        if not self.output_csv:
+            return
+            
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Export User Persona Assignments",
+            initialfile="M365_User_Persona_Assignments.csv",
+            parent=self
+        )
+        if not file_path:
+            return
+            
+        try:
+            df = pd.read_csv(self.output_csv)
+            export_cols = ['User Principal Name', 'App_Access_Profile', 'Assigned_Persona_ID', 'Assigned_Persona_Title']
+            df_export = df[[c for c in export_cols if c in df.columns]]
+            df_export.to_csv(file_path, index=False, encoding="utf-8-sig")
+            self.export_status_lbl.configure(
+                text="✔ Exported successfully!",
+                text_color=COLOR_SUCCESS
+            )
+        except Exception as e:
+            self.export_status_lbl.configure(
+                text=f"✖ Export failed: {e}",
+                text_color=COLOR_ERROR
+            )
 
     def on_generate_clicked(self):
         tenant = self.controller.stored_tenant
@@ -415,7 +609,7 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
 
         # Start loading state
         self.set_loading_state(True)
-        self.update_status("Starting pipeline...")
+        self.update_status("Starting pipeline")
 
         # Run pipeline in a background thread
         def run_thread():
@@ -425,22 +619,23 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
                 output_csv = os.path.join(output_dir, "user_activity_data.csv")
                 
                 # Execute pipeline
-                run_user_persona_pipeline(
+                res = run_user_persona_pipeline(
                     tenant_id=tenant,
                     client_id=client,
                     client_secret=secret,
+                    gemini_api_key=api_key,
                     output_csv_path=output_csv,
                     status_callback=lambda step: self.update_status(step)
                 )
                 
                 # Success
-                self.controller.after(0, lambda: self.on_pipeline_success(output_csv))
+                self.controller.after(0, lambda: self.on_pipeline_success(res))
             except Exception as e:
                 logger.exception("Error generating user persona dataset")
                 self.controller.after(0, lambda err=str(e): self.on_pipeline_error(err))
 
-        import threading
         threading.Thread(target=run_thread, daemon=True).start()
+
 
 
 
@@ -994,13 +1189,13 @@ class ReportsPage(ctk.CTkFrame):
             self.nav_title.configure(text="Migration Planner")
             self.migration_planner_view.pack(fill="both", expand=True)
             gc.collect()
-        elif label == "User Persona Analysis":
+        elif "User Persona Analysis" in label:
             # Show Persona Analysis, Hide Telemetry & Migration Planner
             self.m365_telemetry_view.pack_forget()
             self.migration_planner_view.pack_forget()
             self.fetch_btn.pack_forget()
             self.pdf_btn.pack_forget()
-            self.nav_title.configure(text="User Persona Analysis")
+            self.nav_title.configure(text="User Persona Analysis (Experimental)")
             self.user_persona_view.pack(fill="both", expand=True)
             gc.collect()
 
@@ -1182,7 +1377,7 @@ class SidebarFrame(ctk.CTkFrame):
         self.menu_data = [
             ("Usage and adoption", "📊", True),
             ("Migration planner", "🚀", False),
-            ("User Persona Analysis", "👥", False)
+            ("User Persona Analysis (Experimental)", "👥", False)
         ]
 
         self.render_navigation_menu()
@@ -1243,7 +1438,7 @@ class SidebarFrame(ctk.CTkFrame):
         self.menu_data = [
             ("Usage and adoption", "📊", True),
             ("Migration planner", "🚀", False),
-            ("User Persona Analysis", "👥", False)
+            ("User Persona Analysis (Experimental)", "👥", False)
         ]
         self.render_navigation_menu()
 

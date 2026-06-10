@@ -15,9 +15,12 @@
 """Modular User Persona Analysis dataset extraction and processing pipelines."""
 
 import os
+import json
 import sqlite3
 import logging
 import pandas as pd
+from google import genai
+from google.genai import types
 from core.graph.client import GraphClient
 from core.graph.reports import ReportsService
 
@@ -25,17 +28,22 @@ from core.graph.reports import ReportsService
 logger = logging.getLogger("M365TelemetryAsyncLogger.UserPersonaAnalysis")
 
 
-def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str, output_csv_path: str, reports_dir: str = None, status_callback=None) -> str:
-    """Runs the full pipeline to download M365 reports and generate the user activity dataset.
+def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str, gemini_api_key: str, output_csv_path: str, reports_dir: str = None, status_callback=None) -> dict:
+    """Runs the full pipeline to download M365 reports, generate user activity dataset,
+    and query Gemini to build and classify user personas.
     
-    Returns the path to the generated CSV dataset.
+    Returns a dictionary containing the personas definition and user assignments.
     """
     if not reports_dir:
         reports_dir = os.path.join("telemetry", "reports", f"{tenant_id}_{client_id}")
     
     os.makedirs(reports_dir, exist_ok=True)
     
-    # 1. Authenticate and initialize Graph clients
+    # 1. Download reports & aggregate data
+    if status_callback:
+        status_callback("Fetching Reports")
+        
+    # Authenticate and initialize Graph clients
     logger.info("Initializing Graph connection for User Persona Analysis...")
     client = GraphClient(
         tenant_id=tenant_id,
@@ -48,7 +56,6 @@ def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str
     client.authenticate()
     reports_service = ReportsService(client)
     
-    # 2. Define reports to download
     reports = [
         ("https://graph.microsoft.com/v1.0/reports/getOffice365ActiveUserDetail(period='D180')", "Office365ActiveUserDetail(180d).csv"),
         ("https://graph.microsoft.com/v1.0/reports/getEmailActivityUserDetail(period='D180')", "EmailActivityUserDetail(180d).csv"),
@@ -57,21 +64,41 @@ def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str
         ("https://graph.microsoft.com/v1.0/reports/getSharePointActivityUserDetail(period='D180')", "SharePointActivityUserDetail(180d).csv")
     ]
     
-    if status_callback:
-        status_callback("Fetching Reports")
-        
     logger.info("Downloading reports in batch concurrently...")
     reports_service.download_reports_batch(reports, reports_dir)
-    logger.info("Reports download complete. Starting dataset generation...")
     
     if status_callback:
         status_callback("Aggregating Data")
         
-    # 3. Process and merge reports to create the dataset
+    logger.info("Reports download complete. Starting dataset generation...")
     generate_user_activity_dataset(reports_dir, output_csv_path)
     
-    logger.info(f"User Persona Analysis dataset successfully generated at: {output_csv_path}")
-    return output_csv_path
+    # 2. Call Gemini to define personas
+    if status_callback:
+        status_callback("Generating insights using Gemini")
+        
+    logger.info("Calling Gemini API to define personas...")
+    personas_response = generate_personas_from_dataset(gemini_api_key, output_csv_path)
+    
+    # 3. Classify users in Python
+    logger.info("Classifying users to generated personas in Python...")
+    df_users = pd.read_csv(output_csv_path)
+    personas_list = personas_response.get("personas", [])
+    
+    assigned_persona_ids = classify_users_to_personas(df_users, personas_list)
+    df_users['Assigned_Persona_ID'] = assigned_persona_ids
+    
+    # Map persona IDs to Titles
+    persona_titles = {p["id"]: p["title"] for p in personas_list}
+    df_users['Assigned_Persona_Title'] = df_users['Assigned_Persona_ID'].map(lambda p_id: persona_titles.get(p_id, "Unknown"))
+    
+    # Save the updated dataset containing persona assignments
+    df_users.to_csv(output_csv_path, index=False)
+    
+    return {
+        "personas": personas_list,
+        "dataset_path": output_csv_path
+    }
 
 
 def generate_user_activity_dataset(reports_dir: str, output_csv_path: str) -> None:
@@ -231,3 +258,177 @@ def generate_user_activity_dataset(reports_dir: str, output_csv_path: str) -> No
                 logger.info("Temporary database removed successfully.")
             except Exception as e:
                 logger.warning(f"Could not remove temporary database file: {e}")
+
+
+def generate_personas_from_dataset(api_key: str, dataset_path: str) -> dict:
+    """Invokes Gemini SDK to analyze M365 telemetry data and identify user personas."""
+    if not os.path.exists(dataset_path):
+        raise FileNotFoundError(f"Dataset not found at: {dataset_path}")
+        
+    # Read the entire CSV data
+    with open(dataset_path, "r", encoding="utf-8") as f:
+        csv_data = f.read()
+    
+    prompt = f"""You are an expert M365 telemetry and data analyst.
+Below is the complete M365 user activity dataset (180 days) for all users in a tenant.
+
+CSV Dataset:
+{csv_data}
+
+Based on this M365 dataset, analyze the behavioral patterns and define 3 to 5 distinct user personas that represent the typical usage behavior of the users in this tenant.
+
+It is CRITICAL to include an 'Inactive or Idle Accounts' persona (with all metrics set to 'low') if there are accounts in the dataset with zero or near-zero activity across all telemetry counts. These represent inactive, unlicensed, or archive accounts.
+
+For each persona, output:
+1. A unique ID (e.g., "email_collaborator").
+2. A title/headline (e.g., "Email Collaborator").
+3. A representative emoji/icon (e.g., "📧").
+4. A brief description of this persona.
+5. 2 to 4 behavior patterns (bullet points explaining their characteristics).
+6. A metric profile specifying the relative usage of each behavior category as "high", "medium", or "low".
+
+Output your response strictly as a JSON object matching this schema:
+{{
+  "personas": [
+    {{
+      "id": "email_collaborator",
+      "title": "Email Collaborator",
+      "emoji": "📧",
+      "description": "Users who heavily rely on Email communications...",
+      "behavior_patterns": [
+        "High volume of email sends",
+        "Active calendar organizer"
+      ],
+      "metrics": {{
+        "email_sends": "high",
+        "meetings_organized": "medium",
+        "teams_chats": "low",
+        "teams_meetings": "low",
+        "onedrive_files": "low",
+        "sharepoint_edits": "low",
+        "sharepoint_shared_internal": "low",
+        "sharepoint_shared_external": "low",
+        "onedrive_storage": "low"
+      }}
+    }}
+  ]
+}}
+
+Do not include any other markdown formatting, code block fences, or text outside the JSON."""
+
+    # Initialize the genai Client directly with the API key
+    client = genai.Client(api_key=api_key)
+    
+    models = ["gemini-3.5-flash", "gemini-3.1-flash"]
+    response = None
+    last_err = None
+    
+    for model_name in models:
+        logger.info(f"Attempting Gemini generation with SDK model: {model_name}...")
+        try:
+            res = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            response = res
+            break
+        except Exception as e:
+            logger.warning(f"Failed calling Gemini model {model_name} via SDK: {e}")
+            last_err = e
+            
+    if response is None:
+        if last_err:
+            raise last_err
+        raise ValueError("Failed to generate personas. No Gemini SDK models responded successfully.")
+        
+    try:
+        candidate_text = response.text
+        return json.loads(candidate_text)
+    except (KeyError, IndexError, ValueError) as e:
+        logger.error(f"Failed to parse Gemini response: {e}. Raw response: {response}")
+        raise ValueError(f"Failed to parse Gemini response: {e}")
+
+
+def classify_users_to_personas(df_users: pd.DataFrame, personas_data: list) -> list:
+    """Clusts and maps M365 users to defined personas in Python using distance calculations."""
+    cols_to_normalize = [
+        'Email_Sends', 'Meetings_Organized_Via_Email', 
+        'Teams_Private_Chats', 'Teams_Meetings_Attended', 
+        'OneDrive_Active_Files', 'SharePoint_Files_Edited', 
+        'SharePoint_Shared_Internally', 'SharePoint_Shared_Externally', 
+        'OneDrive_Storage_GB'
+    ]
+    
+    # Calculate ranks (0 to 1) for each column in the dataframe
+    ranks_df = pd.DataFrame(index=df_users.index)
+    for col in cols_to_normalize:
+        if col in df_users.columns:
+            if df_users[col].max() == df_users[col].min():
+                # If all values are 0, rank is 0.0, else 0.5
+                ranks_df[col] = 0.0 if df_users[col].max() == 0 else 0.5
+            else:
+                # Calculate percentile rank
+                ranks_df[col] = df_users[col].rank(pct=True)
+                # Force absolute 0 values to rank 0.0 so they don't get inflated due to ties at 0
+                ranks_df.loc[df_users[col] == 0, col] = 0.0
+        else:
+            ranks_df[col] = 0.0
+
+    # Map profile levels to numeric values
+    level_map = {
+        "high": 0.8,
+        "medium": 0.4,
+        "low": 0.1
+    }
+
+    # Define normalized mapping of persona metrics to df columns
+    norm_metric_keys = {
+        "emailsends": "Email_Sends",
+        "meetingsorganized": "Meetings_Organized_Via_Email",
+        "teamschats": "Teams_Private_Chats",
+        "teamsmeetings": "Teams_Meetings_Attended",
+        "onedrive_files": "OneDrive_Active_Files",  # backup keys
+        "onedrivefiles": "OneDrive_Active_Files",
+        "sharepointedits": "SharePoint_Files_Edited",
+        "sharepointsharedinternal": "SharePoint_Shared_Internally",
+        "sharepointsharedexternal": "SharePoint_Shared_Externally",
+        "onedrivestorage": "OneDrive_Storage_GB"
+    }
+
+    user_personas = []
+    
+    for idx, row in df_users.iterrows():
+        best_persona_id = None
+        min_distance = float('inf')
+        
+        rank_row = ranks_df.loc[idx]
+        
+        for persona in personas_data:
+            p_metrics = persona.get("metrics", {})
+            
+            # Normalize keys returned by LLM to lowercase without spaces/underscores/hyphens
+            norm_p_metrics = {}
+            for k, v in p_metrics.items():
+                norm_k = str(k).lower().replace("_", "").replace("-", "").replace(" ", "")
+                norm_p_metrics[norm_k] = v
+                
+            distance = 0.0
+            
+            for p_key, col_name in norm_metric_keys.items():
+                # Get the value from the normalized metrics dict
+                p_val_str = str(norm_p_metrics.get(p_key, "low")).lower()
+                p_val = level_map.get(p_val_str, 0.1)
+                user_val = rank_row[col_name]
+                distance += (user_val - p_val) ** 2
+                
+            if distance < min_distance:
+                min_distance = distance
+                best_persona_id = persona["id"]
+                
+        user_personas.append(best_persona_id)
+        
+    return user_personas
+
