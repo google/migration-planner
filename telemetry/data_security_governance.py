@@ -226,6 +226,7 @@ def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
             pass
 
 
+
 class DataSecurityGovernanceFrame(ctk.CTkFrame):
     """Self-contained customtkinter component wrapping Data Security & Governance UI."""
     
@@ -526,12 +527,14 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.auth_header_frame.pack_forget()
         self.auth_grid.pack_forget()
         
+
         for w in self.labels_grid.winfo_children():
             w.destroy()
         for w in self.retention_grid.winfo_children():
             w.destroy()
         for w in self.auth_grid.winfo_children():
             w.destroy()
+
             
         self.current_page = 0
         self.last_labels_data = None
@@ -604,6 +607,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.auth_header_frame.pack(fill="x", pady=(20, 10))
         self.auth_grid.pack(fill="x", expand=True, pady=(0, 15))
         self._set_auth_loading("Retrieving Conditional Access authentication mechanics...")
+
         
         # Pack eDiscovery Cases Section (static, show immediately)
         self.ediscovery_header_frame.pack(fill="x", pady=(20, 10))
@@ -633,6 +637,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             args=(tenant, client_id, client_secret),
             daemon=True
         ).start()
+
 
     def _execute_labels_worker(self, tenant: str, client_id: str, client_secret: str):
         usage_logger.info("Executing thread: _execute_labels_worker")
@@ -666,6 +671,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         finally:
             if self.semaphore:
                 self.semaphore.release()
+
 
     def _set_auth_loading(self, msg="Loading..."):
         for w in self.auth_grid.winfo_children():
@@ -837,6 +843,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                     c = ctk.CTkFrame(self.auth_grid, fg_color=bg_style, corner_radius=0)
                     c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=180).pack(padx=10, pady=12, anchor="nw")
+
 
 
 
