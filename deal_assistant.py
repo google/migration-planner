@@ -260,8 +260,107 @@ class MigrationPlannerView(ctk.CTkFrame):
             self.active_tool_frame = None
         self.selector_frame.pack(fill="both", expand=True)
 
+
+class UserPersonaAnalysisView(ctk.CTkFrame):
+    """Container for the User Persona Analysis screen."""
+
+    def __init__(self, master, controller, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.controller = controller
+
+        # Main container
+        self.container = ctk.CTkFrame(self, fg_color="transparent")
+        self.container.pack(fill="both", expand=True)
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        import tkinter as tk
+
+        # API Key Form Card
+        self.form_card = ctk.CTkFrame(
+            self.container,
+            fg_color=COLOR_SURFACE,
+            corner_radius=12,
+            border_width=1,
+            border_color=COLOR_OUTLINE_LIGHT
+        )
+        self.form_card.pack(fill="x", side="top", pady=(5, 20))
+
+        self.form_container = ctk.CTkFrame(self.form_card, fg_color="transparent")
+        self.form_container.pack(fill="x", expand=True, padx=40, pady=40)
+
+        # API Key Input Label
+        self.api_key_lbl = ctk.CTkLabel(
+            self.form_container,
+            text="Gemini API Key",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.api_key_lbl.pack(anchor="w", pady=(10, 5))
+
+        # API Key Input Wrapper Frame (No hardcoded width for responsiveness)
+        self.api_key_border = tk.Frame(
+            self.form_container, height=42,
+            highlightbackground=COLOR_OUTLINE, highlightcolor=COLOR_PRIMARY, highlightthickness=1,
+            bd=0, background=COLOR_SURFACE
+        )
+        self.api_key_border.pack(fill="x", expand=True, pady=(0, 25))
+        self.api_key_border.pack_propagate(False)
+
+        self.api_key_entry = ctk.CTkEntry(
+            self.api_key_border, border_width=0, fg_color="transparent", text_color=COLOR_TEXT_MAIN,
+            placeholder_text="Enter Gemini API Key", show="*"
+        )
+        self.api_key_entry.pack(fill="both", expand=True, padx=10, pady=2)
+
+        # Generate Button
+        self.generate_btn = ctk.CTkButton(
+            self.form_container,
+            text="Generate User Personas",
+            command=self.on_generate_clicked,
+            width=250,
+            height=40,
+            corner_radius=20,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            font=FONT_BODY_BOLD
+        )
+        self.generate_btn.pack(pady=(0, 30))
+
+        # Disclaimer Box (No hardcoded width for responsiveness, center-aligned)
+        self.disclaimer_card = ctk.CTkFrame(
+            self.form_container,
+            fg_color="#FFF9E6",
+            corner_radius=8,
+            border_width=1,
+            border_color="#FFE0B2"
+        )
+        self.disclaimer_card.pack(fill="x", expand=True, pady=10)
+
+        self.disclaimer_lbl = ctk.CTkLabel(
+            self.disclaimer_card,
+            text="⚠️ Disclaimer: This tool uses Generative AI (GenAI) to generate user personas and may not be fully accurate.\nIt should be used for a rough estimate and not as hard evidence.",
+            font=FONT_BODY_MEDIUM,
+            text_color="#B78103",
+            justify="center",
+            anchor="center"
+        )
+        self.disclaimer_lbl.pack(fill="both", expand=True, padx=20, pady=15)
+
+    def on_generate_clicked(self):
+        from tkinter import messagebox
+        api_key = self.api_key_entry.get().strip()
+        if not api_key:
+            messagebox.showwarning("Missing API Key", "Please enter a valid Gemini API Key.", parent=self)
+        else:
+            messagebox.showinfo("User Persona Analysis", "API Key received. Backend generation is not implemented yet.", parent=self)
+
+
+
 # Orchestrator logging
 logger = logging.getLogger("M365TelemetryAsyncLogger.TelemetryOrchestrator")
+
 
 
 class TelemetryApp(ctk.CTk):
@@ -779,26 +878,43 @@ class ReportsPage(ctk.CTkFrame):
             controller=self.controller
         )
 
+        # Initialize the user persona view (initially hidden)
+        self.user_persona_view = UserPersonaAnalysisView(
+            master=self.dashboard_container,
+            controller=self.controller
+        )
+
         # Adapt layout recursively to hide original inputs from view
         self.adapt_embedded_view()
 
     def on_sidebar_selection_changed(self, label):
         import gc
         if label == "Usage and adoption":
-            # Show Telemetry, Hide Migration Planner
+            # Show Telemetry, Hide Migration Planner & Persona Analysis
             self.migration_planner_view.pack_forget()
+            self.user_persona_view.pack_forget()
             self.nav_title.configure(text="Usage Report")
             self.fetch_btn.pack(side="right", padx=20, pady=17)
             self.pdf_btn.pack(side="right", padx=(0, 20), pady=17)
             self.m365_telemetry_view.pack(fill="both", expand=True)
             gc.collect()
         elif label == "Migration planner":
-            # Show Migration Planner, Hide Telemetry
+            # Show Migration Planner, Hide Telemetry & Persona Analysis
             self.m365_telemetry_view.pack_forget()
+            self.user_persona_view.pack_forget()
             self.fetch_btn.pack_forget()
             self.pdf_btn.pack_forget()
             self.nav_title.configure(text="Migration Planner")
             self.migration_planner_view.pack(fill="both", expand=True)
+            gc.collect()
+        elif label == "User Persona Analysis":
+            # Show Persona Analysis, Hide Telemetry & Migration Planner
+            self.m365_telemetry_view.pack_forget()
+            self.migration_planner_view.pack_forget()
+            self.fetch_btn.pack_forget()
+            self.pdf_btn.pack_forget()
+            self.nav_title.configure(text="User Persona Analysis")
+            self.user_persona_view.pack(fill="both", expand=True)
             gc.collect()
 
     def adapt_embedded_view(self):
@@ -978,7 +1094,8 @@ class SidebarFrame(ctk.CTkFrame):
         self.menu_buttons = []
         self.menu_data = [
             ("Usage and adoption", "📊", True),
-            ("Migration planner", "🚀", False)
+            ("Migration planner", "🚀", False),
+            ("User Persona Analysis", "👥", False)
         ]
 
         self.render_navigation_menu()
@@ -1038,7 +1155,8 @@ class SidebarFrame(ctk.CTkFrame):
     def reset_selection(self):
         self.menu_data = [
             ("Usage and adoption", "📊", True),
-            ("Migration planner", "🚀", False)
+            ("Migration planner", "🚀", False),
+            ("User Persona Analysis", "👥", False)
         ]
         self.render_navigation_menu()
 
