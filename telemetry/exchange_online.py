@@ -45,7 +45,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         # Uber Title Heading
         ctk.CTkLabel(
             self.inner_pad,
-            text="Emails & Calendar",
+            text="Email, Calendar and Contacts",
             font=FONT_HEADER_SMALL,
             text_color=COLOR_TEXT_MAIN
         ).pack(anchor="w", pady=(0, 5))

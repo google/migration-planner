@@ -144,14 +144,11 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # Missing UI Header added here to match Exchange Online aesthetics
-        ctk.CTkLabel(self.inner_pad, text="Email Client Support & Legacy PST Data", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
-
-        self.sub_title_1 = ctk.CTkLabel(self.inner_pad, text="Email Client Classification", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
+        self.sub_title_1 = ctk.CTkLabel(self.inner_pad, text="Email Client Classification", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
-        self.sub_title_2 = ctk.CTkLabel(self.inner_pad, text="PST Files", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
+        self.sub_title_2 = ctk.CTkLabel(self.inner_pad, text="PST Files", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
         self.pst_grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
         self.reset_view()
