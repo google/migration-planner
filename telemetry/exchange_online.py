@@ -20,6 +20,7 @@ from telemetry.mailbox_usage import MailboxUsageFrame
 from telemetry.calendar_telemetry import CalendarTelemetryFrame
 from telemetry.exchange_apps import ExchangeAppsFrame
 from telemetry.email_client_support import EmailClientSupportFrame
+from telemetry.exchange_connectors_ui import ExchangeConnectorsFrame
 
 class ExchangeOnlineFrame(ctk.CTkFrame):
     """Uber section container hosting Mailbox, Calendar, Apps, and Email Client telemetry frames vertically stacked."""
@@ -44,7 +45,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         # Uber Title Heading
         ctk.CTkLabel(
             self.inner_pad,
-            text="Emails & Calendar",
+            text="Email, Calendar and Contacts",
             font=FONT_HEADER_SMALL,
             text_color=COLOR_TEXT_MAIN
         ).pack(anchor="w", pady=(0, 5))
@@ -82,6 +83,17 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.apps_view.configure(fg_color="transparent", border_width=0)
         self.apps_view.pack(fill="x", expand=True, pady=(0, 5))
 
+        # Exchange Connectors Sub-frame
+        self.connectors_view = ExchangeConnectorsFrame(
+            master=self.inner_pad,
+            log_callback=self.log_msg,
+            credentials_callback=self.get_credentials,
+            status_change_callback=self._check_overall_status,
+            concurrency_semaphore=self.semaphore
+        )
+        self.connectors_view.configure(fg_color="transparent", border_width=0)
+        self.connectors_view.pack(fill="x", expand=True, pady=(0, 5))
+
         # Email Client Support Sub-frame (combining supported email clients and PST files)
         self.email_clients_view = EmailClientSupportFrame(
             master=self.inner_pad,
@@ -101,6 +113,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.mailbox_view.reset_view()
         self.calendar_view.reset_view()
         self.apps_view.reset_view()
+        self.connectors_view.reset_view()
         self.email_clients_view.reset_view()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
@@ -113,6 +126,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.mailbox_view.trigger_fetch(tenant, client_id, client_secret)
         self.calendar_view.trigger_fetch(tenant, client_id, client_secret)
         self.apps_view.trigger_fetch(tenant, client_id, client_secret)
+        self.connectors_view.trigger_fetch(tenant, client_id, client_secret)
         self.email_clients_view.trigger_fetch(tenant, client_id, client_secret)
 
     def _check_overall_status(self):
@@ -121,6 +135,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
             self.mailbox_view.status,
             self.calendar_view.status,
             self.apps_view.status,
+            self.connectors_view.status,
             self.email_clients_view.status
         ]
         if "loading" in sub_statuses:
