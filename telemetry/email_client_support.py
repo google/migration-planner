@@ -172,13 +172,31 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         for w in self.pst_grid_frame.winfo_children():
             w.destroy()
 
-    def _set_state_loading(self, msg="Loading..."):
-        for w in self.state_frame.winfo_children():
+    def _set_state_loading(self):
+        self.state_frame.pack_forget()
+        
+        self.sub_title_1.pack(anchor="w", pady=(5, 10))
+        self.grid_frame.pack(fill="x", expand=True)
+        for w in self.grid_frame.winfo_children():
             w.destroy()
-        ctk.CTkLabel(self.state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
-        self.state_frame.pack(fill="x", expand=True)
+        f1 = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+        ctk.CTkLabel(f1, text="⏳ Analyzing Email Clients...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        f1.pack(fill="x", expand=True)
+
+        self.sub_title_2.pack(anchor="w", pady=(20, 10))
+        self.pst_grid_frame.pack(fill="x", expand=True)
+        for w in self.pst_grid_frame.winfo_children():
+            w.destroy()
+        f2 = ctk.CTkFrame(self.pst_grid_frame, fg_color="transparent")
+        ctk.CTkLabel(f2, text="⏳ Discovering PST Files...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        f2.pack(fill="x", expand=True)
 
     def _set_state_error(self, error_msg):
+        self.sub_title_1.pack_forget()
+        self.grid_frame.pack_forget()
+        self.sub_title_2.pack_forget()
+        self.pst_grid_frame.pack_forget()
+        
         for w in self.state_frame.winfo_children():
             w.destroy()
         display_msg = error_msg
@@ -193,9 +211,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.on_status_change()
 
         self.pack(fill="x", expand=True, pady=10)
-        self.grid_frame.pack_forget()
-        self.pst_grid_frame.pack_forget()
-        self._set_state_loading("Analyzing Email Clients & Discovering PST Files...")
+        self._set_state_loading()
 
         threading.Thread(
             target=self._execute_worker,
