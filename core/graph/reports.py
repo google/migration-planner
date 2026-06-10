@@ -166,7 +166,7 @@ class ReportsService:
         self.download_report("https://graph.microsoft.com/v1.0/reports/getEmailAppUsageUserDetail(period='D180')", "EmailAppUsageUserDetail(180d).csv", output_dir)
 
     def search_cloud_pst_files(self) -> dict:
-        """Queries Microsoft Graph Search API to locate cloud-stored PST archive files across all active regions."""
+        """Queries Microsoft Graph Search API to locate cloud-stored PST archive files across all active regions in a paginated fashion, up to a total of 2000 files."""
         url = "https://graph.microsoft.com/v1.0/search/query"
         token_slot = self.client.get_active_token()
         session = self.client.get_session()
@@ -179,30 +179,99 @@ class ReportsService:
 
         total_hits = []
         regions = ["NAM", "EUR", "APC"]
+        page_size = 500
+        max_total_limit = 2000
         
         try:
             for region in regions:
-                payload = {
-                    "requests": [
-                        {
-                            "entityTypes": ["driveItem"],
-                            "query": {"queryString": "fileextension:pst"},
-                            "from": 0,
-                            "size": 50,
-                            "region": region
-                        }
-                    ]
-                }
-                logger.info(f"Executing Graph Search query for cloud PST archives in region: {region}...")
-                resp = session.post(url, json=payload, headers=headers)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if "value" in data:
-                        total_hits.extend(data["value"])
-                elif resp.status_code == 400 and "Only valid regions are" in resp.text:
-                    logger.info(f"Region {region} is not active for this tenant. Skipping.")
-                else:
-                    raise ConnectionError(f"Graph Search failed for region {region} (HTTP {resp.status_code}): {resp.text}")
+                # Calculate how many hits we have already fetched in total
+                current_fetched = 0
+                for r_resp in total_hits:
+                    for hc in r_resp.get("hitsContainers", []):
+                        current_fetched += len(hc.get("hits", []))
+                
+                remaining_limit = max_total_limit - current_fetched
+                if remaining_limit <= 0:
+                    logger.info(f"Reached total limit of {max_total_limit} files. Stopping search across regions.")
+                    break
+                
+                offset = 0
+                has_more = True
+                region_response = None
+                region_hits_container = None
+                
+                while has_more:
+                    # Request only up to the remaining allowed limit
+                    current_page_size = min(page_size, remaining_limit)
+                    
+                    payload = {
+                        "requests": [
+                            {
+                                "entityTypes": ["driveItem"],
+                                "query": {"queryString": "fileextension:pst"},
+                                "from": offset,
+                                "size": current_page_size,
+                                "region": region
+                            }
+                        ]
+                    }
+                    logger.info(f"Executing Graph Search query for cloud PST archives in region: {region} (offset: {offset}, limit: {current_page_size})...")
+                    resp = session.post(url, json=payload, headers=headers)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        page_response_list = data.get("value", [])
+                        
+                        if not page_response_list:
+                            has_more = False
+                            continue
+                            
+                        page_response = page_response_list[0]
+                        page_containers = page_response.get("hitsContainers", [])
+                        
+                        if not page_containers:
+                            has_more = False
+                            continue
+                            
+                        container = page_containers[0]
+                        hits = container.get("hits", [])
+                        total_count = container.get("total", 0)
+                        more_results = container.get("moreResultsAvailable", False)
+                        
+                        if region_response is None:
+                            region_response = {
+                                "@odata.type": page_response.get("@odata.type"),
+                                "searchTerms": page_response.get("searchTerms", []),
+                                "hitsContainers": [
+                                    {
+                                        "@odata.type": container.get("@odata.type"),
+                                        "total": total_count,
+                                        "moreResultsAvailable": False,
+                                        "hits": []
+                                    }
+                                ]
+                            }
+                            region_hits_container = region_response["hitsContainers"][0]
+                        
+                        region_hits_container["hits"].extend(hits)
+                        
+                        region_fetched = len(region_hits_container["hits"])
+                        if region_fetched >= remaining_limit:
+                            logger.info(f"Reached remaining limit of {remaining_limit} files in region {region}. Stopping paginated fetch.")
+                            region_hits_container["hits"] = region_hits_container["hits"][:remaining_limit]
+                            has_more = False
+                        elif more_results and len(hits) > 0:
+                            offset += page_size
+                        else:
+                            has_more = False
+                            
+                    elif resp.status_code == 400 and "Only valid regions are" in resp.text:
+                        logger.info(f"Region {region} is not active for this tenant. Skipping.")
+                        has_more = False
+                    else:
+                        raise ConnectionError(f"Graph Search failed for region {region} (HTTP {resp.status_code}): {resp.text}")
+                
+                if region_response is not None:
+                    total_hits.append(region_response)
             
             return {"value": total_hits}
         finally:

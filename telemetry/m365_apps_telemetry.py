@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Uber container section wrapping Active Users Usage, Active Users Trend, and M365 App Usage frames under a single card."""
+"""Uber container section wrapping Active Users Usage, Active Users Trend, and M365 App Usage frames under a single M365 Apps card."""
 
 import customtkinter as ctk
 from telemetry.styles import *
 from telemetry.active_users_usage import ActiveUsersUsageFrame, ActiveUsersTrendFrame, M365AppUsageFrame
 
-class AppUsageTelemetryFrame(ctk.CTkFrame):
+class M365AppsTelemetryFrame(ctk.CTkFrame):
     """Uber section container hosting Active Users Usage, Trend, and M365 App Usage frames vertically stacked."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
@@ -41,7 +41,7 @@ class AppUsageTelemetryFrame(ctk.CTkFrame):
         # Uber Title Heading
         ctk.CTkLabel(
             self.inner_pad,
-            text="App Usage Summary",
+            text="M365 Apps",
             font=FONT_HEADER_SMALL,
             text_color=COLOR_TEXT_MAIN
         ).pack(anchor="w", pady=(0, 5))

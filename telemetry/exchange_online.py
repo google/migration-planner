@@ -12,16 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Uber container section wrapping Mailbox, Calendar, and Organization Apps telemetry frames under a single Exchange Online card."""
+"""Uber container section wrapping Mailbox, Calendar, Organization Apps, and Supported Email Clients/PSTs telemetry frames under a single Emails & Calendar card."""
 
 import customtkinter as ctk
 from telemetry.styles import *
 from telemetry.mailbox_usage import MailboxUsageFrame
 from telemetry.calendar_telemetry import CalendarTelemetryFrame
 from telemetry.exchange_apps import ExchangeAppsFrame
+from telemetry.email_client_support import EmailClientSupportFrame
 
 class ExchangeOnlineFrame(ctk.CTkFrame):
-    """Uber section container hosting Mailbox, Calendar, and Apps telemetry frames vertically stacked."""
+    """Uber section container hosting Mailbox, Calendar, Apps, and Email Client telemetry frames vertically stacked."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
@@ -34,7 +35,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.build_ui()
 
     def build_ui(self):
-        """Instantiates and stacks existing mailbox, calendar, and apps frames."""
+        """Instantiates and stacks existing mailbox, calendar, apps, and email client support frames."""
         self.pack(fill="x", expand=True, pady=10)
 
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
@@ -43,7 +44,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         # Uber Title Heading
         ctk.CTkLabel(
             self.inner_pad,
-            text="Exchange Online",
+            text="Emails & Calendar",
             font=FONT_HEADER_SMALL,
             text_color=COLOR_TEXT_MAIN
         ).pack(anchor="w", pady=(0, 5))
@@ -81,6 +82,17 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.apps_view.configure(fg_color="transparent", border_width=0)
         self.apps_view.pack(fill="x", expand=True, pady=(0, 5))
 
+        # Email Client Support Sub-frame (combining supported email clients and PST files)
+        self.email_clients_view = EmailClientSupportFrame(
+            master=self.inner_pad,
+            log_callback=self.log_msg,
+            credentials_callback=self.get_credentials,
+            status_change_callback=self._check_overall_status,
+            concurrency_semaphore=self.semaphore
+        )
+        self.email_clients_view.configure(fg_color="transparent", border_width=0)
+        self.email_clients_view.pack(fill="x", expand=True, pady=(0, 5))
+
         self.reset_view()
 
     def reset_view(self):
@@ -89,6 +101,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.mailbox_view.reset_view()
         self.calendar_view.reset_view()
         self.apps_view.reset_view()
+        self.email_clients_view.reset_view()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         """Displays container and delegates fetches to all sub-views."""
@@ -100,10 +113,16 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.mailbox_view.trigger_fetch(tenant, client_id, client_secret)
         self.calendar_view.trigger_fetch(tenant, client_id, client_secret)
         self.apps_view.trigger_fetch(tenant, client_id, client_secret)
+        self.email_clients_view.trigger_fetch(tenant, client_id, client_secret)
 
     def _check_overall_status(self):
         """Updates main container status based on sub-frame statuses."""
-        sub_statuses = [self.mailbox_view.status, self.calendar_view.status, self.apps_view.status]
+        sub_statuses = [
+            self.mailbox_view.status,
+            self.calendar_view.status,
+            self.apps_view.status,
+            self.email_clients_view.status
+        ]
         if "loading" in sub_statuses:
             self.status = "loading"
         elif "success" in sub_statuses:
@@ -111,3 +130,4 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         else:
             self.status = "error"
         self.on_status_change()
+

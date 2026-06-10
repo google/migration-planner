@@ -144,13 +144,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
 
-        ctk.CTkLabel(
-            self.inner_pad,
-            text="Email Environment",
-            font=FONT_HEADER_SMALL,
-            text_color=COLOR_TEXT_MAIN
-        ).pack(anchor="w", pady=(0, 15))
-
+        self.sub_title_1 = ctk.CTkLabel(self.inner_pad, text="Email Client Classification", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
 
@@ -161,10 +155,15 @@ class EmailClientSupportFrame(ctk.CTkFrame):
 
     def reset_view(self):
         self.pack_forget()
+        self.sub_title_1.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
         self.sub_title_2.pack_forget()
         self.pst_grid_frame.pack_forget()
+        if hasattr(self, "pst_disclaimer_lbl") and self.pst_disclaimer_lbl:
+            self.pst_disclaimer_lbl.pack_forget()
+            self.pst_disclaimer_lbl.destroy()
+            self.pst_disclaimer_lbl = None
         
         for w in self.state_frame.winfo_children():
             w.destroy()
@@ -224,6 +223,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
             w.destroy()
 
         # Render Supported Email Clients
+        self.sub_title_1.pack(anchor="w", pady=(5, 10))
         self.grid_frame.pack(fill="x", expand=True)
         self.grid_frame.grid_columnconfigure(0, weight=2)
         self.grid_frame.grid_columnconfigure(1, weight=5)
@@ -329,6 +329,17 @@ class EmailClientSupportFrame(ctk.CTkFrame):
             pp1 = ctk.CTkFrame(self.pst_grid_frame, fg_color=bg_p, corner_radius=0)
             pp1.grid(row=p_idx, column=1, sticky="nsew", padx=1, pady=1)
             ctk.CTkLabel(pp1, text=p_val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=10, anchor="nw")
+
+        # Show disclaimer if any cloud PST files are found
+        if not pst_err and cloud_count > 0:
+            self.pst_disclaimer_lbl = ctk.CTkLabel(
+                self.inner_pad, 
+                text="* Note: There may be more than 2,000 files in the tenant; this tool only checks up to 2,000 files.",
+                font=FONT_BODY_SMALL,
+                text_color=COLOR_TEXT_SUB,
+                justify="left"
+            )
+            self.pst_disclaimer_lbl.pack(anchor="w", pady=(10, 0))
 
         self.status = "success"
         self.on_status_change()
