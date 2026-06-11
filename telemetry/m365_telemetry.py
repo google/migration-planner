@@ -16,6 +16,7 @@
 
 import os
 import sys
+import time
 import queue
 import logging
 import threading
@@ -413,19 +414,189 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.power_automate_view
         ]
 
+    def _find_main_title_label(self, view):
+        """Recursively searches the widget tree to identify the exact header/title label of a leaf view."""
+        known_titles = {
+            "SubscribedSKUsFrame": "Subscribed SKUs",
+            "DirectoryFrame": "Directory Summary",
+            "ActiveUsersUsageFrame": "Active Users Usage",
+            "ActiveUsersTrendFrame": "Active Users Trend",
+            "M365AppUsageFrame": "M365 App Usage",
+            "MailboxUsageFrame": "Mailbox Usage Summary",
+            "CalendarTelemetryFrame": "Calendar & Room Resource Telemetry",
+            "ExchangeAppsFrame": "Exchange Integrated Apps",
+            "ExchangeConnectorsFrame": "Exchange Connectors (Inbound & Outbound Routing)",
+            "EmailClientSupportFrame": "Email Client Classification",
+            "SharePointUsageFrame": "SharePoint Online Sites & Files Summary",
+            "OneDriveUsageFrame": "OneDrive for Business Personal Accounts Summary",
+            "DataSecurityGovernanceFrame": "Data Security & Governance",
+            "PowerAutomateUsageFrame": "Power Automate (Workflows & Flows)"
+        }
+        
+        target_text = known_titles.get(view.__class__.__name__, "")
+        
+        def search(widget):
+            if isinstance(widget, ctk.CTkLabel):
+                try:
+                    text = widget.cget("text")
+                    if text == target_text or (target_text and target_text in text):
+                        return widget
+                except Exception:
+                    pass
+            if hasattr(widget, "winfo_children"):
+                for child in widget.winfo_children():
+                    res = search(child)
+                    if res:
+                        return res
+            return None
+            
+        lbl = search(view)
+        if lbl:
+            return lbl
+            
+        # Fallback: search for the first CTkLabel
+        def first_label(widget):
+            if isinstance(widget, ctk.CTkLabel):
+                return widget
+            if hasattr(widget, "winfo_children"):
+                for child in widget.winfo_children():
+                    res = first_label(child)
+                    if res:
+                        return res
+            return None
+        return first_label(view)
+
     def _wrap_view_for_cancellation(self, view):
-        """Wraps a leaf view's trigger, render/handle, reset and after methods dynamically to enforce thread safety, cancellation, and stale thread filtering."""
+        """Wraps a leaf view's trigger, render/handle, reset and after methods dynamically to enforce thread safety, cancellation, stale thread filtering, and precise execution time tracking."""
         view.current_request_id = 0
         view.is_cancelled = False
+        view.fetch_time_lbl = None
+        view.fetch_start_time = 0.0
         
         orig_trigger = view.trigger_fetch
         orig_reset = view.reset_view
         orig_after = view.after
         
+        # Wrap the semaphore if present to capture the exact start time after acquisition
+        if getattr(view, "semaphore", None):
+            orig_sem = view.semaphore
+            
+            class WrappedSemaphore:
+                def __init__(self, sem):
+                    self._sem = sem
+                def acquire(self, *args, **kwargs):
+                    res = self._sem.acquire(*args, **kwargs)
+                    cur_thread = threading.current_thread()
+                    sub_sec = getattr(cur_thread, "sub_section", None)
+                    if sub_sec:
+                        view.sub_section_start_times[sub_sec] = time.time()
+                    else:
+                        view.fetch_start_time = time.time()
+                    return res
+                def release(self, *args, **kwargs):
+                    return self._sem.release(*args, **kwargs)
+                def __getattr__(self, name):
+                    return getattr(self._sem, name)
+                    
+            view.semaphore = WrappedSemaphore(orig_sem)
+        
+        def display_fetch_time(elapsed):
+            # Destroy old label if exists
+            if hasattr(view, "fetch_time_lbl") and view.fetch_time_lbl:
+                try:
+                    view.fetch_time_lbl.destroy()
+                except Exception:
+                    pass
+                view.fetch_time_lbl = None
+            
+            # Create a new floating label next to the title
+            view.fetch_time_lbl = ctk.CTkLabel(
+                view,
+                text=f"⏱ {elapsed:.2f}s",
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                text_color=COLOR_PRIMARY
+            )
+            
+            # Place in the center of the header frame if available (for Subscribed SKUs Frame)
+            if hasattr(view, "lic_header") and view.lic_header:
+                view.fetch_time_lbl.place(
+                    in_=view.lic_header,
+                    relx=0.5,
+                    rely=0.5,
+                    anchor="center"
+                )
+            else:
+                # Otherwise, place at the exact horizontal center of the card container, aligned vertically with the title
+                view.fetch_time_lbl.place(relx=0.5, rely=0.0, anchor="center", y=32)
+
+        def display_sub_section_time(sub_sec, header_frame, elapsed):
+            # Destroy old label if exists
+            if hasattr(view, "sub_section_timer_labels") and sub_sec in view.sub_section_timer_labels:
+                lbl = view.sub_section_timer_labels[sub_sec]
+                if lbl:
+                    try:
+                        lbl.destroy()
+                    except Exception:
+                        pass
+                view.sub_section_timer_labels[sub_sec] = None
+            
+            # Create a new floating label
+            lbl = ctk.CTkLabel(
+                header_frame,
+                text=f"⏱ {elapsed:.2f}s",
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                text_color=COLOR_PRIMARY
+            )
+            
+            # Place in the exact center of the sub-section's header frame
+            # (completely safe: title/links on the left, export button on the right)
+            lbl.place(
+                in_=header_frame,
+                relx=0.5,
+                rely=0.5,
+                anchor="center"
+            )
+                
+            view.sub_section_timer_labels[sub_sec] = lbl
+
         # Determine which rendering method is present
         has_render = hasattr(view, "_render_success") and hasattr(view, "_render_error")
         has_handle = hasattr(view, "_handle_result")
+        is_security_gov = hasattr(view, "_handle_labels_result")
         
+        if is_security_gov:
+            view.sub_section_start_times = {}
+            view.sub_section_timer_labels = {}
+            
+            orig_labels_handle = view._handle_labels_result
+            orig_retention_handle = view._handle_retention_result
+            orig_auth_handle = view._handle_auth_result
+            
+            def new_labels_handle(*args, **kwargs):
+                if view.is_cancelled:
+                    return
+                elapsed = time.time() - view.sub_section_start_times.get("labels", time.time())
+                display_sub_section_time("labels", view.labels_header_frame, elapsed)
+                orig_labels_handle(*args, **kwargs)
+                
+            def new_retention_handle(*args, **kwargs):
+                if view.is_cancelled:
+                    return
+                elapsed = time.time() - view.sub_section_start_times.get("retention", time.time())
+                display_sub_section_time("retention", view.retention_header_frame, elapsed)
+                orig_retention_handle(*args, **kwargs)
+                
+            def new_auth_handle(*args, **kwargs):
+                if view.is_cancelled:
+                    return
+                elapsed = time.time() - view.sub_section_start_times.get("auth", time.time())
+                display_sub_section_time("auth", view.auth_header_frame, elapsed)
+                orig_auth_handle(*args, **kwargs)
+                
+            view._handle_labels_result = new_labels_handle
+            view._handle_retention_result = new_retention_handle
+            view._handle_auth_result = new_auth_handle
+            
         if has_render:
             orig_success = view._render_success
             orig_error = view._render_error
@@ -434,12 +605,16 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 if view.is_cancelled:
                     async_logger.info(f"Ignored _render_success for {view.__class__.__name__} because it was cancelled.")
                     return
+                elapsed = time.time() - getattr(view, "fetch_start_time", time.time())
+                display_fetch_time(elapsed)
                 orig_success(*args, **kwargs)
                 
             def new_error(*args, **kwargs):
                 if view.is_cancelled:
                     async_logger.info(f"Ignored _render_error for {view.__class__.__name__} because it was cancelled.")
                     return
+                elapsed = time.time() - getattr(view, "fetch_start_time", time.time())
+                display_fetch_time(elapsed)
                 orig_error(*args, **kwargs)
                 
             view._render_success = new_success
@@ -452,21 +627,57 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 if view.is_cancelled:
                     async_logger.info(f"Ignored _handle_result for {view.__class__.__name__} because it was cancelled.")
                     return
+                elapsed = time.time() - getattr(view, "fetch_start_time", time.time())
+                display_fetch_time(elapsed)
                 orig_handle(*args, **kwargs)
                 
             view._handle_result = new_handle
             
         def new_trigger(*args, **kwargs):
+            if hasattr(view, "fetch_time_lbl") and view.fetch_time_lbl:
+                try:
+                    view.fetch_time_lbl.destroy()
+                except Exception:
+                    pass
+                view.fetch_time_lbl = None
+                
+            if hasattr(view, "sub_section_timer_labels"):
+                for lbl in view.sub_section_timer_labels.values():
+                    if lbl:
+                        try:
+                            lbl.destroy()
+                        except Exception:
+                            pass
+                view.sub_section_timer_labels.clear()
+            
+            if is_security_gov:
+                view.sub_section_start_times.clear()
+                
+            # Only set fetch_start_time here if there is no semaphore (otherwise WrappedSemaphore handles it)
+            if not getattr(view, "semaphore", None):
+                view.fetch_start_time = time.time()
+                
             view.current_request_id += 1
             view.is_cancelled = False
             
-            # Temporarily tag spawned threads with the current request ID
+            # Temporarily tag spawned threads with the current request ID and sub-section
             orig_thread_init = threading.Thread.__init__
             req_id = view.current_request_id
             
             def new_thread_init(thread_self, *t_args, **t_kwargs):
                 orig_thread_init(thread_self, *t_args, **t_kwargs)
                 thread_self.request_id = req_id
+                
+                # Tag with sub-section name based on target method name
+                target = t_kwargs.get("target") or (t_args[0] if t_args else None)
+                if target:
+                    target_name = getattr(target, "__name__", "")
+                    if "labels" in target_name:
+                        thread_self.sub_section = "labels"
+                    elif "retention" in target_name:
+                        thread_self.sub_section = "retention"
+                    elif "auth" in target_name:
+                        thread_self.sub_section = "auth"
                 
             threading.Thread.__init__ = new_thread_init
             try:
@@ -476,6 +687,21 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             
         def new_reset(*args, **kwargs):
             view.is_cancelled = True
+            if hasattr(view, "fetch_time_lbl") and view.fetch_time_lbl:
+                try:
+                    view.fetch_time_lbl.destroy()
+                except Exception:
+                    pass
+                view.fetch_time_lbl = None
+                
+            if hasattr(view, "sub_section_timer_labels"):
+                for lbl in view.sub_section_timer_labels.values():
+                    if lbl:
+                        try:
+                            lbl.destroy()
+                        except Exception:
+                            pass
+                view.sub_section_timer_labels.clear()
             orig_reset(*args, **kwargs)
             
         def new_after(ms, callback, *args, **kwargs):

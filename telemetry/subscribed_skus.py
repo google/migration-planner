@@ -59,12 +59,12 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
         
-        lic_header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        lic_header.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(lic_header, text="Subscribed SKUs", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.lic_header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.lic_header.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.lic_header, text="Subscribed SKUs", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         
         self.lic_reference_link = ctk.CTkLabel(
-            lic_header,
+            self.lic_header,
             text="Service Plan Reference ↗",
             font=FONT_BODY_BOLD,
             text_color=COLOR_PRIMARY,
@@ -75,10 +75,10 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         self.lic_reference_link.bind("<Enter>", lambda e: self.lic_reference_link.configure(text_color=COLOR_PRIMARY_HOVER))
         self.lic_reference_link.bind("<Leave>", lambda e: self.lic_reference_link.configure(text_color=COLOR_PRIMARY))
 
-        ctk.CTkLabel(lic_header, text="* To view specific services offered, export the spreadsheet.", font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB).pack(side="left", padx=(10, 0))
+        ctk.CTkLabel(self.lic_header, text="* To view specific services offered, export the spreadsheet.", font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB).pack(side="left", padx=(10, 0))
 
         self.btn_export_lic = ctk.CTkButton(
-            lic_header, text="Export Spreadsheet", width=140, height=32, corner_radius=16,
+            self.lic_header, text="Export Spreadsheet", width=140, height=32, corner_radius=16,
             font=FONT_BODY_BOLD, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             command=self.export_licenses_spreadsheet, state="disabled"
