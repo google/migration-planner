@@ -320,6 +320,46 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
         )
         self.api_key_entry.pack(fill="both", expand=True, padx=10, pady=2)
 
+        # Strategy Selector Heading
+        self.strategy_lbl = ctk.CTkLabel(
+            self.form_container,
+            text="Analysis Strategy",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.strategy_lbl.pack(anchor="w", pady=(5, 5))
+
+        self.strategy_var = tk.StringVar(value="heuristic")
+
+        self.strategy_frame = ctk.CTkFrame(self.form_container, fg_color="transparent")
+        self.strategy_frame.pack(fill="x", pady=(0, 20))
+
+        # Radio option 1: AI Heuristic matching
+        self.radio_heuristic = ctk.CTkRadioButton(
+            self.strategy_frame,
+            text="Strategy 1: Direct LLM Classification",
+            variable=self.strategy_var,
+            value="heuristic",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER
+        )
+        self.radio_heuristic.pack(anchor="w", pady=5)
+
+        # Radio option 2: K-Means + LLM Summary
+        self.radio_kmeans = ctk.CTkRadioButton(
+            self.strategy_frame,
+            text="Strategy 2: K-Means pre-clustering & LLM summary",
+            variable=self.strategy_var,
+            value="kmeans",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER
+        )
+        self.radio_kmeans.pack(anchor="w", pady=5)
+
         # Generate Button
         self.generate_btn = ctk.CTkButton(
             self.form_container,
@@ -339,7 +379,9 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             self.form_container,
             text="",
             font=FONT_BODY_MEDIUM,
-            text_color=COLOR_PRIMARY
+            text_color=COLOR_PRIMARY,
+            justify="center",
+            wraplength=700
         )
 
         # Disclaimer Box always packed at bottom of self.container (No hardcoded width, center-aligned)
@@ -363,14 +405,17 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
         self.disclaimer_lbl.pack(fill="both", expand=True, padx=20, pady=15)
 
     def set_loading_state(self, is_loading):
+        state = "disabled" if is_loading else "normal"
+        self.generate_btn.configure(state=state)
+        self.api_key_entry.configure(state=state)
+        self.radio_heuristic.configure(state=state)
+        self.radio_kmeans.configure(state=state)
+        
         if is_loading:
-            self.generate_btn.configure(state="disabled")
             self.status_lbl.configure(text_color=COLOR_PRIMARY)
             self.status_lbl.pack(pady=10)
             if self.results_frame:
                 self.results_frame.pack_forget()
-        else:
-            self.generate_btn.configure(state="normal")
 
     def update_status(self, step):
         if step == "Fetching Reports":
@@ -411,6 +456,7 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
     def show_regenerate_form(self):
         if self.results_frame:
             self.results_frame.pack_forget()
+        self.status_lbl.pack_forget()
         self.form_card.pack(fill="x", side="top", pady=(5, 15))
 
     def render_persona_results(self):
@@ -537,7 +583,7 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
                 text_color=COLOR_TEXT_MAIN,
                 justify="left",
                 anchor="w",
-                wraplength=700
+                wraplength=1050
             ).pack(fill="x", padx=15, pady=(0, 10))
 
             # Behavior Patterns Bullet points
@@ -553,7 +599,7 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
                         text_color=COLOR_TEXT_MAIN,
                         justify="left",
                         anchor="w",
-                        wraplength=680
+                        wraplength=1030
                     ).pack(fill="x", pady=1)
 
     def export_assignments_csv(self):
@@ -625,6 +671,7 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
                     client_secret=secret,
                     gemini_api_key=api_key,
                     output_csv_path=output_csv,
+                    strategy=self.strategy_var.get(),
                     status_callback=lambda step: self.update_status(step)
                 )
                 

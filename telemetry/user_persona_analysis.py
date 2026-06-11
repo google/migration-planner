@@ -21,6 +21,9 @@ import logging
 import pandas as pd
 from google import genai
 from google.genai import types
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 from core.graph.client import GraphClient
 from core.graph.reports import ReportsService
 
@@ -28,9 +31,9 @@ from core.graph.reports import ReportsService
 logger = logging.getLogger("M365TelemetryAsyncLogger.UserPersonaAnalysis")
 
 
-def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str, gemini_api_key: str, output_csv_path: str, reports_dir: str = None, status_callback=None) -> dict:
+def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str, gemini_api_key: str, output_csv_path: str, strategy: str = "heuristic", reports_dir: str = None, status_callback=None) -> dict:
     """Runs the full pipeline to download M365 reports, generate user activity dataset,
-    and query Gemini to build and classify user personas.
+    and query Gemini to build and classify user personas using the selected strategy.
     
     Returns a dictionary containing the personas definition and user assignments.
     """
@@ -73,32 +76,67 @@ def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str
     logger.info("Reports download complete. Starting dataset generation...")
     generate_user_activity_dataset(reports_dir, output_csv_path)
     
-    # 2. Call Gemini to define personas
-    if status_callback:
-        status_callback("Generating insights using Gemini")
+    # 2. Execute Selected Strategy
+    if strategy == "kmeans":
+        if status_callback:
+            status_callback("Clustering the data")
+            
+        logger.info("Executing K-Means clustering strategy...")
+        df_users = pd.read_csv(output_csv_path)
         
-    logger.info("Calling Gemini API to define personas...")
-    personas_response = generate_personas_from_dataset(gemini_api_key, output_csv_path)
-    
-    # 3. Classify users in Python
-    logger.info("Classifying users to generated personas in Python...")
-    df_users = pd.read_csv(output_csv_path)
-    personas_list = personas_response.get("personas", [])
-    
-    assigned_persona_ids = classify_users_to_personas(df_users, personas_list)
-    df_users['Assigned_Persona_ID'] = assigned_persona_ids
-    
-    # Map persona IDs to Titles
-    persona_titles = {p["id"]: p["title"] for p in personas_list}
-    df_users['Assigned_Persona_Title'] = df_users['Assigned_Persona_ID'].map(lambda p_id: persona_titles.get(p_id, "Unknown"))
-    
-    # Save the updated dataset containing persona assignments
-    df_users.to_csv(output_csv_path, index=False)
-    
-    return {
-        "personas": personas_list,
-        "dataset_path": output_csv_path
-    }
+        # Run clustering
+        df_clustered, cluster_summary, optimal_k = perform_kmeans_clustering(df_users)
+        
+        if status_callback:
+            status_callback("Generating insights using Gemini")
+            
+        # Call Gemini to summarize centroids
+        personas_response = generate_kmeans_personas_gemini(gemini_api_key, cluster_summary, optimal_k)
+        
+        personas_list = personas_response.get("personas", [])
+        
+        # Format assigned personas ID as cluster_X
+        df_clustered['Assigned_Persona_ID'] = 'cluster_' + df_clustered['Cluster_ID'].astype(str)
+        
+        # Map persona IDs to Titles
+        persona_titles = {p["id"]: p["title"] for p in personas_list}
+        df_clustered['Assigned_Persona_Title'] = df_clustered['Assigned_Persona_ID'].map(lambda p_id: persona_titles.get(p_id, "Unknown"))
+        
+        # Save the updated clustered dataset
+        df_clustered.to_csv(output_csv_path, index=False)
+        
+        return {
+            "personas": personas_list,
+            "dataset_path": output_csv_path
+        }
+        
+    else:
+        # Heuristic Strategy
+        if status_callback:
+            status_callback("Generating insights using Gemini")
+            
+        logger.info("Calling Gemini API to define personas...")
+        personas_response = generate_personas_from_dataset(gemini_api_key, output_csv_path)
+        
+        # Classify users in Python
+        logger.info("Classifying users to generated personas in Python...")
+        df_users = pd.read_csv(output_csv_path)
+        personas_list = personas_response.get("personas", [])
+        
+        assigned_persona_ids = classify_users_to_personas(df_users, personas_list)
+        df_users['Assigned_Persona_ID'] = assigned_persona_ids
+        
+        # Map persona IDs to Titles
+        persona_titles = {p["id"]: p["title"] for p in personas_list}
+        df_users['Assigned_Persona_Title'] = df_users['Assigned_Persona_ID'].map(lambda p_id: persona_titles.get(p_id, "Unknown"))
+        
+        # Save the updated dataset containing persona assignments
+        df_users.to_csv(output_csv_path, index=False)
+        
+        return {
+            "personas": personas_list,
+            "dataset_path": output_csv_path
+        }
 
 
 def generate_user_activity_dataset(reports_dir: str, output_csv_path: str) -> None:
@@ -319,30 +357,14 @@ Do not include any other markdown formatting, code block fences, or text outside
     # Initialize the genai Client directly with the API key
     client = genai.Client(api_key=api_key)
     
-    models = ["gemini-3.5-flash", "gemini-3.1-flash"]
-    response = None
-    last_err = None
-    
-    for model_name in models:
-        logger.info(f"Attempting Gemini generation with SDK model: {model_name}...")
-        try:
-            res = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
-                )
-            )
-            response = res
-            break
-        except Exception as e:
-            logger.warning(f"Failed calling Gemini model {model_name} via SDK: {e}")
-            last_err = e
-            
-    if response is None:
-        if last_err:
-            raise last_err
-        raise ValueError("Failed to generate personas. No Gemini SDK models responded successfully.")
+    logger.info("Calling Gemini generation with SDK model: gemini-flash-latest...")
+    response = client.models.generate_content(
+        model="gemini-flash-latest",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json"
+        )
+    )
         
     try:
         candidate_text = response.text
@@ -431,4 +453,134 @@ def classify_users_to_personas(df_users: pd.DataFrame, personas_data: list) -> l
         user_personas.append(best_persona_id)
         
     return user_personas
+
+
+def perform_kmeans_clustering(df: pd.DataFrame, max_clusters: int = 6) -> tuple[pd.DataFrame, pd.DataFrame, int]:
+    """Runs K-Means clustering on employee usage telemetry.
+    Automatically determines the optimal number of clusters (2 to max_clusters) using Silhouette scores.
+    """
+    logger.info(f"Running K-Means clustering dynamic selection (Max: {max_clusters})...")
+    
+    # Select numerical columns for clustering
+    cols_to_cluster = [
+        'Email_Sends', 'Meetings_Organized_Via_Email', 
+        'Teams_Private_Chats', 'Teams_Meetings_Attended', 
+        'OneDrive_Active_Files', 'SharePoint_Files_Edited', 
+        'SharePoint_Shared_Internally', 'SharePoint_Shared_Externally', 
+        'OneDrive_Storage_GB'
+    ]
+    
+    # Filter columns that actually exist in the dataframe
+    cluster_cols = [c for c in cols_to_cluster if c in df.columns]
+    if not cluster_cols:
+        raise ValueError("No numerical columns found in the dataset to perform clustering.")
+        
+    X = df[cluster_cols].copy()
+    
+    # Fill NaN values with 0
+    X = X.fillna(0.0)
+
+    # Scale the metrics
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    best_k = 2
+    best_score = -1
+    best_kmeans = None
+
+    # Test k up to min(max_clusters, number of rows - 1)
+    limit_k = min(max_clusters, len(df) - 1)
+    if limit_k < 2:
+        kmeans = KMeans(n_clusters=len(df), random_state=42, n_init=10)
+        labels = kmeans.fit_predict(X_scaled)
+        df['Cluster_ID'] = labels
+        
+        centroid_cols = ['Cluster_ID'] + cluster_cols
+        cluster_summary = df[centroid_cols].groupby('Cluster_ID').mean().round(2)
+        cluster_summary['User_Count'] = df['Cluster_ID'].value_counts()
+        return df, cluster_summary, len(df)
+
+    for k in range(2, limit_k + 1):
+        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+        labels = kmeans.fit_predict(X_scaled)
+        
+        score = silhouette_score(X_scaled, labels)
+        msg = f"  Tested k={k} -> Silhouette Score: {score:.4f}"
+        logger.info(msg)
+        
+        if score > best_score:
+            best_score = score
+            best_k = k
+            best_kmeans = kmeans
+
+    optimal_msg = f"Optimal cluster count determined: {best_k} (Silhouette Score: {best_score:.4f})"
+    logger.info(optimal_msg)
+    
+    df['Cluster_ID'] = best_kmeans.labels_
+
+    # Calculate centroids
+    centroid_cols = ['Cluster_ID'] + cluster_cols
+    cluster_summary = df[centroid_cols].groupby('Cluster_ID').mean().round(2)
+    cluster_summary['User_Count'] = df['Cluster_ID'].value_counts()
+    
+    return df, cluster_summary, best_k
+
+
+def generate_kmeans_personas_gemini(api_key: str, cluster_summary: pd.DataFrame, optimal_k: int) -> dict:
+    """Sends K-Means centroids and user count data to Gemini to define visual personas."""
+    cluster_data_text = cluster_summary.to_string()
+
+    prompt = f"""You are an expert IT Operations and SaaS Licensing Analyst.
+I have run a K-Means clustering algorithm on employee Microsoft 365 usage telemetry spanning a 180-day period.
+
+The algorithm automatically determined that the workforce divides best into {optimal_k} distinct employee clusters.
+Here is the centroid data (average behavior metrics and user count) for each cluster:
+
+Centroid Summary:
+{cluster_data_text}
+
+Analyze the centroid values for each cluster in great detail and translate them into a distinct, creative user persona.
+For each cluster, define:
+1. An ID matching "cluster_[Cluster_ID]" (e.g. "cluster_0", "cluster_1").
+2. A creative, professional persona name (title).
+3. A representative emoji character.
+4. A behavioral summary description (2-3 sentences).
+5. 2 to 4 behavior patterns (bullet points explaining their characteristics based on the metric values).
+
+Output your response strictly as a JSON object matching this schema:
+{{
+  "personas": [
+    {{
+      "id": "cluster_0",
+      "title": "Collaborative Power User",
+      "emoji": "🚀",
+      "description": "Users in this cluster are highly active in Teams and email communication...",
+      "behavior_patterns": [
+        "Very high Teams chat volume",
+        "Active meeting participant"
+      ]
+    }}
+  ]
+}}
+
+Do not include any other markdown formatting, code block fences, or text outside the JSON."""
+
+    # Initialize client directly with the API key
+    client = genai.Client(api_key=api_key)
+    
+    logger.info("Calling K-Means Gemini summarization with SDK model: gemini-flash-latest...")
+    response = client.models.generate_content(
+        model="gemini-flash-latest",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json"
+        )
+    )
+        
+    try:
+        candidate_text = response.text
+        return json.loads(candidate_text)
+    except (KeyError, IndexError, ValueError) as e:
+        logger.error(f"Failed to parse Gemini response: {e}. Raw response: {response}")
+        raise ValueError(f"Failed to parse Gemini response: {e}")
 
