@@ -1269,7 +1269,20 @@ class ReportsPage(ctk.CTkFrame):
     def on_telemetry_fetch_completed(self, success: bool):
         """Callback from M365TelemetryTab when all parallel reports complete or are cancelled."""
         self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color=COLOR_PRIMARY)
-        if success:
+        
+        # Check if any data has been successfully fetched (enables partial downloads post-cancellation)
+        data = self.m365_telemetry_view.get_all_telemetry_data()
+        has_any_data = any([
+            data.get("skus"),
+            data.get("directory", {}).get("domains"),
+            data.get("o365_usage"),
+            data.get("m365_apps"),
+            data.get("mailbox", {}).get("total_mailboxes"),
+            data.get("sharepoint", {}).get("total_sites"),
+            data.get("power_automate", {}).get("counts")
+        ])
+        
+        if has_any_data:
             self.pdf_btn.configure(state="normal")
         else:
             self.pdf_btn.configure(state="disabled")
