@@ -146,3 +146,24 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
             self.status = "error"
         self.on_status_change()
 
+    def cancel(self):
+        """Cancels all child views in this container."""
+        self.mailbox_view.cancel()
+        self.calendar_view.cancel()
+        self.apps_view.cancel()
+        self.connectors_view.cancel()
+        self.email_clients_view.cancel()
+        
+        sub_statuses = [
+            self.mailbox_view.status,
+            self.calendar_view.status,
+            self.apps_view.status,
+            self.connectors_view.status,
+            self.email_clients_view.status
+        ]
+        if all(s is None for s in sub_statuses):
+            self.status = None
+            self.reset_view()
+        else:
+            self._check_overall_status()
+

@@ -122,6 +122,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         self.on_all_done_callback = None
         self.telemetry_semaphore = threading.Semaphore(1)
+        self.is_fetching = False
 
         self.build_ui()
 
@@ -256,6 +257,10 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         self._hide_all_grids()
 
+        # Wrap all leaf views to support cancellation and prevent race conditions
+        for leaf in self._get_all_leaf_views():
+            self._wrap_view_for_cancellation(leaf)
+
     def _hide_all_grids(self):
         views = [
             self.subscribed_skus_view,
@@ -295,6 +300,10 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
     def _check_all_done(self):
         """Checks if all sections of the current batch have resolved, then triggers next batch or finishes."""
+        if not getattr(self, "is_fetching", False):
+            # If fetching was cancelled, ignore any further background thread completions
+            return
+
         if not hasattr(self, "batches"):
             return
 
@@ -317,6 +326,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             return
 
         # Re-enable the submit button
+        self.is_fetching = False
         self.btn_lic_submit.configure(state="normal", text="Submit")
 
         success = all(s == "success" for s in global_states)
@@ -344,7 +354,11 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 view.trigger_fetch(tenant, clients[0], secrets[0])
 
     def authenticate_licenses_tab(self):
-        """Master full sequential fetch of sections."""
+        """Master full sequential fetch of sections, or cancel if already fetching."""
+        if getattr(self, "is_fetching", False):
+            self.cancel_fetching()
+            return
+
         async_logger.info("Master Submit triggered. Restarting all fetches sequentially.")
 
         tenant, clients, secrets = self._get_credentials()
@@ -353,7 +367,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             messagebox.showerror("Credential Error", "Please provide complete Tenant ID, Client ID, and Client Secret strings.", parent=self)
             return
 
-        self.btn_lic_submit.configure(state="disabled", text="Submitting...")
+        self.is_fetching = True
+        self.btn_lic_submit.configure(state="normal", text="Cancel")
         self.lbl_lic_status.configure(text="Querying Microsoft Graph APIs and Reports sequentially...", text_color=COLOR_TEXT_SUB)
 
         # Reset all views first
@@ -361,6 +376,133 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         self.current_batch_index = 0
         self.trigger_current_batch()
+
+    def cancel_fetching(self):
+        """Cancels the current fetching process and stops all subsequent batches."""
+        async_logger.info("Cancellation triggered by user.")
+        self.is_fetching = False
+        
+        self.btn_lic_submit.configure(state="normal", text="Submit")
+        self.lbl_lic_status.configure(text="✖ Query cancelled by user.", text_color=COLOR_ERROR)
+        
+        # Propagate cancel to all top-level views
+        for batch in self.batches:
+            for view in batch:
+                if hasattr(view, "cancel"):
+                    view.cancel()
+
+        if hasattr(self, "on_all_done_callback") and self.on_all_done_callback:
+            self.on_all_done_callback(False)
+
+    def _get_all_leaf_views(self):
+        """Returns a list of all active leaf/base telemetry views across all cards."""
+        return [
+            self.subscribed_skus_view,
+            self.directory_view,
+            self.m365_apps_view.active_users_view,
+            self.m365_apps_view.active_users_trend_view,
+            self.m365_apps_view.m365_apps_view,
+            self.exchange_online_view.mailbox_view,
+            self.exchange_online_view.calendar_view,
+            self.exchange_online_view.apps_view,
+            self.exchange_online_view.connectors_view,
+            self.exchange_online_view.email_clients_view,
+            self.files_view.sharepoint_view,
+            self.files_view.onedrive_view,
+            self.security_gov_view,
+            self.power_automate_view
+        ]
+
+    def _wrap_view_for_cancellation(self, view):
+        """Wraps a leaf view's trigger, render/handle, reset and after methods dynamically to enforce thread safety, cancellation, and stale thread filtering."""
+        view.current_request_id = 0
+        view.is_cancelled = False
+        
+        orig_trigger = view.trigger_fetch
+        orig_reset = view.reset_view
+        orig_after = view.after
+        
+        # Determine which rendering method is present
+        has_render = hasattr(view, "_render_success") and hasattr(view, "_render_error")
+        has_handle = hasattr(view, "_handle_result")
+        
+        if has_render:
+            orig_success = view._render_success
+            orig_error = view._render_error
+            
+            def new_success(*args, **kwargs):
+                if view.is_cancelled:
+                    async_logger.info(f"Ignored _render_success for {view.__class__.__name__} because it was cancelled.")
+                    return
+                orig_success(*args, **kwargs)
+                
+            def new_error(*args, **kwargs):
+                if view.is_cancelled:
+                    async_logger.info(f"Ignored _render_error for {view.__class__.__name__} because it was cancelled.")
+                    return
+                orig_error(*args, **kwargs)
+                
+            view._render_success = new_success
+            view._render_error = new_error
+            
+        elif has_handle:
+            orig_handle = view._handle_result
+            
+            def new_handle(*args, **kwargs):
+                if view.is_cancelled:
+                    async_logger.info(f"Ignored _handle_result for {view.__class__.__name__} because it was cancelled.")
+                    return
+                orig_handle(*args, **kwargs)
+                
+            view._handle_result = new_handle
+            
+        def new_trigger(*args, **kwargs):
+            view.current_request_id += 1
+            view.is_cancelled = False
+            
+            # Temporarily tag spawned threads with the current request ID
+            orig_thread_init = threading.Thread.__init__
+            req_id = view.current_request_id
+            
+            def new_thread_init(thread_self, *t_args, **t_kwargs):
+                orig_thread_init(thread_self, *t_args, **t_kwargs)
+                thread_self.request_id = req_id
+                
+            threading.Thread.__init__ = new_thread_init
+            try:
+                orig_trigger(*args, **kwargs)
+            finally:
+                threading.Thread.__init__ = orig_thread_init
+            
+        def new_reset(*args, **kwargs):
+            view.is_cancelled = True
+            orig_reset(*args, **kwargs)
+            
+        def new_after(ms, callback, *args, **kwargs):
+            # Identify the calling thread
+            cur_thread = threading.current_thread()
+            thread_req_id = getattr(cur_thread, "request_id", None)
+            
+            # If the calling thread has a request_id and it doesn't match the current one, discard it
+            if thread_req_id is not None and thread_req_id != view.current_request_id:
+                async_logger.warning(
+                    f"Discarded after() callback for {view.__class__.__name__} from stale thread "
+                    f"(thread req_id: {thread_req_id}, current req_id: {view.current_request_id})"
+                )
+                return None
+            return orig_after(ms, callback, *args, **kwargs)
+            
+        def cancel_method():
+            view.is_cancelled = True
+            view.current_request_id += 1
+            if view.status == "loading":
+                view.status = None
+                view.reset_view()
+                
+        view.trigger_fetch = new_trigger
+        view.reset_view = new_reset
+        view.after = new_after
+        view.cancel = cancel_method
 
     def get_all_telemetry_data(self) -> dict:
         """Retrieves cached telemetry data and charts from all sub-views."""

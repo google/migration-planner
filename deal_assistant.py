@@ -1240,7 +1240,11 @@ class ReportsPage(ctk.CTkFrame):
             self.m365_telemetry_view.inputs_frame.grid_forget()
 
     def on_fetch_report_clicked(self):
-        """Stage 2: Migrates stored variables into the telemetry coordinator and triggers fetch directly."""
+        """Stage 2: Migrates stored variables into the telemetry coordinator and triggers fetch directly, or cancels if in progress."""
+        if getattr(self.m365_telemetry_view, "is_fetching", False):
+            self.m365_telemetry_view.cancel_fetching()
+            return
+
         tenant = self.controller.stored_tenant
         client = self.controller.stored_client
         secret = self.controller.stored_secret
@@ -1250,8 +1254,8 @@ class ReportsPage(ctk.CTkFrame):
             return
 
         logger.info("Fetch Report triggered. Invoking background parallel audits...")
-        # Disable the trigger button and update visual text during background thread audit
-        self.fetch_btn.configure(state="disabled", text="Fetching...", fg_color="#64748B")
+        # Toggle button to Cancel and keep it enabled and active
+        self.fetch_btn.configure(state="normal", text="Cancel", fg_color="#DC2626") # Red color for cancel
         self.pdf_btn.configure(state="disabled")
 
         # Set variables of m365_telemetry_view directly
@@ -1263,8 +1267,8 @@ class ReportsPage(ctk.CTkFrame):
         self.m365_telemetry_view.authenticate_licenses_tab()
 
     def on_telemetry_fetch_completed(self, success: bool):
-        """Callback from M365TelemetryTab when all parallel reports complete."""
-        self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color="#1E3A8A")
+        """Callback from M365TelemetryTab when all parallel reports complete or are cancelled."""
+        self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color=COLOR_PRIMARY)
         if success:
             self.pdf_btn.configure(state="normal")
         else:
