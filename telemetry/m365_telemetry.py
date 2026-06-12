@@ -130,16 +130,14 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         self.build_ui()
 
-        # Batching orchestration for sequential loading of sections one by one
         self.batches = [
             [self.subscribed_skus_view],
             [self.directory_view],
             [self.m365_apps_view],
             [self.exchange_online_view],
             [self.files_view],
-            [self.devices_apps_view],
+            [self.devices_apps_view, self.intune_policies_view],
             [self.security_gov_view],
-            [self.intune_policies_view],
             [self.power_automate_view]
         ]
         self.current_batch_index = 0
@@ -338,7 +336,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             return
 
         current_views = self.batches[self.current_batch_index]
-        batch_states = [view.status for view in current_views if view != self.devices_apps_view]
+        batch_states = [view.status for view in current_views if view not in [self.devices_apps_view, self.intune_policies_view]]
 
         if "loading" in batch_states:
             return
@@ -351,7 +349,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # All batches have finished. Make sure no individual retries are still loading
         all_views = [view for batch in self.batches for view in batch]
-        global_states = [v.status for v in all_views if v != self.devices_apps_view]
+        global_states = [v.status for v in all_views if v not in [self.devices_apps_view, self.intune_policies_view]]
         if "loading" in global_states:
             return
 
