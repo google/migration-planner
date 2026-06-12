@@ -34,11 +34,13 @@ from telemetry.power_automate import PowerAutomateUsageFrame
 
 # Import existing modular views
 from telemetry.files_telemetry import FilesTelemetryFrame
+from telemetry.devices_apps_telemetry import DevicesAppsTelemetryFrame
 from telemetry.exchange_online import ExchangeOnlineFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
 from telemetry.intune_policies import IntunePoliciesFrame
 
 from telemetry.styles import *
+
 
 # =================================================================================
 # ASYNC FILE LOGGING SETUP
@@ -135,17 +137,22 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             [self.m365_apps_view],
             [self.exchange_online_view],
             [self.files_view],
+            [self.devices_apps_view],
             [self.security_gov_view],
             [self.intune_policies_view],
             [self.power_automate_view]
         ]
         self.current_batch_index = 0
 
-
         # Bind mouse wheel globally to scroll this tab when hovered
         self.bind_all("<MouseWheel>", self._handle_global_mousewheel, add="+")
         self.bind_all("<Button-4>", self._handle_global_mousewheel, add="+")
         self.bind_all("<Button-5>", self._handle_global_mousewheel, add="+")
+
+        # Start a background daemon thread to monitor memory consumption every 30s
+        self.mem_monitor_active = True
+        self.mem_monitor_thread = threading.Thread(target=self._monitor_memory_loop, daemon=True)
+        self.mem_monitor_thread.start()
 
     def _create_entry(self, parent, label, var, show=None):
         f = ctk.CTkFrame(parent, fg_color="transparent")
@@ -240,6 +247,15 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
+        # 5d. Devices & Apps Section
+        self.devices_apps_view = DevicesAppsTelemetryFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
+        )
+
         # 6. Data Security & Governance Section
         self.security_gov_view = DataSecurityGovernanceFrame(
             master=self,
@@ -280,6 +296,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.m365_apps_view,
             self.exchange_online_view,
             self.files_view,
+            self.devices_apps_view,
             self.security_gov_view,
             self.intune_policies_view,
             self.power_automate_view
@@ -321,7 +338,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             return
 
         current_views = self.batches[self.current_batch_index]
-        batch_states = [view.status for view in current_views]
+        batch_states = [view.status for view in current_views if view != self.devices_apps_view]
 
         if "loading" in batch_states:
             return
@@ -334,7 +351,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # All batches have finished. Make sure no individual retries are still loading
         all_views = [view for batch in self.batches for view in batch]
-        global_states = [v.status for v in all_views]
+        global_states = [v.status for v in all_views if v != self.devices_apps_view]
         if "loading" in global_states:
             return
 
@@ -423,6 +440,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.exchange_online_view.email_clients_view,
             self.files_view.sharepoint_view,
             self.files_view.onedrive_view,
+            self.devices_apps_view,
             self.security_gov_view,
             self.intune_policies_view,
             self.power_automate_view
@@ -444,6 +462,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "EmailClientSupportFrame": "Email Client Classification",
             "SharePointUsageFrame": "SharePoint Online Sites & Files Summary",
             "OneDriveUsageFrame": "OneDrive for Business Personal Accounts Summary",
+            "DevicesAppsTelemetryFrame": "Devices & Apps Summary (Sign-in Telemetry)",
             "DataSecurityGovernanceFrame": "Data Security & Governance",
             "IntunePoliciesFrame": "Intune Policies (Device Configurations)",
             "PowerAutomateUsageFrame": "Power Automate (Workflows & Flows)"
@@ -736,8 +755,12 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             view.is_cancelled = True
             view.current_request_id += 1
             if view.status == "loading":
-                view.status = None
-                view.reset_view()
+                view.status = "cancelled"
+                if hasattr(view, "_update_ui_lists"):
+                    data = getattr(view, "last_data", {}) or {}
+                    view._update_ui_lists(data)
+                elif hasattr(view, "_set_state_error"):
+                    view._set_state_error("⚠️ Telemetry fetch cancelled by user.")
                 
         view.trigger_fetch = new_trigger
         view.reset_view = new_reset
@@ -761,6 +784,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "calendar": getattr(self.exchange_online_view.calendar_view, "last_data", {}),
             "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
             "onedrive": getattr(self.files_view.onedrive_view, "last_data", {}),
+            "devices_apps": getattr(self.devices_apps_view, "last_data", {}),
             "security_labels": getattr(self.security_gov_view, "last_labels_data", []),
             "retention_policies": getattr(self.security_gov_view, "last_policies_data", []),
             "power_automate": getattr(self.power_automate_view, "last_results", {})
@@ -800,3 +824,27 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 else:
                     # Windows delta (usually multiple of 120)
                     self._parent_canvas.yview("scroll", -int(event.delta / 120), "units")
+
+    def _monitor_memory_loop(self):
+        """Periodically measures current resident set size (RSS) RAM usage of the python process and logs it."""
+        import time
+        import os
+        import psutil
+        
+        try:
+            process = psutil.Process(os.getpid())
+        except Exception as err:
+            async_logger.warning(f"Could not initialize psutil Process: {err}")
+            process = None
+
+        while getattr(self, "mem_monitor_active", False):
+            mem_mb = 0.0
+            if process:
+                try:
+                    mem_bytes = process.memory_info().rss
+                    mem_mb = float(mem_bytes) / (1024.0 * 1024.0)
+                except Exception as get_err:
+                    async_logger.warning(f"Error reading memory info via psutil: {get_err}")
+            
+            async_logger.info(f"💾 Application Current Memory Usage (RSS): {mem_mb:.2f} MB")
+            time.sleep(30)

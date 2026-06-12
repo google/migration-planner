@@ -180,21 +180,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.apps_view.cancel()
         self.connectors_view.cancel()
         self.email_clients_view.cancel()
-        
         if hasattr(self.mail_security_view, 'cancel'):
             self.mail_security_view.cancel()
-        
-        sub_statuses = [
-            self.mailbox_view.status,
-            self.calendar_view.status,
-            self.apps_view.status,
-            self.connectors_view.status,
-            self.email_clients_view.status,
-            getattr(self.mail_security_view, 'status', None)
-        ]
-        if all(s is None for s in sub_statuses):
-            self.status = None
-            self.reset_view()
-        else:
-            self._check_overall_status()
+        self.status = None
 

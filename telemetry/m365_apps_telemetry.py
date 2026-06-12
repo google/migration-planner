@@ -124,10 +124,4 @@ class M365AppsTelemetryFrame(ctk.CTkFrame):
         self.active_users_view.cancel()
         self.active_users_trend_view.cancel()
         self.m365_apps_view.cancel()
-        
-        sub_statuses = [self.active_users_view.status, self.active_users_trend_view.status, self.m365_apps_view.status]
-        if all(s is None for s in sub_statuses):
-            self.status = None
-            self.reset_view()
-        else:
-            self._check_overall_status()
+        self.status = None

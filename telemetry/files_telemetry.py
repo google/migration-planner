@@ -109,13 +109,4 @@ class FilesTelemetryFrame(ctk.CTkFrame):
         """Cancels all child views in this container."""
         self.sharepoint_view.cancel()
         self.onedrive_view.cancel()
-        
-        sub_statuses = [
-            self.sharepoint_view.status,
-            self.onedrive_view.status
-        ]
-        if all(s is None for s in sub_statuses):
-            self.status = None
-            self.reset_view()
-        else:
-            self._check_overall_status()
+        self.status = None

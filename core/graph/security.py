@@ -135,5 +135,100 @@ class SecurityService:
         finally:
             self.client.release_token(token_slot)
 
+    def fetch_signin_activities(self, event_type: str, csv_path: str, max_rows: int = 10000, on_page_callback=None, is_cancelled_callback=None) -> None:
+        """Fetches successful sign-in logs from Microsoft Graph beta auditLogs endpoint for a specific signInEventType
+        and appends them to a CSV file.
+        
+        Args:
+            event_type: 'interactiveUser' or 'nonInteractiveUser'
+            csv_path: Absolute path to the CSV file where logs will be appended
+            max_rows: Maximum number of rows to retrieve (default 10000)
+            on_page_callback: Optional callback invoked as on_page_callback(value_list) for each page fetched
+            is_cancelled_callback: Optional callable returning boolean indicating if operation is cancelled
+        """
+        base_url = "https://graph.microsoft.com/beta/auditLogs/signIns"
+        filter_str = f"status/errorCode eq 0 and signInEventTypes/any(t: t eq '{event_type}')"
+        select_str = "appDisplayName,deviceDetail"
+        
+        token_slot = self.client.get_active_token()
+        session = self.client.get_session()
+        
+        headers = {
+            "Authorization": f"Bearer {token_slot['token']}",
+            "Accept": "application/json"
+        }
+        
+        next_url = f"{base_url}?$filter={filter_str}&$select={select_str}&$top=100"
+        rows_written = 0
+        page_number = 1
+        import csv
+        
+        try:
+            logger.info("Fetching successful sign-in activities for %s...", event_type)
+            with open(csv_path, 'a', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                
+                while next_url and rows_written < max_rows:
+                    if is_cancelled_callback and is_cancelled_callback():
+                        logger.info("Fetch cancelled in-flight for %s. Aborting pagination loop.", event_type)
+                        break
+                    import time
+                    retries_left = 2
+                    resp = None
+                    while retries_left > 0:
+                        logger.info("Querying MSFT Graph sign-ins endpoint (Event: %s, Page: %d, Rows so far: %d, Attempt: %d)...", 
+                                    event_type, page_number, rows_written, 3 - retries_left)
+                        try:
+                            resp = session.get(next_url, headers=headers, timeout=40.0)
+                            if resp.status_code == 200:
+                                break
+                            elif resp.status_code in [401, 403]:
+                                break
+                        except Exception as get_err:
+                            logger.warning("Query attempt failed: %s", get_err)
+                        
+                        retries_left -= 1
+                        if retries_left > 0:
+                            time.sleep(2)
+
+                    page_number += 1
+                    if resp and resp.status_code == 200:
+                        data = resp.json()
+                        value_list = data.get("value", [])
+                        
+                        for log in value_list:
+                            if rows_written >= max_rows:
+                                break
+                            app_name = log.get("appDisplayName") or ""
+                            device = log.get("deviceDetail") or {}
+                            os_name = device.get("operatingSystem") or ""
+                            browser_name = device.get("browser") or ""
+                            writer.writerow([app_name, os_name, browser_name, event_type])
+                            rows_written += 1
+                        
+                        if on_page_callback:
+                            try:
+                                on_page_callback(value_list)
+                            except Exception as cb_err:
+                                logger.warning("Error in sign-ins page callback: %s", cb_err)
+                        
+                        if rows_written >= max_rows:
+                            break
+                            
+                        next_url = data.get("@odata.nextLink")
+                    else:
+                        if resp and resp.status_code in [401, 403]:
+                            logger.error("Sign-ins endpoint permission error: %d %s", resp.status_code, resp.text)
+                            raise PermissionError("AuditLog.Read.All permission required.")
+                        else:
+                            status_str = f"status {resp.status_code}" if resp else "connection/timeout error"
+                            logger.warning("Sign-ins endpoint query failed after 2 attempts (%s). Stopping pagination.", status_str)
+                            break
+            
+            logger.info("Successfully fetched and appended %d sign-in records for %s", rows_written, event_type)
+        finally:
+            self.client.release_token(token_slot)
+
+
 
 
