@@ -193,6 +193,6 @@ class MailSecurityFrame(ctk.CTkFrame):
                     c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
                     
-        disclaimer = ctk.CTkLabel(self.grid_frame, text="Note: Users can track outbound connectors displayed below to identify 3rd-party security apps.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, anchor="w")
+        disclaimer = ctk.CTkLabel(self.grid_frame, text="Note: Users can track inbound connectors displayed below to identify 3rd-party security apps.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, anchor="w")
         disclaimer.pack(fill="x", padx=15, pady=(5, 15))
         self.grid_frame.pack(fill="x", expand=True, pady=10)
