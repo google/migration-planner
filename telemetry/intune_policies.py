@@ -1,118 +1,110 @@
-import customtkinter as ctk
-import threading
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import os
+import csv
 import logging
-import traceback
+import threading
 import webbrowser
+import customtkinter as ctk
 from telemetry.styles import *
+from core.graph.client import GraphClient
+from core.graph.intune import IntuneService
 
 usage_logger = logging.getLogger("IntunePoliciesUI")
 
-def fetch_intune_policies_data(client_id, client_secret, tenant_id) -> dict:
-    """Fetch and parse Intune Configuration Policies and Device Configurations."""
-    usage_logger.info("Starting Intune Policies fetch...")
+def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: str, on_page_callback=None, is_cancelled_callback=None) -> dict:
+    """Pipeline to fetch Intune configuration policies in parallel and aggregate unique policies by platform."""
+    usage_logger.info("Starting Intune Policies Pipeline in parallel...")
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+    reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
+    os.makedirs(reports_dir, exist_ok=True)
+    
+    csv_path_device_configs = os.path.join(reports_dir, "intune_device_configs.csv")
+    csv_path_config_policies = os.path.join(reports_dir, "intune_config_policies.csv")
+    
+    for path in [csv_path_device_configs, csv_path_config_policies]:
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["id", "displayName", "platform", "policyType"])
+            
+    client = GraphClient(
+        tenant_id=tenant_id,
+        client_ids=client_id,
+        client_secrets=client_secret,
+        concurrency=2,
+        retries=5,
+        backoff=2
+    )
+    client.authenticate()
+    service = IntuneService(client)
+    
+    errors = []
+    
+    def run_fetch(endpoint, path):
+        try:
+            service.fetch_configuration_records(
+                endpoint_name=endpoint,
+                csv_path=path,
+                max_rows=10000,
+                on_page_callback=on_page_callback,
+                is_cancelled_callback=is_cancelled_callback
+            )
+        except Exception as thread_err:
+            usage_logger.error(f"Error in thread fetching Intune {endpoint}: {thread_err}")
+            errors.append(thread_err)
+            
     try:
-        from core.graph.client import GraphClient
-        client = GraphClient(
-            tenant_id=tenant_id,
-            client_ids=client_id,
-            client_secrets=client_secret,
-            concurrency=1,
-            retries=3,
-            backoff=2
-        )
-        client.authenticate()
-        session = client.token_manager.get_session()
+        t1 = threading.Thread(target=run_fetch, args=("deviceConfigurations", csv_path_device_configs), daemon=True)
+        t2 = threading.Thread(target=run_fetch, args=("configurationPolicies", csv_path_config_policies), daemon=True)
         
-        slot = client.token_manager.get_valid_token_slot()
-        access_token = slot["token"]
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        t1.start()
+        t2.start()
         
-        device_configs = []
-        try:
-            res1 = session.get("https://graph.microsoft.com/beta/deviceManagement/deviceConfigurations", headers=headers)
-            if res1.status_code == 200:
-                device_configs = res1.json().get("value", [])
-        except Exception as e:
-            usage_logger.warning(f"Failed to fetch deviceConfigurations: {e}")
-
-        config_policies = []
-        try:
-            res2 = session.get("https://graph.microsoft.com/beta/deviceManagement/configurationPolicies", headers=headers)
-            if res2.status_code == 200:
-                config_policies = res2.json().get("value", [])
-        except Exception as e:
-            usage_logger.warning(f"Failed to fetch configurationPolicies: {e}")
-            
-        client.token_manager.return_token_slot(slot)
-        client.close()
+        t1.join()
+        t2.join()
         
-        import re
-        from collections import defaultdict
-        counts = defaultdict(int)
-
-        def extract_platform_and_type(odata_type):
-            type_str = odata_type.replace("#microsoft.graph.", "")
-            platform = "Unknown"
+        if len(errors) == 2:
+            raise errors[0]
             
-            if type_str.startswith("windows10"):
-                platform = "Windows 10"
-                policy_type = type_str.replace("windows10", "")
-            elif type_str.startswith("windows"):
-                platform = "Windows"
-                policy_type = type_str.replace("windows", "")
-            elif type_str.startswith("ios"):
-                platform = "iOS"
-                policy_type = type_str.replace("ios", "")
-            elif type_str.startswith("android"):
-                platform = "Android"
-                policy_type = type_str.replace("android", "")
-            elif type_str.startswith("macOS"):
-                platform = "macOS"
-                policy_type = type_str.replace("macOS", "")
-            else:
-                policy_type = type_str
-
-            if not policy_type:
-                policy_type = "Configuration"
-                
-            policy_type = re.sub(r"([A-Z])", r" \1", policy_type).strip()
-            return platform, policy_type
-
-        for dc in device_configs:
-            platform, p_type = extract_platform_and_type(dc.get("@odata.type", ""))
-            counts[(platform, p_type)] += 1
-            
-        for cp in config_policies:
-            platform = cp.get("platforms", "Unknown")
-            if platform == "windows10AndLater":
-                platform = "Windows 10"
-            elif platform == "windows81AndLater":
-                platform = "Windows 8.1"
-            elif platform == "macOS":
-                platform = "macOS"
-            else:
-                platform = platform.capitalize()
-            counts[(platform, "Settings Catalog")] += 1
-            
-        rows = []
-        for (platform, p_type), count in sorted(counts.items()):
-            rows.append((platform, p_type, str(count)))
-
+        policies_by_platform = {}
+        
+        for path in [csv_path_device_configs, csv_path_config_policies]:
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    next(reader, None)
+                    for row in reader:
+                        if len(row) >= 4:
+                            platform, policy_name = row[2], row[1]
+                            if platform and policy_name:
+                                if platform not in policies_by_platform:
+                                    policies_by_platform[platform] = set()
+                                policies_by_platform[platform].add(policy_name)
+                                
         return {
-            "total_device_configs": len(device_configs),
-            "total_config_policies": len(config_policies),
-            "table_rows": rows,
-            "error": None
+            platform: sorted(list(names))
+            for platform, names in policies_by_platform.items()
         }
-    except Exception as e:
-        usage_logger.error("Failed to fetch Intune Policies", exc_info=True)
-        return {"error": str(e)}
+    finally:
+        client.close()
+
 
 class IntunePoliciesFrame(ctk.CTkFrame):
-    def update_loading_text(self, text_msg):
-        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
-            self.loading_label.configure(text=f"⏳ {text_msg}")
-    """Component for rendering Intune Policies data."""
+    """Component for rendering Intune Policies data in wrapped dynamic horizontal list format."""
+
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
@@ -120,6 +112,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.get_credentials = credentials_callback
         self.on_status_change = status_change_callback
         self.status = None
+        self.last_data = {}
 
         self.build_ui()
 
@@ -153,7 +146,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.link_lbl.bind("<Leave>", lambda e: self.link_lbl.configure(text_color=COLOR_PRIMARY))
         
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         
         self.reset_view()
 
@@ -161,6 +154,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
+        self.last_data = {}
         
         for w in self.state_frame.winfo_children():
             w.destroy()
@@ -170,11 +164,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
     def _set_state_loading(self, msg="Loading..."):
         for w in self.state_frame.winfo_children():
             w.destroy()
-        self.loading_label = __import__("customtkinter").CTkLabel(self.state_frame, text=f"⏳ {msg}", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
-        self.loading_label.pack(pady=(20, 5))
-        pb = __import__("customtkinter").CTkProgressBar(self.state_frame, mode="indeterminate", width=250, fg_color="#F3F4F6", progress_color="#2563EB")
-        pb.pack(pady=(0, 20))
-        pb.start()
+        ctk.CTkLabel(self.state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
         self.state_frame.pack(fill="x", expand=True)
 
     def _set_state_error(self, error_msg):
@@ -208,66 +198,118 @@ class IntunePoliciesFrame(ctk.CTkFrame):
     def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
         if self.semaphore:
             self.semaphore.acquire()
+            
+        platform_policies = {}
+        
+        def handle_page(parsed_records):
+            for item in parsed_records:
+                platform = item.get("platform")
+                name = item.get("displayName")
+                if platform and name:
+                    if platform not in platform_policies:
+                        platform_policies[platform] = set()
+                    platform_policies[platform].add(name)
+            
+            data_to_render = {
+                plat: sorted(list(names))
+                for plat, names in platform_policies.items()
+            }
+            self.after(0, self._render_partial_success, data_to_render)
+            
         try:
-            res = fetch_intune_policies_data(client_id, client_secret, tenant)
-            self.after(0, self._handle_result, res)
+            data = run_intune_policies_pipeline(
+                client_id, 
+                client_secret, 
+                tenant, 
+                on_page_callback=handle_page,
+                is_cancelled_callback=lambda: getattr(self, "is_cancelled", False)
+            )
+            usage_logger.info("Successfully completed Intune Policies fetch.")
+            self.after(0, self._render_success, data)
+        except Exception as e:
+            usage_logger.error("Exception caught in Intune worker.", exc_info=True)
+            self.after(0, self._render_error, str(e))
         finally:
             if self.semaphore:
                 self.semaphore.release()
 
-    def _handle_result(self, result: dict):
-        self.state_frame.pack_forget()
-        for w in self.grid_frame.winfo_children():
-            w.destroy()
-            
-        err = result.get("error")
-        if err:
-            self.status = "error"
-            if "Authorization_RequestDenied" in err or "403" in err:
-                self._set_state_error("Access Denied: Missing Intune or DeviceManagement permissions.")
-            else:
-                self._set_state_error(err)
-        else:
-            self.status = "success"
-            self.grid_frame.pack(fill="x", expand=True)
-            self._render_card(result)
-            
+    def _render_partial_success(self, data: dict):
+        if self.status == "loading":
+            self._update_ui_lists(data)
+
+    def _render_success(self, data: dict):
+        self.status = "success"
+        self._update_ui_lists(data)
         self.on_status_change()
 
-    def _render_card(self, data: dict):
-        summary_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
-        summary_frame.pack(fill="x", padx=10, pady=10)
-        
-        tot_dc = data.get("total_device_configs", 0)
-        tot_cp = data.get("total_config_policies", 0)
-        ctk.CTkLabel(summary_frame, text=f"Total Extracted: {tot_dc} Device Configurations | {tot_cp} Configuration Policies", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w")
+    def _update_ui_lists(self, data: dict):
+        self.last_data = data
+        self.state_frame.pack_forget()
+        for w in self.grid_frame.winfo_children():
+            try:
+                w.destroy()
+            except Exception:
+                pass
 
-        metrics_grid = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
-        metrics_grid.pack(fill="x", padx=10, pady=(5, 15))
-        
-        headers = ["Platform", "Policy Type", "Number of Policies"]
-        for i in range(3):
-            metrics_grid.grid_columnconfigure(i, weight=1 if i == 2 else 2)
+        self.grid_frame.pack(fill="x", expand=True)
+
+        if self.status == "loading":
+            progress_frame = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_TONAL_BG, height=26, corner_radius=6)
+            progress_frame.pack(fill="x", pady=(0, 6))
+            ctk.CTkLabel(
+                progress_frame, 
+                text="⏳ Querying Microsoft Intune configuration policies in the background... UI will auto-refresh.", 
+                font=FONT_BODY_SMALL,
+                text_color=COLOR_TONAL_TEXT
+            ).pack(padx=10, pady=2, anchor="w")
+        elif self.status == "cancelled" or getattr(self, "is_cancelled", False):
+            progress_frame = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE_VARIANT, height=26, corner_radius=6)
+            progress_frame.pack(fill="x", pady=(0, 6))
+            ctk.CTkLabel(
+                progress_frame, 
+                text="⚠️ Fetching cancelled by user. Displaying partial data.", 
+                font=FONT_BODY_SMALL,
+                text_color=COLOR_ERROR
+            ).pack(padx=10, pady=2, anchor="w")
+
+        # Map to render platforms
+        for platform, policies in sorted(data.items()):
+            row_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+            row_frame.pack(fill="x", pady=6, anchor="w")
             
-        for col_idx, head_text in enumerate(headers):
-            cell = ctk.CTkFrame(metrics_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
-            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+            lbl_title = ctk.CTkLabel(
+                row_frame, 
+                text=f"⚙️ {platform} Policies: ", 
+                font=FONT_BODY_BOLD, 
+                text_color=COLOR_TEXT_MAIN,
+                anchor="w"
+            )
+            lbl_title.pack(side="left", anchor="nw")
             
-        rows_data = data.get("table_rows", [])
-        
-        if not rows_data:
-            c = ctk.CTkFrame(metrics_grid, fg_color=COLOR_SURFACE, corner_radius=0)
-            c.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkLabel(c, text="No policies detected.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=12)
-            return
+            display_text = ", ".join(policies) if policies else "No policies found"
+            lbl_content = ctk.CTkLabel(
+                row_frame, 
+                text=display_text, 
+                font=FONT_BODY_MEDIUM, 
+                text_color=COLOR_TEXT_MAIN if policies else COLOR_TEXT_SUB,
+                justify="left",
+                anchor="w"
+            )
+            lbl_content.pack(side="left", fill="x", expand=True, anchor="nw")
             
-        for r_idx, (platform, p_type, count) in enumerate(rows_data, start=1):
-            bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
-            
-            vals = [platform, p_type, count]
-            
-            for c_idx, val in enumerate(vals):
-                c = ctk.CTkFrame(metrics_grid, fg_color=bg_style, corner_radius=0)
-                c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
-                ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
+            def make_configure_handler(lbl=lbl_content):
+                def on_configure(event):
+                    lbl.configure(wraplength=max(200, event.width - 200))
+                return on_configure
+                
+            row_frame.bind("<Configure>", make_configure_handler())
+
+    def _render_error(self, err_msg):
+        usage_logger.warning(f"Intune Policies Telemetry fetch failed: {err_msg}")
+        self._set_state_error(err_msg)
+        self.status = "error"
+        self.on_status_change()
+
+    def cancel(self):
+        """Cancels background thread operations."""
+        self.status = None
