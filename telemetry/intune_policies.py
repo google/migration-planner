@@ -38,7 +38,7 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
     for path in [csv_path_device_configs, csv_path_config_policies]:
         with open(path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(["id", "displayName", "platform", "policyType"])
+            writer.writerow(["displayName", "platform", "policyType"])
             
     client = GraphClient(
         tenant_id=tenant_id,
@@ -87,12 +87,13 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
                     reader = csv.reader(f)
                     next(reader, None)
                     for row in reader:
-                        if len(row) >= 4:
-                            platform, policy_name = row[2], row[1]
-                            if platform and policy_name:
-                                if platform not in policies_by_platform:
-                                    policies_by_platform[platform] = set()
-                                policies_by_platform[platform].add(policy_name)
+                        if len(row) >= 3:
+                            policy_name, platform, policy_type = row[0], row[1], row[2]
+                            if platform and policy_name and policy_type:
+                                key = f"{platform} - {policy_type}"
+                                if key not in policies_by_platform:
+                                    policies_by_platform[key] = set()
+                                policies_by_platform[key].add(policy_name)
                                 
         return {
             platform: sorted(list(names))
@@ -205,10 +206,12 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             for item in parsed_records:
                 platform = item.get("platform")
                 name = item.get("displayName")
-                if platform and name:
-                    if platform not in platform_policies:
-                        platform_policies[platform] = set()
-                    platform_policies[platform].add(name)
+                policy_type = item.get("policyType")
+                if platform and name and policy_type:
+                    key = f"{platform} - {policy_type}"
+                    if key not in platform_policies:
+                        platform_policies[key] = set()
+                    platform_policies[key].add(name)
             
             data_to_render = {
                 plat: sorted(list(names))
@@ -279,7 +282,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             
             lbl_title = ctk.CTkLabel(
                 row_frame, 
-                text=f"⚙️ {platform} Policies: ", 
+                text=f"⚙️ {platform}: ", 
                 font=FONT_BODY_BOLD, 
                 text_color=COLOR_TEXT_MAIN,
                 anchor="w"

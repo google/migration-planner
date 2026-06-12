@@ -132,9 +132,8 @@ class IntuneService:
                                     platform = raw_platform.capitalize()
                                 policy_type = "Settings Catalog"
                                 
-                            writer.writerow([item_id, display_name, platform, policy_type])
+                            writer.writerow([display_name, platform, policy_type])
                             parsed_records.append({
-                                "id": item_id,
                                 "displayName": display_name,
                                 "platform": platform,
                                 "policyType": policy_type
