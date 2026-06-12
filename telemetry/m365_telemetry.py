@@ -36,6 +36,7 @@ from telemetry.power_automate import PowerAutomateUsageFrame
 from telemetry.files_telemetry import FilesTelemetryFrame
 from telemetry.exchange_online import ExchangeOnlineFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
+from telemetry.intune_policies import IntunePoliciesFrame
 
 from telemetry.styles import *
 
@@ -135,6 +136,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             [self.exchange_online_view],
             [self.files_view],
             [self.security_gov_view],
+            [self.intune_policies_view],
             [self.power_automate_view]
         ]
         self.current_batch_index = 0
@@ -247,6 +249,15 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
+        # 6.5. Intune Policies Section
+        self.intune_policies_view = IntunePoliciesFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
+        )
+
         # 7. Power Automate Section
         self.power_automate_view = PowerAutomateUsageFrame(
             master=self,
@@ -270,6 +281,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.exchange_online_view,
             self.files_view,
             self.security_gov_view,
+            self.intune_policies_view,
             self.power_automate_view
         ]
         for view in views:
@@ -411,6 +423,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.files_view.sharepoint_view,
             self.files_view.onedrive_view,
             self.security_gov_view,
+            self.intune_policies_view,
             self.power_automate_view
         ]
 
@@ -430,6 +443,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "SharePointUsageFrame": "SharePoint Online Sites & Files Summary",
             "OneDriveUsageFrame": "OneDrive for Business Personal Accounts Summary",
             "DataSecurityGovernanceFrame": "Data Security & Governance",
+            "IntunePoliciesFrame": "Intune Policies (Device Configurations)",
             "PowerAutomateUsageFrame": "Power Automate (Workflows & Flows)"
         }
         
