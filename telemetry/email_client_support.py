@@ -126,6 +126,9 @@ def run_email_client_pipeline(client_id: str, client_secret: str, tenant_id: str
 
 
 class EmailClientSupportFrame(ctk.CTkFrame):
+    def update_loading_text(self, text_msg):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.configure(text=f"⏳ {text_msg}")
     """Self-contained CustomTkinter component rendering Email Environment UI."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
@@ -180,15 +183,21 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         for w in self.grid_frame.winfo_children():
             w.destroy()
         f1 = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
-        ctk.CTkLabel(f1, text="⏳ Analyzing Email Clients...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        ctk.CTkLabel(f1, text="⏳ Analyzing Email Clients...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
+        pb1 = ctk.CTkProgressBar(f1, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
+        pb1.pack(pady=(0, 20))
+        pb1.start()
         f1.pack(fill="x", expand=True)
 
-        self.sub_title_2.pack(anchor="w", pady=(20, 10))
+        self.sub_title_2.pack(anchor="w", pady=(20, 5))
         self.pst_grid_frame.pack(fill="x", expand=True)
         for w in self.pst_grid_frame.winfo_children():
             w.destroy()
         f2 = ctk.CTkFrame(self.pst_grid_frame, fg_color="transparent")
-        ctk.CTkLabel(f2, text="⏳ Discovering PST Files...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        ctk.CTkLabel(f2, text="⏳ Discovering PST Files...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
+        pb2 = ctk.CTkProgressBar(f2, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
+        pb2.pack(pady=(0, 20))
+        pb2.start()
         f2.pack(fill="x", expand=True)
 
     def _set_state_error(self, error_msg):
@@ -203,7 +212,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower():
             display_msg = "Reports / Search telemetry permission required.\nPlease grant 'Reports.Read.All' and 'Files.Read.All' in Microsoft Entra ID."
 
-        ctk.CTkLabel(self.state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 10))
+        ctk.CTkLabel(self.state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
         self.state_frame.pack(fill="x", expand=True)
 
     def trigger_fetch(self, tenant, client_id, client_secret):

@@ -228,6 +228,9 @@ def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
 
 
 class DataSecurityGovernanceFrame(ctk.CTkFrame):
+    def update_loading_text(self, text_msg):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.configure(text=f"⏳ {text_msg}")
     """Self-contained customtkinter component wrapping Data Security & Governance UI."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
@@ -547,7 +550,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         for w in self.labels_grid.winfo_children():
             w.destroy()
         self.labels_state_frame = ctk.CTkFrame(self.labels_grid, fg_color="transparent")
-        ctk.CTkLabel(self.labels_state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.loading_label = __import__("customtkinter").CTkLabel(self.labels_state_frame, text=f"⏳ {msg}", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
+        self.loading_label.pack(pady=(20, 5))
+        pb = __import__("customtkinter").CTkProgressBar(self.labels_state_frame, mode="indeterminate", width=250, fg_color="#F3F4F6", progress_color="#2563EB")
+        pb.pack(pady=(0, 20))
+        pb.start()
         self.labels_state_frame.pack(fill="x", expand=True)
 
     def _set_labels_error(self, error_msg):
@@ -564,7 +571,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         for w in self.retention_grid.winfo_children():
             w.destroy()
         self.retention_state_frame = ctk.CTkFrame(self.retention_grid, fg_color="transparent")
-        ctk.CTkLabel(self.retention_state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.loading_label = __import__("customtkinter").CTkLabel(self.retention_state_frame, text=f"⏳ {msg}", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
+        self.loading_label.pack(pady=(20, 5))
+        pb = __import__("customtkinter").CTkProgressBar(self.retention_state_frame, mode="indeterminate", width=250, fg_color="#F3F4F6", progress_color="#2563EB")
+        pb.pack(pady=(0, 20))
+        pb.start()
         self.retention_state_frame.pack(fill="x", expand=True)
 
     def _set_retention_error(self, error_msg):
@@ -590,7 +601,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.status = "loading"
         self.on_status_change()
         
-        self.pack(fill="x", expand=True, pady=(20, 10))
+        self.pack(fill="x", expand=True, pady=(20, 5))
         
         # Pack Sensitivity Labels Section
         self.labels_header_frame.pack(fill="x", pady=(0, 10))
@@ -599,18 +610,18 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self._set_labels_loading("Retrieving Sensitivity labels...")
         
         # Pack Retention Policies Section
-        self.retention_header_frame.pack(fill="x", pady=(20, 10))
+        self.retention_header_frame.pack(fill="x", pady=(20, 5))
         self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
         self._set_retention_loading("Retrieving Retention policies...")
         
         # Pack Authentication Section
-        self.auth_header_frame.pack(fill="x", pady=(20, 10))
+        self.auth_header_frame.pack(fill="x", pady=(20, 5))
         self.auth_grid.pack(fill="x", expand=True, pady=(0, 15))
         self._set_auth_loading("Retrieving Conditional Access authentication mechanics...")
 
         
         # Pack eDiscovery Cases Section (static, show immediately)
-        self.ediscovery_header_frame.pack(fill="x", pady=(20, 10))
+        self.ediscovery_header_frame.pack(fill="x", pady=(20, 5))
         self.ediscovery_body_frame.pack(fill="x", expand=True, pady=(0, 15))
         
         self.btn_export_labels.configure(state="disabled")
@@ -677,7 +688,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         for w in self.auth_grid.winfo_children():
             w.destroy()
         self.auth_state_frame = ctk.CTkFrame(self.auth_grid, fg_color="transparent")
-        ctk.CTkLabel(self.auth_state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.loading_label = __import__("customtkinter").CTkLabel(self.auth_state_frame, text=f"⏳ {msg}", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
+        self.loading_label.pack(pady=(20, 5))
+        pb = __import__("customtkinter").CTkProgressBar(self.auth_state_frame, mode="indeterminate", width=250, fg_color="#F3F4F6", progress_color="#2563EB")
+        pb.pack(pady=(0, 20))
+        pb.start()
         self.auth_state_frame.pack(fill="x", expand=True)
 
     def _set_auth_error(self, error_msg):
@@ -687,7 +702,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         display_msg = error_msg
         if "401" in error_msg or "403" in error_msg or "permission" in error_msg.lower() or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower() or "policy.read" in error_msg.lower():
             display_msg = "Conditional Access telemetry permission required.\nPlease grant the 'Policy.Read.All' (or 'Policy.Read') application permission to your App Registration in Microsoft Entra ID."
-        ctk.CTkLabel(self.auth_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 10))
+        ctk.CTkLabel(self.auth_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
         ctk.CTkButton(self.auth_state_frame, text="Try Again", command=self._retry_auth_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
         self.auth_state_frame.pack(fill="x", expand=True)
 

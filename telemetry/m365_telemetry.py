@@ -173,7 +173,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self._create_entry(inner_pad, "Client Secret", self.lic_client_secrets, show="*")
 
         actions_frame = ctk.CTkFrame(self, fg_color="transparent")
-        actions_frame.pack(fill="x", pady=(20, 10))
+        actions_frame.pack(fill="x", pady=(20, 5))
 
         self.btn_lic_submit = ctk.CTkButton(
             actions_frame, text="Submit", width=160, height=40, corner_radius=20,
@@ -533,17 +533,17 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 text_color=COLOR_PRIMARY
             )
             
-            # Place in the center of the header frame if available (for Subscribed SKUs Frame)
-            if hasattr(view, "lic_header") and view.lic_header:
-                view.fetch_time_lbl.place(
-                    in_=view.lic_header,
-                    relx=0.5,
-                    rely=0.5,
-                    anchor="center"
+            # Automatically pack the timer into the header so Tkinter resolves layout clashes with buttons
+            header_target = getattr(view, "lic_header", getattr(view, "pa_header", getattr(view, "header", None)))
+            if header_target:
+                view.fetch_time_lbl.pack(
+                    in_=header_target,
+                    side="right",
+                    padx=(0, 15)
                 )
             else:
-                # Otherwise, place at the exact horizontal center of the card container, aligned vertically with the title
-                view.fetch_time_lbl.place(relx=0.5, rely=0.0, anchor="center", y=32)
+                # Place at top right of the card container inline with text (for views with no buttons)
+                view.fetch_time_lbl.place(relx=0.98, rely=0.0, anchor="ne", y=20)
 
         def display_sub_section_time(sub_sec, header_frame, elapsed):
             # Destroy old label if exists
@@ -556,21 +556,19 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                         pass
                 view.sub_section_timer_labels[sub_sec] = None
             
-            # Create a new floating label
+            # Create a new floating label, parented to the view to avoid clipping
             lbl = ctk.CTkLabel(
-                header_frame,
+                view,
                 text=f"⏱ {elapsed:.2f}s",
                 font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
                 text_color=COLOR_PRIMARY
             )
             
-            # Place in the exact center of the sub-section's header frame
-            # (completely safe: title/links on the left, export button on the right)
-            lbl.place(
+            # Pack safely to the right side of the header frame (auto-avoids export buttons)
+            lbl.pack(
                 in_=header_frame,
-                relx=0.5,
-                rely=0.5,
-                anchor="center"
+                side="right",
+                padx=(0, 15)
             )
                 
             view.sub_section_timer_labels[sub_sec] = lbl

@@ -157,7 +157,10 @@ class CalendarTelemetryFrame(ctk.CTkFrame):
     def _set_state_loading(self, msg="Loading..."):
         for w in self.state_frame.winfo_children():
             w.destroy()
-        ctk.CTkLabel(self.state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        ctk.CTkLabel(self.state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
+        self.progress = __import__("customtkinter").CTkProgressBar(self.state_frame, mode="indeterminate", width=250, fg_color="#F3F4F6", progress_color="#2563EB")
+        self.progress.pack(pady=(0, 20))
+        self.progress.start()
         self.state_frame.pack(fill="x", expand=True)
 
     def _set_state_error(self, error_msg):

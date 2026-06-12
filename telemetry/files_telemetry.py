@@ -19,6 +19,9 @@ from telemetry.styles import *
 from telemetry.sharepoint_onedrive_usage import SharePointUsageFrame, OneDriveUsageFrame
 
 class FilesTelemetryFrame(ctk.CTkFrame):
+    def update_loading_text(self, text_msg):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.configure(text=f"⏳ {text_msg}")
     """Uber section container hosting SharePoint and OneDrive telemetry frames vertically stacked."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):

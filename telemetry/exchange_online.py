@@ -24,6 +24,9 @@ from telemetry.exchange_connectors_ui import ExchangeConnectorsFrame
 from telemetry.mail_security import MailSecurityFrame
 
 class ExchangeOnlineFrame(ctk.CTkFrame):
+    def update_loading_text(self, text_msg):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.configure(text=f"⏳ {text_msg}")
     """Uber section container hosting Mailbox, Calendar, Apps, and Email Client telemetry frames vertically stacked."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
@@ -163,10 +166,11 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         ]
         if "loading" in sub_statuses or getattr(self.mail_security_view, 'loading', False):
             self.status = "loading"
-        elif "success" in sub_statuses:
-            self.status = "success"
         else:
-            self.status = "error"
+            if "success" in sub_statuses:
+                self.status = "success"
+            else:
+                self.status = "error"
         self.on_status_change()
 
     def cancel(self):
