@@ -70,8 +70,12 @@ def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str
         ("https://graph.microsoft.com/v1.0/reports/getSharePointActivityUserDetail(period='D180')", "SharePointActivityUserDetail(180d).csv")
     ]
     
+    def report_progress(progress_val):
+        if status_callback:
+            status_callback("Fetching Reports", progress=progress_val)
+
     logger.info("Downloading reports in batch concurrently...")
-    reports_service.download_reports_batch(reports, reports_dir)
+    reports_service.download_reports_batch(reports, reports_dir, progress_callback=report_progress)
     
     if status_callback:
         status_callback("Aggregating Data")

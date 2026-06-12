@@ -103,9 +103,12 @@ class ReportsService:
         finally:
             self.client.release_token(token_slot)
 
-    def download_reports_batch(self, reports: List[Tuple[str, str]], output_dir: str) -> None:
+    def download_reports_batch(self, reports: List[Tuple[str, str]], output_dir: str, progress_callback=None) -> None:
         """Downloads a list of reports concurrently using thread executors."""
         logger.info("Starting parallel batch download for %d reports...", len(reports))
+        
+        completed_count = 0
+        total_reports = len(reports)
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(reports)) as executor:
             futures = [
@@ -115,6 +118,12 @@ class ReportsService:
             # Gather all futures, raising exceptions if any thread failed
             for future in concurrent.futures.as_completed(futures):
                 future.result()
+                completed_count += 1
+                if progress_callback:
+                    try:
+                        progress_callback(completed_count / total_reports)
+                    except Exception as e:
+                        logger.warning("Failed to invoke progress callback: %s", e)
 
     def download_o365_active_user_detail(self, output_dir: str) -> None:
         """Downloads the Office 365 active user details CSV report (180 days)."""

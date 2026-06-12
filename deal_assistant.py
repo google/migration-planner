@@ -396,7 +396,16 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             justify="center",
             wraplength=700
         )
-
+        # Progress loading bar (hidden by default)
+        self.progress_bar = ctk.CTkProgressBar(
+            self.form_container,
+            width=250,
+            height=8,
+            corner_radius=4,
+            progress_color=COLOR_PRIMARY,
+            fg_color="#E2E8F0"
+        )
+        self.progress_bar.set(0)
         # Disclaimer Box always packed at bottom of self.container (No hardcoded width, center-aligned)
         self.disclaimer_card = ctk.CTkFrame(
             self.container,
@@ -430,24 +439,37 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             self.status_lbl.pack(pady=10)
             if self.results_frame:
                 self.results_frame.pack_forget()
+        else:
+            self.status_lbl.pack_forget()
+            self.progress_bar.pack_forget()
 
-    def update_status(self, step):
+    def update_status(self, step, progress=None):
         if step == "Fetching Reports":
             msg = "⏳ Fetching Reports..."
+            self.controller.after(0, lambda: self.progress_bar.pack(pady=(0, 10)))
+            if progress is not None:
+                self.controller.after(0, lambda: self.progress_bar.set(progress))
+            else:
+                self.controller.after(0, lambda: self.progress_bar.set(0))
         elif step == "Aggregating Data":
             msg = "⏳ Aggregating Data..."
+            self.controller.after(0, lambda: self.progress_bar.pack_forget())
         elif step == "Selecting features":
             msg = "⏳ Selecting telemetry features..."
+            self.controller.after(0, lambda: self.progress_bar.pack_forget())
         elif step == "Generating insights using Gemini":
             msg = "⏳ Generating insights using Gemini..."
+            self.controller.after(0, lambda: self.progress_bar.pack_forget())
         else:
             msg = f"⏳ {step}..."
+            self.controller.after(0, lambda: self.progress_bar.pack_forget())
             
         self.controller.after(0, lambda: self.status_lbl.configure(text=msg, text_color=COLOR_PRIMARY))
 
     def on_pipeline_success(self, result):
         self.set_loading_state(False)
         self.status_lbl.pack_forget() # Hide the status label on success
+        self.progress_bar.pack_forget()
         
         self.personas_list = result.get("personas", [])
         self.output_csv = result.get("dataset_path")
@@ -468,6 +490,7 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             text_color=COLOR_ERROR
         )
         self.status_lbl.pack(pady=10)
+        self.progress_bar.pack_forget()
 
     def show_regenerate_form(self):
         if self.results_frame:
@@ -688,7 +711,7 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
                     gemini_api_key=api_key,
                     output_csv_path=output_csv,
                     strategy=self.strategy_var.get(),
-                    status_callback=lambda step: self.update_status(step)
+                    status_callback=lambda step, progress=None: self.update_status(step, progress)
                 )
                 
                 # Success
