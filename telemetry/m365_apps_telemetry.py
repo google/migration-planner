@@ -19,6 +19,9 @@ from telemetry.styles import *
 from telemetry.active_users_usage import ActiveUsersUsageFrame, ActiveUsersTrendFrame, M365AppUsageFrame
 
 class M365AppsTelemetryFrame(ctk.CTkFrame):
+    def update_loading_text(self, text_msg):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.configure(text=f"⏳ {text_msg}")
     """Uber section container hosting Active Users Usage, Trend, and M365 App Usage frames vertically stacked."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
@@ -57,9 +60,7 @@ class M365AppsTelemetryFrame(ctk.CTkFrame):
         self.active_users_view.configure(fg_color="transparent", border_width=0)
         self.active_users_view.pack(fill="x", expand=True, pady=(0, 5))
 
-        # Divider 1
-        self.divider1 = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
-        self.divider1.pack(fill="x", pady=10)
+
 
         # Active Users Trend Sub-frame
         self.active_users_trend_view = ActiveUsersTrendFrame(
@@ -72,9 +73,7 @@ class M365AppsTelemetryFrame(ctk.CTkFrame):
         self.active_users_trend_view.configure(fg_color="transparent", border_width=0)
         self.active_users_trend_view.pack(fill="x", expand=True, pady=(0, 5))
 
-        # Divider 2
-        self.divider2 = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
-        self.divider2.pack(fill="x", pady=10)
+
 
         # M365 App Usage Sub-frame
         self.m365_apps_view = M365AppUsageFrame(
@@ -94,9 +93,8 @@ class M365AppsTelemetryFrame(ctk.CTkFrame):
         self.pack_forget()
         self.active_users_view.reset_view()
         self.active_users_trend_view.reset_view()
+        self.active_users_trend_view.reset_view()
         self.m365_apps_view.reset_view()
-        self.divider1.pack_forget()
-        self.divider2.pack_forget()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         """Displays container and delegates fetches to all sub-views."""
@@ -104,8 +102,6 @@ class M365AppsTelemetryFrame(ctk.CTkFrame):
         self.on_status_change()
 
         self.pack(fill="x", expand=True, pady=10)
-        self.divider1.pack(fill="x", pady=10)
-        self.divider2.pack(fill="x", pady=10)
 
         self.active_users_view.trigger_fetch(tenant, client_id, client_secret)
         self.active_users_trend_view.trigger_fetch(tenant, client_id, client_secret)
@@ -116,10 +112,11 @@ class M365AppsTelemetryFrame(ctk.CTkFrame):
         sub_statuses = [self.active_users_view.status, self.active_users_trend_view.status, self.m365_apps_view.status]
         if "loading" in sub_statuses:
             self.status = "loading"
-        elif "success" in sub_statuses:
-            self.status = "success"
         else:
-            self.status = "error"
+            if "success" in sub_statuses:
+                self.status = "success"
+            else:
+                self.status = "error"
         self.on_status_change()
 
     def cancel(self):

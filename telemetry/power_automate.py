@@ -361,6 +361,9 @@ class PowerAutomateScanner:
 # =================================================================================
 
 class PowerAutomateUsageFrame(ctk.CTkFrame):
+    def update_loading_text(self, text_msg):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.configure(text=f"⏳ {text_msg}")
     """Self-contained component wrapping Power Automate UI and export controls."""
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
@@ -381,12 +384,12 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
         
-        pa_header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        pa_header.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(pa_header, text="Power Automate", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.pa_header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.pa_header.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.pa_header, text="Power Automate", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         
         self.btn_export_pa = ctk.CTkButton(
-            pa_header, text="Export Complex Flows", width=160, height=32, corner_radius=16,
+            self.pa_header, text="Export Complex Flows", width=160, height=32, corner_radius=16,
             font=FONT_BODY_BOLD, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             command=self.export_complex_flows, state="disabled"
@@ -439,7 +442,11 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
     def _set_state_loading(self, msg="Loading..."):
         for w in self.state_frame.winfo_children():
             w.destroy()
-        ctk.CTkLabel(self.state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.loading_label = __import__("customtkinter").CTkLabel(self.state_frame, text=f"⏳ {msg}", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
+        self.loading_label.pack(pady=(20, 5))
+        pb = __import__("customtkinter").CTkProgressBar(self.state_frame, mode="indeterminate", width=250, fg_color="#F3F4F6", progress_color="#2563EB")
+        pb.pack(pady=(0, 20))
+        pb.start()
         self.state_frame.pack(fill="x", expand=True)
 
     def _set_state_error(self, error_msg):
@@ -450,7 +457,7 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
             display_msg = "Management Link / Flow read permissions required."
 
-        ctk.CTkLabel(self.state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 10))
+        ctk.CTkLabel(self.state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
         ctk.CTkButton(self.state_frame, text="Try Again", command=self._retry_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
         self.state_frame.pack(fill="x", expand=True)
 

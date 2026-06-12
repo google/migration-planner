@@ -4,9 +4,12 @@ import requests
 from telemetry.styles import *
 
 class MailSecurityFrame(ctk.CTkFrame):
+    def update_loading_text(self, text_msg):
+        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+            self.loading_label.configure(text=f"⏳ {text_msg}")
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
-        super().__init__(master, fg_color="transparent", **kwargs)
+        super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
         self.on_status_change_cb = status_change_callback
@@ -23,19 +26,25 @@ class MailSecurityFrame(ctk.CTkFrame):
         
         self.last_data = {}
         
-        self.grid_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE_LIGHT)
+        self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
+        self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
         
-        header = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
-        header.pack(fill="x", padx=15, pady=(15, 5))
-        ctk.CTkLabel(header, text="Mail Security", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.header.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.header, text="Mail Security", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         
-        self.loading_label = ctk.CTkLabel(self.grid_frame, text="Loading Mail Security Data...", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB)
-        self.loading_label.pack(pady=20)
+        self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE_LIGHT)
+        
+        ctk.CTkLabel(self.grid_frame, text="⏳ Loading Mail Security Data...", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13)).pack(pady=(20, 5))
+        self.progress = ctk.CTkProgressBar(self.grid_frame, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
+        self.progress.pack(pady=(0, 20))
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         self.pack(fill="x", expand=True, pady=(0, 5))
         self.status = "loading"
         self.loading = True
+        if hasattr(self, 'progress') and self.progress:
+            self.progress.start()
         self.on_status_change()
         import threading
         threading.Thread(target=self._fetch_data, args=(tenant, client_id, client_secret), daemon=True).start()
@@ -139,10 +148,11 @@ class MailSecurityFrame(ctk.CTkFrame):
         self.loading = True
         self.grid_frame.pack_forget()
         for widget in self.grid_frame.winfo_children():
-            if widget != self.grid_frame.winfo_children()[0]: # Keep header
-                widget.destroy()
-        self.loading_label = ctk.CTkLabel(self.grid_frame, text="Loading Mail Security Data...", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB)
-        self.loading_label.pack(pady=20)
+            widget.destroy()
+        self.loading_label = ctk.CTkLabel(self.grid_frame, text="⏳ Loading Mail Security Data...", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
+        self.loading_label.pack(pady=(20, 5))
+        self.progress = ctk.CTkProgressBar(self.grid_frame, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
+        self.progress.pack(pady=(0, 20))
 
     def cancel(self):
         self.status = None
@@ -151,10 +161,17 @@ class MailSecurityFrame(ctk.CTkFrame):
 
     def on_status_change(self):
         try:
+            if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
+                self.loading_label.destroy()
+            if hasattr(self, 'progress') and self.progress.winfo_exists():
+                self.progress.stop()
+                self.progress.destroy()
+        except:
+            pass
+        try:
             self.loading_label.destroy()
         except:
             pass
-            
         if self.loading:
             return
             
