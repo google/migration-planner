@@ -1,0 +1,198 @@
+import customtkinter as ctk
+import time
+import requests
+from telemetry.styles import *
+
+class MailSecurityFrame(ctk.CTkFrame):
+    def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
+        self.semaphore = kwargs.pop("concurrency_semaphore", None)
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.log_msg = log_callback
+        self.get_credentials = credentials_callback
+        self.on_status_change_cb = status_change_callback
+        
+        self.status = None
+        self.loading = True
+        self.error_msg = None
+        
+        self.total_eop_users = 0
+        self.eop_skus = []
+        
+        self.total_defender_users = 0
+        self.defender_skus = []
+        
+        self.last_data = {}
+        
+        self.grid_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE_LIGHT)
+        
+        header = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+        header.pack(fill="x", padx=15, pady=(15, 5))
+        ctk.CTkLabel(header, text="Mail Security", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        
+        self.loading_label = ctk.CTkLabel(self.grid_frame, text="Loading Mail Security Data...", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB)
+        self.loading_label.pack(pady=20)
+
+    def trigger_fetch(self, tenant, client_id, client_secret):
+        self.pack(fill="x", expand=True, pady=(0, 5))
+        self.status = "loading"
+        self.loading = True
+        self.on_status_change()
+        import threading
+        threading.Thread(target=self._fetch_data, args=(tenant, client_id, client_secret), daemon=True).start()
+
+    def _fetch_data(self, tenant, c_id, c_secret):
+        try:
+            if not tenant or not c_id or not c_secret:
+                self.error_msg = "Missing credentials."
+                self.loading = False
+                self.on_status_change()
+                return
+
+            from util.auth_manager import TokenManager
+            tm = TokenManager(tenant_id=tenant, client_ids=[c_id], client_secrets=[c_secret], concurrency=1, retries=1, backoff=0)
+            tm.authenticate_all()
+            
+            slot = tm.get_valid_token_slot()
+            if not slot:
+                self.error_msg = "Authentication failed: No valid token."
+                self.loading = False
+                self.on_status_change()
+                return
+
+            token = slot["token"]
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            
+            url = "https://graph.microsoft.com/v1.0/subscribedSkus"
+            res = requests.get(url, headers=headers, timeout=15)
+            
+            tm.return_token_slot(slot)
+            
+            if res.status_code != 200:
+                self.error_msg = f"Graph API Error {res.status_code}: {res.text}"
+                self.loading = False
+                self.on_status_change()
+                return
+                
+            data = res.json().get("value", [])
+            
+            defender_skus_set = set()
+            eop_skus_set = set()
+            
+            defender_users = 0
+            eop_users = 0
+            
+            for sku in data:
+                raw_part_num = sku.get("skuPartNumber", "Unknown")
+                if isinstance(raw_part_num, list):
+                    part_num = ", ".join([str(x) for x in raw_part_num])
+                else:
+                    part_num = str(raw_part_num)
+                    
+                consumed = int(sku.get("consumedUnits", 0))
+                plans = sku.get("servicePlans", [])
+                
+                has_defender = False
+                has_eop = False
+                
+                for p in plans:
+                    if p.get("provisioningStatus") == "Success":
+                        name = p.get("servicePlanName", "").upper()
+                        if "DEFENDER_PLATFORM_FOR_OFFICE" in name or "ATP_ENTERPRISE" in name:
+                            has_defender = True
+                        elif "EXCHANGE_S_ENTERPRISE" in name or "EXCHANGE_S_STANDARD" in name or "EXCHANGE_S_FOUNDATION" in name:
+                            has_eop = True
+                            
+                if has_defender:
+                    defender_skus_set.add(part_num)
+                    defender_users += consumed
+                elif has_eop:
+                    eop_skus_set.add(part_num)
+                    eop_users += consumed
+                    
+            self.defender_skus = list(defender_skus_set)
+            self.total_defender_users = defender_users
+            
+            self.eop_skus = list(eop_skus_set)
+            self.total_eop_users = eop_users
+            
+            self.last_data = {
+                "defender": {"skus": self.defender_skus, "users": self.total_defender_users},
+                "eop": {"skus": self.eop_skus, "users": self.total_eop_users}
+            }
+            
+            self.status = "success"
+            self.loading = False
+            self.on_status_change()
+            self.on_status_change_cb()
+            
+        except Exception as e:
+            self.error_msg = f"Exception: {str(e)}"
+            self.status = "error"
+            self.loading = False
+            self.on_status_change()
+            self.on_status_change_cb()
+
+    def reset_view(self):
+        self.pack_forget()
+        self.status = None
+        self.error_msg = None
+        self.loading = True
+        self.grid_frame.pack_forget()
+        for widget in self.grid_frame.winfo_children():
+            if widget != self.grid_frame.winfo_children()[0]: # Keep header
+                widget.destroy()
+        self.loading_label = ctk.CTkLabel(self.grid_frame, text="Loading Mail Security Data...", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB)
+        self.loading_label.pack(pady=20)
+
+    def cancel(self):
+        self.status = None
+        self.loading = False
+        self.reset_view()
+
+    def on_status_change(self):
+        try:
+            self.loading_label.destroy()
+        except:
+            pass
+            
+        if self.loading:
+            return
+            
+        if self.error_msg:
+            ctk.CTkLabel(self.grid_frame, text=self.error_msg, text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM).pack(pady=10)
+            self.grid_frame.pack(fill="x", expand=True, pady=10)
+            return
+            
+        metrics_grid = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
+        metrics_grid.pack(fill="x", padx=10, pady=(5, 5))
+        
+        headers = ["Mail Security Configuration", "Detected SKUs", "Affected Users"]
+        for i in range(3):
+            metrics_grid.grid_columnconfigure(i, weight=1 if i == 2 else 2)
+            
+        for col_idx, head_text in enumerate(headers):
+            cell = ctk.CTkFrame(metrics_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+            
+        rows_data = []
+        if self.defender_skus:
+            rows_data.append(("Microsoft Defender for Office 365", ", ".join(self.defender_skus), str(self.total_defender_users)))
+        if self.eop_skus:
+            rows_data.append(("Exchange Online Protection (Baseline)", ", ".join(self.eop_skus), str(self.total_eop_users)))
+            
+        if not rows_data:
+            c = ctk.CTkFrame(metrics_grid, fg_color=COLOR_SURFACE, corner_radius=0)
+            c.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c, text="No Mail Security SKUs detected.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=12)
+        else:
+            for r_idx, vals in enumerate(rows_data, start=1):
+                bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+                for c_idx, val in enumerate(vals):
+                    c = ctk.CTkFrame(metrics_grid, fg_color=bg_style, corner_radius=0)
+                    c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
+                    ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
+                    
+        disclaimer = ctk.CTkLabel(self.grid_frame, text="Note: Users can track outbound connectors displayed below to identify 3rd-party security apps.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, anchor="w")
+        disclaimer.pack(fill="x", padx=15, pady=(5, 15))
+        self.grid_frame.pack(fill="x", expand=True, pady=10)
