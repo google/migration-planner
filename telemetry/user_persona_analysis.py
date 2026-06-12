@@ -21,10 +21,13 @@ from core.graph.client import GraphClient
 from core.graph.reports import ReportsService
 from telemetry.persona import (
     generate_user_activity_dataset,
+    generate_full_unfiltered_dataset,
     generate_personas_from_dataset,
     classify_users_to_personas,
     perform_kmeans_clustering,
-    generate_kmeans_personas_gemini
+    generate_kmeans_personas_gemini,
+    select_telemetry_features_gemini,
+    generate_personas_from_reduced_dataset
 )
 
 # Bind to the async logger initialized in m365_telemetry.py
@@ -74,7 +77,10 @@ def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str
         status_callback("Aggregating Data")
         
     logger.info("Reports download complete. Starting dataset generation...")
-    generate_user_activity_dataset(reports_dir, output_csv_path)
+    if strategy == "feature_selection":
+        generate_full_unfiltered_dataset(reports_dir, output_csv_path)
+    else:
+        generate_user_activity_dataset(reports_dir, output_csv_path)
     
     # 2. Execute Selected Strategy
     if strategy == "kmeans":
@@ -104,6 +110,48 @@ def run_user_persona_pipeline(tenant_id: str, client_id: str, client_secret: str
         
         # Save the updated clustered dataset
         df_clustered.to_csv(output_csv_path, index=False)
+        
+        return {
+            "personas": personas_list,
+            "dataset_path": output_csv_path
+        }
+        
+    elif strategy == "feature_selection":
+        if status_callback:
+            status_callback("Selecting features")
+            
+        logger.info("Executing AI feature selection strategy - Step 1: Selecting features...")
+        selected_features = select_telemetry_features_gemini(gemini_api_key, output_csv_path)
+        logger.info(f"Features selected by Gemini: {selected_features}")
+        
+        # Reduce the dataset to only selected features + identity columns
+        df_full = pd.read_csv(output_csv_path)
+        keep_cols = ['User Principal Name', 'App_Access_Profile']
+        valid_selected = [col for col in selected_features if col in df_full.columns]
+        
+        df_reduced = df_full[keep_cols + valid_selected]
+        df_reduced.to_csv(output_csv_path, index=False)
+        
+        if status_callback:
+            status_callback("Generating insights using Gemini")
+            
+        logger.info("Executing AI feature selection strategy - Step 2: Generating personas...")
+        personas_response = generate_personas_from_reduced_dataset(gemini_api_key, output_csv_path, selected_features)
+        
+        # Classify users in Python
+        logger.info("Classifying users to generated personas in Python...")
+        df_users = pd.read_csv(output_csv_path)
+        personas_list = personas_response.get("personas", [])
+        
+        assigned_persona_ids = classify_users_to_personas(df_users, personas_list)
+        df_users['Assigned_Persona_ID'] = assigned_persona_ids
+        
+        # Map persona IDs to Titles
+        persona_titles = {p["id"]: p["title"] for p in personas_list}
+        df_users['Assigned_Persona_Title'] = df_users['Assigned_Persona_ID'].map(lambda p_id: persona_titles.get(p_id, "Unknown"))
+        
+        # Save the updated dataset containing persona assignments
+        df_users.to_csv(output_csv_path, index=False)
         
         return {
             "personas": personas_list,

@@ -155,3 +155,124 @@ Do not include any other markdown formatting, code block fences, or text outside
     except (KeyError, IndexError, ValueError) as e:
         logger.error(f"Failed to parse Gemini response: {e}. Raw response: {response}")
         raise ValueError(f"Failed to parse Gemini response: {e}")
+
+
+def select_telemetry_features_gemini(api_key: str, dataset_path: str) -> list[str]:
+    """Asks Gemini to analyze the CSV dataset headers and select the most relevant telemetry features
+    to distinguish employee personas.
+    """
+    if not os.path.exists(dataset_path):
+        raise FileNotFoundError(f"Dataset not found at: {dataset_path}")
+        
+    # Read the headers of the dataset to get available columns
+    df_headers = pd.read_csv(dataset_path, nrows=0)
+    available_cols = [col for col in df_headers.columns if col not in ['User Principal Name', 'App_Access_Profile']]
+
+    prompt = f"""You are an expert IT Operations and SaaS Licensing Analyst.
+I have combined several Microsoft 365 usage reports containing detailed employee activity logs.
+
+Here is the list of all available telemetry columns in the dataset:
+{json.dumps(available_cols, indent=2)}
+
+From a classification standpoint, which of these telemetry features would be most relevant to cluster employees into distinct behavioral personas (e.g., active communicators, file-centric users, collaborative power users, inactive accounts)? Select a subset of these features (typically 3 to 6 columns) that are most informative and non-redundant.
+
+Output your response strictly as a JSON object matching this schema:
+{{
+  "selected_features": [
+    "Email_Send_Count",
+    "Teams_Private_Chat_Message_Count"
+  ]
+}}
+
+Do not include any other markdown formatting, code block fences, or text outside the JSON."""
+
+    client = genai.Client(api_key=api_key)
+    logger.info("Calling Gemini feature selection with SDK model: gemini-flash-latest...")
+    response = client.models.generate_content(
+        model="gemini-flash-latest",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json"
+        )
+    )
+    
+    try:
+        data = json.loads(response.text)
+        return data.get("selected_features", [])
+    except Exception as e:
+        logger.error(f"Failed to parse selected features JSON: {e}. Raw: {response.text}")
+        # Default fallback to all columns if LLM call fails
+        return available_cols
+
+
+def generate_personas_from_reduced_dataset(api_key: str, dataset_path: str, selected_features: list[str]) -> dict:
+    """Reduces the dataset columns in Python and calls Gemini to define personas on the reduced set."""
+    if not os.path.exists(dataset_path):
+        raise FileNotFoundError(f"Dataset not found at: {dataset_path}")
+        
+    df = pd.read_csv(dataset_path)
+    
+    # Keep UPN and access profile, plus selected columns
+    keep_cols = ['User Principal Name', 'App_Access_Profile']
+    valid_selected = [col for col in selected_features if col in df.columns]
+    
+    df_reduced = df[keep_cols + valid_selected]
+    csv_data = df_reduced.to_csv(index=False)
+    
+    metrics_schema_fields = {}
+    for col in valid_selected:
+        metrics_schema_fields[col] = "high/medium/low"
+
+    prompt = f"""You are an expert M365 telemetry and data analyst.
+Below is the reduced M365 user activity dataset (180 days) containing only the most distinguishing telemetry features selected for all users in a tenant.
+
+CSV Dataset:
+{csv_data}
+
+Based on this M365 dataset, analyze the behavioral patterns and define 3 to 5 distinct user personas that represent the typical usage behavior of the users in this tenant.
+
+It is CRITICAL to include an 'Inactive or Idle Accounts' persona (with all metrics set to 'low') if there are accounts in the dataset with zero or near-zero activity across all telemetry counts. These represent inactive, unlicensed, or archive accounts.
+
+For each persona, output:
+1. A unique ID (e.g., "email_collaborator").
+2. A title/headline (e.g., "Email Collaborator").
+3. A representative emoji/icon (e.g., "📧").
+4. A brief description of this persona.
+5. 2 to 4 behavior patterns (bullet points explaining their characteristics).
+6. A metric profile specifying the relative usage of each behavior category as "high", "medium", or "low".
+
+Output your response strictly as a JSON object matching this schema:
+{{
+  "personas": [
+    {{
+      "id": "email_collaborator",
+      "title": "Email Collaborator",
+      "emoji": "📧",
+      "description": "Users who heavily rely on Email communications...",
+      "behavior_patterns": [
+        "High volume of email sends",
+        "Active calendar organizer"
+      ],
+      "metrics": {json.dumps(metrics_schema_fields)}
+    }}
+  ]
+}}
+
+Do not include any other markdown formatting, code block fences, or text outside the JSON."""
+
+    client = genai.Client(api_key=api_key)
+    logger.info("Calling Gemini generation with reduced dataset using SDK model: gemini-flash-latest...")
+    response = client.models.generate_content(
+        model="gemini-flash-latest",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json"
+        )
+    )
+        
+    try:
+        candidate_text = response.text
+        return json.loads(candidate_text)
+    except (KeyError, IndexError, ValueError) as e:
+        logger.error(f"Failed to parse Gemini response: {e}. Raw response: {response}")
+        raise ValueError(f"Failed to parse Gemini response: {e}")

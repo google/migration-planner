@@ -176,3 +176,152 @@ def generate_user_activity_dataset(reports_dir: str, output_csv_path: str) -> No
                 logger.info("Temporary database removed successfully.")
             except Exception as e:
                 logger.warning(f"Could not remove temporary database file: {e}")
+
+
+def generate_full_unfiltered_dataset(reports_dir: str, output_csv_path: str) -> None:
+    """Combines all downloaded reports on UPN without dropping any columns, preserving all telemetry features."""
+    temp_db_path = os.path.join(reports_dir, "temp_full_persona_data.db")
+    
+    if os.path.exists(temp_db_path):
+        try: os.remove(temp_db_path)
+        except Exception: pass
+        
+    conn = sqlite3.connect(temp_db_path)
+    cursor = conn.cursor()
+    
+    report_files = {
+        "Office365ActiveUserDetail(180d).csv": "office365_active_users",
+        "EmailActivityUserDetail(180d).csv": "email_activity",
+        "TeamsUserActivityUserDetail(180d).csv": "teams_activity",
+        "OneDriveUsageAccountDetail(180d).csv": "onedrive_usage",
+        "SharePointActivityUserDetail(180d).csv": "sharepoint_activity"
+    }
+    
+    try:
+        # Load CSVs
+        for csv_name, table_name in report_files.items():
+            csv_path = os.path.join(reports_dir, csv_name)
+            if not os.path.exists(csv_path):
+                continue
+            for chunk in pd.read_csv(csv_path, chunksize=20000, encoding="utf-8-sig"):
+                chunk.columns = chunk.columns.str.strip()
+                chunk.to_sql(table_name, conn, if_exists="append", index=False)
+                
+        # Check table existence helper
+        def table_exists(t_name):
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (t_name,))
+            return cursor.fetchone() is not None
+
+        # Indices
+        if table_exists("office365_active_users"):
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_base_upn ON office365_active_users (`User Principal Name`);")
+        if table_exists("email_activity"):
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_upn ON email_activity (`User Principal Name`);")
+        if table_exists("teams_activity"):
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_teams_upn ON teams_activity (`User Principal Name`);")
+        if table_exists("onedrive_usage"):
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_onedrive_upn ON onedrive_usage (`Owner Principal Name`);")
+        if table_exists("sharepoint_activity"):
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sp_upn ON sharepoint_activity (`User Principal Name`);")
+        conn.commit()
+        
+        # Build SELECT query dynamically by inspecting columns of loaded tables
+        tables_cols = {}
+        for table_name in report_files.values():
+            if table_exists(table_name):
+                cursor.execute(f"PRAGMA table_info({table_name});")
+                cols = [row[1] for row in cursor.fetchall()]
+                tables_cols[table_name] = cols
+            
+        # Select all unique columns across tables
+        select_parts = []
+        
+        # Base table columns
+        for col in tables_cols.get("office365_active_users", []):
+            if col not in ["Report Refresh Date", "Last Activity Date"]:
+                select_parts.append(f"b.`{col}` AS `{col}`")
+                
+        # Email table columns
+        for col in tables_cols.get("email_activity", []):
+            if col not in ["User Principal Name", "Report Refresh Date", "Last Activity Date"]:
+                select_parts.append(f"e.`{col}` AS `Email_{col.replace(' ', '_')}`")
+                
+        # Teams table columns
+        for col in tables_cols.get("teams_activity", []):
+            if col not in ["User Principal Name", "Report Refresh Date", "Last Activity Date"]:
+                select_parts.append(f"t.`{col}` AS `Teams_{col.replace(' ', '_')}`")
+                
+        # OneDrive table columns
+        for col in tables_cols.get("onedrive_usage", []):
+            if col not in ["Owner Principal Name", "Report Refresh Date", "Last Activity Date", "User Principal Name"]:
+                select_parts.append(f"o.`{col}` AS `OneDrive_{col.replace(' ', '_')}`")
+                
+        # SharePoint table columns
+        for col in tables_cols.get("sharepoint_activity", []):
+            if col not in ["User Principal Name", "Report Refresh Date", "Last Activity Date"]:
+                select_parts.append(f"s.`{col}` AS `SharePoint_{col.replace(' ', '_')}`")
+                
+        join_clauses = []
+        if table_exists("email_activity"):
+            join_clauses.append("LEFT JOIN email_activity e ON b.`User Principal Name` = e.`User Principal Name`")
+        if table_exists("teams_activity"):
+            join_clauses.append("LEFT JOIN teams_activity t ON b.`User Principal Name` = t.`User Principal Name`")
+        if table_exists("onedrive_usage"):
+            join_clauses.append("LEFT JOIN onedrive_usage o ON b.`User Principal Name` = o.`Owner Principal Name`")
+        if table_exists("sharepoint_activity"):
+            join_clauses.append("LEFT JOIN sharepoint_activity s ON b.`User Principal Name` = s.`User Principal Name`")
+            
+        query = f"""
+        SELECT 
+            {", ".join(select_parts)}
+        FROM office365_active_users b
+        {" ".join(join_clauses)}
+        """
+        
+        if os.path.exists(output_csv_path):
+            os.remove(output_csv_path)
+            
+        def determine_access_profile(row):
+            def is_truthy(val):
+                if val is None:
+                    return False
+                if isinstance(val, bool):
+                    return val
+                s = str(val).strip().lower()
+                return s in ['true', '1', '1.0', 'yes']
+
+            apps = []
+            if is_truthy(row.get('Has Exchange License')): apps.append('Email')
+            if is_truthy(row.get('Has Teams License')): apps.append('Teams')
+            if is_truthy(row.get('Has OneDrive License')) or is_truthy(row.get('Has SharePoint License')): apps.append('Files')
+            
+            if len(apps) == 3: return "Full Suite Access"
+            if len(apps) == 0: return "Restricted / Unlicensed"
+            return "Partial Access: " + " + ".join(apps)
+
+        first_chunk = True
+        for chunk in pd.read_sql_query(query, conn, chunksize=20000):
+            # Clean whitespaces in column values or headers if any
+            chunk.columns = chunk.columns.str.strip()
+            
+            # Calculate App Access Profile
+            chunk['App_Access_Profile'] = chunk.apply(determine_access_profile, axis=1)
+            
+            # Fill NaNs with 0 for numerical columns
+            num_cols = chunk.select_dtypes(include=['float64', 'int64']).columns
+            chunk[num_cols] = chunk[num_cols].fillna(0)
+            
+            # Reorder columns: put App_Access_Profile next to User Principal Name
+            cols = chunk.columns.tolist()
+            if 'App_Access_Profile' in cols and 'User Principal Name' in cols:
+                cols.insert(1, cols.pop(cols.index('App_Access_Profile')))
+                chunk = chunk[cols]
+                
+            chunk.to_csv(output_csv_path, mode='a', index=False, header=first_chunk)
+            first_chunk = False
+            
+    finally:
+        conn.close()
+        if os.path.exists(temp_db_path):
+            try: os.remove(temp_db_path)
+            except Exception: pass

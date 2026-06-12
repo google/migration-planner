@@ -360,6 +360,19 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
         )
         self.radio_kmeans.pack(anchor="w", pady=5)
 
+        # Radio option 3: AI Feature Selection + LLM classification
+        self.radio_feature_selection = ctk.CTkRadioButton(
+            self.strategy_frame,
+            text="Strategy 3: AI Feature selection & Direct LLM classification",
+            variable=self.strategy_var,
+            value="feature_selection",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER
+        )
+        self.radio_feature_selection.pack(anchor="w", pady=5)
+
         # Generate Button
         self.generate_btn = ctk.CTkButton(
             self.form_container,
@@ -410,6 +423,7 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
         self.api_key_entry.configure(state=state)
         self.radio_heuristic.configure(state=state)
         self.radio_kmeans.configure(state=state)
+        self.radio_feature_selection.configure(state=state)
         
         if is_loading:
             self.status_lbl.configure(text_color=COLOR_PRIMARY)
@@ -422,6 +436,8 @@ class UserPersonaAnalysisView(ctk.CTkFrame):
             msg = "⏳ Fetching Reports..."
         elif step == "Aggregating Data":
             msg = "⏳ Aggregating Data..."
+        elif step == "Selecting features":
+            msg = "⏳ Selecting telemetry features..."
         elif step == "Generating insights using Gemini":
             msg = "⏳ Generating insights using Gemini..."
         else:

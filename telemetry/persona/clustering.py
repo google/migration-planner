@@ -23,28 +23,20 @@ logger = logging.getLogger("M365TelemetryAsyncLogger.UserPersonaAnalysis.cluster
 
 def classify_users_to_personas(df_users: pd.DataFrame, personas_data: list) -> list:
     """Clusts and maps M365 users to defined personas in Python using distance calculations."""
-    cols_to_normalize = [
-        'Email_Sends', 'Meetings_Organized_Via_Email', 
-        'Teams_Private_Chats', 'Teams_Meetings_Attended', 
-        'OneDrive_Active_Files', 'SharePoint_Files_Edited', 
-        'SharePoint_Shared_Internally', 'SharePoint_Shared_Externally', 
-        'OneDrive_Storage_GB'
-    ]
+    # Dynamically normalize all numeric columns present in the dataframe
+    cols_to_normalize = df_users.select_dtypes(include=['float64', 'int64']).columns.tolist()
     
     # Calculate ranks (0 to 1) for each column in the dataframe
     ranks_df = pd.DataFrame(index=df_users.index)
     for col in cols_to_normalize:
-        if col in df_users.columns:
-            if df_users[col].max() == df_users[col].min():
-                # If all values are 0, rank is 0.0, else 0.5
-                ranks_df[col] = 0.0 if df_users[col].max() == 0 else 0.5
-            else:
-                # Calculate percentile rank
-                ranks_df[col] = df_users[col].rank(pct=True)
-                # Force absolute 0 values to rank 0.0 so they don't get inflated due to ties at 0
-                ranks_df.loc[df_users[col] == 0, col] = 0.0
+        if df_users[col].max() == df_users[col].min():
+            # If all values are 0, rank is 0.0, else 0.5
+            ranks_df[col] = 0.0 if df_users[col].max() == 0 else 0.5
         else:
-            ranks_df[col] = 0.0
+            # Calculate percentile rank
+            ranks_df[col] = df_users[col].rank(pct=True)
+            # Force absolute 0 values to rank 0.0 so they don't get inflated due to ties at 0
+            ranks_df.loc[df_users[col] == 0, col] = 0.0
 
     # Map profile levels to numeric values
     level_map = {
@@ -53,19 +45,11 @@ def classify_users_to_personas(df_users: pd.DataFrame, personas_data: list) -> l
         "low": 0.1
     }
 
-    # Define normalized mapping of persona metrics to df columns
-    norm_metric_keys = {
-        "emailsends": "Email_Sends",
-        "meetingsorganized": "Meetings_Organized_Via_Email",
-        "teamschats": "Teams_Private_Chats",
-        "teamsmeetings": "Teams_Meetings_Attended",
-        "onedrive_files": "OneDrive_Active_Files",  # backup keys
-        "onedrivefiles": "OneDrive_Active_Files",
-        "sharepointedits": "SharePoint_Files_Edited",
-        "sharepointsharedinternal": "SharePoint_Shared_Internally",
-        "sharepointsharedexternal": "SharePoint_Shared_Externally",
-        "onedrivestorage": "OneDrive_Storage_GB"
-    }
+    # Dynamically define normalized mapping of persona metrics to df columns
+    norm_metric_keys = {}
+    for col in cols_to_normalize:
+        norm_k = str(col).lower().replace("_", "").replace("-", "").replace(" ", "")
+        norm_metric_keys[norm_k] = col
 
     user_personas = []
     
@@ -87,6 +71,9 @@ def classify_users_to_personas(df_users: pd.DataFrame, personas_data: list) -> l
             distance = 0.0
             
             for p_key, col_name in norm_metric_keys.items():
+                # For Strategy 3 (feature selection), only calculate distance for selected features
+                if p_key not in norm_p_metrics:
+                    continue
                 # Get the value from the normalized metrics dict
                 p_val_str = str(norm_p_metrics.get(p_key, "low")).lower()
                 p_val = level_map.get(p_val_str, 0.1)
