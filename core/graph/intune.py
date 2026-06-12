@@ -18,7 +18,7 @@ import re
 import time
 from core.graph.client import GraphClient
 
-logger = logging.getLogger("IntuneService")
+logger = logging.getLogger("core.graph.intune")
 
 class IntuneService:
     def __init__(self, client: GraphClient):

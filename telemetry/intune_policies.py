@@ -22,7 +22,7 @@ from telemetry.styles import *
 from core.graph.client import GraphClient
 from core.graph.intune import IntuneService
 
-usage_logger = logging.getLogger("IntunePoliciesUI")
+usage_logger = logging.getLogger("M365TelemetryAsyncLogger.IntunePoliciesUI")
 
 def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: str, on_page_callback=None, is_cancelled_callback=None) -> dict:
     """Pipeline to fetch Intune configuration policies in parallel and aggregate unique policies by platform."""
