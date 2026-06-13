@@ -309,9 +309,12 @@ class ReportsService:
                 return
                 
             resp = session.get(url, headers=headers, timeout=40.0)
+            logger.info("App Sign-ins HTTP status: %d", resp.status_code)
             if resp.status_code == 200:
                 data = resp.json()
                 value_list = data.get("value", [])
+                logger.info("App Sign-ins value collection length: %d", len(value_list))
+                logger.info("App Sign-ins first 200 chars: %s", str(data)[:200])
                 
                 with open(csv_path, 'a', encoding='utf-8', newline='') as f:
                     writer = csv.writer(f)
