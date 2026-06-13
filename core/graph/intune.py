@@ -157,3 +157,92 @@ class IntuneService:
             logger.info("Successfully fetched %d records for Intune %s", rows_written, endpoint_name)
         finally:
             self.client.release_token(token_slot)
+
+    def fetch_mobile_apps(
+        self,
+        csv_path: str,
+        max_rows: int = 5000,
+        on_page_callback=None,
+        is_cancelled_callback=None
+    ) -> None:
+        """Fetches mobile apps from Microsoft Graph /deviceAppManagement/mobileApps endpoint
+        and streams them directly to a CSV file.
+        
+        Args:
+            csv_path: Absolute path to the CSV file where data will be written
+            max_rows: Maximum rows to fetch (default 5000)
+            on_page_callback: Callback invoked as on_page_callback(parsed_list) for each page
+            is_cancelled_callback: Callback returning boolean if cancelled
+        """
+        token_slot = self.client.get_active_token()
+        session = self.client.get_session()
+        
+        headers = {
+            "Authorization": f"Bearer {token_slot['token']}",
+            "Accept": "application/json"
+        }
+        
+        base_url = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps"
+        next_url = f"{base_url}?$select=displayName&$top=100"
+        rows_written = 0
+        page_number = 1
+        
+        try:
+            logger.info("Fetching Intune mobile apps...")
+            with open(csv_path, 'a', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                
+                while next_url and rows_written < max_rows:
+                    if is_cancelled_callback and is_cancelled_callback():
+                        logger.info("Fetch cancelled in-flight for Intune mobile apps. Aborting.")
+                        break
+                        
+                    retries_left = 2
+                    resp = None
+                    while retries_left > 0:
+                        logger.info("Querying Intune apps endpoint (Page: %d, Rows so far: %d, Attempt: %d)...", 
+                                    page_number, rows_written, 3 - retries_left)
+                        try:
+                            resp = session.get(next_url, headers=headers, timeout=40.0)
+                            if resp.status_code == 200:
+                                break
+                            elif resp.status_code in [401, 403]:
+                                break
+                        except Exception as get_err:
+                            logger.warning("Intune apps query attempt failed: %s", get_err)
+                        
+                        retries_left -= 1
+                        if retries_left > 0:
+                            time.sleep(2)
+                            
+                    page_number += 1
+                    if resp and resp.status_code == 200:
+                        data = resp.json()
+                        value_list = data.get("value", [])
+                        parsed_records = []
+                        
+                        for item in value_list:
+                            display_name = item.get("displayName", "")
+                            writer.writerow([display_name])
+                            parsed_records.append({
+                                "displayName": display_name
+                            })
+                            rows_written += 1
+                            
+                        if on_page_callback:
+                            on_page_callback(parsed_records)
+                            
+                        if rows_written >= max_rows:
+                            break
+                        next_url = data.get("@odata.nextLink")
+                    else:
+                        if resp and resp.status_code in [401, 403]:
+                            logger.error("Intune apps endpoint access denied: %d %s", resp.status_code, resp.text)
+                            raise PermissionError("DeviceManagementApps.Read.All permission required.")
+                        else:
+                            status_str = f"status {resp.status_code}" if resp else "connection/timeout error"
+                            logger.warning("Intune apps query failed after 2 attempts (%s). Stopping pagination.", status_str)
+                            break
+            logger.info("Successfully fetched %d mobile apps", rows_written)
+        finally:
+            self.client.release_token(token_slot)

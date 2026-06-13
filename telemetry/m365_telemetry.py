@@ -783,6 +783,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
             "onedrive": getattr(self.files_view.onedrive_view, "last_data", {}),
             "devices_apps": getattr(self.devices_apps_view, "last_data", {}),
+            "intune": getattr(self.intune_policies_view, "last_data", {}),
             "security_labels": getattr(self.security_gov_view, "last_labels_data", []),
             "retention_policies": getattr(self.security_gov_view, "last_policies_data", []),
             "power_automate": getattr(self.power_automate_view, "last_results", {})

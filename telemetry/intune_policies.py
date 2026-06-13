@@ -24,8 +24,8 @@ from core.graph.intune import IntuneService
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.IntunePoliciesUI")
 
-def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: str, on_page_callback=None, is_cancelled_callback=None) -> dict:
-    """Pipeline to fetch Intune configuration policies in parallel and aggregate counts by platform and type from local CSV files."""
+def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: str, on_page_callback=None, on_apps_page_callback=None, is_cancelled_callback=None) -> dict:
+    """Pipeline to fetch Intune configuration policies and mobile apps in parallel and aggregate counts by platform and type from local CSV files."""
     usage_logger.info("Starting Intune Policies Pipeline in parallel...")
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
@@ -34,17 +34,22 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
     
     csv_path_device_configs = os.path.join(reports_dir, "intune_device_configs.csv")
     csv_path_config_policies = os.path.join(reports_dir, "intune_config_policies.csv")
+    csv_path_apps = os.path.join(reports_dir, "intune_apps.csv")
     
     for path in [csv_path_device_configs, csv_path_config_policies]:
         with open(path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(["displayName", "platform", "policyType"])
             
+    with open(csv_path_apps, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["displayName"])
+            
     client = GraphClient(
         tenant_id=tenant_id,
         client_ids=client_id,
         client_secrets=client_secret,
-        concurrency=2,
+        concurrency=3,
         retries=5,
         backoff=2
     )
@@ -66,23 +71,39 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
             usage_logger.error(f"Error in thread fetching Intune {endpoint}: {thread_err}")
             errors.append(thread_err)
             
+    def run_fetch_apps(path):
+        try:
+            service.fetch_mobile_apps(
+                csv_path=path,
+                max_rows=5000,
+                on_page_callback=on_apps_page_callback,
+                is_cancelled_callback=is_cancelled_callback
+            )
+        except Exception as thread_err:
+            usage_logger.error(f"Error in thread fetching Intune apps: {thread_err}")
+            errors.append(thread_err)
+            
     try:
         t1 = threading.Thread(target=run_fetch, args=("deviceConfigurations", csv_path_device_configs), daemon=True)
         t2 = threading.Thread(target=run_fetch, args=("configurationPolicies", csv_path_config_policies), daemon=True)
+        t3 = threading.Thread(target=run_fetch_apps, args=(csv_path_apps,), daemon=True)
         
         t1.start()
         t2.start()
+        t3.start()
         
         t1.join()
         t2.join()
+        t3.join()
         
-        if len(errors) == 2:
+        if len(errors) == 3:
             raise errors[0]
             
         from collections import defaultdict
         counts = defaultdict(int)
         total_dc = 0
         total_cp = 0
+        unique_apps = set()
         
         if os.path.exists(csv_path_device_configs):
             with open(csv_path_device_configs, 'r', encoding='utf-8') as f:
@@ -106,6 +127,16 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
                             counts[(platform, policy_type)] += 1
                             total_cp += 1
                             
+        if os.path.exists(csv_path_apps):
+            with open(csv_path_apps, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)
+                for row in reader:
+                    if len(row) >= 1:
+                        app_name = row[0]
+                        if app_name:
+                            unique_apps.add(app_name)
+                            
         rows = []
         for (platform, p_type), count in sorted(counts.items()):
             rows.append((platform, p_type, str(count)))
@@ -113,7 +144,8 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
         return {
             "total_device_configs": total_dc,
             "total_config_policies": total_cp,
-            "table_rows": rows
+            "table_rows": rows,
+            "mobile_apps": sorted(list(unique_apps))
         }
     finally:
         client.close()
@@ -220,6 +252,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         platform_policy_counts = defaultdict(int)
         tot_dc = [0]
         tot_cp = [0]
+        unique_apps = set()
         
         def handle_page(parsed_records):
             for item in parsed_records:
@@ -239,7 +272,26 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             data_to_render = {
                 "total_device_configs": tot_dc[0],
                 "total_config_policies": tot_cp[0],
-                "table_rows": rows
+                "table_rows": rows,
+                "mobile_apps": sorted(list(unique_apps))
+            }
+            self.after(0, self._render_partial_success, data_to_render)
+            
+        def handle_apps_page(parsed_records):
+            for item in parsed_records:
+                name = item.get("displayName")
+                if name:
+                    unique_apps.add(name)
+                    
+            rows = []
+            for (plat, p_type), count in sorted(platform_policy_counts.items()):
+                rows.append((plat, p_type, str(count)))
+                
+            data_to_render = {
+                "total_device_configs": tot_dc[0],
+                "total_config_policies": tot_cp[0],
+                "table_rows": rows,
+                "mobile_apps": sorted(list(unique_apps))
             }
             self.after(0, self._render_partial_success, data_to_render)
             
@@ -249,6 +301,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
                 client_secret, 
                 tenant, 
                 on_page_callback=handle_page,
+                on_apps_page_callback=handle_apps_page,
                 is_cancelled_callback=lambda: getattr(self, "is_cancelled", False)
             )
             usage_logger.info("Successfully completed Intune Policies fetch.")
@@ -298,6 +351,41 @@ class IntunePoliciesFrame(ctk.CTkFrame):
                 font=FONT_BODY_SMALL,
                 text_color=COLOR_ERROR
             ).pack(padx=10, pady=2, anchor="w")
+
+        # Mobile Apps section
+        apps_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+        apps_frame.pack(fill="x", padx=10, pady=(10, 5))
+        
+        apps_title = ctk.CTkLabel(
+            apps_frame, 
+            text="⚙️ Managed Mobile Apps: ", 
+            font=FONT_BODY_BOLD, 
+            text_color=COLOR_TEXT_MAIN,
+            anchor="w"
+        )
+        apps_title.pack(side="left", anchor="nw")
+        
+        apps_list = data.get("mobile_apps", [])
+        display_text = ", ".join(apps_list) if apps_list else "No apps found or scanning..."
+        apps_content = ctk.CTkLabel(
+            apps_frame, 
+            text=display_text, 
+            font=FONT_BODY_MEDIUM, 
+            text_color=COLOR_TEXT_MAIN if apps_list else COLOR_TEXT_SUB,
+            justify="left",
+            anchor="w"
+        )
+        apps_content.pack(side="left", fill="x", expand=True, anchor="nw")
+        
+        def make_configure_handler(lbl=apps_content):
+            def on_configure(event):
+                lbl.configure(wraplength=max(200, event.width - 200))
+            return on_configure
+            
+        apps_frame.bind("<Configure>", make_configure_handler())
+        
+        # Spacer separator line
+        ctk.CTkFrame(self.grid_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1).pack(fill="x", padx=10, pady=15)
 
         summary_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
         summary_frame.pack(fill="x", padx=10, pady=10)

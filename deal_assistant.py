@@ -1372,6 +1372,7 @@ class ReportsPage(ctk.CTkFrame):
             data.get("sharepoint"),
             data.get("onedrive"),
             data.get("devices_apps"),
+            data.get("intune"),
             data.get("security_labels"),
             data.get("retention_policies"),
             data.get("power_automate")
