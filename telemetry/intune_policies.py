@@ -144,7 +144,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         
         self.title_lbl = ctk.CTkLabel(
             self.header_frame,
-            text="Intune Policies (Device Configurations)",
+            text="Microsoft Intune Data",
             font=FONT_HEADER_SMALL,
             text_color=COLOR_TEXT_MAIN
         )
