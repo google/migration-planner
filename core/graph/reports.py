@@ -15,6 +15,7 @@
 """ReportsService encapsulating Microsoft Graph usage report generation and downloads."""
 
 import os
+import csv
 import time
 import logging
 import concurrent.futures
@@ -289,5 +290,98 @@ class ReportsService:
     def download_email_app_usage_apps_user_counts(self, output_dir: str) -> None:
         """Downloads Exchange email app usage apps user counts CSV report (180 days)."""
         self.download_report("https://graph.microsoft.com/v1.0/reports/getEmailAppUsageAppsUserCounts(period='D180')", "EmailAppUsageAppsUserCounts(180d).csv", output_dir)
+
+    def fetch_app_signin_summary(self, csv_path: str, max_rows: int = 5000, on_page_callback=None, is_cancelled_callback=None) -> None:
+        """Fetches Azure AD application sign-in summary for the last 30 days and dumps to a CSV file."""
+        token_slot = self.client.get_active_token()
+        session = self.client.get_session()
+        
+        headers = {
+            "Authorization": f"Bearer {token_slot['token']}",
+            "Accept": "application/json"
+        }
+        
+        url = "https://graph.microsoft.com/beta/reports/getAzureADApplicationSignInSummary(period='D30')"
+        
+        try:
+            logger.info("Fetching Azure AD Application Sign-in Summary...")
+            if is_cancelled_callback and is_cancelled_callback():
+                return
+                
+            resp = session.get(url, headers=headers, timeout=40.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                value_list = data.get("value", [])
+                
+                with open(csv_path, 'a', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    rows_written = 0
+                    for item in value_list:
+                        if rows_written >= max_rows:
+                            break
+                        app_name = item.get("appDisplayName") or ""
+                        success_count = item.get("successfulSignInCount") or 0
+                        writer.writerow([app_name, success_count])
+                        rows_written += 1
+                        
+                if on_page_callback:
+                    on_page_callback(value_list)
+                    
+                logger.info("Successfully fetched %d app sign-in summary records", rows_written)
+            else:
+                if resp.status_code in [401, 403]:
+                    logger.error("App Sign-ins Summary endpoint access denied: %d %s", resp.status_code, resp.text)
+                    raise PermissionError("Reports.Read.All permission required.")
+                else:
+                    logger.warning("App Sign-ins Summary query failed (HTTP %d).", resp.status_code)
+        finally:
+            self.client.release_token(token_slot)
+
+    def fetch_auth_methods_summary(self, csv_path: str, max_rows: int = 5000, on_page_callback=None, is_cancelled_callback=None) -> None:
+        """Fetches User Sign-in by Authentication Method Summary for the last 30 days and dumps to a CSV file."""
+        token_slot = self.client.get_active_token()
+        session = self.client.get_session()
+        
+        headers = {
+            "Authorization": f"Bearer {token_slot['token']}",
+            "Accept": "application/json"
+        }
+        
+        url = "https://graph.microsoft.com/beta/reports/authenticationMethods/userSignInsByAuthMethodSummary(period='D30')"
+        
+        try:
+            logger.info("Fetching User Sign-ins by Authentication Method Summary...")
+            if is_cancelled_callback and is_cancelled_callback():
+                return
+                
+            resp = session.get(url, headers=headers, timeout=40.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                value_list = data.get("value", [])
+                
+                with open(csv_path, 'a', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    rows_written = 0
+                    for item in value_list:
+                        if rows_written >= max_rows:
+                            break
+                        method = item.get("authenticationMethod") or ""
+                        success_count = item.get("successActivityCount") or 0
+                        writer.writerow([method, success_count])
+                        rows_written += 1
+                        
+                if on_page_callback:
+                    on_page_callback(value_list)
+                    
+                logger.info("Successfully fetched %d authentication method summary records", rows_written)
+            else:
+                if resp.status_code in [401, 403]:
+                    logger.error("Auth Methods Summary endpoint access denied: %d %s", resp.status_code, resp.text)
+                    raise PermissionError("Reports.Read.All permission required.")
+                else:
+                    logger.warning("Auth Methods Summary query failed (HTTP %d).", resp.status_code)
+        finally:
+            self.client.release_token(token_slot)
+
 
 

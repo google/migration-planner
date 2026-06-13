@@ -31,6 +31,7 @@ COLOR_SECONDARY_HOVER = "#F1F3F4"
 
 FONT_HEADER_MEDIUM = ("Segoe UI", 22, "bold")
 FONT_HEADER_SMALL = ("Segoe UI", 16, "bold")
+FONT_SUBSECTION_HEADER = ("Segoe UI", 14, "bold")
 FONT_BODY_BOLD = ("Segoe UI", 12, "bold")
 FONT_BODY_MEDIUM = ("Segoe UI", 12, "normal")
 FONT_BODY_SMALL = ("Segoe UI", 10, "normal")

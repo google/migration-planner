@@ -803,15 +803,20 @@ def generate_pdf_report(data: dict, filepath: str):
     story.append(files_table)
     story.append(Spacer(1, 15))
 
-    # 3.3 Devices & Apps Telemetry
-    story.append(Paragraph("Devices & Apps Telemetry", h2_style))
-    story.append(Paragraph("This section outlines unique client applications, operating systems, and browsers detected during user sign-in processes.", body_style))
+    # 3.3 Microsoft Entra Data
+    story.append(Paragraph("Microsoft Entra Data", h2_style))
+    story.append(Paragraph("This section outlines user sign-in activity (apps, operating systems, and browsers used), application sign-in metrics, and authentication methods configuration summaries.", body_style))
     story.append(Spacer(1, 8))
     
-    devices_data = data.get("devices_apps", {})
-    apps = devices_data.get("apps", [])
-    oss = devices_data.get("operating_systems", [])
-    browsers = devices_data.get("browsers", [])
+    entra_data = data.get("devices_apps", {})
+    
+    # 3.3.1 User Sign Ins
+    story.append(Paragraph("<b>User Sign Ins</b>", body_style))
+    story.append(Spacer(1, 4))
+    
+    apps = entra_data.get("apps", [])
+    oss = entra_data.get("operating_systems", [])
+    browsers = entra_data.get("browsers", [])
     
     if not apps and not oss and not browsers:
         story.append(Paragraph("No sign-in audit logs were discovered or permission restricted.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
@@ -845,6 +850,72 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(devices_table)
+        
+    story.append(Spacer(1, 15))
+    
+    # 3.3.2 App Sign Ins
+    story.append(Paragraph("<b>App Sign Ins</b>", body_style))
+    story.append(Spacer(1, 4))
+    
+    app_signins = entra_data.get("app_signins", [])
+    if not app_signins:
+        story.append(Paragraph("No Azure AD application sign-in logs were discovered or permission restricted.", ParagraphStyle('ErrTxtAppSignins', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        app_signins_table_data = [[
+            Paragraph("App Name", table_cell_header),
+            Paragraph("Successful Sign Ins", table_cell_header)
+        ]]
+        
+        for app, success in app_signins:
+            app_signins_table_data.append([
+                Paragraph(app, table_cell_bold),
+                Paragraph(success, table_cell_style)
+            ])
+            
+        app_signins_table = Table(app_signins_table_data, colWidths=[250, 254])
+        app_signins_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(app_signins_table)
+        
+    story.append(Spacer(1, 15))
+    
+    # 3.3.3 Authentication Methods
+    story.append(Paragraph("<b>Authentication Methods</b>", body_style))
+    story.append(Spacer(1, 4))
+    
+    auth_methods = entra_data.get("auth_methods", [])
+    if not auth_methods:
+        story.append(Paragraph("No authentication methods logs were discovered or permission restricted.", ParagraphStyle('ErrTxtAuthMethods', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        auth_table_data = [[
+            Paragraph("Authentication Method", table_cell_header),
+            Paragraph("Success Activity Count", table_cell_header)
+        ]]
+        
+        for method, activity in auth_methods:
+            auth_table_data.append([
+                Paragraph(method, table_cell_bold),
+                Paragraph(activity, table_cell_style)
+            ])
+            
+        auth_table = Table(auth_table_data, colWidths=[250, 254])
+        auth_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(auth_table)
         
     story.append(Spacer(1, 15))
 
