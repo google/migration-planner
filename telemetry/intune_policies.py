@@ -25,7 +25,7 @@ from core.graph.intune import IntuneService
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.IntunePoliciesUI")
 
 def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: str, on_page_callback=None, is_cancelled_callback=None) -> dict:
-    """Pipeline to fetch Intune configuration policies in parallel and aggregate unique policies by platform."""
+    """Pipeline to fetch Intune configuration policies in parallel and aggregate counts by platform and type from local CSV files."""
     usage_logger.info("Starting Intune Policies Pipeline in parallel...")
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
@@ -58,7 +58,7 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
             service.fetch_configuration_records(
                 endpoint_name=endpoint,
                 csv_path=path,
-                max_rows=10000,
+                max_rows=5000,
                 on_page_callback=on_page_callback,
                 is_cancelled_callback=is_cancelled_callback
             )
@@ -79,32 +79,48 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
         if len(errors) == 2:
             raise errors[0]
             
-        policies_by_platform = {}
+        from collections import defaultdict
+        counts = defaultdict(int)
+        total_dc = 0
+        total_cp = 0
         
-        for path in [csv_path_device_configs, csv_path_config_policies]:
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
-                    reader = csv.reader(f)
-                    next(reader, None)
-                    for row in reader:
-                        if len(row) >= 3:
-                            policy_name, platform, policy_type = row[0], row[1], row[2]
-                            if platform and policy_name and policy_type:
-                                key = f"{platform} - {policy_type}"
-                                if key not in policies_by_platform:
-                                    policies_by_platform[key] = set()
-                                policies_by_platform[key].add(policy_name)
-                                
+        if os.path.exists(csv_path_device_configs):
+            with open(csv_path_device_configs, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)
+                for row in reader:
+                    if len(row) >= 3:
+                        platform, policy_type = row[1], row[2]
+                        if platform and policy_type:
+                            counts[(platform, policy_type)] += 1
+                            total_dc += 1
+                            
+        if os.path.exists(csv_path_config_policies):
+            with open(csv_path_config_policies, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)
+                for row in reader:
+                    if len(row) >= 3:
+                        platform, policy_type = row[1], row[2]
+                        if platform and policy_type:
+                            counts[(platform, policy_type)] += 1
+                            total_cp += 1
+                            
+        rows = []
+        for (platform, p_type), count in sorted(counts.items()):
+            rows.append((platform, p_type, str(count)))
+            
         return {
-            platform: sorted(list(names))
-            for platform, names in policies_by_platform.items()
+            "total_device_configs": total_dc,
+            "total_config_policies": total_cp,
+            "table_rows": rows
         }
     finally:
         client.close()
 
 
 class IntunePoliciesFrame(ctk.CTkFrame):
-    """Component for rendering Intune Policies data in wrapped dynamic horizontal list format."""
+    """Component for rendering Intune Policies data inside a metrics table grid."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
@@ -147,7 +163,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.link_lbl.bind("<Leave>", lambda e: self.link_lbl.configure(text_color=COLOR_PRIMARY))
         
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
         self.reset_view()
 
@@ -200,22 +216,30 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         if self.semaphore:
             self.semaphore.acquire()
             
-        platform_policies = {}
+        from collections import defaultdict
+        platform_policy_counts = defaultdict(int)
+        tot_dc = [0]
+        tot_cp = [0]
         
         def handle_page(parsed_records):
             for item in parsed_records:
                 platform = item.get("platform")
-                name = item.get("displayName")
                 policy_type = item.get("policyType")
-                if platform and name and policy_type:
-                    key = f"{platform} - {policy_type}"
-                    if key not in platform_policies:
-                        platform_policies[key] = set()
-                    platform_policies[key].add(name)
+                if platform and policy_type:
+                    platform_policy_counts[(platform, policy_type)] += 1
+                    if policy_type == "Settings Catalog":
+                        tot_cp[0] += 1
+                    else:
+                        tot_dc[0] += 1
             
+            rows = []
+            for (plat, p_type), count in sorted(platform_policy_counts.items()):
+                rows.append((plat, p_type, str(count)))
+                
             data_to_render = {
-                plat: sorted(list(names))
-                for plat, names in platform_policies.items()
+                "total_device_configs": tot_dc[0],
+                "total_config_policies": tot_cp[0],
+                "table_rows": rows
             }
             self.after(0, self._render_partial_success, data_to_render)
             
@@ -275,37 +299,42 @@ class IntunePoliciesFrame(ctk.CTkFrame):
                 text_color=COLOR_ERROR
             ).pack(padx=10, pady=2, anchor="w")
 
-        # Map to render platforms
-        for platform, policies in sorted(data.items()):
-            row_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
-            row_frame.pack(fill="x", pady=6, anchor="w")
+        summary_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+        summary_frame.pack(fill="x", padx=10, pady=10)
+        
+        tot_dc = data.get("total_device_configs", 0)
+        tot_cp = data.get("total_config_policies", 0)
+        ctk.CTkLabel(summary_frame, text=f"Total Extracted: {tot_dc} Device Configurations | {tot_cp} Configuration Policies", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w")
+
+        metrics_grid = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
+        metrics_grid.pack(fill="x", padx=10, pady=(5, 15))
+        
+        headers = ["Platform", "Policy Type", "Number of Policies"]
+        for i in range(3):
+            metrics_grid.grid_columnconfigure(i, weight=1 if i == 2 else 2)
             
-            lbl_title = ctk.CTkLabel(
-                row_frame, 
-                text=f"⚙️ {platform}: ", 
-                font=FONT_BODY_BOLD, 
-                text_color=COLOR_TEXT_MAIN,
-                anchor="w"
-            )
-            lbl_title.pack(side="left", anchor="nw")
+        for col_idx, head_text in enumerate(headers):
+            cell = ctk.CTkFrame(metrics_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
             
-            display_text = ", ".join(policies) if policies else "No policies found"
-            lbl_content = ctk.CTkLabel(
-                row_frame, 
-                text=display_text, 
-                font=FONT_BODY_MEDIUM, 
-                text_color=COLOR_TEXT_MAIN if policies else COLOR_TEXT_SUB,
-                justify="left",
-                anchor="w"
-            )
-            lbl_content.pack(side="left", fill="x", expand=True, anchor="nw")
+        rows_data = data.get("table_rows", [])
+        
+        if not rows_data:
+            c = ctk.CTkFrame(metrics_grid, fg_color=COLOR_SURFACE, corner_radius=0)
+            c.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c, text="No policies detected.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=12)
+            return
             
-            def make_configure_handler(lbl=lbl_content):
-                def on_configure(event):
-                    lbl.configure(wraplength=max(200, event.width - 200))
-                return on_configure
-                
-            row_frame.bind("<Configure>", make_configure_handler())
+        for r_idx, (platform, p_type, count) in enumerate(rows_data, start=1):
+            bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+            
+            vals = [platform, p_type, count]
+            
+            for c_idx, val in enumerate(vals):
+                c = ctk.CTkFrame(metrics_grid, fg_color=bg_style, corner_radius=0)
+                c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Intune Policies Telemetry fetch failed: {err_msg}")
