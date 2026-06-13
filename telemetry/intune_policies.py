@@ -302,12 +302,14 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         summary_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
         summary_frame.pack(fill="x", padx=10, pady=10)
         
+        ctk.CTkLabel(summary_frame, text="Device Configurations", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 2))
+        
         tot_dc = data.get("total_device_configs", 0)
         tot_cp = data.get("total_config_policies", 0)
         ctk.CTkLabel(summary_frame, text=f"Total Extracted: {tot_dc} Device Configurations | {tot_cp} Configuration Policies", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w")
 
         metrics_grid = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
-        metrics_grid.pack(fill="x", padx=10, pady=(5, 15))
+        metrics_grid.pack(fill="x", padx=10, pady=(5, 10))
         
         headers = ["Platform", "Policy Type", "Number of Policies"]
         for i in range(3):
@@ -335,6 +337,8 @@ class IntunePoliciesFrame(ctk.CTkFrame):
                 c = ctk.CTkFrame(metrics_grid, fg_color=bg_style, corner_radius=0)
                 c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                 ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
+
+        ctk.CTkLabel(self.grid_frame, text="* Based on sample data collected from Intune.", font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=10, pady=(0, 15))
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Intune Policies Telemetry fetch failed: {err_msg}")
