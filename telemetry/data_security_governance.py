@@ -1087,81 +1087,81 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             r_idx = offset
             bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
 
-                name = policy.get("Name", "N/A")
-                comment = policy.get("Comment", "")
-                workload = policy.get("Workload", "N/A")
-                duration_val = str(policy.get("Duration", "N/A"))
-                trigger_val = policy.get("RetentionTrigger", "N/A")
-                mode = policy.get("Mode", "Enforce")
-                dist_status = policy.get("DistributionStatus", "Success")
+            name = policy.get("Name", "N/A")
+            comment = policy.get("Comment", "")
+            workload = policy.get("Workload", "N/A")
+            duration_val = str(policy.get("Duration", "N/A"))
+            trigger_val = policy.get("RetentionTrigger", "N/A")
+            mode = policy.get("Mode", "Enforce")
+            dist_status = policy.get("DistributionStatus", "Success")
                 
-                # Format Duration nicely
-                duration_str = duration_val
-                if duration_val.lower() == "unlimited":
-                    duration_str = "Keep Forever"
-                elif duration_val.isdigit():
-                    days = int(duration_val)
-                    if days >= 365:
-                        years = days / 365.0
-                        if years.is_integer():
-                            duration_str = f"{int(years)} Years ({days} days)"
-                        else:
-                            duration_str = f"{years:.1f} Years ({days} days)"
+            # Format Duration nicely
+            duration_str = duration_val
+            if duration_val.lower() == "unlimited":
+                duration_str = "Keep Forever"
+            elif duration_val.isdigit():
+                days = int(duration_val)
+                if days >= 365:
+                    years = days / 365.0
+                    if years.is_integer():
+                        duration_str = f"{int(years)} Years ({days} days)"
                     else:
-                        duration_str = f"{days} days"
-                
-                # Append trigger details to duration string if present and not N/A
-                if trigger_val and trigger_val != "N/A":
-                    trigger_map = {
-                        "DateCreated": "created date",
-                        "DateModified": "last modified date",
-                        "DateLabeled": "labeled date"
-                    }
-                    friendly_trigger = trigger_map.get(trigger_val, trigger_val)
-                    duration_str += f"\n(from {friendly_trigger})"
-
-                # Enabled can be boolean or string
-                enabled_val = policy.get("Enabled", True)
-                if isinstance(enabled_val, str):
-                    is_enabled = enabled_val.lower() == "true"
+                        duration_str = f"{years:.1f} Years ({days} days)"
                 else:
-                    is_enabled = bool(enabled_val)
+                    duration_str = f"{days} days"
+                
+            # Append trigger details to duration string if present and not N/A
+            if trigger_val and trigger_val != "N/A":
+                trigger_map = {
+                    "DateCreated": "created date",
+                    "DateModified": "last modified date",
+                    "DateLabeled": "labeled date"
+                }
+                friendly_trigger = trigger_map.get(trigger_val, trigger_val)
+                duration_str += f"\n(from {friendly_trigger})"
+
+            # Enabled can be boolean or string
+            enabled_val = policy.get("Enabled", True)
+            if isinstance(enabled_val, str):
+                is_enabled = enabled_val.lower() == "true"
+            else:
+                is_enabled = bool(enabled_val)
                     
-                status = "🟢 Enabled" if is_enabled else "🔴 Disabled"
+            status = "🟢 Enabled" if is_enabled else "🔴 Disabled"
 
-                c0 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
-                c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+            c0 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
                 
-                has_comment = bool(comment and comment != name)
-                lbl_name = ctk.CTkLabel(c0, text=name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
-                lbl_name.pack(padx=10, pady=(6, 2) if has_comment else 6, anchor="w")
+            has_comment = bool(comment and comment != name)
+            lbl_name = ctk.CTkLabel(c0, text=name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
+            lbl_name.pack(padx=10, pady=(6, 2) if has_comment else 6, anchor="w")
                 
-                if has_comment:
-                    lbl_comment = ctk.CTkLabel(c0, text=comment, font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB)
-                    lbl_comment.pack(padx=10, pady=(0, 6), anchor="w")
-                    c0.bind("<Configure>", lambda e, l1=lbl_name, l2=lbl_comment: (l1.configure(wraplength=e.width - 20), l2.configure(wraplength=e.width - 20)))
-                else:
-                    c0.bind("<Configure>", lambda e, l=lbl_name: l.configure(wraplength=e.width - 20))
+            if has_comment:
+                lbl_comment = ctk.CTkLabel(c0, text=comment, font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB)
+                lbl_comment.pack(padx=10, pady=(0, 6), anchor="w")
+                c0.bind("<Configure>", lambda e, l1=lbl_name, l2=lbl_comment: (l1.configure(wraplength=e.width - 20), l2.configure(wraplength=e.width - 20)))
+            else:
+                c0.bind("<Configure>", lambda e, l=lbl_name: l.configure(wraplength=e.width - 20))
 
-                c1 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
-                c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
-                lbl_workload = ctk.CTkLabel(c1, text=workload, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
-                lbl_workload.pack(padx=10, pady=6, anchor="w")
-                c1.bind("<Configure>", lambda e, l=lbl_workload: l.configure(wraplength=e.width - 20))
+            c1 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
+            lbl_workload = ctk.CTkLabel(c1, text=workload, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+            lbl_workload.pack(padx=10, pady=6, anchor="w")
+            c1.bind("<Configure>", lambda e, l=lbl_workload: l.configure(wraplength=e.width - 20))
 
-                c2 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
-                c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
-                lbl_duration = ctk.CTkLabel(c2, text=duration_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left")
-                lbl_duration.pack(padx=10, pady=6, anchor="w")
-                c2.bind("<Configure>", lambda e, l=lbl_duration: l.configure(wraplength=e.width - 20))
+            c2 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+            c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
+            lbl_duration = ctk.CTkLabel(c2, text=duration_str, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left")
+            lbl_duration.pack(padx=10, pady=6, anchor="w")
+            c2.bind("<Configure>", lambda e, l=lbl_duration: l.configure(wraplength=e.width - 20))
 
-                c3 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
-                c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c3, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+            c3 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+            c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
+            ctk.CTkLabel(c3, text=dist_status, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
-                c4 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
-                c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(c4, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+            c4 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
+            c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
+            ctk.CTkLabel(c4, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
     def export_labels_csv(self):
         """Prompts the user to save sensitivity labels as a detailed CSV file."""
