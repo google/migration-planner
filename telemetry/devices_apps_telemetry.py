@@ -56,7 +56,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.header_frame, text="Authentication Methods", font=FONT_SUBSECTION_HEADER, text_color=COLOR_PRIMARY).pack(side="left")
 
         self.btn_refresh = ctk.CTkButton(
-            self.header_frame, text="↻ Reload", width=80, height=26, corner_radius=13,
+            self.header_frame, state="disabled", text="↻ Reload", width=80, height=26, corner_radius=13,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             command=self.trigger_fetch_individual
@@ -270,7 +270,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.header_frame, text="App Sign Ins", font=FONT_SUBSECTION_HEADER, text_color=COLOR_PRIMARY).pack(side="left")
 
         self.btn_refresh = ctk.CTkButton(
-            self.header_frame, text="↻ Reload", width=80, height=26, corner_radius=13,
+            self.header_frame, state="disabled", text="↻ Reload", width=80, height=26, corner_radius=13,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             command=self.trigger_fetch_individual
@@ -568,7 +568,7 @@ class UserSigninsSubFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.header_frame, text="User Sign Ins", font=FONT_SUBSECTION_HEADER, text_color=COLOR_PRIMARY).pack(side="left")
 
         self.btn_refresh = ctk.CTkButton(
-            self.header_frame, text="↻ Reload", width=80, height=26, corner_radius=13,
+            self.header_frame, state="disabled", text="↻ Reload", width=80, height=26, corner_radius=13,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             command=self.trigger_fetch_individual

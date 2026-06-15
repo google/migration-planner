@@ -34,7 +34,7 @@ class MailSecurityFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.header, text="Mail Security", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         self.reload_btn = ctk.CTkButton(
             self.header, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
@@ -177,6 +177,9 @@ class MailSecurityFrame(ctk.CTkFrame):
     def render_ui_state(self):
         for widget in self.grid_frame.winfo_children():
             widget.destroy()
+            
+        if not self.loading and hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
             
         if self.loading:
             self.loading_label = ctk.CTkLabel(self.grid_frame, text="⏳ Loading Mail Security Data...", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))

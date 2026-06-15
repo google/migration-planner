@@ -264,6 +264,15 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
+        # 5c. Files (SharePoint & OneDrive) Section
+        self.files_view = FilesTelemetryFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
+        )
+
         # 6. Data Security & Governance Section
         self.security_gov_view = DataSecurityGovernanceFrame(
             master=self,

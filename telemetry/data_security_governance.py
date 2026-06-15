@@ -308,7 +308,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         self.labels_reload_btn = ctk.CTkButton(
             self.labels_header_frame, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
@@ -409,7 +409,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         self.retention_reload_btn = ctk.CTkButton(
             self.retention_header_frame, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
@@ -536,7 +536,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         self.auth_reload_btn = ctk.CTkButton(
             self.auth_header_frame, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),

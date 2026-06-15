@@ -196,7 +196,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         
         self.reload_btn = ctk.CTkButton(
             self.header_frame, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),

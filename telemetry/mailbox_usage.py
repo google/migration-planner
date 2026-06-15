@@ -206,7 +206,7 @@ class MailboxUsageFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.header, text="Exchange Online Mailbox Usage", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         self.reload_btn = ctk.CTkButton(
             self.header, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),

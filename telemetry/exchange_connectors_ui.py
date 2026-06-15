@@ -95,7 +95,7 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
         
         self.reload_btn = ctk.CTkButton(
             self.header_frame, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
@@ -181,6 +181,8 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
                 self.semaphore.release()
 
     def _handle_result(self, result: dict):
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()

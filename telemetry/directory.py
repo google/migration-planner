@@ -78,7 +78,7 @@ class DirectoryFrame(ctk.CTkFrame):
         self.domains_title.pack(side="left")
         self.domains_reload_btn = ctk.CTkButton(
             self.domains_header_frame, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
@@ -105,7 +105,7 @@ class DirectoryFrame(ctk.CTkFrame):
         self.groups_users_title.pack(side="left")
         self.groups_users_reload_btn = ctk.CTkButton(
             self.groups_users_header_frame, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
@@ -177,8 +177,10 @@ class DirectoryFrame(ctk.CTkFrame):
         self.on_status_change()
         
         self.pack(fill="x", expand=True, pady=10)
+        self.domains_header_frame.pack_forget()
         self.domains_grid.pack_forget()
         self.divider.pack_forget()
+        self.groups_users_header_frame.pack_forget()
         self.groups_users_grid.pack_forget()
         
         self._set_state_loading("Fetching directory domains, users, and group counts...")

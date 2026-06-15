@@ -146,7 +146,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.client_header_frame, text="Email Client Classification", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         self.client_reload_btn = ctk.CTkButton(
             self.client_header_frame, 
-            text="↻ Reload", width=80, height=24,
+            state="disabled", text="↻ Reload", width=80, height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
             fg_color="transparent", border_width=1, text_color="#2563EB", hover_color="#DBEAFE",
             command=self._retry_client_fetch
@@ -161,7 +161,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.pst_header_frame, text="PST Files", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         self.pst_reload_btn = ctk.CTkButton(
             self.pst_header_frame, 
-            text="↻ Reload", width=80, height=24,
+            state="disabled", text="↻ Reload", width=80, height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
             fg_color="transparent", border_width=1, text_color="#2563EB", hover_color="#DBEAFE",
             command=self._retry_pst_fetch

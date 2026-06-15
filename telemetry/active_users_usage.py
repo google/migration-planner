@@ -276,7 +276,7 @@ class ActiveUsersUsageFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.header, text="O365 Active Users Usage", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         self.reload_btn = ctk.CTkButton(
             self.header, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
@@ -632,7 +632,7 @@ class M365AppUsageFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.header, text="M365 App Usage (180 Days)", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         self.reload_btn = ctk.CTkButton(
             self.header, 
-            text="↻ Reload", 
+            state="disabled", text="↻ Reload", 
             width=80, 
             height=24,
             font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
