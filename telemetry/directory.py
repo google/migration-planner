@@ -14,6 +14,7 @@
 
 """Modular Directory Domains, Users & Groups summary telemetry scanners and visual interfaces."""
 
+import os
 import logging
 import threading
 from typing import Any, Dict, List, Optional
@@ -30,11 +31,12 @@ usage_logger = logging.getLogger("M365TelemetryAsyncLogger")
 from telemetry.styles import *
 
 class DirectoryFrame(ctk.CTkFrame):
+    """Self-contained customtkinter component wrapping Directory summary (e.g. Domains, Users & Groups) UI."""
+    
     def update_loading_text(self, text_msg):
         if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
             self.loading_label.configure(text=f"⏳ {text_msg}")
-    """Self-contained customtkinter component wrapping Directory summary (e.g. Domains, Users & Groups) UI."""
-    
+            
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, retries_var=None, backoff_var=None, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
@@ -47,6 +49,11 @@ class DirectoryFrame(ctk.CTkFrame):
         self.last_group_counts = {}
         self.last_user_counts = {}
         self.last_domains = []
+        
+        # Pagination variables for Domains
+        self.ITEMS_PER_PAGE = 10
+        self.current_page = 0
+        self.csv_path = None
         
         self.build_ui()
 
@@ -129,9 +136,14 @@ class DirectoryFrame(ctk.CTkFrame):
         self.divider.pack_forget()
         self.groups_users_header_frame.pack_forget()
         self.groups_users_grid.pack_forget()
+        if hasattr(self, "pagination_frame") and self.pagination_frame.winfo_exists():
+            self.pagination_frame.destroy()
+
         self.last_group_counts = {}
         self.last_user_counts = {}
         self.last_domains = []
+        self.current_page = 0
+        self.csv_path = None
         
         for w in self.state_frame.winfo_children():
             w.destroy()
@@ -176,12 +188,19 @@ class DirectoryFrame(ctk.CTkFrame):
         self.status = "loading"
         self.on_status_change()
         
+        self.current_page = 0
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+        self.csv_path = os.path.join(reports_dir, "directory_domains.csv")
+        
         self.pack(fill="x", expand=True, pady=10)
         self.domains_header_frame.pack_forget()
         self.domains_grid.pack_forget()
         self.divider.pack_forget()
         self.groups_users_header_frame.pack_forget()
         self.groups_users_grid.pack_forget()
+        if hasattr(self, "pagination_frame") and self.pagination_frame.winfo_exists():
+            self.pagination_frame.destroy()
         
         self._set_state_loading("Fetching directory domains, users, and group counts...")
         
@@ -218,7 +237,33 @@ class DirectoryFrame(ctk.CTkFrame):
             telemetry_data = dir_service.get_directory_telemetry(self.log_msg)
             client.close()
             
-            usage_logger.info("Successfully fetched directory telemetry data.")
+            usage_logger.info("Successfully fetched directory telemetry data. Writing to disk...")
+            
+            # Write to CSV on disk
+            script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, "directory_domains.csv")
+            
+            headers = ["Domain ID", "Admin Managed", "Default", "Verified", "Supported Services"]
+            rows = []
+            
+            for domain in telemetry_data.get("domains", []):
+                admin_managed = "Yes" if domain.get("isAdminManaged") else "No"
+                is_default = "Yes" if domain.get("isDefault") else "No"
+                is_verified = "Yes" if domain.get("isVerified") else "No"
+                services = domain.get("supportedServices", [])
+                services_str = ", ".join(services) if services else "-"
+                rows.append([domain.get("id", "-"), admin_managed, is_default, is_verified, services_str])
+
+            import csv
+            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                writer.writerows(rows)
+                
+            usage_logger.info(f"Successfully wrote Domains data to {csv_path}")
+            
             self.after(0, self._render_success, telemetry_data)
         except Exception as e:
             usage_logger.error("Exception caught in Directory worker.", exc_info=True)
@@ -234,6 +279,10 @@ class DirectoryFrame(ctk.CTkFrame):
                 getattr(self, btn).configure(state="normal")
         self.state_frame.pack_forget()
         
+        self.last_domains = telemetry_dict.get("domains", [])
+        self.last_group_counts = telemetry_dict.get("group_counts", {})
+        self.last_user_counts = telemetry_dict.get("user_counts", {})
+
         for w in self.domains_grid.winfo_children():
             w.destroy()
         for w in self.groups_users_grid.winfo_children():
@@ -248,9 +297,42 @@ class DirectoryFrame(ctk.CTkFrame):
         self.groups_users_header_frame.pack(fill="x", pady=(10, 10))
         self.groups_users_grid.pack(fill="x", expand=True, pady=(0, 10))
 
-        # ----------------------------------------------------
-        # RENDER DOMAINS GRID
-        # ----------------------------------------------------
+        self._update_domains_ui_paginated()
+        self._render_groups_users_grid()
+
+    def _load_page_from_csv(self, page):
+        if not self.csv_path or not os.path.exists(self.csv_path):
+            return [], 0
+
+        domains = []
+        try:
+            import csv
+            with open(self.csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # skip header
+                for row in reader:
+                    if row:
+                        domains.append({
+                            "id": row[0],
+                            "isAdminManaged": row[1] == "Yes",
+                            "isDefault": row[2] == "Yes",
+                            "isVerified": row[3] == "Yes",
+                            "supportedServices": [s.strip() for s in row[4].split(",")] if row[4] != "-" else []
+                        })
+        except Exception as e:
+            usage_logger.error(f"Error reading CSV for Domains pagination: {e}")
+            
+        total_count = len(domains)
+        start_idx = page * self.ITEMS_PER_PAGE
+        end_idx = start_idx + self.ITEMS_PER_PAGE
+        page_data = domains[start_idx:end_idx]
+        
+        return page_data, total_count
+
+    def _update_domains_ui_paginated(self):
+        for w in self.domains_grid.winfo_children():
+            w.destroy()
+
         self.domains_grid.grid_columnconfigure((0, 4), weight=3)
         self.domains_grid.grid_columnconfigure((1, 2, 3), weight=2)
 
@@ -258,17 +340,16 @@ class DirectoryFrame(ctk.CTkFrame):
         for col_idx, head_text in enumerate(domains_headers):
             cell = ctk.CTkFrame(self.domains_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, text_color=COLOR_TONAL_TEXT, pady=8, anchor="w")
 
-        domains_list = telemetry_dict.get("domains", [])
-        self.last_domains = domains_list
+        page_data, total_count = self._load_page_from_csv(self.current_page)
 
-        if not domains_list:
+        if not page_data:
             empty_cell = ctk.CTkFrame(self.domains_grid, fg_color="transparent")
             empty_cell.grid(row=1, column=0, columnspan=5, sticky="nsew", pady=15)
             ctk.CTkLabel(empty_cell, text="No domains found under the organization.", text_color=COLOR_TEXT_SUB).pack()
         else:
-            for item_idx, domain in enumerate(domains_list, start=1):
+            for item_idx, domain in enumerate(page_data, start=1):
                 bg_style = COLOR_SURFACE if item_idx % 2 == 0 else COLOR_SURFACE_VARIANT
 
                 admin_managed = "Yes" if domain.get("isAdminManaged") else "No"
@@ -302,9 +383,63 @@ class DirectoryFrame(ctk.CTkFrame):
                 c4.grid(row=item_idx, column=4, sticky="nsew", padx=0, pady=(0, 1))
                 ctk.CTkLabel(c4, text=services_str, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=250).pack(padx=10, pady=8, anchor="nw")
 
-        # ----------------------------------------------------
-        # RENDER GROUPS & USERS GRID
-        # ----------------------------------------------------
+        # Draw pagination controls if we have multiple pages
+        if total_count > 0:
+            self._draw_pagination_controls(total_count)
+
+    def _draw_pagination_controls(self, total_count):
+        total_pages = (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+        if total_pages <= 1:
+            return
+
+        if hasattr(self, "pagination_frame") and self.pagination_frame.winfo_exists():
+            self.pagination_frame.destroy()
+
+        self.pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.pagination_frame.pack(fill="x", pady=(10, 0), after=self.domains_grid)
+
+        left_spacer = ctk.CTkFrame(self.pagination_frame, fg_color="transparent")
+        left_spacer.pack(side="left", fill="x", expand=True)
+
+        center_container = ctk.CTkFrame(self.pagination_frame, fg_color="transparent")
+        center_container.pack(side="left")
+
+        prev_state = "normal" if self.current_page > 0 else "disabled"
+        btn_prev = ctk.CTkButton(
+            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
+            state=prev_state,
+            command=lambda: self._change_page(-1)
+        )
+        btn_prev.pack(side="left", padx=5)
+
+        page_lbl = ctk.CTkLabel(
+            center_container,
+            text=f"Page {self.current_page + 1} of {total_pages} ({total_count} domains)",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_SUB
+        )
+        page_lbl.pack(side="left", padx=15)
+
+        next_state = "normal" if self.current_page < total_pages - 1 else "disabled"
+        btn_next = ctk.CTkButton(
+            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
+            state=next_state,
+            command=lambda: self._change_page(1)
+        )
+        btn_next.pack(side="left", padx=5)
+
+        right_spacer = ctk.CTkFrame(self.pagination_frame, fg_color="transparent")
+        right_spacer.pack(side="right", fill="x", expand=True)
+
+    def _change_page(self, delta):
+        self.current_page += delta
+        self._update_domains_ui_paginated()
+
+    def _render_groups_users_grid(self):
         self.groups_users_grid.grid_columnconfigure(0, weight=3)
         self.groups_users_grid.grid_columnconfigure(1, weight=1)
 
@@ -314,28 +449,22 @@ class DirectoryFrame(ctk.CTkFrame):
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
-        counts_dict = telemetry_dict.get("group_counts", {})
-        self.last_group_counts = counts_dict
-
-        user_counts_dict = telemetry_dict.get("user_counts", {})
-        self.last_user_counts = user_counts_dict
-
         rows_data = [
             # User statistics
-            ("Total Users", user_counts_dict.get("total", 0), True),
-            ("Enabled Users", user_counts_dict.get("enabled", 0), False),
-            ("Disabled Users", user_counts_dict.get("disabled", 0), False),
-            ("Member Users", user_counts_dict.get("member", 0), False),
-            ("Guest Users", user_counts_dict.get("guest", 0), False),
+            ("Total Users", self.last_user_counts.get("total", 0), True),
+            ("Enabled Users", self.last_user_counts.get("enabled", 0), False),
+            ("Disabled Users", self.last_user_counts.get("disabled", 0), False),
+            ("Member Users", self.last_user_counts.get("member", 0), False),
+            ("Guest Users", self.last_user_counts.get("guest", 0), False),
             # Divider separator row
             (None, None, False),
             # Group statistics
-            ("Total Groups", counts_dict.get("total", 0), True),
-            ("Microsoft 365 Groups (Unified)", counts_dict.get("m365", 0), False),
-            ("Security Groups (Static, non-mail-enabled)", counts_dict.get("security", 0), False),
-            ("Mail-enabled Security Groups", counts_dict.get("mail_enabled_security", 0), False),
-            ("Distribution Groups", counts_dict.get("distribution", 0), False),
-            ("Dynamic Groups (Dynamic Membership)", counts_dict.get("dynamic", 0), False)
+            ("Total Groups", self.last_group_counts.get("total", 0), True),
+            ("Microsoft 365 Groups (Unified)", self.last_group_counts.get("m365", 0), False),
+            ("Security Groups (Static, non-mail-enabled)", self.last_group_counts.get("security", 0), False),
+            ("Mail-enabled Security Groups", self.last_group_counts.get("mail_enabled_security", 0), False),
+            ("Distribution Groups", self.last_group_counts.get("distribution", 0), False),
+            ("Dynamic Groups (Dynamic Membership)", self.last_group_counts.get("dynamic", 0), False)
         ]
 
         current_row = 1
@@ -360,9 +489,6 @@ class DirectoryFrame(ctk.CTkFrame):
             ctk.CTkLabel(c1, text=f"{val:,}", font=font_style, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
             current_row += 1
-
-        self.status = "success"
-        self.on_status_change()
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Rendering Directory error state: {err_msg}")
