@@ -349,41 +349,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         # Pagination controls frame (centered below the grid)
         
         # Pagination controls frame (centered below the grid)
-        self.pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        
-        self.btn_prev = ctk.CTkButton(
-            self.pagination_frame,
-            text="◀ Prev",
-            command=self._prev_page,
-            width=80,
-            fg_color="transparent",
-            border_width=1,
-            text_color=COLOR_PRIMARY,
-            border_color=COLOR_PRIMARY,
-            hover_color=COLOR_SECONDARY_HOVER
-        )
-        self.btn_prev.pack(side="left", padx=10)
-        
-        self.lbl_page_info = ctk.CTkLabel(
-            self.pagination_frame,
-            text="Page 1 of 1",
-            font=FONT_BODY_MEDIUM,
-            text_color=COLOR_TEXT_MAIN
-        )
-        self.lbl_page_info.pack(side="left", padx=10)
-        
-        self.btn_next = ctk.CTkButton(
-            self.pagination_frame,
-            text="Next ▶",
-            command=self._next_page,
-            width=80,
-            fg_color="transparent",
-            border_width=1,
-            text_color=COLOR_PRIMARY,
-            border_color=COLOR_PRIMARY,
-            hover_color=COLOR_SECONDARY_HOVER
-        )
-        self.btn_next.pack(side="left", padx=10)
+        self.labels_pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         
         # Retention Policies section
         self.retention_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
@@ -444,6 +410,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             border_width=1,
             corner_radius=8
         )
+        
+        self.retention_pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         
         # eDiscovery Cases section (Instructional Guidance)
         
@@ -563,7 +531,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.pack_forget()
         self.labels_header_frame.pack_forget()
         self.labels_grid.pack_forget()
-        self.pagination_frame.pack_forget()
+        self.labels_pagination_frame.pack_forget()
         
         self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
@@ -583,7 +551,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             w.destroy()
 
             
-        self.current_page = 0
+        self.labels_current_page = 0
+        self.retention_current_page = 0
         self.last_labels_data = None
         self.last_policies_data = None
         
@@ -641,7 +610,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if tenant:
             self.labels_status = "loading"
             self.labels_grid.pack(fill="x", expand=True, pady=(0, 15))
-            self.pagination_frame.pack_forget()
+            if hasattr(self, 'labels_pagination_frame'): self.labels_pagination_frame.pack_forget()
             self._set_labels_loading("Retrieving Sensitivity labels...")
             threading.Thread(target=self._execute_labels_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
 
@@ -666,7 +635,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         # Pack Sensitivity Labels Section
         self.labels_header_frame.pack(fill="x", pady=(0, 10))
         self.labels_grid.pack(fill="x", expand=True, pady=(0, 15))
-        self.pagination_frame.pack_forget()
+        if hasattr(self, 'labels_pagination_frame'): self.labels_pagination_frame.pack_forget()
         self._set_labels_loading("Retrieving Sensitivity labels...")
         
         # Pack Retention Policies Section
@@ -797,7 +766,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             
             if not labels:
                 ctk.CTkLabel(self.labels_grid, text="No Sensitivity Labels configured in this tenant.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(padx=20, pady=20)
-                self.pagination_frame.pack_forget()
+                if hasattr(self, 'labels_pagination_frame'): self.labels_pagination_frame.pack_forget()
                 self.btn_export_labels.configure(state="disabled")
             else:
                 self.btn_export_labels.configure(state="normal")
@@ -850,7 +819,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 if total_items > self.ITEMS_PER_PAGE:
                     self.pagination_frame.pack(pady=(5, 10))
                 else:
-                    self.pagination_frame.pack_forget()
+                    if hasattr(self, 'labels_pagination_frame'): self.labels_pagination_frame.pack_forget()
                     
         self._check_overall_status()
 
@@ -940,43 +909,35 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self.status = "success"
         self.on_status_change()
 
-    def _display_current_page(self):
-        # Destroy existing data rows (row > 0)
+    def _update_labels_ui_paginated(self, data):
         for w in self.labels_grid.winfo_children():
             info = w.grid_info()
             if "row" in info and int(info["row"]) > 0:
                 w.destroy()
+        
+        for w in self.labels_pagination_frame.winfo_children():
+            w.destroy()
 
-        usage_logger.info(f"Displaying page {self.current_page + 1} of Sensitivity Labels.")
+        if not data:
+            return
 
-        self.cursor.execute("SELECT COUNT(*) FROM labels")
-        total_items = self.cursor.fetchone()[0]
-        total_pages = (total_items + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
-        if total_pages < 1:
-            total_pages = 1
+        total_count = len(data)
+        start_idx = self.labels_current_page * self.ITEMS_PER_PAGE
+        end_idx = start_idx + self.ITEMS_PER_PAGE
+        page_data = data[start_idx:end_idx]
 
-        # Bounds safety check
-        if self.current_page >= total_pages:
-            self.current_page = total_pages - 1
-        if self.current_page < 0:
-            self.current_page = 0
-
-        start_idx = self.current_page * self.ITEMS_PER_PAGE
-        self.cursor.execute("SELECT name, description, hasProtection, applicationMode, priority, applicableTo, isEnabled, is_sublabel FROM labels ORDER BY id LIMIT ? OFFSET ?", (self.ITEMS_PER_PAGE, start_idx))
-        page_items = self.cursor.fetchall()
-
-        for offset, row_item in enumerate(page_items, start=1):
+        for offset, row_item in enumerate(page_data, start=1):
             r_idx = offset
             bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
             
-            name = row_item[0]
-            desc = row_item[1]
-            protection = "🛡️ Yes" if row_item[2] else "🔓 No"
-            mode = str(row_item[3]).capitalize()
-            priority = str(row_item[4])
-            applicable = ", ".join([x.capitalize() for x in row_item[5].split(",") if x.strip()]) or "N/A"
-            status = "🟢 Enabled" if row_item[6] else "🔴 Disabled"
-            is_sublabel = bool(row_item[7])
+            name = row_item["name"]
+            desc = row_item["description"]
+            protection = "🛡️ Yes" if row_item["hasProtection"] else "🔓 No"
+            mode = str(row_item["applicationMode"]).capitalize()
+            priority = str(row_item["priority"])
+            applicable = ", ".join([x.capitalize() for x in row_item["applicableTo"].split(",") if x.strip()]) or "N/A"
+            status = "🟢 Enabled" if row_item["isEnabled"] else "🔴 Disabled"
+            is_sublabel = bool(row_item["is_sublabel"])
 
             name_color = COLOR_TEXT_MAIN if not is_sublabel else COLOR_TEXT_SUB
             name_font = FONT_BODY_BOLD if not is_sublabel else FONT_BODY_MEDIUM
@@ -1015,32 +976,47 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             c6.grid(row=r_idx, column=6, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c6, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
-        # Update page info label
-        self.lbl_page_info.configure(text=f"Page {self.current_page + 1} of {total_pages}")
-
-        # Update navigation button states
-        if self.current_page <= 0:
-            self.btn_prev.configure(state="disabled", text_color=COLOR_TEXT_SUB, border_color=COLOR_OUTLINE_LIGHT)
+        if total_count > self.ITEMS_PER_PAGE:
+            self._draw_labels_pagination_controls(total_count, data)
+            self.labels_pagination_frame.pack(fill="x", pady=(5, 10))
         else:
-            self.btn_prev.configure(state="normal", text_color=COLOR_PRIMARY, border_color=COLOR_PRIMARY)
+            self.labels_pagination_frame.pack_forget()
 
-        if self.current_page >= total_pages - 1:
-            self.btn_next.configure(state="disabled", text_color=COLOR_TEXT_SUB, border_color=COLOR_OUTLINE_LIGHT)
-        else:
-            self.btn_next.configure(state="normal", text_color=COLOR_PRIMARY, border_color=COLOR_PRIMARY)
+    def _draw_labels_pagination_controls(self, total_count, data):
+        total_pages = (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+        
+        left_spacer = ctk.CTkFrame(self.labels_pagination_frame, fg_color="transparent")
+        left_spacer.pack(side="left", fill="x", expand=True)
+        center_container = ctk.CTkFrame(self.labels_pagination_frame, fg_color="transparent")
+        center_container.pack(side="left")
 
-    def _prev_page(self):
-        if self.current_page > 0:
-            self.current_page -= 1
-            self._display_current_page()
+        prev_state = "normal" if self.labels_current_page > 0 else "disabled"
+        btn_prev = ctk.CTkButton(
+            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
+            command=lambda: self._change_labels_page(-1, data)
+        )
+        btn_prev.pack(side="left", padx=5)
 
-    def _next_page(self):
-        self.cursor.execute("SELECT COUNT(*) FROM labels")
-        total_items = self.cursor.fetchone()[0]
-        total_pages = (total_items + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
-        if self.current_page < total_pages - 1:
-            self.current_page += 1
-            self._display_current_page()
+        page_lbl = ctk.CTkLabel(center_container, text=f"Page {self.labels_current_page + 1} of {total_pages}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB)
+        page_lbl.pack(side="left", padx=15)
+
+        next_state = "normal" if self.labels_current_page < total_pages - 1 else "disabled"
+        btn_next = ctk.CTkButton(
+            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
+            command=lambda: self._change_labels_page(1, data)
+        )
+        btn_next.pack(side="left", padx=5)
+
+        right_spacer = ctk.CTkFrame(self.labels_pagination_frame, fg_color="transparent")
+        right_spacer.pack(side="right", fill="x", expand=True)
+
+    def _change_labels_page(self, delta, data):
+        self.labels_current_page += delta
+        self._update_labels_ui_paginated(data)
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Data Security & Governance fetch failed: {err_msg}")
@@ -1079,24 +1055,37 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self.btn_export_retention.configure(state="disabled")
         else:
             self.btn_export_retention.configure(state="normal")
-            # Configure grid columns
-            self.retention_grid.grid_columnconfigure(0, weight=3)  # Policy Name
-            self.retention_grid.grid_columnconfigure(1, weight=3)  # Workloads
-            self.retention_grid.grid_columnconfigure(2, weight=2)  # Duration & Trigger
-            self.retention_grid.grid_columnconfigure(3, weight=1)  # Distribution
-            self.retention_grid.grid_columnconfigure(4, weight=1)  # Status
-
-            headers = ["Policy Name", "Workloads", "Duration", "Distribution", "Status"]
-            for col_idx, head_text in enumerate(headers):
-                cell = ctk.CTkFrame(self.retention_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
-                cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
-                ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
-
-            # Handle case where policies is a single dict rather than a list
             policies_list = policies if isinstance(policies, list) else [policies]
+            self.last_policies_data = policies_list
+            self.retention_current_page = 0
+            self._update_retention_ui_paginated(self.last_policies_data)
+            
+    def _update_retention_ui_paginated(self, data):
+        for w in self.retention_grid.winfo_children():
+            w.destroy()
+        for w in self.retention_pagination_frame.winfo_children():
+            w.destroy()
 
-            for r_idx, policy in enumerate(policies_list, start=1):
-                bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+        self.retention_grid.grid_columnconfigure(0, weight=3)  # Policy Name
+        self.retention_grid.grid_columnconfigure(1, weight=3)  # Workloads
+        self.retention_grid.grid_columnconfigure(2, weight=2)  # Duration & Trigger
+        self.retention_grid.grid_columnconfigure(3, weight=1)  # Distribution
+        self.retention_grid.grid_columnconfigure(4, weight=1)  # Status
+
+        headers = ["Policy Name", "Workloads", "Duration", "Distribution", "Status"]
+        for col_idx, head_text in enumerate(headers):
+            cell = ctk.CTkFrame(self.retention_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        total_count = len(data)
+        start_idx = self.retention_current_page * self.ITEMS_PER_PAGE
+        end_idx = start_idx + self.ITEMS_PER_PAGE
+        page_data = data[start_idx:end_idx]
+
+        for offset, policy in enumerate(page_data, start=1):
+            r_idx = offset
+            bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
 
                 name = policy.get("Name", "N/A")
                 comment = policy.get("Comment", "")
