@@ -206,6 +206,15 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
+        # 5d. Devices & Apps Section (Microsoft Entra Data)
+        self.devices_apps_view = DevicesAppsTelemetryFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
+        )
+
         # 1b. Directory Groups Section
         self.directory_view = DirectoryFrame(
             master=self,
@@ -255,15 +264,6 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
-        # 5d. Devices & Apps Section
-        self.devices_apps_view = DevicesAppsTelemetryFrame(
-            master=self,
-            log_callback=self.log_msg,
-            credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done,
-            concurrency_semaphore=self.telemetry_semaphore
-        )
-
         # 6. Data Security & Governance Section
         self.security_gov_view = DataSecurityGovernanceFrame(
             master=self,
@@ -293,11 +293,12 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         self.batches = [
             [self.subscribed_skus_view],
+            [self.devices_apps_view],
             [self.directory_view],
             [self.m365_apps_view],
             [self.exchange_online_view, self.email_client_view],
             [self.files_view],
-            [self.devices_apps_view, self.intune_policies_view],
+            [self.intune_policies_view],
             [self.security_gov_view],
             [self.power_automate_view]
         ]
@@ -454,6 +455,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         """Returns a list of all active leaf/base telemetry views across all cards."""
         return [
             self.subscribed_skus_view,
+            self.devices_apps_view,
             self.directory_view,
             self.m365_apps_view.active_users_view,
             self.m365_apps_view.active_users_trend_view,
@@ -466,7 +468,6 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.email_client_view,
             self.files_view.sharepoint_view,
             self.files_view.onedrive_view,
-            self.devices_apps_view,
             self.security_gov_view,
             self.intune_policies_view,
             self.power_automate_view

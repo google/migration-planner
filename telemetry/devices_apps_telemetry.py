@@ -762,6 +762,7 @@ class DevicesAppsTelemetryFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def reset_view(self):
+        self.pack_forget()
         self.status = None
         self.auth_methods_subframe.reset_view()
         self.app_signins_subframe.reset_view()
