@@ -279,8 +279,10 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Permanent section heading visible during loading and error states
-        self.main_title = ctk.CTkLabel(self.inner_pad, text="Data Security & Governance", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
-        self.main_title.pack(anchor="w", pady=(0, 10))
+        self.header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.header.pack(fill="x", pady=(0, 10))
+        self.main_title = ctk.CTkLabel(self.header, text="Data Security & Governance", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
+        self.main_title.pack(side="left")
         
         # Sensitivity Labels section header
         self.labels_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
@@ -303,6 +305,20 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.labels_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/informationprotection/informationprotectionlabels/sensitivitylabels"))
         self.labels_link.bind("<Enter>", lambda e: self.labels_link.configure(text_color=COLOR_PRIMARY_HOVER))
         self.labels_link.bind("<Leave>", lambda e: self.labels_link.configure(text_color=COLOR_PRIMARY))
+        
+        self.labels_reload_btn = ctk.CTkButton(
+            self.labels_header_frame, 
+            text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_labels_fetch
+        )
+        self.labels_reload_btn.pack(side="right", padx=(0, 15))
         
         self.btn_export_labels = ctk.CTkButton(
             self.labels_header_frame,
@@ -390,6 +406,20 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.retention_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/datalifecyclemanagement/retention"))
         self.retention_link.bind("<Enter>", lambda e: self.retention_link.configure(text_color=COLOR_PRIMARY_HOVER))
         self.retention_link.bind("<Leave>", lambda e: self.retention_link.configure(text_color=COLOR_PRIMARY))
+
+        self.retention_reload_btn = ctk.CTkButton(
+            self.retention_header_frame, 
+            text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_retention_fetch
+        )
+        self.retention_reload_btn.pack(side="right", padx=(0, 15))
 
         self.btn_export_retention = ctk.CTkButton(
             self.retention_header_frame,
@@ -504,6 +534,20 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.auth_link.bind("<Enter>", lambda e: self.auth_link.configure(text_color=COLOR_PRIMARY_HOVER))
         self.auth_link.bind("<Leave>", lambda e: self.auth_link.configure(text_color=COLOR_PRIMARY))
 
+        self.auth_reload_btn = ctk.CTkButton(
+            self.auth_header_frame, 
+            text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_auth_fetch
+        )
+        self.auth_reload_btn.pack(side="right", padx=(0, 15))
+
         self.auth_grid = ctk.CTkFrame(
             self.inner_pad,
             fg_color=COLOR_SURFACE,
@@ -590,10 +634,26 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         ctk.CTkLabel(self.retention_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
         self.retention_state_frame.pack(fill="x", expand=True)
 
-    def _retry_fetch(self):
+    def _retry_labels_fetch(self):
+        if hasattr(self, 'labels_reload_btn') and self.labels_reload_btn.winfo_exists():
+            self.labels_reload_btn.configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
         if tenant:
-            self.trigger_fetch(tenant, clients[0], secrets[0])
+            self.labels_status = "loading"
+            self.labels_grid.pack(fill="x", expand=True, pady=(0, 15))
+            self.pagination_frame.pack_forget()
+            self._set_labels_loading("Retrieving Sensitivity labels...")
+            threading.Thread(target=self._execute_labels_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
+
+    def _retry_retention_fetch(self):
+        if hasattr(self, 'retention_reload_btn') and self.retention_reload_btn.winfo_exists():
+            self.retention_reload_btn.configure(state="disabled")
+        tenant, clients, secrets = self.get_credentials()
+        if tenant:
+            self.retention_status = "loading"
+            self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
+            self._set_retention_loading("Retrieving Retention policies...")
+            threading.Thread(target=self._execute_retention_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         """Triggers parallel fetches inside isolated background threads."""
@@ -707,6 +767,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.auth_state_frame.pack(fill="x", expand=True)
 
     def _retry_auth_fetch(self):
+        if hasattr(self, 'auth_reload_btn') and self.auth_reload_btn.winfo_exists():
+            self.auth_reload_btn.configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.auth_status = "loading"
@@ -717,6 +779,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 self.semaphore.release()
 
     def _handle_labels_result(self, result: dict):
+        if hasattr(self, 'labels_reload_btn') and self.labels_reload_btn.winfo_exists():
+            self.labels_reload_btn.configure(state="normal")
         for w in self.labels_grid.winfo_children():
             w.destroy()
             
@@ -791,6 +855,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self._check_overall_status()
 
     def _handle_retention_result(self, result: dict):
+        if hasattr(self, 'retention_reload_btn') and self.retention_reload_btn.winfo_exists():
+            self.retention_reload_btn.configure(state="normal")
         for w in self.retention_grid.winfo_children():
             w.destroy()
             
@@ -809,6 +875,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self._check_overall_status()
 
     def _handle_auth_result(self, result: dict):
+        if hasattr(self, 'auth_reload_btn') and self.auth_reload_btn.winfo_exists():
+            self.auth_reload_btn.configure(state="normal")
         for w in self.auth_grid.winfo_children():
             w.destroy()
 
@@ -976,6 +1044,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Data Security & Governance fetch failed: {err_msg}")
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()

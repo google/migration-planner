@@ -386,7 +386,23 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         
         self.pa_header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.pa_header.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(self.pa_header, text="Power Automate", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        
+        self.header = ctk.CTkFrame(self.pa_header, fg_color="transparent")
+        self.header.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.header, text="Power Automate", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.reload_btn = ctk.CTkButton(
+            self.header, 
+            text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_fetch
+        )
+        self.reload_btn.pack(side="right")
         
         self.btn_export_pa = ctk.CTkButton(
             self.pa_header, text="Export Complex Flows", width=160, height=32, corner_radius=16,
@@ -462,6 +478,8 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         self.state_frame.pack(fill="x", expand=True)
 
     def _retry_fetch(self):
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.trigger_fetch(tenant, clients[0], secrets[0])
@@ -501,6 +519,8 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
 
     def _render_success(self, results: dict):
         self.last_results = results
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -650,6 +670,8 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Power Automate fetch failed: {err_msg}")
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()

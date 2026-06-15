@@ -35,6 +35,7 @@ from telemetry.power_automate import PowerAutomateUsageFrame
 # Import existing modular views
 from telemetry.files_telemetry import FilesTelemetryFrame
 from telemetry.devices_apps_telemetry import DevicesAppsTelemetryFrame
+from telemetry.email_client_support import EmailClientSupportFrame
 from telemetry.exchange_online import ExchangeOnlineFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
 from telemetry.intune_policies import IntunePoliciesFrame
@@ -236,6 +237,15 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
 
 
+        # 5b. Email Client & PST Support Section
+        self.email_client_view = EmailClientSupportFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
+        )
+
         # 5c. Files (SharePoint & OneDrive) Section
         self.files_view = FilesTelemetryFrame(
             master=self,
@@ -281,6 +291,23 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
+        self.batches = [
+            [self.subscribed_skus_view],
+            [self.directory_view],
+            [self.m365_apps_view],
+            [self.exchange_online_view, self.email_client_view],
+            [self.files_view],
+            [self.devices_apps_view, self.intune_policies_view],
+            [self.security_gov_view],
+            [self.power_automate_view]
+        ]
+        self.current_batch_index = 0
+
+        # Bind mouse wheel globally to scroll this tab when hovered
+        self.bind_all("<MouseWheel>", self._handle_global_mousewheel, add="+")
+        self.bind_all("<Button-4>", self._handle_global_mousewheel, add="+")
+        self.bind_all("<Button-5>", self._handle_global_mousewheel, add="+")
+
         self._hide_all_grids()
 
         # Wrap all leaf views to support cancellation and prevent race conditions
@@ -293,6 +320,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.directory_view,
             self.m365_apps_view,
             self.exchange_online_view,
+            self.email_client_view,
             self.files_view,
             self.devices_apps_view,
             self.security_gov_view,
@@ -435,7 +463,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.exchange_online_view.apps_view,
             self.exchange_online_view.mail_security_view,
             self.exchange_online_view.connectors_view,
-            self.exchange_online_view.email_clients_view,
+            self.email_client_view,
             self.files_view.sharepoint_view,
             self.files_view.onedrive_view,
             self.devices_apps_view,
@@ -551,7 +579,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             )
             
             # Automatically pack the timer into the header so Tkinter resolves layout clashes with buttons
-            header_target = getattr(view, "lic_header", getattr(view, "pa_header", getattr(view, "header", None)))
+            header_target = getattr(view, "lic_header", getattr(view, "pa_header", getattr(view, "header", getattr(view, "header_frame", None))))
             if header_target:
                 view.fetch_time_lbl.pack(
                     in_=header_target,
@@ -780,6 +808,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "m365_apps": getattr(self.m365_apps_view.m365_apps_view, "m365_data", []),
             "mailbox": getattr(self.exchange_online_view.mailbox_view, "last_data", {}),
             "calendar": getattr(self.exchange_online_view.calendar_view, "last_data", {}),
+            "email_clients": getattr(self.email_client_view, "last_client_data", {}),
+            "pst_files": getattr(self.email_client_view, "last_pst_data", {}),
             "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
             "onedrive": getattr(self.files_view.onedrive_view, "last_data", {}),
             "devices_apps": getattr(self.devices_apps_view, "last_data", {}),
