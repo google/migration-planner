@@ -32,20 +32,32 @@ class MailSecurityFrame(ctk.CTkFrame):
         self.header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.header.pack(fill="x", pady=(0, 10))
         ctk.CTkLabel(self.header, text="Mail Security", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.reload_btn = ctk.CTkButton(
+            self.header, 
+            text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_fetch
+        )
+        self.reload_btn.pack(side="right")
         
         self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, corner_radius=12, border_width=1, border_color=COLOR_OUTLINE_LIGHT)
+        self.grid_frame.pack(fill="x", expand=True, pady=(0, 10))
         
-        ctk.CTkLabel(self.grid_frame, text="⏳ Loading Mail Security Data...", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13)).pack(pady=(20, 5))
-        self.progress = ctk.CTkProgressBar(self.grid_frame, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
-        self.progress.pack(pady=(0, 20))
+        self.loading_label = None
+        self.progress = None
+        self.render_ui_state()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         self.pack(fill="x", expand=True, pady=(0, 5))
         self.status = "loading"
         self.loading = True
-        if hasattr(self, 'progress') and self.progress:
-            self.progress.start()
-        self.on_status_change()
+        self.render_ui_state()
         import threading
         threading.Thread(target=self._fetch_data, args=(tenant, client_id, client_secret), daemon=True).start()
 
@@ -131,53 +143,50 @@ class MailSecurityFrame(ctk.CTkFrame):
             
             self.status = "success"
             self.loading = False
-            self.on_status_change()
-            self.on_status_change_cb()
+            self.after(0, self.on_status_change)
             
         except Exception as e:
             self.error_msg = f"Exception: {str(e)}"
             self.status = "error"
             self.loading = False
-            self.on_status_change()
-            self.on_status_change_cb()
+            self.after(0, self.on_status_change)
 
     def reset_view(self):
         self.pack_forget()
         self.status = None
         self.error_msg = None
-        self.loading = True
-        self.grid_frame.pack_forget()
-        for widget in self.grid_frame.winfo_children():
-            widget.destroy()
-        self.loading_label = ctk.CTkLabel(self.grid_frame, text="⏳ Loading Mail Security Data...", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
-        self.loading_label.pack(pady=(20, 5))
-        self.progress = ctk.CTkProgressBar(self.grid_frame, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
-        self.progress.pack(pady=(0, 20))
+
+    def _retry_fetch(self):
+        tenant, clients, secrets = self.get_credentials()
+        if tenant and clients and secrets:
+            if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+                self.reload_btn.configure(state="disabled")
+            self.trigger_fetch(tenant, clients[0], secrets[0])
 
     def cancel(self):
         self.status = None
         self.loading = False
+        self.error_msg = None
         self.reset_view()
 
     def on_status_change(self):
-        try:
-            if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
-                self.loading_label.destroy()
-            if hasattr(self, 'progress') and self.progress.winfo_exists():
-                self.progress.stop()
-                self.progress.destroy()
-        except:
-            pass
-        try:
-            self.loading_label.destroy()
-        except:
-            pass
-        if self.loading:
-            return
+        self.render_ui_state()
+        if hasattr(self, "on_status_change_cb") and self.on_status_change_cb:
+            self.on_status_change_cb()
+
+    def render_ui_state(self):
+        for widget in self.grid_frame.winfo_children():
+            widget.destroy()
             
+        if self.loading:
+            self.loading_label = ctk.CTkLabel(self.grid_frame, text="⏳ Loading Mail Security Data...", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
+            self.loading_label.pack(pady=(20, 5))
+            self.progress = ctk.CTkProgressBar(self.grid_frame, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
+            self.progress.pack(pady=(0, 20))
+            self.progress.start()
+            return
         if self.error_msg:
-            ctk.CTkLabel(self.grid_frame, text=self.error_msg, text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM).pack(pady=10)
-            self.grid_frame.pack(fill="x", expand=True, pady=10)
+            ctk.CTkLabel(self.grid_frame, text=self.error_msg, text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM).pack(pady=20)
             return
             
         metrics_grid = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
@@ -212,4 +221,3 @@ class MailSecurityFrame(ctk.CTkFrame):
                     
         disclaimer = ctk.CTkLabel(self.grid_frame, text="Note: Users can track inbound connectors displayed below to identify 3rd-party security apps.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, anchor="w")
         disclaimer.pack(fill="x", padx=15, pady=(5, 15))
-        self.grid_frame.pack(fill="x", expand=True, pady=10)

@@ -68,24 +68,54 @@ class DirectoryFrame(ctk.CTkFrame):
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         
         # Domains sub-heading & grid
+        self.domains_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.domains_title = ctk.CTkLabel(
-            self.inner_pad,
+            self.domains_header_frame,
             text="Domains",
             font=FONT_HEADER_SMALL,
             text_color=COLOR_TEXT_MAIN
         )
+        self.domains_title.pack(side="left")
+        self.domains_reload_btn = ctk.CTkButton(
+            self.domains_header_frame, 
+            text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_fetch
+        )
+        self.domains_reload_btn.pack(side="right")
         self.domains_grid = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
         # Divider between sections
         self.divider = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
         
         # Groups & Users sub-heading & grid
+        self.groups_users_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.groups_users_title = ctk.CTkLabel(
-            self.inner_pad,
+            self.groups_users_header_frame,
             text="Groups & Users",
             font=FONT_HEADER_SMALL,
             text_color=COLOR_TEXT_MAIN
         )
+        self.groups_users_title.pack(side="left")
+        self.groups_users_reload_btn = ctk.CTkButton(
+            self.groups_users_header_frame, 
+            text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_fetch
+        )
+        self.groups_users_reload_btn.pack(side="right")
         self.groups_users_grid = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
         self.reset_view()
@@ -94,10 +124,10 @@ class DirectoryFrame(ctk.CTkFrame):
         """Resets and hides grids."""
         self.pack_forget()
         self.state_frame.pack_forget()
-        self.domains_title.pack_forget()
+        self.domains_header_frame.pack_forget()
         self.domains_grid.pack_forget()
         self.divider.pack_forget()
-        self.groups_users_title.pack_forget()
+        self.groups_users_header_frame.pack_forget()
         self.groups_users_grid.pack_forget()
         self.last_group_counts = {}
         self.last_user_counts = {}
@@ -133,6 +163,9 @@ class DirectoryFrame(ctk.CTkFrame):
         self.state_frame.pack(fill="x", expand=True)
 
     def _retry_fetch(self):
+        for btn in ['domains_reload_btn', 'groups_users_reload_btn']:
+            if hasattr(self, btn) and getattr(self, btn).winfo_exists():
+                getattr(self, btn).configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.trigger_fetch(tenant, clients[0], secrets[0])
@@ -194,6 +227,9 @@ class DirectoryFrame(ctk.CTkFrame):
 
     def _render_success(self, telemetry_dict: Dict[str, Any]):
         usage_logger.info("Executing UI render for Directory domains, users & groups tables.")
+        for btn in ['domains_reload_btn', 'groups_users_reload_btn']:
+            if hasattr(self, btn) and getattr(self, btn).winfo_exists():
+                getattr(self, btn).configure(state="normal")
         self.state_frame.pack_forget()
         
         for w in self.domains_grid.winfo_children():
@@ -202,12 +238,12 @@ class DirectoryFrame(ctk.CTkFrame):
             w.destroy()
 
         # Display UI titles and tables
-        self.domains_title.pack(anchor="w", pady=(10, 10))
+        self.domains_header_frame.pack(fill="x", pady=(10, 10))
         self.domains_grid.pack(fill="x", expand=True, pady=(0, 10))
         
         self.divider.pack(fill="x", pady=15)
         
-        self.groups_users_title.pack(anchor="w", pady=(10, 10))
+        self.groups_users_header_frame.pack(fill="x", pady=(10, 10))
         self.groups_users_grid.pack(fill="x", expand=True, pady=(0, 10))
 
         # ----------------------------------------------------
@@ -328,6 +364,8 @@ class DirectoryFrame(ctk.CTkFrame):
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Rendering Directory error state: {err_msg}")
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()
