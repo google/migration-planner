@@ -66,7 +66,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         self.btn_refresh.pack(side="right", padx=(10, 0))
 
         self.body_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.body_frame.pack(fill="x", expand=True)
+        self.body_frame.pack(fill="x")
 
         self.reset_view()
 
@@ -245,14 +245,12 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
     def _draw_pagination_controls(self, total_count, data, is_partial):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        control_frame = ctk.CTkFrame(self.body_frame, fg_color="transparent")
-        control_frame.pack(fill="x", pady=(5, 10))
+        control_frame = ctk.CTkFrame(self.body_frame, fg_color=COLOR_SURFACE)
+        control_frame.pack(fill="x", pady=0)
 
-        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        left_spacer.pack(side="left", fill="x", expand=True)
 
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
-        center_container.pack(side="left")
+        center_container.pack(pady=(5, 10))
 
         prev_state = "normal" if self.current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
@@ -278,8 +276,6 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         )
         btn_next.pack(side="left", padx=5)
 
-        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        right_spacer.pack(side="right", fill="x", expand=True)
 
     def _change_page(self, delta, data, is_partial):
         self.current_page += delta
@@ -331,7 +327,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         self.btn_refresh.pack(side="right", padx=(10, 0))
 
         self.body_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.body_frame.pack(fill="x", expand=True)
+        self.body_frame.pack(fill="x")
 
         self.reset_view()
 
@@ -541,14 +537,12 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         if total_pages <= 1:
             return
 
-        control_frame = ctk.CTkFrame(self.body_frame, fg_color="transparent")
-        control_frame.pack(fill="x", pady=(5, 10))
+        control_frame = ctk.CTkFrame(self.body_frame, fg_color=COLOR_SURFACE)
+        control_frame.pack(fill="x", pady=0)
 
-        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        left_spacer.pack(side="left", fill="x", expand=True)
 
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
-        center_container.pack(side="left")
+        center_container.pack(pady=(5, 10))
 
         prev_state = "normal" if self.current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
@@ -578,8 +572,6 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         )
         btn_next.pack(side="left", padx=5)
 
-        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        right_spacer.pack(side="right", fill="x", expand=True)
 
     def _change_page(self, delta, data, is_partial):
         self.current_page += delta
@@ -630,7 +622,7 @@ class UserSigninsSubFrame(ctk.CTkFrame):
         self.btn_refresh.pack(side="right", padx=(10, 0))
 
         self.body_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.body_frame.pack(fill="x", expand=True)
+        self.body_frame.pack(fill="x")
 
         self.reset_view()
 

@@ -586,7 +586,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.labels_status = "loading"
-            self.labels_grid.pack(fill="x", expand=True, pady=(0, 15))
+            self.labels_grid.pack(fill="x", pady=(0, 15))
             if hasattr(self, 'labels_pagination_frame'): self.labels_pagination_frame.pack_forget()
             self._set_labels_loading("Retrieving Sensitivity labels...")
             threading.Thread(target=self._execute_labels_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
@@ -597,7 +597,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.retention_status = "loading"
-            self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
+            self.retention_grid.pack(fill="x", pady=(0, 15))
             self._set_retention_loading("Retrieving Retention policies...")
             threading.Thread(target=self._execute_retention_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
 
@@ -611,24 +611,24 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         # Pack Sensitivity Labels Section
         self.labels_header_frame.pack(fill="x", pady=(0, 10))
-        self.labels_grid.pack(fill="x", expand=True, pady=(0, 15))
+        self.labels_grid.pack(fill="x", pady=(0, 15))
         if hasattr(self, 'labels_pagination_frame'): self.labels_pagination_frame.pack_forget()
         self._set_labels_loading("Retrieving Sensitivity labels...")
         
         # Pack Retention Policies Section
         self.retention_header_frame.pack(fill="x", pady=(20, 5))
-        self.retention_grid.pack(fill="x", expand=True, pady=(0, 15))
+        self.retention_grid.pack(fill="x", pady=(0, 15))
         self._set_retention_loading("Retrieving Retention policies...")
         
         # Pack Authentication Section
         self.auth_header_frame.pack(fill="x", pady=(20, 5))
-        self.auth_grid.pack(fill="x", expand=True, pady=(0, 15))
+        self.auth_grid.pack(fill="x", pady=(0, 15))
         self._set_auth_loading("Retrieving Conditional Access authentication mechanics...")
 
         
         # Pack eDiscovery Cases Section (static, show immediately)
         self.ediscovery_header_frame.pack(fill="x", pady=(20, 5))
-        self.ediscovery_body_frame.pack(fill="x", expand=True, pady=(0, 15))
+        self.ediscovery_body_frame.pack(fill="x", pady=(0, 15))
         
         self.btn_export_labels.configure(state="disabled")
         self.btn_export_retention.configure(state="disabled")
@@ -718,7 +718,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.auth_status = "loading"
-            self.auth_grid.pack(fill="x", expand=True, pady=(0, 15))
+            self.auth_grid.pack(fill="x", pady=(0, 15))
             self._set_auth_loading("Retrieving Conditional Access authentication mechanics...")
             threading.Thread(target=self._execute_auth_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
             if self.semaphore:
@@ -889,13 +889,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _draw_auth_pagination_controls(self, total_count, data):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        control_frame = ctk.CTkFrame(self.auth_grid, fg_color="transparent")
-        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=5, pady=(5, 10), sticky="ew")
+        control_frame = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_SURFACE)
+        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=5, pady=0, sticky="ew")
         
-        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        left_spacer.pack(side="left", fill="x", expand=True)
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
-        center_container.pack(side="left")
+        center_container.pack(pady=(5, 10))
 
         prev_state = "normal" if self.auth_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
@@ -918,8 +916,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         btn_next.pack(side="left", padx=5)
 
-        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        right_spacer.pack(side="right", fill="x", expand=True)
 
     def _change_auth_page(self, delta, data):
         self.auth_current_page += delta
@@ -1009,13 +1005,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _draw_labels_pagination_controls(self, total_count, data):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        control_frame = ctk.CTkFrame(self.labels_grid, fg_color="transparent")
-        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=7, pady=(5, 10), sticky="ew")
+        control_frame = ctk.CTkFrame(self.labels_grid, fg_color=COLOR_SURFACE)
+        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=7, pady=0, sticky="ew")
         
-        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        left_spacer.pack(side="left", fill="x", expand=True)
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
-        center_container.pack(side="left")
+        center_container.pack(pady=(5, 10))
 
         prev_state = "normal" if self.labels_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
@@ -1038,8 +1032,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         btn_next.pack(side="left", padx=5)
 
-        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        right_spacer.pack(side="right", fill="x", expand=True)
 
     def _change_labels_page(self, delta, data):
         self.labels_current_page += delta
@@ -1194,13 +1186,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _draw_retention_pagination_controls(self, total_count, data):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        control_frame = ctk.CTkFrame(self.retention_grid, fg_color="transparent")
-        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=5, pady=(5, 10), sticky="ew")
+        control_frame = ctk.CTkFrame(self.retention_grid, fg_color=COLOR_SURFACE)
+        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=5, pady=0, sticky="ew")
         
-        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        left_spacer.pack(side="left", fill="x", expand=True)
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
-        center_container.pack(side="left")
+        center_container.pack(pady=(5, 10))
 
         prev_state = "normal" if self.retention_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
@@ -1223,8 +1213,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         btn_next.pack(side="left", padx=5)
 
-        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        right_spacer.pack(side="right", fill="x", expand=True)
 
     def _change_retention_page(self, delta, data):
         self.retention_current_page += delta

@@ -354,7 +354,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             except Exception:
                 pass
 
-        self.grid_frame.pack(fill="x", expand=True)
+        self.grid_frame.pack(fill="x")
 
         if self.status == "loading":
             progress_frame = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_TONAL_BG, height=26, corner_radius=6)
@@ -461,14 +461,12 @@ class IntunePoliciesFrame(ctk.CTkFrame):
     def _draw_pagination_controls(self, total_count, data):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        control_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+        control_frame = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE)
         control_frame.pack(fill="x", pady=(5, 10))
 
-        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        left_spacer.pack(side="left", fill="x", expand=True)
 
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
-        center_container.pack(side="left")
+        center_container.pack(pady=(5, 10))
 
         prev_state = "normal" if self.current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
@@ -494,8 +492,6 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         )
         btn_next.pack(side="left", padx=5)
 
-        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        right_spacer.pack(side="right", fill="x", expand=True)
 
     def _change_page(self, delta, data):
         self.current_page += delta
