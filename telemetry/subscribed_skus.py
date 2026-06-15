@@ -61,7 +61,23 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         
         self.lic_header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.lic_header.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(self.lic_header, text="Subscribed SKUs", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        
+        self.header = ctk.CTkFrame(self.lic_header, fg_color="transparent")
+        self.header.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.header, text="Subscribed SKUs", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.reload_btn = ctk.CTkButton(
+            self.header, 
+            state="disabled", text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_fetch
+        )
+        self.reload_btn.pack(side="right")
         
         self.lic_reference_link = ctk.CTkLabel(
             self.lic_header,
@@ -125,6 +141,8 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         self.state_frame.pack(fill="x", expand=True)
 
     def _retry_fetch(self):
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.trigger_fetch(tenant, clients, secrets)
@@ -187,6 +205,8 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
 
     def _render_success(self, sku_dict: Dict[str, Any]):
         usage_logger.info("Executing UI render for SKU table.")
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -240,6 +260,8 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Rendering SKU table error state: {err_msg}")
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self._set_state_error(err_msg)
         self.btn_export_lic.configure(state="disabled")
         self.status = "error"

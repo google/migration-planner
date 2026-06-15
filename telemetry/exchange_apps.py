@@ -50,7 +50,23 @@ class ExchangeAppsFrame(ctk.CTkFrame):
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
 
-        ctk.CTkLabel(self.inner_pad, text="Integrated Apps", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
+        
+        self.header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.header.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.header, text="Integrated Apps", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.reload_btn = ctk.CTkButton(
+            self.header, 
+            state="disabled", text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_fetch
+        )
+        self.reload_btn.pack(side="right")
 
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.warning_label = ctk.CTkLabel(self.inner_pad, text="", font=FONT_BODY_MEDIUM, text_color=COLOR_ERROR, justify="left", anchor="w", wraplength=750)
@@ -91,6 +107,8 @@ class ExchangeAppsFrame(ctk.CTkFrame):
         self.state_frame.pack(fill="x", expand=True)
 
     def _retry_fetch(self):
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.trigger_fetch(tenant, clients[0], secrets[0])
@@ -130,6 +148,8 @@ class ExchangeAppsFrame(ctk.CTkFrame):
 
     def _render_success(self, data: dict):
         usage_logger.info("Exchange Apps data successfully retrieved. Rendering UI grid.")
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -206,6 +226,8 @@ class ExchangeAppsFrame(ctk.CTkFrame):
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Exchange Apps Telemetry fetch failed: {err_msg}")
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()

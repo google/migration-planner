@@ -83,20 +83,13 @@ def parse_email_client_support_csv(filepath: str) -> dict:
         usage_logger.error(f"Error parsing Email App Usage CSV: {e}")
         return {}
 
-def run_email_client_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
-    """Pipeline specifically downloading getEmailAppUsageAppsUserCounts reports and discovering PSTs."""
-    usage_logger.info("Starting Email Environment & PST Discovery Pipeline...")
-    client = GraphClient(
-        tenant_id=tenant_id,
-        client_ids=client_id,
-        client_secrets=client_secret,
-        concurrency=1,
-        retries=3,
-        backoff=2
-    )
+def run_email_client_usage_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
+    from core.graph.client import GraphClient
+    from core.graph.reports import ReportsService
+    client = GraphClient(tenant_id=tenant_id, client_ids=client_id, client_secrets=client_secret, concurrency=1, retries=3, backoff=2)
     client.authenticate()
     service = ReportsService(client)
-
+    
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
     
@@ -106,169 +99,187 @@ def run_email_client_pipeline(client_id: str, client_secret: str, tenant_id: str
         service.download_email_app_usage_detail(reports_dir)
         client_stats = parse_email_client_support_csv(os.path.join(reports_dir, "EmailAppUsageUserDetail(180d).csv"))
     except Exception as e:
-        usage_logger.warning(f"Could not retrieve/parse Email App Usage report: {e}")
         client_error = str(e)
+    client.close()
+    return {"client_adoption": client_stats, "client_error": client_error}
 
+def run_pst_discovery_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
+    from core.graph.client import GraphClient
+    from core.graph.reports import ReportsService
+    client = GraphClient(tenant_id=tenant_id, client_ids=client_id, client_secrets=client_secret, concurrency=1, retries=3, backoff=2)
+    client.authenticate()
+    service = ReportsService(client)
+    
     pst_cloud = {}
     pst_error = None
     try:
         pst_cloud = service.search_cloud_pst_files()
     except Exception as e:
         pst_error = str(e)
-
     client.close()
-    return {
-        "client_adoption": client_stats,
-        "client_error": client_error,
-        "pst_cloud_data": pst_cloud,
-        "pst_error": pst_error
-    }
+    return {"pst_cloud_data": pst_cloud, "pst_error": pst_error}
+
 
 
 class EmailClientSupportFrame(ctk.CTkFrame):
-    def update_loading_text(self, text_msg):
-        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
-            self.loading_label.configure(text=f"⏳ {text_msg}")
-    """Self-contained CustomTkinter component rendering Email Environment UI."""
-
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
         self.on_status_change = status_change_callback
+        
+        # We don't have a global status anymore, but we'll use it to notify parent
         self.status = None
 
         self.build_ui()
 
     def build_ui(self):
         self.pack(fill="x", expand=True, pady=10)
-        
+
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
 
-        self.sub_title_1 = ctk.CTkLabel(self.inner_pad, text="Email Client Classification", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
-        self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        # 1. Email Client Classification Section
+        self.client_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.client_header_frame.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.client_header_frame, text="Email Client Classification", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.client_reload_btn = ctk.CTkButton(
+            self.client_header_frame, 
+            state="disabled", text="↻ Reload", width=80, height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", border_width=1, text_color="#2563EB", hover_color="#DBEAFE",
+            command=self._retry_client_fetch
+        )
+        self.client_reload_btn.pack(side="right")
+        self.client_grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.client_grid_frame.pack(fill="x", expand=True)
 
-        self.sub_title_2 = ctk.CTkLabel(self.inner_pad, text="PST Files", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN)
+        # 2. PST Files Section
+        self.pst_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.pst_header_frame.pack(fill="x", pady=(20, 10))
+        ctk.CTkLabel(self.pst_header_frame, text="PST Files", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.pst_reload_btn = ctk.CTkButton(
+            self.pst_header_frame, 
+            state="disabled", text="↻ Reload", width=80, height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", border_width=1, text_color="#2563EB", hover_color="#DBEAFE",
+            command=self._retry_pst_fetch
+        )
+        self.pst_reload_btn.pack(side="right")
         self.pst_grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
-
+        self.pst_grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.pst_grid_frame.pack(fill="x", expand=True)
         self.reset_view()
 
     def reset_view(self):
         self.pack_forget()
-        self.sub_title_1.pack_forget()
-        self.state_frame.pack_forget()
-        self.grid_frame.pack_forget()
-        self.sub_title_2.pack_forget()
-        self.pst_grid_frame.pack_forget()
-        if hasattr(self, "pst_disclaimer_lbl") and self.pst_disclaimer_lbl:
-            self.pst_disclaimer_lbl.pack_forget()
+        self.status = None
+        for w in self.client_grid_frame.winfo_children(): w.destroy()
+        for w in self.pst_grid_frame.winfo_children(): w.destroy()
+        if hasattr(self, 'pst_disclaimer_lbl') and self.pst_disclaimer_lbl:
             self.pst_disclaimer_lbl.destroy()
             self.pst_disclaimer_lbl = None
-        
-        for w in self.state_frame.winfo_children():
-            w.destroy()
-        for w in self.grid_frame.winfo_children():
-            w.destroy()
-        for w in self.pst_grid_frame.winfo_children():
-            w.destroy()
 
-    def _set_state_loading(self):
-        self.state_frame.pack_forget()
-        
-        self.sub_title_1.pack(anchor="w", pady=(5, 10))
-        self.grid_frame.pack(fill="x", expand=True)
-        for w in self.grid_frame.winfo_children():
-            w.destroy()
-        f1 = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
-        ctk.CTkLabel(f1, text="⏳ Analyzing Email Clients...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
-        pb1 = ctk.CTkProgressBar(f1, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
-        pb1.pack(pady=(0, 20))
-        pb1.start()
-        f1.pack(fill="x", expand=True)
+    def _retry_client_fetch(self):
+        tenant, clients, secrets = self.get_credentials()
+        if tenant and clients and secrets:
+            self.client_reload_btn.configure(state="disabled")
+            self.trigger_client_fetch(tenant, clients[0], secrets[0])
 
-        self.sub_title_2.pack(anchor="w", pady=(20, 5))
-        self.pst_grid_frame.pack(fill="x", expand=True)
-        for w in self.pst_grid_frame.winfo_children():
-            w.destroy()
-        f2 = ctk.CTkFrame(self.pst_grid_frame, fg_color="transparent")
-        ctk.CTkLabel(f2, text="⏳ Discovering PST Files...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
-        pb2 = ctk.CTkProgressBar(f2, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
-        pb2.pack(pady=(0, 20))
-        pb2.start()
-        f2.pack(fill="x", expand=True)
-
-    def _set_state_error(self, error_msg):
-        self.sub_title_1.pack_forget()
-        self.grid_frame.pack_forget()
-        self.sub_title_2.pack_forget()
-        self.pst_grid_frame.pack_forget()
-        
-        for w in self.state_frame.winfo_children():
-            w.destroy()
-        display_msg = error_msg
-        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower():
-            display_msg = "Reports / Search telemetry permission required.\nPlease grant 'Reports.Read.All' and 'Files.Read.All' in Microsoft Entra ID."
-
-        ctk.CTkLabel(self.state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
-        self.state_frame.pack(fill="x", expand=True)
+    def _retry_pst_fetch(self):
+        tenant, clients, secrets = self.get_credentials()
+        if tenant and clients and secrets:
+            self.pst_reload_btn.configure(state="disabled")
+            self.trigger_pst_fetch(tenant, clients[0], secrets[0])
 
     def trigger_fetch(self, tenant, client_id, client_secret):
+        self.pack(fill="x", expand=True, pady=10)
         self.status = "loading"
         self.on_status_change()
+        self.trigger_client_fetch(tenant, client_id, client_secret)
+        self.trigger_pst_fetch(tenant, client_id, client_secret)
 
-        self.pack(fill="x", expand=True, pady=10)
-        self._set_state_loading()
+    def trigger_client_fetch(self, tenant, client_id, client_secret):
+        for w in self.client_grid_frame.winfo_children(): w.destroy()
+        f = ctk.CTkFrame(self.client_grid_frame, fg_color="transparent")
+        ctk.CTkLabel(f, text="⏳ Analyzing Email Clients...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
+        pb = ctk.CTkProgressBar(f, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
+        pb.pack(pady=(0, 20))
+        pb.start()
+        f.pack(fill="x", expand=True)
+        threading.Thread(target=self._execute_client_worker, args=(tenant, client_id, client_secret), daemon=True).start()
 
-        threading.Thread(
-            target=self._execute_worker,
-            args=(tenant, client_id, client_secret),
-            daemon=True
-        ).start()
+    def trigger_pst_fetch(self, tenant, client_id, client_secret):
+        for w in self.pst_grid_frame.winfo_children(): w.destroy()
+        f = ctk.CTkFrame(self.pst_grid_frame, fg_color="transparent")
+        ctk.CTkLabel(f, text="⏳ Discovering PST Files...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
+        pb = ctk.CTkProgressBar(f, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
+        pb.pack(pady=(0, 20))
+        pb.start()
+        f.pack(fill="x", expand=True)
+        threading.Thread(target=self._execute_pst_worker, args=(tenant, client_id, client_secret), daemon=True).start()
 
-    def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
-        if self.semaphore:
-            self.semaphore.acquire()
+    def _execute_client_worker(self, tenant, client_id, client_secret):
+        if self.semaphore: self.semaphore.acquire()
         try:
-            data = run_email_client_pipeline(client_id, client_secret, tenant)
-            self.after(0, self._render_success, data)
+            data = run_email_client_usage_pipeline(client_id, client_secret, tenant)
+            self.after(0, self._render_client_success, data)
         except Exception as e:
-            self.after(0, self._render_error, str(e))
+            self.after(0, self._render_client_error, str(e))
         finally:
-            if self.semaphore:
-                self.semaphore.release()
+            if self.semaphore: self.semaphore.release()
 
-    def _render_success(self, data: dict):
-        self.state_frame.pack_forget()
-        for w in self.grid_frame.winfo_children():
-            w.destroy()
-        for w in self.pst_grid_frame.winfo_children():
-            w.destroy()
+    def _execute_pst_worker(self, tenant, client_id, client_secret):
+        if self.semaphore: self.semaphore.acquire()
+        try:
+            data = run_pst_discovery_pipeline(client_id, client_secret, tenant)
+            self.after(0, self._render_pst_success, data)
+        except Exception as e:
+            self.after(0, self._render_pst_error, str(e))
+        finally:
+            if self.semaphore: self.semaphore.release()
 
-        # Render Supported Email Clients
-        self.sub_title_1.pack(anchor="w", pady=(5, 10))
-        self.grid_frame.pack(fill="x", expand=True)
+    def _render_client_error(self, error_msg):
+        self.client_reload_btn.configure(state="normal")
+        for w in self.client_grid_frame.winfo_children(): w.destroy()
+        display_msg = "✖ " + error_msg
+        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower():
+            display_msg = "✖ Reports permission required. Please grant 'Reports.Read.All'."
+        ctk.CTkLabel(self.client_grid_frame, text=display_msg, text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
+        self.status = "error"
+        self.on_status_change()
+
+    def _render_pst_error(self, error_msg):
+        self.pst_reload_btn.configure(state="normal")
+        for w in self.pst_grid_frame.winfo_children(): w.destroy()
+        display_msg = "✖ " + error_msg
+        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower():
+            display_msg = "✖ Search permission required. Please grant 'Files.Read.All'."
+        ctk.CTkLabel(self.pst_grid_frame, text=display_msg, text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
+        self.status = "error"
+        self.on_status_change()
+
+    def _render_client_success(self, data: dict):
+        self.client_reload_btn.configure(state="normal")
+        for w in self.client_grid_frame.winfo_children(): w.destroy()
+        
         for i in range(2):
-            self.grid_frame.grid_columnconfigure(i, weight=1)
+            self.client_grid_frame.grid_columnconfigure(i, weight=1)
 
         headers_client = ["Email Client Classification", "Active User Counts (180-Day Telemetry)"]
         for col_idx, head_text in enumerate(headers_client):
-            cell = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell = ctk.CTkFrame(self.client_grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
         client_err = data.get("client_error")
         if client_err:
-            d_str = f"✖ Error: {client_err}"
-            m_str = f"✖ Error: {client_err}"
-            p_str = f"✖ Error: {client_err}"
             rows_client = [
                 ("Supported Browser-Based Clients", f"✖ Error: {client_err}"),
-                ("Supported Non-Browser (Desktop)", d_str),
-                ("Supported Non-Browser (Mobile)", m_str),
-                ("Supported Non-Browser (Protocols)", p_str)
+                ("Supported Non-Browser (Desktop)", f"✖ Error: {client_err}"),
+                ("Supported Non-Browser (Mobile)", f"✖ Error: {client_err}"),
+                ("Supported Non-Browser (Protocols)", f"✖ Error: {client_err}")
             ]
         else:
             c_adop = data.get("client_adoption", {})
@@ -303,17 +314,21 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         for cr_idx, (c_name, c_val) in enumerate(rows_client, start=1):
             bg_c = "transparent" if cr_idx % 2 != 0 else COLOR_SURFACE_VARIANT
             
-            cc0 = ctk.CTkFrame(self.grid_frame, fg_color=bg_c, corner_radius=0)
+            cc0 = ctk.CTkFrame(self.client_grid_frame, fg_color=bg_c, corner_radius=0)
             cc0.grid(row=cr_idx, column=0, sticky="nsew", padx=1, pady=1)
             ctk.CTkLabel(cc0, text=c_name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=10, anchor="nw")
 
-            cc1 = ctk.CTkFrame(self.grid_frame, fg_color=bg_c, corner_radius=0)
+            cc1 = ctk.CTkFrame(self.client_grid_frame, fg_color=bg_c, corner_radius=0)
             cc1.grid(row=cr_idx, column=1, sticky="nsew", padx=1, pady=1)
             ctk.CTkLabel(cc1, text=c_val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=10, anchor="nw")
 
-        # 3. Subsection 3: PST Files
-        self.sub_title_2.pack(anchor="w", pady=(25, 10))
-        self.pst_grid_frame.pack(fill="x", expand=True)
+        self.status = "success"
+        self.on_status_change()
+
+    def _render_pst_success(self, data: dict):
+        self.pst_reload_btn.configure(state="normal")
+        for w in self.pst_grid_frame.winfo_children(): w.destroy()
+        
         self.pst_grid_frame.grid_columnconfigure(0, weight=2)
         self.pst_grid_frame.grid_columnconfigure(1, weight=5)
 
@@ -355,8 +370,9 @@ class EmailClientSupportFrame(ctk.CTkFrame):
             pp1.grid(row=p_idx, column=1, sticky="nsew", padx=1, pady=1)
             ctk.CTkLabel(pp1, text=p_val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=10, anchor="nw")
 
-        # Show disclaimer if any cloud PST files are found
         if not pst_err and cloud_count > 0:
+            if hasattr(self, 'pst_disclaimer_lbl') and self.pst_disclaimer_lbl:
+                self.pst_disclaimer_lbl.destroy()
             self.pst_disclaimer_lbl = ctk.CTkLabel(
                 self.inner_pad, 
                 text="* Note: There may be more than 2,000 files in the tenant; this tool only checks up to 2,000 files.",
@@ -369,8 +385,5 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.status = "success"
         self.on_status_change()
 
-    def _render_error(self, err_msg):
-        self._set_state_error(err_msg)
-        self.status = "error"
-        self.on_status_change()
-
+    def cancel(self):
+        self.status = None

@@ -33,18 +33,14 @@ from core.graph.reports import ReportsService
 from telemetry.styles import *
 
 
-def run_devices_apps_pipeline(
-    client_id: str, 
-    client_secret: str, 
-    tenant_id: str, 
-    on_page_callback=None, 
-    on_app_signins_page_callback=None,
-    on_auth_methods_page_callback=None,
-    is_cancelled_callback=None
-) -> dict:
-    """Pipeline to fetch interactive & non-interactive sign-in logs, app sign-in summaries, 
-    and auth methods in parallel, then compile them from local CSV files."""
-    usage_logger.info("Starting Microsoft Entra Data Telemetry Pipeline in parallel...")
+
+def run_user_signins_pipeline(client_id: str, client_secret: str, tenant_id: str, on_page_callback=None) -> dict:
+    from core.graph.client import GraphClient
+    from core.graph.security import SecurityService
+    import csv, os
+    client = GraphClient(tenant_id=tenant_id, client_ids=client_id, client_secrets=client_secret, concurrency=4, retries=5, backoff=2)
+    client.authenticate()
+    security_service = SecurityService(client)
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
@@ -52,347 +48,328 @@ def run_devices_apps_pipeline(
     
     csv_path_interactive = os.path.join(reports_dir, "signin_interactive.csv")
     csv_path_noninteractive = os.path.join(reports_dir, "signin_noninteractive.csv")
-    csv_path_app_signins = os.path.join(reports_dir, "entra_app_signins.csv")
-    csv_path_auth_methods = os.path.join(reports_dir, "entra_auth_methods.csv")
     
     for path in [csv_path_interactive, csv_path_noninteractive]:
         with open(path, 'w', encoding='utf-8', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["appDisplayName", "operatingSystem", "browser", "signInEventType"])
+            csv.writer(f).writerow(["appDisplayName", "operatingSystem", "browser", "signInEventType"])
             
-    with open(csv_path_app_signins, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["appDisplayName", "successSignInCount"])
-        
-    with open(csv_path_auth_methods, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["authenticationMethod", "successActivityCount"])
-            
-    client = GraphClient(
-        tenant_id=tenant_id,
-        client_ids=client_id,
-        client_secrets=client_secret,
-        concurrency=4,
-        retries=5,
-        backoff=2
-    )
-    client.authenticate()
-    security_service = SecurityService(client)
-    reports_service = ReportsService(client)
-    
+    import threading
     errors = []
     
+    unique_apps = set()
+    unique_os = set()
+    unique_browsers = set()
+    
+    def handle_page(value_list):
+        for item in value_list:
+            app = item.get("appDisplayName")
+            device = item.get("deviceDetail") or {}
+            os_name = device.get("operatingSystem")
+            browser = device.get("browser")
+            if app: unique_apps.add(app)
+            if os_name: unique_os.add(os_name)
+            if browser: unique_browsers.add(browser)
+            
+        if on_page_callback:
+            try:
+                on_page_callback({
+                    "apps": sorted(list(unique_apps)),
+                    "operating_systems": sorted(list(unique_os)),
+                    "browsers": sorted(list(unique_browsers))
+                })
+            except Exception as e:
+                errors.append(e)
+
     def run_fetch_signins(event_type, path):
         try:
-            security_service.fetch_signin_activities(
-                event_type=event_type,
-                csv_path=path,
-                max_rows=10000,
-                on_page_callback=on_page_callback,
-                is_cancelled_callback=is_cancelled_callback
-            )
-        except Exception as thread_err:
-            usage_logger.error(f"Error in thread fetching {event_type}: {thread_err}")
-            errors.append(thread_err)
-            
-    def run_fetch_app_signins(path):
-        try:
-            reports_service.fetch_app_signin_summary(
-                csv_path=path,
-                max_rows=5000,
-                on_page_callback=on_app_signins_page_callback,
-                is_cancelled_callback=is_cancelled_callback
-            )
-        except Exception as thread_err:
-            usage_logger.error(f"Error in thread fetching app sign-ins: {thread_err}")
-            errors.append(thread_err)
+            security_service.fetch_signin_activities(event_type=event_type, csv_path=path, max_rows=10000, on_page_callback=handle_page)
+        except Exception as e:
+            errors.append(e)
 
-    def run_fetch_auth_methods(path):
-        try:
-            reports_service.fetch_auth_methods_summary(
-                csv_path=path,
-                max_rows=5000,
-                on_page_callback=on_auth_methods_page_callback,
-                is_cancelled_callback=is_cancelled_callback
-            )
-        except Exception as thread_err:
-            usage_logger.error(f"Error in thread fetching auth methods: {thread_err}")
-            errors.append(thread_err)
-            
-    try:
-        t1 = threading.Thread(target=run_fetch_signins, args=("nonInteractiveUser", csv_path_noninteractive), daemon=True)
-        t2 = threading.Thread(target=run_fetch_signins, args=("interactiveUser", csv_path_interactive), daemon=True)
-        t3 = threading.Thread(target=run_fetch_app_signins, args=(csv_path_app_signins,), daemon=True)
-        t4 = threading.Thread(target=run_fetch_auth_methods, args=(csv_path_auth_methods,), daemon=True)
-        
-        t1.start()
-        t2.start()
-        t3.start()
-        t4.start()
-        
-        t1.join()
-        t2.join()
-        t3.join()
-        t4.join()
-        
-        if len(errors) == 4:
-            raise errors[0]
-            
-        unique_apps = set()
-        unique_os = set()
-        unique_browsers = set()
-        app_signins = []
-        auth_methods = []
-        
-        for path in [csv_path_noninteractive, csv_path_interactive]:
-            if os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
-                    reader = csv.reader(f)
-                    next(reader, None)
-                    for row in reader:
-                        if len(row) >= 3:
-                            app, os_name, browser = row[0], row[1], row[2]
-                            if app:
-                                unique_apps.add(app)
-                            if os_name:
-                                unique_os.add(os_name)
-                            if browser:
-                                unique_browsers.add(browser)
-                                
-        if os.path.exists(csv_path_app_signins):
-            with open(csv_path_app_signins, 'r', encoding='utf-8') as f:
+    t1 = threading.Thread(target=run_fetch_signins, args=("nonInteractiveUser", csv_path_noninteractive), daemon=True)
+    t2 = threading.Thread(target=run_fetch_signins, args=("interactiveUser", csv_path_interactive), daemon=True)
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+    
+    client.close()
+    
+    if errors: raise errors[0]
+    
+    unique_apps = set()
+    unique_os = set()
+    unique_browsers = set()
+    
+    for path in [csv_path_noninteractive, csv_path_interactive]:
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
                 reader = csv.reader(f)
-                next(reader, None)
+                header = next(reader, None)
                 for row in reader:
-                    if len(row) >= 2:
-                        app_signins.append((row[0], row[1]))
+                    if len(row) >= 3:
+                        if row[0]: unique_apps.add(row[0])
+                        if row[1]: unique_os.add(row[1])
+                        if row[2]: unique_browsers.add(row[2])
                         
-        if os.path.exists(csv_path_auth_methods):
-            with open(csv_path_auth_methods, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)
-                for row in reader:
-                    if len(row) >= 2:
-                        auth_methods.append((row[0], row[1]))
-                                
-        return {
-            "apps": sorted(list(unique_apps)),
-            "operating_systems": sorted(list(unique_os)),
-            "browsers": sorted(list(unique_browsers)),
-            "app_signins": app_signins,
-            "auth_methods": auth_methods
-        }
-    finally:
-        client.close()
+    return {
+        "apps": sorted(list(unique_apps)),
+        "operating_systems": sorted(list(unique_os)),
+        "browsers": sorted(list(unique_browsers))
+    }
+
+def run_app_signins_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
+    from core.graph.client import GraphClient
+    from core.graph.reports import ReportsService
+    import csv, os
+    client = GraphClient(tenant_id=tenant_id, client_ids=client_id, client_secrets=client_secret, concurrency=4, retries=5, backoff=2)
+    client.authenticate()
+    reports_service = ReportsService(client)
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+    reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
+    os.makedirs(reports_dir, exist_ok=True)
+    
+    csv_path_app_signins = os.path.join(reports_dir, "entra_app_signins.csv")
+    with open(csv_path_app_signins, 'w', encoding='utf-8', newline='') as f:
+        csv.writer(f).writerow(["appDisplayName", "successSignInCount"])
+        
+    reports_service.fetch_app_signin_summary(csv_path=csv_path_app_signins, max_rows=5000)
+    client.close()
+    
+    app_signins = []
+    if os.path.exists(csv_path_app_signins):
+        with open(csv_path_app_signins, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            for row in reader:
+                if len(row) >= 2:
+                    app_signins.append((row[0], row[1]))
+                    
+    return {"app_signins": app_signins}
+
+def run_auth_methods_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
+    from core.graph.client import GraphClient
+    from core.graph.reports import ReportsService
+    import csv, os
+    client = GraphClient(tenant_id=tenant_id, client_ids=client_id, client_secrets=client_secret, concurrency=4, retries=5, backoff=2)
+    client.authenticate()
+    reports_service = ReportsService(client)
+    
+    script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+    reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
+    os.makedirs(reports_dir, exist_ok=True)
+    
+    csv_path_auth_methods = os.path.join(reports_dir, "entra_auth_methods.csv")
+    with open(csv_path_auth_methods, 'w', encoding='utf-8', newline='') as f:
+        csv.writer(f).writerow(["authenticationMethod", "successActivityCount"])
+        
+    reports_service.fetch_auth_methods_summary(csv_path=csv_path_auth_methods, max_rows=5000)
+    client.close()
+    
+    auth_methods = []
+    if os.path.exists(csv_path_auth_methods):
+        with open(csv_path_auth_methods, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            for row in reader:
+                if len(row) >= 2:
+                    auth_methods.append((row[0], row[1]))
+                    
+    return {"auth_methods": auth_methods}
 
 
 class DevicesAppsTelemetryFrame(ctk.CTkFrame):
-    """Self-contained customtkinter component wrapping Microsoft Entra Data UI."""
-
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
         self.on_status_change = status_change_callback
-        self.status = None
-        self.last_data = {}
-
         self.build_ui()
 
     def build_ui(self):
-        """Creates card container for the tab."""
         self.pack(fill="x", expand=True, pady=10)
-
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
 
-        ctk.CTkLabel(self.inner_pad, text="Microsoft Entra Data", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
+        ctk.CTkLabel(self.inner_pad, text="Microsoft Entra Data", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 20))
 
-        self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        # 1. User Sign Ins
+        self.us_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.us_header_frame.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.us_header_frame, text="User Sign Ins", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.us_reload_btn = ctk.CTkButton(
+            self.us_header_frame, state="disabled", text="↻ Reload", width=80, height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", border_width=1, text_color="#2563EB", hover_color="#DBEAFE",
+            command=self._retry_us_fetch
+        )
+        self.us_reload_btn.pack(side="right")
+        self.us_grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.us_grid_frame.pack(fill="x", expand=True, pady=(0, 20))
 
+        # 2. App Sign Ins
+        self.as_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.as_header_frame.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.as_header_frame, text="App Sign Ins", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.as_reload_btn = ctk.CTkButton(
+            self.as_header_frame, state="disabled", text="↻ Reload", width=80, height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", border_width=1, text_color="#2563EB", hover_color="#DBEAFE",
+            command=self._retry_as_fetch
+        )
+        self.as_reload_btn.pack(side="right")
+        self.as_grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.as_grid_frame.pack(fill="x", expand=True, pady=(0, 20))
+
+        # 3. Auth Methods
+        self.am_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.am_header_frame.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.am_header_frame, text="Authentication Methods", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.am_reload_btn = ctk.CTkButton(
+            self.am_header_frame, state="disabled", text="↻ Reload", width=80, height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", border_width=1, text_color="#2563EB", hover_color="#DBEAFE",
+            command=self._retry_am_fetch
+        )
+        self.am_reload_btn.pack(side="right")
+        self.am_grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        self.am_grid_frame.pack(fill="x", expand=True)
         self.reset_view()
 
     def reset_view(self):
-        """Resets and hides grids."""
         self.pack_forget()
-        self.state_frame.pack_forget()
-        self.grid_frame.pack_forget()
-        self.last_data = {}
-
-        for w in self.state_frame.winfo_children():
-            w.destroy()
-        for w in self.grid_frame.winfo_children():
-            w.destroy()
-
-    def _set_state_loading(self, msg="Loading..."):
-        for w in self.state_frame.winfo_children():
-            w.destroy()
-        ctk.CTkLabel(self.state_frame, text=f"⏳ {msg}", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=20)
-        self.state_frame.pack(fill="x", expand=True)
-
-    def _set_state_error(self, error_msg):
-        for w in self.state_frame.winfo_children():
-            w.destroy()
-
-        display_msg = error_msg
-        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
-            display_msg = "Reports and Audit Log reading permission required.\nPlease grant 'Reports.Read.All' and 'AuditLog.Read.All' application permissions to your App Registration in Microsoft Entra ID."
-
-        ctk.CTkLabel(self.state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 10))
-        ctk.CTkButton(self.state_frame, text="Try Again", command=self._retry_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
-        self.state_frame.pack(fill="x", expand=True)
-
-    def _retry_fetch(self):
-        tenant, clients, secrets = self.get_credentials()
-        if tenant:
-            self.trigger_fetch(tenant, clients[0], secrets[0])
+        self.status = None
+        for w in self.us_grid_frame.winfo_children(): w.destroy()
+        for w in self.as_grid_frame.winfo_children(): w.destroy()
+        for w in self.am_grid_frame.winfo_children(): w.destroy()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
-        """Triggers background fetch thread."""
-        usage_logger.info("Entra Data trigger_fetch called. Spawning background thread...")
-        self.status = "loading"
-        self.on_status_change()
-
         self.pack(fill="x", expand=True, pady=10)
-        self.grid_frame.pack_forget()
+        self.trigger_us_fetch(tenant, client_id, client_secret)
+        self.trigger_as_fetch(tenant, client_id, client_secret)
+        self.trigger_am_fetch(tenant, client_id, client_secret)
 
-        self._set_state_loading("Downloading and parsing Microsoft Entra activities...")
+    def _retry_us_fetch(self):
+        tenant, clients, secrets = self.get_credentials()
+        if tenant and clients and secrets:
+            self.us_reload_btn.configure(state="disabled")
+            self.trigger_us_fetch(tenant, clients[0], secrets[0])
 
-        threading.Thread(
-            target=self._execute_worker,
-            args=(tenant, client_id, client_secret),
-            daemon=True
-        ).start()
+    def _retry_as_fetch(self):
+        tenant, clients, secrets = self.get_credentials()
+        if tenant and clients and secrets:
+            self.as_reload_btn.configure(state="disabled")
+            self.trigger_as_fetch(tenant, clients[0], secrets[0])
 
-    def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
-        usage_logger.info("Executing thread: _execute_entra_data_worker")
-        if self.semaphore:
-            self.semaphore.acquire()
-            
-        unique_apps = set()
-        unique_os = set()
-        unique_browsers = set()
-        app_signins = []
-        auth_methods = []
-        
-        def handle_signins_page(value_list):
-            for log in value_list:
-                app = log.get("appDisplayName")
-                if app:
-                    unique_apps.add(app)
-                device = log.get("deviceDetail")
-                if device:
-                    os_name = device.get("operatingSystem")
-                    if os_name:
-                        unique_os.add(os_name)
-                    browser = device.get("browser")
-                    if browser:
-                        unique_browsers.add(browser)
-            
-            data_to_render = {
-                "apps": sorted(list(unique_apps)),
-                "operating_systems": sorted(list(unique_os)),
-                "browsers": sorted(list(unique_browsers)),
-                "app_signins": list(app_signins),
-                "auth_methods": list(auth_methods)
-            }
-            self.after(0, self._render_partial_success, data_to_render)
-            
-        def handle_app_signins_page(value_list):
-            for item in value_list:
-                app_name = item.get("appDisplayName") or ""
-                success = str(item.get("successfulSignInCount") or 0)
-                app_signins.append((app_name, success))
-                
-            data_to_render = {
-                "apps": sorted(list(unique_apps)),
-                "operating_systems": sorted(list(unique_os)),
-                "browsers": sorted(list(unique_browsers)),
-                "app_signins": list(app_signins),
-                "auth_methods": list(auth_methods)
-            }
-            self.after(0, self._render_partial_success, data_to_render)
+    def _retry_am_fetch(self):
+        tenant, clients, secrets = self.get_credentials()
+        if tenant and clients and secrets:
+            self.am_reload_btn.configure(state="disabled")
+            self.trigger_am_fetch(tenant, clients[0], secrets[0])
 
-        def handle_auth_methods_page(value_list):
-            for item in value_list:
-                method = item.get("authenticationMethod") or ""
-                activity = str(item.get("successActivityCount") or 0)
-                auth_methods.append((method, activity))
-                
-            data_to_render = {
-                "apps": sorted(list(unique_apps)),
-                "operating_systems": sorted(list(unique_os)),
-                "browsers": sorted(list(unique_browsers)),
-                "app_signins": list(app_signins),
-                "auth_methods": list(auth_methods)
-            }
-            self.after(0, self._render_partial_success, data_to_render)
-            
+    def trigger_us_fetch(self, tenant, client_id, client_secret):
+        for w in self.us_grid_frame.winfo_children(): w.destroy()
+        f = ctk.CTkFrame(self.us_grid_frame, fg_color="transparent")
+        ctk.CTkLabel(f, text="⏳ Analyzing User Sign Ins...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
+        pb = ctk.CTkProgressBar(f, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
+        pb.pack(pady=(0, 20))
+        pb.start()
+        self.us_status = "loading"
+        f.pack(fill="x", expand=True)
+        threading.Thread(target=self._execute_us_worker, args=(tenant, client_id, client_secret), daemon=True).start()
+
+    def trigger_as_fetch(self, tenant, client_id, client_secret):
+        for w in self.as_grid_frame.winfo_children(): w.destroy()
+        f = ctk.CTkFrame(self.as_grid_frame, fg_color="transparent")
+        ctk.CTkLabel(f, text="⏳ Analyzing App Sign Ins...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
+        pb = ctk.CTkProgressBar(f, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
+        pb.pack(pady=(0, 20))
+        pb.start()
+        f.pack(fill="x", expand=True)
+        threading.Thread(target=self._execute_as_worker, args=(tenant, client_id, client_secret), daemon=True).start()
+
+    def trigger_am_fetch(self, tenant, client_id, client_secret):
+        for w in self.am_grid_frame.winfo_children(): w.destroy()
+        f = ctk.CTkFrame(self.am_grid_frame, fg_color="transparent")
+        ctk.CTkLabel(f, text="⏳ Analyzing Auth Methods...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
+        pb = ctk.CTkProgressBar(f, mode="indeterminate", width=250, fg_color=COLOR_SURFACE_VARIANT, progress_color=COLOR_PRIMARY)
+        pb.pack(pady=(0, 20))
+        pb.start()
+        f.pack(fill="x", expand=True)
+        threading.Thread(target=self._execute_am_worker, args=(tenant, client_id, client_secret), daemon=True).start()
+
+    def _execute_us_worker(self, tenant, client_id, client_secret):
+        if self.semaphore: self.semaphore.acquire()
         try:
-            data = run_devices_apps_pipeline(
-                client_id, 
-                client_secret, 
-                tenant, 
-                on_page_callback=handle_signins_page,
-                on_app_signins_page_callback=handle_app_signins_page,
-                on_auth_methods_page_callback=handle_auth_methods_page,
-                is_cancelled_callback=lambda: getattr(self, "is_cancelled", False)
+            data = run_user_signins_pipeline(
+                client_id, client_secret, tenant,
+                on_page_callback=lambda d: self.after(0, self._render_us_success, d, True)
             )
-            usage_logger.info("Successfully completed Microsoft Entra telemetry data fetch.")
-            self.after(0, self._render_success, data)
+            self.after(0, self._render_us_success, data, False)
         except Exception as e:
-            usage_logger.error("Exception caught in Microsoft Entra worker.", exc_info=True)
-            self.after(0, self._render_error, str(e))
+            self.after(0, self._render_us_error, str(e))
         finally:
-            if self.semaphore:
-                self.semaphore.release()
+            if self.semaphore: self.semaphore.release()
 
-    def _render_partial_success(self, data: dict):
-        if self.status == "loading":
-            self._update_ui_lists(data)
+    def _execute_as_worker(self, tenant, client_id, client_secret):
+        if self.semaphore: self.semaphore.acquire()
+        try:
+            data = run_app_signins_pipeline(client_id, client_secret, tenant)
+            self.after(0, self._render_as_success, data)
+        except Exception as e:
+            self.after(0, self._render_as_error, str(e))
+        finally:
+            if self.semaphore: self.semaphore.release()
 
-    def _render_success(self, data: dict):
-        self.status = "success"
-        self._update_ui_lists(data)
+    def _execute_am_worker(self, tenant, client_id, client_secret):
+        if self.semaphore: self.semaphore.acquire()
+        try:
+            data = run_auth_methods_pipeline(client_id, client_secret, tenant)
+            self.after(0, self._render_am_success, data)
+        except Exception as e:
+            self.after(0, self._render_am_error, str(e))
+        finally:
+            if self.semaphore: self.semaphore.release()
+
+    def _render_us_error(self, err_msg):
+        self.us_reload_btn.configure(state="normal")
+        self.us_status = "error"
+        for w in self.us_grid_frame.winfo_children(): w.destroy()
+        ctk.CTkLabel(self.us_grid_frame, text=f"✖ Error: {err_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.status = "error"
         self.on_status_change()
 
-    def _update_ui_lists(self, data: dict):
-        self.last_data = data
-        self.state_frame.pack_forget()
-        for w in self.grid_frame.winfo_children():
-            try:
-                w.destroy()
-            except Exception:
-                pass
+    def _render_as_error(self, err_msg):
+        self.as_reload_btn.configure(state="normal")
+        for w in self.as_grid_frame.winfo_children(): w.destroy()
+        ctk.CTkLabel(self.as_grid_frame, text=f"✖ Error: {err_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.status = "error"
+        self.on_status_change()
 
-        self.grid_frame.pack(fill="x", expand=True)
+    def _render_am_error(self, err_msg):
+        self.am_reload_btn.configure(state="normal")
+        for w in self.am_grid_frame.winfo_children(): w.destroy()
+        ctk.CTkLabel(self.am_grid_frame, text=f"✖ Error: {err_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM).pack(pady=20)
+        self.status = "error"
+        self.on_status_change()
 
-        if self.status == "loading":
-            progress_frame = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_TONAL_BG, height=26, corner_radius=6)
+    def _render_us_success(self, data: dict, is_partial=False):
+        if not is_partial:
+            self.us_reload_btn.configure(state="normal")
+            self.us_status = "success"
+            
+        for w in self.us_grid_frame.winfo_children(): w.destroy()
+        
+        if is_partial and getattr(self, "us_status", None) == "loading":
+            progress_frame = ctk.CTkFrame(self.us_grid_frame, fg_color=COLOR_TONAL_BG, height=26, corner_radius=6)
             progress_frame.pack(fill="x", pady=(0, 6))
             ctk.CTkLabel(
                 progress_frame, 
-                text="⏳ Querying Microsoft Entra activities in the background... UI will auto-refresh.", 
+                text="⏳ Querying activities... UI will auto-refresh.", 
                 font=FONT_BODY_SMALL,
                 text_color=COLOR_TONAL_TEXT
             ).pack(padx=10, pady=2, anchor="w")
-        elif self.status == "cancelled" or getattr(self, "is_cancelled", False):
-            progress_frame = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE_VARIANT, height=26, corner_radius=6)
-            progress_frame.pack(fill="x", pady=(0, 6))
-            ctk.CTkLabel(
-                progress_frame, 
-                text="⚠️ Fetching cancelled by user. Displaying partial data.", 
-                font=FONT_BODY_SMALL,
-                text_color=COLOR_ERROR
-            ).pack(padx=10, pady=2, anchor="w")
-
-        # --- Subheading 1: User Sign Ins ---
-        user_signins_header = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
-        user_signins_header.pack(fill="x", padx=10, pady=(10, 5))
-        ctk.CTkLabel(user_signins_header, text="User Sign Ins", font=FONT_SUBSECTION_HEADER, text_color=COLOR_PRIMARY).pack(anchor="w")
-
+            
         rows_data = [
             ("📱 Apps Used", data.get("apps", []), "No apps found"),
             ("💻 Operating Systems", data.get("operating_systems", []), "No operating systems found"),
@@ -400,112 +377,78 @@ class DevicesAppsTelemetryFrame(ctk.CTkFrame):
         ]
 
         for title, items, empty_msg in rows_data:
-            row_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+            row_frame = ctk.CTkFrame(self.us_grid_frame, fg_color="transparent")
             row_frame.pack(fill="x", pady=4, padx=10, anchor="w")
-            
-            lbl_title = ctk.CTkLabel(
-                row_frame, 
-                text=f"{title}: ", 
-                font=FONT_BODY_BOLD, 
-                text_color=COLOR_TEXT_MAIN,
-                anchor="w"
-            )
-            lbl_title.pack(side="left", anchor="nw")
-            
+            ctk.CTkLabel(row_frame, text=f"{title}: ", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN, anchor="w").pack(side="left", anchor="nw")
             display_text = ", ".join(items) if items else empty_msg
-            lbl_content = ctk.CTkLabel(
-                row_frame, 
-                text=display_text, 
-                font=FONT_BODY_MEDIUM, 
-                text_color=COLOR_TEXT_MAIN if items else COLOR_TEXT_SUB,
-                justify="left",
-                anchor="w"
-            )
+            lbl_content = ctk.CTkLabel(row_frame, text=display_text, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN if items else COLOR_TEXT_SUB, justify="left", anchor="w")
             lbl_content.pack(side="left", fill="x", expand=True, anchor="nw")
             
             def make_configure_handler(lbl=lbl_content):
                 def on_configure(event):
                     lbl.configure(wraplength=max(200, event.width - 180))
                 return on_configure
-            
             row_frame.bind("<Configure>", make_configure_handler())
+        self.status = "success"
+        self.on_status_change()
 
-        # Spacer
-        ctk.CTkFrame(self.grid_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1).pack(fill="x", padx=10, pady=15)
-
-        # --- Subheading 2: App Sign Ins ---
-        app_signins_header = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
-        app_signins_header.pack(fill="x", padx=10, pady=(0, 5))
-        ctk.CTkLabel(app_signins_header, text="App Sign Ins", font=FONT_SUBSECTION_HEADER, text_color=COLOR_PRIMARY).pack(anchor="w")
-
+    def _render_as_success(self, data: dict):
+        self.as_reload_btn.configure(state="normal")
+        for w in self.as_grid_frame.winfo_children(): w.destroy()
+        
         app_signins_data = data.get("app_signins", [])
-        
-        metrics_grid1 = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
-        metrics_grid1.pack(fill="x", padx=10, pady=(5, 10))
-        
         headers1 = ["App Name", "Successful Sign Ins"]
         for i in range(2):
-            metrics_grid1.grid_columnconfigure(i, weight=1)
+            self.as_grid_frame.grid_columnconfigure(i, weight=1)
             
         for col_idx, head_text in enumerate(headers1):
-            cell = ctk.CTkFrame(metrics_grid1, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell = ctk.CTkFrame(self.as_grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
             
         if not app_signins_data:
-            c = ctk.CTkFrame(metrics_grid1, fg_color=COLOR_SURFACE, corner_radius=0)
+            c = ctk.CTkFrame(self.as_grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
             c.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c, text="No app sign-ins detected.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=12)
         else:
-            for r_idx, (app, success) in enumerate(app_signins_data[:500], start=1): # Limit display to top 500 for UI clean layout
-                bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+            for r_idx, (app, success) in enumerate(app_signins_data[:500], start=1):
+                bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
                 vals = [app, success]
                 for c_idx, val in enumerate(vals):
-                    c = ctk.CTkFrame(metrics_grid1, fg_color=bg_style, corner_radius=0)
+                    c = ctk.CTkFrame(self.as_grid_frame, fg_color=bg_style, corner_radius=0)
                     c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=350).pack(padx=10, pady=8, anchor="nw")
+        self.status = "success"
+        self.on_status_change()
 
-        # Spacer
-        ctk.CTkFrame(self.grid_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1).pack(fill="x", padx=10, pady=15)
-
-        # --- Subheading 3: Authentication Methods ---
-        auth_header = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
-        auth_header.pack(fill="x", padx=10, pady=(0, 5))
-        ctk.CTkLabel(auth_header, text="Authentication Methods", font=FONT_SUBSECTION_HEADER, text_color=COLOR_PRIMARY).pack(anchor="w")
-
+    def _render_am_success(self, data: dict):
+        self.am_reload_btn.configure(state="normal")
+        for w in self.am_grid_frame.winfo_children(): w.destroy()
+        
         auth_methods_data = data.get("auth_methods", [])
-        
-        metrics_grid2 = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
-        metrics_grid2.pack(fill="x", padx=10, pady=(5, 10))
-        
         headers2 = ["Authentication Method", "Success Activity Count"]
         for i in range(2):
-            metrics_grid2.grid_columnconfigure(i, weight=1)
+            self.am_grid_frame.grid_columnconfigure(i, weight=1)
             
         for col_idx, head_text in enumerate(headers2):
-            cell = ctk.CTkFrame(metrics_grid2, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell = ctk.CTkFrame(self.am_grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
             
         if not auth_methods_data:
-            c = ctk.CTkFrame(metrics_grid2, fg_color=COLOR_SURFACE, corner_radius=0)
+            c = ctk.CTkFrame(self.am_grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
             c.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c, text="No authentication activity detected.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=12)
         else:
             for r_idx, (method, activity) in enumerate(auth_methods_data, start=1):
-                bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+                bg_style = "transparent" if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
                 vals = [method, activity]
                 for c_idx, val in enumerate(vals):
-                    c = ctk.CTkFrame(metrics_grid2, fg_color=bg_style, corner_radius=0)
+                    c = ctk.CTkFrame(self.am_grid_frame, fg_color=bg_style, corner_radius=0)
                     c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=8, anchor="nw")
-
-    def _render_error(self, err_msg):
-        usage_logger.warning(f"Entra Data Telemetry fetch failed: {err_msg}")
-        self._set_state_error(err_msg)
-        self.status = "error"
+        self.status = "success"
         self.on_status_change()
 
     def cancel(self):
-        """Cancels background thread operations."""
-        self.status = None
+        pass

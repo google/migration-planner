@@ -270,7 +270,23 @@ class ActiveUsersUsageFrame(ctk.CTkFrame):
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
         
-        ctk.CTkLabel(self.inner_pad, text="O365 Active Users Usage", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
+        
+        self.header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.header.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.header, text="O365 Active Users Usage", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.reload_btn = ctk.CTkButton(
+            self.header, 
+            state="disabled", text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_fetch
+        )
+        self.reload_btn.pack(side="right")
         
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
@@ -310,6 +326,8 @@ class ActiveUsersUsageFrame(ctk.CTkFrame):
         self.state_frame.pack(fill="x", expand=True)
 
     def _retry_fetch(self):
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.trigger_fetch(tenant, clients[0], secrets[0])
@@ -346,6 +364,8 @@ class ActiveUsersUsageFrame(ctk.CTkFrame):
 
     def _render_success(self, o365_data: list):
         self.o365_data = o365_data
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -381,6 +401,8 @@ class ActiveUsersUsageFrame(ctk.CTkFrame):
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Active Users Usage fetch failed: {err_msg}")
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()
@@ -471,6 +493,8 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
         self.state_frame.pack(fill="x", expand=True)
 
     def _retry_fetch(self):
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.trigger_fetch(tenant, clients[0], secrets[0])
@@ -507,6 +531,8 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
 
     def _render_success(self, trend_data: dict):
         self.trend_data = trend_data
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -569,6 +595,8 @@ class ActiveUsersTrendFrame(ctk.CTkFrame):
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Active Users Trend fetch failed: {err_msg}")
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()
@@ -598,7 +626,23 @@ class M365AppUsageFrame(ctk.CTkFrame):
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
         self.inner_pad.pack(fill="both", expand=True, padx=20, pady=20)
         
-        ctk.CTkLabel(self.inner_pad, text="M365 App Usage (180 Days)", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(anchor="w", pady=(0, 10))
+        
+        self.header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.header.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(self.header, text="M365 App Usage (180 Days)", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.reload_btn = ctk.CTkButton(
+            self.header, 
+            state="disabled", text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_fetch
+        )
+        self.reload_btn.pack(side="right")
         
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
@@ -638,6 +682,8 @@ class M365AppUsageFrame(ctk.CTkFrame):
         self.state_frame.pack(fill="x", expand=True)
 
     def _retry_fetch(self):
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.trigger_fetch(tenant, clients[0], secrets[0])
@@ -674,6 +720,8 @@ class M365AppUsageFrame(ctk.CTkFrame):
 
     def _render_success(self, m365_data: list):
         self.m365_data = m365_data
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
@@ -723,6 +771,8 @@ class M365AppUsageFrame(ctk.CTkFrame):
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"M365 App Usage fetch failed: {err_msg}")
+        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
+            self.reload_btn.configure(state="normal")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()
