@@ -132,14 +132,18 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
             reports_service = ReportsService(client)
 
             auth_methods = []
+            page_count = 0
             def handle_page(value_list):
+                nonlocal auth_methods, page_count
                 if self.is_cancelled or request_id != self.current_request_id:
                     return
                 for item in value_list:
                     method = item.get("authenticationMethod") or ""
                     activity = str(item.get("successActivityCount") or 0)
                     auth_methods.append((method, activity))
-                self.after(0, self._render_partial, list(auth_methods), request_id)
+                page_count += 1
+                if page_count % 3 == 0:
+                    self.after(0, self._render_partial, list(auth_methods), request_id)
 
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
@@ -329,14 +333,18 @@ class AppSigninsSubFrame(ctk.CTkFrame):
             reports_service = ReportsService(client)
 
             app_signins = []
+            page_count = 0
             def handle_page(value_list):
+                nonlocal app_signins, page_count
                 if self.is_cancelled or request_id != self.current_request_id:
                     return
                 for item in value_list:
                     app_name = item.get("appDisplayName") or ""
                     success = str(item.get("successfulSignInCount") or 0)
                     app_signins.append((app_name, success))
-                self.after(0, self._render_partial, list(app_signins), request_id)
+                page_count += 1
+                if page_count % 3 == 0:
+                    self.after(0, self._render_partial, list(app_signins), request_id)
 
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
@@ -542,8 +550,10 @@ class UserSigninsSubFrame(ctk.CTkFrame):
             unique_apps = set()
             unique_os = set()
             unique_browsers = set()
-
+            page_count = 0
+ 
             def handle_signins_page(value_list):
+                nonlocal page_count
                 if self.is_cancelled or request_id != self.current_request_id:
                     return
                 for log in value_list:
@@ -559,12 +569,14 @@ class UserSigninsSubFrame(ctk.CTkFrame):
                         if browser:
                             unique_browsers.add(browser)
                 
-                partial_data = {
-                    "apps": sorted(list(unique_apps)),
-                    "operating_systems": sorted(list(unique_os)),
-                    "browsers": sorted(list(unique_browsers))
-                }
-                self.after(0, self._render_partial, partial_data, request_id)
+                page_count += 1
+                if page_count % 3 == 0:
+                    partial_data = {
+                        "apps": sorted(list(unique_apps)),
+                        "operating_systems": sorted(list(unique_os)),
+                        "browsers": sorted(list(unique_browsers))
+                    }
+                    self.after(0, self._render_partial, partial_data, request_id)
 
             errors = []
             def run_fetch_signins(event_type, path):
