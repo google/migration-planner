@@ -243,7 +243,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
 
 
 class AppSigninsSubFrame(ctk.CTkFrame):
-    """Sub-frame for Microsoft Entra App Sign Ins."""
+    """Sub-frame for Microsoft Entra App Sign Ins with UI Pagination."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, semaphore=None, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
@@ -255,6 +255,11 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         self.last_data = []
         self.is_cancelled = False
         self.current_request_id = 0
+
+        # Pagination variables
+        self.ITEMS_PER_PAGE = 10
+        self.current_page = 0
+        self.csv_path = None
 
         self.build_ui()
 
@@ -281,6 +286,8 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         self.status = None
         self.last_data = []
         self.is_cancelled = False
+        self.current_page = 0
+        self.csv_path = None
         for w in self.body_frame.winfo_children():
             w.destroy()
 
@@ -308,6 +315,12 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         self.status = "loading"
         self.is_cancelled = False
         self.current_request_id += 1
+        self.current_page = 0  # Reset to page 0
+
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+        self.csv_path = os.path.join(reports_dir, "entra_app_signins.csv")
+
         self._set_state_loading("Downloading and parsing App Sign Ins...")
         self.on_status_change()
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
@@ -325,11 +338,6 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         try:
             if self.is_cancelled or request_id != self.current_request_id:
                 return
-
-            script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
-            os.makedirs(reports_dir, exist_ok=True)
-            csv_path = os.path.join(reports_dir, "entra_app_signins.csv")
 
             client = GraphClient(
                 tenant_id=tenant,
@@ -356,12 +364,12 @@ class AppSigninsSubFrame(ctk.CTkFrame):
                 if page_count % 3 == 0:
                     self.after(0, self._render_partial, list(app_signins), request_id)
 
-            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+            with open(self.csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(["appDisplayName", "successSignInCount"])
 
             reports_service.fetch_app_signin_summary(
-                csv_path=csv_path,
+                csv_path=self.csv_path,
                 max_rows=5000,
                 on_page_callback=handle_page,
                 is_cancelled_callback=lambda: self.is_cancelled or request_id != self.current_request_id
@@ -381,14 +389,14 @@ class AppSigninsSubFrame(ctk.CTkFrame):
     def _render_partial(self, data, request_id):
         if self.is_cancelled or request_id != self.current_request_id:
             return
-        self._update_ui(data, is_partial=True)
+        self._update_ui_paginated(data, is_partial=True)
 
     def _render_success(self, data, request_id):
         if self.is_cancelled or request_id != self.current_request_id:
             return
         self.status = "success"
         self.last_data = data
-        self._update_ui(data, is_partial=False)
+        self._update_ui_paginated(data=None, is_partial=False)
         self.on_status_change()
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
@@ -402,7 +410,26 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
 
-    def _update_ui(self, data, is_partial=False):
+    def _load_page_from_csv(self, page):
+        if not self.csv_path or not os.path.exists(self.csv_path):
+            return [], 0
+
+        items = []
+        total_count = 0
+        try:
+            with open(self.csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # skip header
+                all_rows = list(reader)
+                total_count = len(all_rows)
+                start_idx = page * self.ITEMS_PER_PAGE
+                end_idx = start_idx + self.ITEMS_PER_PAGE
+                items = all_rows[start_idx:end_idx]
+        except Exception as e:
+            usage_logger.error(f"Error reading CSV for pagination: {e}")
+        return items, total_count
+
+    def _update_ui_paginated(self, data=None, is_partial=False):
         for w in self.body_frame.winfo_children():
             w.destroy()
 
@@ -416,6 +443,16 @@ class AppSigninsSubFrame(ctk.CTkFrame):
                 text_color=COLOR_TONAL_TEXT
             ).pack(padx=10, pady=2, anchor="w")
 
+        # Get the page slice
+        if data is not None:
+            total_count = len(data)
+            start_idx = self.current_page * self.ITEMS_PER_PAGE
+            end_idx = start_idx + self.ITEMS_PER_PAGE
+            page_data = data[start_idx:end_idx]
+        else:
+            page_data, total_count = self._load_page_from_csv(self.current_page)
+
+        # Draw the table grid
         metrics_grid = ctk.CTkFrame(self.body_frame, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         metrics_grid.pack(fill="x", pady=(5, 10))
 
@@ -428,12 +465,12 @@ class AppSigninsSubFrame(ctk.CTkFrame):
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
-        if not data:
+        if not page_data:
             c = ctk.CTkFrame(metrics_grid, fg_color=COLOR_SURFACE, corner_radius=0)
             c.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c, text="No app sign-ins detected.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=12)
         else:
-            for r_idx, (app, success) in enumerate(data[:500], start=1):
+            for r_idx, (app, success) in enumerate(page_data, start=1):
                 bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
                 vals = [app, success]
                 for c_idx, val in enumerate(vals):
@@ -441,12 +478,65 @@ class AppSigninsSubFrame(ctk.CTkFrame):
                     c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=350).pack(padx=10, pady=8, anchor="nw")
 
+        # Draw the pagination controls if we have items
+        if total_count > 0:
+            self._draw_pagination_controls(total_count, data, is_partial)
+
+    def _draw_pagination_controls(self, total_count, data, is_partial):
+        total_pages = (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+        if total_pages <= 1:
+            return
+
+        control_frame = ctk.CTkFrame(self.body_frame, fg_color="transparent")
+        control_frame.pack(fill="x", pady=(5, 10))
+
+        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
+        left_spacer.pack(side="left", fill="x", expand=True)
+
+        center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
+        center_container.pack(side="left")
+
+        prev_state = "normal" if self.current_page > 0 else "disabled"
+        btn_prev = ctk.CTkButton(
+            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
+            state=prev_state,
+            command=lambda: self._change_page(-1, data, is_partial)
+        )
+        btn_prev.pack(side="left", padx=5)
+
+        page_lbl = ctk.CTkLabel(
+            center_container,
+            text=f"Page {self.current_page + 1} of {total_pages} ({total_count} items)",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_SUB
+        )
+        page_lbl.pack(side="left", padx=15)
+
+        next_state = "normal" if self.current_page < total_pages - 1 else "disabled"
+        btn_next = ctk.CTkButton(
+            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
+            state=next_state,
+            command=lambda: self._change_page(1, data, is_partial)
+        )
+        btn_next.pack(side="left", padx=5)
+
+        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
+        right_spacer.pack(side="right", fill="x", expand=True)
+
+    def _change_page(self, delta, data, is_partial):
+        self.current_page += delta
+        self._update_ui_paginated(data, is_partial)
+
     def cancel(self):
         self.is_cancelled = True
         self.current_request_id += 1
         if self.status == "loading":
             self.status = "cancelled"
-            self._update_ui(self.last_data)
+            self._update_ui_paginated(self.last_data)
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
 
