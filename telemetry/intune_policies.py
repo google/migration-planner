@@ -162,6 +162,8 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.on_status_change = status_change_callback
         self.status = None
         self.last_data = {}
+        self.current_page = 0
+        self.ITEMS_PER_PAGE = 5
 
         self.build_ui()
 
@@ -334,16 +336,16 @@ class IntunePoliciesFrame(ctk.CTkFrame):
 
     def _render_partial_success(self, data: dict):
         if self.status == "loading":
-            self._update_ui_lists(data)
+            self._update_ui_lists_paginated(data)
 
     def _render_success(self, data: dict):
         self.status = "success"
         if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
             self.reload_btn.configure(state="normal")
-        self._update_ui_lists(data)
+        self._update_ui_lists_paginated(data)
         self.on_status_change()
 
-    def _update_ui_lists(self, data: dict):
+    def _update_ui_lists_paginated(self, data: dict):
         self.last_data = data
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
@@ -437,7 +439,12 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             ctk.CTkLabel(c, text="No policies detected.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=12)
             return
             
-        for r_idx, (platform, p_type, count) in enumerate(rows_data, start=1):
+        total_count = len(rows_data)
+        start_idx = self.current_page * self.ITEMS_PER_PAGE
+        end_idx = start_idx + self.ITEMS_PER_PAGE
+        page_data = rows_data[start_idx:end_idx]
+
+        for r_idx, (platform, p_type, count) in enumerate(page_data, start=1):
             bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
             
             vals = [platform, p_type, count]
@@ -447,7 +454,53 @@ class IntunePoliciesFrame(ctk.CTkFrame):
                 c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                 ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
 
+        if total_count > self.ITEMS_PER_PAGE:
+            self._draw_pagination_controls(total_count, data)
+
         ctk.CTkLabel(self.grid_frame, text="* Based on sample data collected from Intune.", font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=10, pady=(0, 15))
+
+    def _draw_pagination_controls(self, total_count, data):
+        total_pages = (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+        
+        control_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+        control_frame.pack(fill="x", pady=(5, 10))
+
+        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
+        left_spacer.pack(side="left", fill="x", expand=True)
+
+        center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
+        center_container.pack(side="left")
+
+        prev_state = "normal" if self.current_page > 0 else "disabled"
+        btn_prev = ctk.CTkButton(
+            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
+            command=lambda: self._change_page(-1, data)
+        )
+        btn_prev.pack(side="left", padx=5)
+
+        page_lbl = ctk.CTkLabel(
+            center_container, text=f"Page {self.current_page + 1} of {total_pages}",
+            font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB
+        )
+        page_lbl.pack(side="left", padx=15)
+
+        next_state = "normal" if self.current_page < total_pages - 1 else "disabled"
+        btn_next = ctk.CTkButton(
+            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
+            command=lambda: self._change_page(1, data)
+        )
+        btn_next.pack(side="left", padx=5)
+
+        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
+        right_spacer.pack(side="right", fill="x", expand=True)
+
+    def _change_page(self, delta, data):
+        self.current_page += delta
+        self._update_ui_lists_paginated(data)
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Intune Policies Telemetry fetch failed: {err_msg}")
