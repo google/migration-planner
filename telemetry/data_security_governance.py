@@ -900,7 +900,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
-            command=lambda: self._change_auth_page(-1, data)
+            command=lambda d=data: self._change_auth_page(-1, d)
         )
         btn_prev.pack(side="left", padx=5)
 
@@ -912,7 +912,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             center_container, text="Next ▶", width=70, height=26, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
-            command=lambda: self._change_auth_page(1, data)
+            command=lambda d=data: self._change_auth_page(1, d)
         )
         btn_next.pack(side="left", padx=5)
 
@@ -1016,7 +1016,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
-            command=lambda: self._change_labels_page(-1, data)
+            command=lambda d=data: self._change_labels_page(-1, d)
         )
         btn_prev.pack(side="left", padx=5)
 
@@ -1028,7 +1028,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             center_container, text="Next ▶", width=70, height=26, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
-            command=lambda: self._change_labels_page(1, data)
+            command=lambda d=data: self._change_labels_page(1, d)
         )
         btn_next.pack(side="left", padx=5)
 
@@ -1073,8 +1073,10 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             ).pack(padx=20, pady=20)
             self.btn_export_retention.configure(state="disabled")
         else:
-            self.btn_export_retention.configure(state="normal")
-            policies_list = policies if isinstance(policies, list) else [policies]
+            if isinstance(policies, dict) and "value" in policies and isinstance(policies["value"], list):
+                policies_list = policies["value"]
+            else:
+                policies_list = policies if isinstance(policies, list) else [policies]
             self.last_policies_data = policies_list
             self.retention_current_page = 0
             self._update_retention_ui_paginated(self.last_policies_data)
@@ -1197,7 +1199,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
-            command=lambda: self._change_retention_page(-1, data)
+            command=lambda d=data: self._change_retention_page(-1, d)
         )
         btn_prev.pack(side="left", padx=5)
 
@@ -1209,7 +1211,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             center_container, text="Next ▶", width=70, height=26, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
-            command=lambda: self._change_retention_page(1, data)
+            command=lambda d=data: self._change_retention_page(1, d)
         )
         btn_next.pack(side="left", padx=5)
 
