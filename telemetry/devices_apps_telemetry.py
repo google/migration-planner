@@ -240,11 +240,10 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
                     c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=8, anchor="nw")
 
-            if total_count > self.ITEMS_PER_PAGE:
-                self._draw_pagination_controls(total_count, data, is_partial)
+            self._draw_pagination_controls(total_count, data, is_partial)
 
     def _draw_pagination_controls(self, total_count, data, is_partial):
-        total_pages = (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+        total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
         control_frame = ctk.CTkFrame(self.body_frame, fg_color="transparent")
         control_frame.pack(fill="x", pady=(5, 10))

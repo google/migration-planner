@@ -241,33 +241,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.on_status_change = status_change_callback
         self.status = None  # 'loading', 'success', 'error', None
         
-        self.current_page = 0
-        self.ITEMS_PER_PAGE = 8
+        self.labels_current_page = 0
+        self.retention_current_page = 0
+        self.ITEMS_PER_PAGE = 5
         self.last_labels_data = None
         self.last_policies_data = None
-        
-        import tempfile
-        import sqlite3
-        import atexit
-        self.db_fd, self.db_path = tempfile.mkstemp(suffix=".db")
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self.cursor = self.conn.cursor()
-        self.cursor.execute('''CREATE TABLE IF NOT EXISTS labels 
-                               (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                                name TEXT, description TEXT, hasProtection INTEGER, 
-                                applicationMode TEXT, priority INTEGER, 
-                                applicableTo TEXT, isEnabled INTEGER, is_sublabel INTEGER)''')
-        self.conn.commit()
-        
-        def cleanup_db():
-            try:
-                self.conn.close()
-                import os
-                os.close(self.db_fd)
-                os.remove(self.db_path)
-            except Exception:
-                pass
-        atexit.register(cleanup_db)
         
         self.build_ui()
 
@@ -412,8 +390,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         
         self.retention_pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        
-        # eDiscovery Cases section (Instructional Guidance)
         
         # eDiscovery Cases section (Instructional Guidance)
         self.ediscovery_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
@@ -785,41 +761,35 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                     cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
                     
-                import sqlite3
-                self.cursor.execute("DELETE FROM labels")
+                flattened = []
                 for parent in labels:
-                    self.cursor.execute("INSERT INTO labels (name, description, hasProtection, applicationMode, priority, applicableTo, isEnabled, is_sublabel) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        (parent.get("name", "N/A"),
-                         parent.get("description", "") or parent.get("toolTip", "") or "N/A",
-                         1 if parent.get("hasProtection", False) else 0,
-                         parent.get("applicationMode", "N/A") or "N/A",
-                         parent.get("priority", 0),
-                         parent.get("applicableTo", ""),
-                         1 if parent.get("isEnabled", True) else 0,
-                         0))
+                    flattened.append({
+                        "name": parent.get("name", "N/A"),
+                        "description": parent.get("description", "") or parent.get("toolTip", "") or "N/A",
+                        "hasProtection": 1 if parent.get("hasProtection", False) else 0,
+                        "applicationMode": parent.get("applicationMode", "N/A") or "N/A",
+                        "priority": parent.get("priority", 0),
+                        "applicableTo": parent.get("applicableTo", ""),
+                        "isEnabled": 1 if parent.get("isEnabled", True) else 0,
+                        "is_sublabel": 0
+                    })
                     sublabels = parent.get("sublabels", [])
                     if sublabels:
                         sublabels_sorted = sorted(sublabels, key=lambda x: x.get("priority", 0), reverse=True)
                         for sub in sublabels_sorted:
-                            self.cursor.execute("INSERT INTO labels (name, description, hasProtection, applicationMode, priority, applicableTo, isEnabled, is_sublabel) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                                (f"    ↳  {sub.get('name', 'N/A')}",
-                                 sub.get("description", "") or sub.get("toolTip", "") or "N/A",
-                                 1 if sub.get("hasProtection", False) else 0,
-                                 sub.get("applicationMode", "N/A") or "N/A",
-                                 sub.get("priority", 0),
-                                 sub.get("applicableTo", ""),
-                                 1 if sub.get("isEnabled", True) else 0,
-                                 1))
-                self.conn.commit()
-                self.current_page = 0
-                self._display_current_page()
-                
-                self.cursor.execute("SELECT COUNT(*) FROM labels")
-                total_items = self.cursor.fetchone()[0]
-                if total_items > self.ITEMS_PER_PAGE:
-                    self.pagination_frame.pack(pady=(5, 10))
-                else:
-                    if hasattr(self, 'labels_pagination_frame'): self.labels_pagination_frame.pack_forget()
+                            flattened.append({
+                                "name": f"    ↳  {sub.get('name', 'N/A')}",
+                                "description": sub.get("description", "") or sub.get("toolTip", "") or "N/A",
+                                "hasProtection": 1 if sub.get("hasProtection", False) else 0,
+                                "applicationMode": sub.get("applicationMode", "N/A") or "N/A",
+                                "priority": sub.get("priority", 0),
+                                "applicableTo": sub.get("applicableTo", ""),
+                                "isEnabled": 1 if sub.get("isEnabled", True) else 0,
+                                "is_sublabel": 1
+                            })
+                self.last_labels_data = flattened
+                self.labels_current_page = 0
+                self._update_labels_ui_paginated(self.last_labels_data)
                     
         self._check_overall_status()
 
@@ -976,14 +946,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             c6.grid(row=r_idx, column=6, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c6, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
-        if total_count > self.ITEMS_PER_PAGE:
-            self._draw_labels_pagination_controls(total_count, data)
-            self.labels_pagination_frame.pack(fill="x", pady=(5, 10))
-        else:
-            self.labels_pagination_frame.pack_forget()
+        self._draw_labels_pagination_controls(total_count, data)
+        self.labels_pagination_frame.pack(fill="x", pady=(5, 10))
 
     def _draw_labels_pagination_controls(self, total_count, data):
-        total_pages = (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+        total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
         left_spacer = ctk.CTkFrame(self.labels_pagination_frame, fg_color="transparent")
         left_spacer.pack(side="left", fill="x", expand=True)
@@ -1162,6 +1129,45 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             c4 = ctk.CTkFrame(self.retention_grid, fg_color=bg_style, corner_radius=0)
             c4.grid(row=r_idx, column=4, sticky="nsew", padx=1, pady=1)
             ctk.CTkLabel(c4, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
+
+        self._draw_retention_pagination_controls(total_count, data)
+        self.retention_pagination_frame.pack(fill="x", pady=(5, 10))
+
+    def _draw_retention_pagination_controls(self, total_count, data):
+        total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
+        
+        left_spacer = ctk.CTkFrame(self.retention_pagination_frame, fg_color="transparent")
+        left_spacer.pack(side="left", fill="x", expand=True)
+        center_container = ctk.CTkFrame(self.retention_pagination_frame, fg_color="transparent")
+        center_container.pack(side="left")
+
+        prev_state = "normal" if self.retention_current_page > 0 else "disabled"
+        btn_prev = ctk.CTkButton(
+            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
+            command=lambda: self._change_retention_page(-1, data)
+        )
+        btn_prev.pack(side="left", padx=5)
+
+        page_lbl = ctk.CTkLabel(center_container, text=f"Page {self.retention_current_page + 1} of {total_pages}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB)
+        page_lbl.pack(side="left", padx=15)
+
+        next_state = "normal" if self.retention_current_page < total_pages - 1 else "disabled"
+        btn_next = ctk.CTkButton(
+            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
+            command=lambda: self._change_retention_page(1, data)
+        )
+        btn_next.pack(side="left", padx=5)
+
+        right_spacer = ctk.CTkFrame(self.retention_pagination_frame, fg_color="transparent")
+        right_spacer.pack(side="right", fill="x", expand=True)
+
+    def _change_retention_page(self, delta, data):
+        self.retention_current_page += delta
+        self._update_retention_ui_paginated(data)
 
     def export_labels_csv(self):
         """Prompts the user to save sensitivity labels as a detailed CSV file."""

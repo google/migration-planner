@@ -454,13 +454,12 @@ class IntunePoliciesFrame(ctk.CTkFrame):
                 c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                 ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
 
-        if total_count > self.ITEMS_PER_PAGE:
-            self._draw_pagination_controls(total_count, data)
+        self._draw_pagination_controls(total_count, data)
 
         ctk.CTkLabel(self.grid_frame, text="* Based on sample data collected from Intune.", font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB).pack(anchor="w", padx=10, pady=(0, 15))
 
     def _draw_pagination_controls(self, total_count, data):
-        total_pages = (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+        total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
         control_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
         control_frame.pack(fill="x", pady=(5, 10))
