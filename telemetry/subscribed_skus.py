@@ -50,6 +50,11 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         self.status = None  # 'loading', 'success', 'error', None
         self.last_licenses_items = []
         
+        # Pagination variables
+        self.ITEMS_PER_PAGE = 10
+        self.current_page = 0
+        self.csv_path = None
+        
         self.build_ui()
 
     def build_ui(self):
@@ -93,13 +98,7 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
 
         ctk.CTkLabel(self.lic_header, text="* To view specific services offered, export the spreadsheet.", font=FONT_BODY_SMALL, text_color=COLOR_TEXT_SUB).pack(side="left", padx=(10, 0))
 
-        self.btn_export_lic = ctk.CTkButton(
-            self.lic_header, text="Export Spreadsheet", width=140, height=32, corner_radius=16,
-            font=FONT_BODY_BOLD, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
-            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
-            command=self.export_licenses_spreadsheet, state="disabled"
-        )
-        self.btn_export_lic.pack(side="right")
+
 
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.grid_frame = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
@@ -111,8 +110,12 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         self.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
-        self.btn_export_lic.configure(state="disabled")
+        if hasattr(self, "pagination_frame") and self.pagination_frame.winfo_exists():
+            self.pagination_frame.destroy()
+
         self.last_licenses_items = []
+        self.current_page = 0
+        self.csv_path = None
         
         for w in self.state_frame.winfo_children():
             w.destroy()
@@ -153,8 +156,15 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         self.status = "loading"
         self.on_status_change()
         
+        self.current_page = 0
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}")
+        self.csv_path = os.path.join(reports_dir, "subscribed_skus.csv")
+        
         self.pack(fill="x", expand=True, pady=10)
         self.grid_frame.pack_forget()
+        if hasattr(self, "pagination_frame") and self.pagination_frame.winfo_exists():
+            self.pagination_frame.destroy()
         
         self._set_state_loading("Fetching subscribed SKUs...")
         
@@ -194,7 +204,51 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
             sku_data = dir_service.get_subscribed_skus()
             client.close()
             
-            usage_logger.info("Successfully fetched SKU data.")
+            usage_logger.info("Successfully fetched SKU data. Writing to disk...")
+            
+            # Write to CSV on disk
+            script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, "subscribed_skus.csv")
+            
+            headers = ["SKU Part Number", "Units", "Consumed Units", "Included Service Plans", "Applies To"]
+            rows = []
+            
+            items = sku_data.get("value", [])
+            for item in items:
+                sku_name = item.get("skuPartNumber", "UNKNOWN_SKU")
+                prepaid = item.get("prepaidUnits", {})
+                enabled_units = prepaid.get("enabled", 0)
+                warn_units = prepaid.get("warning", 0)
+                susp_units = prepaid.get("suspended", 0)
+
+                prepaid_str = f"Enabled: {enabled_units:,}"
+                if warn_units > 0: prepaid_str += f"\nWarn: {warn_units:,}"
+                if susp_units > 0: prepaid_str += f"\nSusp: {susp_units:,}"
+                consumed_str = f"{item.get('consumedUnits', 0):,}"
+
+                plans = item.get("servicePlans", [])
+
+                if not plans:
+                    rows.append([sku_name, prepaid_str, consumed_str, "None designated.", "-"])
+                else:
+                    for idx, p in enumerate(plans):
+                        p_name = p.get("servicePlanName", "UnnamedPlan")
+                        p_scope = p.get("appliesTo", "Unknown")
+                        if idx == 0:
+                            rows.append([sku_name, prepaid_str, consumed_str, p_name, p_scope])
+                        else:
+                            rows.append(["", "", "", p_name, p_scope])
+
+            import csv
+            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                writer.writerows(rows)
+                
+            usage_logger.info(f"Successfully wrote SKU data to {csv_path}")
+            
             self.after(0, self._render_success, sku_data)
         except Exception as e:
             usage_logger.error("Exception caught in SubscribedSKUs worker.", exc_info=True)
@@ -207,11 +261,45 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         usage_logger.info("Executing UI render for SKU table.")
         if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
             self.reload_btn.configure(state="normal")
+        
+        items = sku_dict.get("value", [])
+        items.sort(key=lambda x: len(x.get("servicePlans", [])), reverse=True)
+        self.last_licenses_items = items
+        
+        self._update_ui_paginated()
+
+    def _load_page_from_csv(self, page):
+        if not self.csv_path or not os.path.exists(self.csv_path):
+            return [], 0
+
+        skus = []
+        try:
+            import csv
+            with open(self.csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # skip header
+                for row in reader:
+                    if row and row[0].strip():
+                        skus.append((row[0], row[1], row[2]))
+        except Exception as e:
+            usage_logger.error(f"Error reading CSV for SKU pagination: {e}")
+            
+        total_count = len(skus)
+        start_idx = page * self.ITEMS_PER_PAGE
+        end_idx = start_idx + self.ITEMS_PER_PAGE
+        page_data = skus[start_idx:end_idx]
+        
+        return page_data, total_count
+
+    def _update_ui_paginated(self, data=None):
         self.state_frame.pack_forget()
         for w in self.grid_frame.winfo_children():
             w.destroy()
 
         self.grid_frame.pack(fill="x", expand=True)
+
+        # Get the page slice
+        page_data, total_count = self._load_page_from_csv(self.current_page)
 
         self.grid_frame.grid_columnconfigure(0, weight=2)
         self.grid_frame.grid_columnconfigure(1, weight=1)
@@ -223,105 +311,91 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
-        items = sku_dict.get("value", [])
-        if not items:
+        if not page_data:
             empty_cell = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
             empty_cell.grid(row=1, column=0, columnspan=3, sticky="nsew", pady=15)
             ctk.CTkLabel(empty_cell, text="No subscribed product configurations found in scope.", text_color=COLOR_TEXT_SUB).pack()
         else:
-            items.sort(key=lambda x: len(x.get("servicePlans", [])), reverse=True)
-            self.last_licenses_items = items
-            self.btn_export_lic.configure(state="normal")
-
-            current_row = 1
-            for item_idx, item in enumerate(items):
+            for item_idx, (sku_name, prepaid_str, consumed_str) in enumerate(page_data):
                 bg_style = COLOR_SURFACE if item_idx % 2 == 0 else COLOR_SURFACE_VARIANT
 
                 c0 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
-                c0.grid(row=current_row, column=0, sticky="nsew", padx=0, pady=(0, 1))
-                ctk.CTkLabel(c0, text=item.get("skuPartNumber", "UNKNOWN_SKU"), font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
+                c0.grid(row=item_idx + 1, column=0, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(c0, text=sku_name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
                 c1 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
-                c1.grid(row=current_row, column=1, sticky="nsew", padx=0, pady=(0, 1))
-                prepaid = item.get("prepaidUnits", {})
-                p_str = f"Enabled: {prepaid.get('enabled', 0):,}"
-                if prepaid.get('warning', 0) > 0: p_str += f"\nWarn: {prepaid.get('warning'):,}"
-                if prepaid.get('suspended', 0) > 0: p_str += f"\nSusp: {prepaid.get('suspended'):,}"
-                ctk.CTkLabel(c1, text=p_str, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=8, anchor="nw")
+                c1.grid(row=item_idx + 1, column=1, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(c1, text=prepaid_str, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=8, anchor="nw")
 
                 c2 = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
-                c2.grid(row=current_row, column=2, sticky="nsew", padx=0, pady=(0, 1))
-                ctk.CTkLabel(c2, text=f"{item.get('consumedUnits', 0):,}", text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
+                c2.grid(row=item_idx + 1, column=2, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(c2, text=consumed_str, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
-                current_row += 1
+        # Draw pagination controls if we have multiple pages
+        if total_count > 0:
+            self._draw_pagination_controls(total_count)
 
         self.status = "success"
         self.on_status_change()
+
+    def _draw_pagination_controls(self, total_count):
+        total_pages = (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+        if total_pages <= 1:
+            return
+
+        if hasattr(self, "pagination_frame") and self.pagination_frame.winfo_exists():
+            self.pagination_frame.destroy()
+
+        self.pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.pagination_frame.pack(fill="x", pady=(10, 0))
+
+        left_spacer = ctk.CTkFrame(self.pagination_frame, fg_color="transparent")
+        left_spacer.pack(side="left", fill="x", expand=True)
+
+        center_container = ctk.CTkFrame(self.pagination_frame, fg_color="transparent")
+        center_container.pack(side="left")
+
+        prev_state = "normal" if self.current_page > 0 else "disabled"
+        btn_prev = ctk.CTkButton(
+            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
+            state=prev_state,
+            command=lambda: self._change_page(-1)
+        )
+        btn_prev.pack(side="left", padx=5)
+
+        page_lbl = ctk.CTkLabel(
+            center_container,
+            text=f"Page {self.current_page + 1} of {total_pages} ({total_count} items)",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_SUB
+        )
+        page_lbl.pack(side="left", padx=15)
+
+        next_state = "normal" if self.current_page < total_pages - 1 else "disabled"
+        btn_next = ctk.CTkButton(
+            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
+            state=next_state,
+            command=lambda: self._change_page(1)
+        )
+        btn_next.pack(side="left", padx=5)
+
+        right_spacer = ctk.CTkFrame(self.pagination_frame, fg_color="transparent")
+        right_spacer.pack(side="right", fill="x", expand=True)
+
+    def _change_page(self, delta):
+        self.current_page += delta
+        self._update_ui_paginated()
 
     def _render_error(self, err_msg):
         usage_logger.warning(f"Rendering SKU table error state: {err_msg}")
         if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
             self.reload_btn.configure(state="normal")
         self._set_state_error(err_msg)
-        self.btn_export_lic.configure(state="disabled")
+
         self.status = "error"
         self.on_status_change()
 
-    def export_licenses_spreadsheet(self):
-        """Exports the SKUs inventory to a CSV formatted to mimic merged cells."""
-        usage_logger.info("Exporting licenses to local spreadsheet requested.")
-        if not self.last_licenses_items:
-            usage_logger.warning("Export aborted: No cached license items available to export.")
-            return
-
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        f = filedialog.asksaveasfilename(
-            initialfile=f"licenses_inventory_{ts}.csv",
-            defaultextension=".csv",
-            filetypes=[("CSV Spreadsheet", "*.csv")]
-        )
-
-        if not f:
-            usage_logger.info("Export aborted by user (dialog cancelled).")
-            return
-
-        usage_logger.info(f"Target export path established: {f}")
-        headers = ["SKU Part Number", "Units", "Consumed Units", "Included Service Plans", "Applies To"]
-        rows = []
-
-        for item in self.last_licenses_items:
-            sku_name = item.get("skuPartNumber", "UNKNOWN_SKU")
-            prepaid = item.get("prepaidUnits", {})
-            enabled_units = prepaid.get("enabled", 0)
-            warn_units = prepaid.get("warning", 0)
-            susp_units = prepaid.get("suspended", 0)
-
-            prepaid_str = f"Enabled: {enabled_units:,}"
-            if warn_units > 0: prepaid_str += f"\nWarn: {warn_units:,}"
-            if susp_units > 0: prepaid_str += f"\nSusp: {susp_units:,}"
-            consumed_str = f"{item.get('consumedUnits', 0):,}"
-
-            plans = item.get("servicePlans", [])
-
-            if not plans:
-                rows.append([sku_name, prepaid_str, consumed_str, "None designated.", "-"])
-            else:
-                for idx, p in enumerate(plans):
-                    p_name = p.get("servicePlanName", "UnnamedPlan")
-                    p_scope = p.get("appliesTo", "Unknown")
-                    if idx == 0:
-                        rows.append([sku_name, prepaid_str, consumed_str, p_name, p_scope])
-                    else:
-                        rows.append(["", "", "", p_name, p_scope])
-
-        try:
-            chunk_size = 1000
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i:i + chunk_size]
-                df = pd.DataFrame(chunk, columns=headers)
-                df.to_csv(f, mode='a' if i > 0 else 'w', header=(i == 0), index=False, encoding='utf-8')
-            usage_logger.info("Spreadsheet exported successfully.")
-            messagebox.showinfo("Export Successful", f"Spreadsheet successfully saved to:\n{f}", parent=self)
-        except Exception as e:
-            usage_logger.error("Failed writing export spreadsheet to disk.", exc_info=True)
-            messagebox.showerror("Export Error", f"Failed to save file:\n{e}", parent=self)
