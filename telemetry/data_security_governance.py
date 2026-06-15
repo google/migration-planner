@@ -327,7 +327,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         # Pagination controls frame (centered below the grid)
         
         # Pagination controls frame (centered below the grid)
-        self.labels_pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+
         
         # Retention Policies section
         self.retention_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
@@ -389,7 +389,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             corner_radius=8
         )
         
-        self.retention_pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+
         
         # eDiscovery Cases section (Instructional Guidance)
         self.ediscovery_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
@@ -507,7 +507,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.pack_forget()
         self.labels_header_frame.pack_forget()
         self.labels_grid.pack_forget()
-        self.labels_pagination_frame.pack_forget()
         
         self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
@@ -885,8 +884,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             if "row" in info and int(info["row"]) > 0:
                 w.destroy()
         
-        for w in self.labels_pagination_frame.winfo_children():
-            w.destroy()
+
 
         if not data:
             return
@@ -947,14 +945,16 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             ctk.CTkLabel(c6, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
         self._draw_labels_pagination_controls(total_count, data)
-        self.labels_pagination_frame.pack(fill="x", pady=(5, 10))
 
     def _draw_labels_pagination_controls(self, total_count, data):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        left_spacer = ctk.CTkFrame(self.labels_pagination_frame, fg_color="transparent")
+        control_frame = ctk.CTkFrame(self.labels_grid, fg_color="transparent")
+        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=7, pady=(5, 10), sticky="ew")
+        
+        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
         left_spacer.pack(side="left", fill="x", expand=True)
-        center_container = ctk.CTkFrame(self.labels_pagination_frame, fg_color="transparent")
+        center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
         center_container.pack(side="left")
 
         prev_state = "normal" if self.labels_current_page > 0 else "disabled"
@@ -978,7 +978,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         btn_next.pack(side="left", padx=5)
 
-        right_spacer = ctk.CTkFrame(self.labels_pagination_frame, fg_color="transparent")
+        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
         right_spacer.pack(side="right", fill="x", expand=True)
 
     def _change_labels_page(self, delta, data):
@@ -1030,8 +1030,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _update_retention_ui_paginated(self, data):
         for w in self.retention_grid.winfo_children():
             w.destroy()
-        for w in self.retention_pagination_frame.winfo_children():
-            w.destroy()
+
 
         self.retention_grid.grid_columnconfigure(0, weight=3)  # Policy Name
         self.retention_grid.grid_columnconfigure(1, weight=3)  # Workloads
@@ -1131,14 +1130,16 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             ctk.CTkLabel(c4, text=status, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
         self._draw_retention_pagination_controls(total_count, data)
-        self.retention_pagination_frame.pack(fill="x", pady=(5, 10))
 
     def _draw_retention_pagination_controls(self, total_count, data):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        left_spacer = ctk.CTkFrame(self.retention_pagination_frame, fg_color="transparent")
+        control_frame = ctk.CTkFrame(self.retention_grid, fg_color="transparent")
+        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=5, pady=(5, 10), sticky="ew")
+        
+        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
         left_spacer.pack(side="left", fill="x", expand=True)
-        center_container = ctk.CTkFrame(self.retention_pagination_frame, fg_color="transparent")
+        center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
         center_container.pack(side="left")
 
         prev_state = "normal" if self.retention_current_page > 0 else "disabled"
@@ -1162,7 +1163,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         btn_next.pack(side="left", padx=5)
 
-        right_spacer = ctk.CTkFrame(self.retention_pagination_frame, fg_color="transparent")
+        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
         right_spacer.pack(side="right", fill="x", expand=True)
 
     def _change_retention_page(self, delta, data):

@@ -785,14 +785,14 @@ class UserSigninsSubFrame(ctk.CTkFrame):
     def _render_partial(self, data, request_id):
         if self.is_cancelled or request_id != self.current_request_id:
             return
-        self._update_ui_paginated(data, is_partial=True)
+        self._update_ui(data, is_partial=True)
 
     def _render_success(self, data, request_id):
         if self.is_cancelled or request_id != self.current_request_id:
             return
         self.status = "success"
         self.last_data = data
-        self._update_ui_paginated(data, is_partial=False)
+        self._update_ui(data, is_partial=False)
         self.on_status_change()
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
