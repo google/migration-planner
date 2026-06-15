@@ -97,7 +97,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 3.  **Install Dependencies**: Run the following command:
     ```cmd
-    pip install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi
+    pip install -r requirements.txt
     ```
 
 #### macOS
@@ -113,7 +113,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 4.  **Install Dependencies**:
     ```bash
-    pip3 install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi
+    pip3 install -r requirements.txt
     ```
 
 #### Linux (Ubuntu/Debian)
@@ -128,7 +128,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 3.  **Install Dependencies**:
     ```bash
-    pip3 install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi
+    pip3 install -r requirements.txt
     ```
 
 ### 3. Setting up a Virtual Environment (Optional / Corp Policy)
