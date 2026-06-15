@@ -46,6 +46,8 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         self.last_data = []
         self.is_cancelled = False
         self.current_request_id = 0
+        self.current_page = 0
+        self.ITEMS_PER_PAGE = 5
 
         self.build_ui()
 
@@ -64,7 +66,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         self.btn_refresh.pack(side="right", padx=(10, 0))
 
         self.body_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.body_frame.pack(fill="x", expand=True)
+        self.body_frame.pack(fill="x")
 
         self.reset_view()
 
@@ -99,6 +101,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         self.status = "loading"
         self.is_cancelled = False
         self.current_request_id += 1
+        self.current_page = 0
         self._set_state_loading("Downloading and parsing Authentication Methods...")
         self.on_status_change()
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
@@ -172,14 +175,14 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
     def _render_partial(self, data, request_id):
         if self.is_cancelled or request_id != self.current_request_id:
             return
-        self._update_ui(data, is_partial=True)
+        self._update_ui_paginated(data, is_partial=True)
 
     def _render_success(self, data, request_id):
         if self.is_cancelled or request_id != self.current_request_id:
             return
         self.status = "success"
         self.last_data = data
-        self._update_ui(data, is_partial=False)
+        self._update_ui_paginated(data, is_partial=False)
         self.on_status_change()
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
@@ -193,7 +196,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
 
-    def _update_ui(self, data, is_partial=False):
+    def _update_ui_paginated(self, data, is_partial=False):
         for w in self.body_frame.winfo_children():
             w.destroy()
 
@@ -224,7 +227,12 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
             c.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c, text="No authentication activity detected.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=12)
         else:
-            for r_idx, (method, activity) in enumerate(data, start=1):
+            total_count = len(data)
+            start_idx = self.current_page * self.ITEMS_PER_PAGE
+            end_idx = start_idx + self.ITEMS_PER_PAGE
+            page_data = data[start_idx:end_idx]
+
+            for r_idx, (method, activity) in enumerate(page_data, start=1):
                 bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
                 vals = [method, activity]
                 for c_idx, val in enumerate(vals):
@@ -232,12 +240,53 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
                     c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=8, anchor="nw")
 
+            self._draw_pagination_controls(total_count, data, is_partial)
+
+    def _draw_pagination_controls(self, total_count, data, is_partial):
+        total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
+        
+        control_frame = ctk.CTkFrame(self.body_frame, fg_color=COLOR_SURFACE)
+        control_frame.pack(fill="x", pady=0)
+
+
+        center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
+        center_container.pack(pady=(5, 10))
+
+        prev_state = "normal" if self.current_page > 0 else "disabled"
+        btn_prev = ctk.CTkButton(
+            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
+            command=lambda: self._change_page(-1, data, is_partial)
+        )
+        btn_prev.pack(side="left", padx=5)
+
+        page_lbl = ctk.CTkLabel(
+            center_container, text=f"Page {self.current_page + 1} of {total_pages}",
+            font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB
+        )
+        page_lbl.pack(side="left", padx=15)
+
+        next_state = "normal" if self.current_page < total_pages - 1 else "disabled"
+        btn_next = ctk.CTkButton(
+            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
+            command=lambda: self._change_page(1, data, is_partial)
+        )
+        btn_next.pack(side="left", padx=5)
+
+
+    def _change_page(self, delta, data, is_partial):
+        self.current_page += delta
+        self._update_ui_paginated(data, is_partial)
+
     def cancel(self):
         self.is_cancelled = True
         self.current_request_id += 1
         if self.status == "loading":
             self.status = "cancelled"
-            self._update_ui(self.last_data)
+            self._update_ui_paginated(self.last_data)
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
 
@@ -278,7 +327,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         self.btn_refresh.pack(side="right", padx=(10, 0))
 
         self.body_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.body_frame.pack(fill="x", expand=True)
+        self.body_frame.pack(fill="x")
 
         self.reset_view()
 
@@ -315,6 +364,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         self.status = "loading"
         self.is_cancelled = False
         self.current_request_id += 1
+        self.current_page = 0
         self.current_page = 0  # Reset to page 0
 
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
@@ -487,14 +537,12 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         if total_pages <= 1:
             return
 
-        control_frame = ctk.CTkFrame(self.body_frame, fg_color="transparent")
-        control_frame.pack(fill="x", pady=(5, 10))
+        control_frame = ctk.CTkFrame(self.body_frame, fg_color=COLOR_SURFACE)
+        control_frame.pack(fill="x", pady=0)
 
-        left_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        left_spacer.pack(side="left", fill="x", expand=True)
 
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
-        center_container.pack(side="left")
+        center_container.pack(pady=(5, 10))
 
         prev_state = "normal" if self.current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
@@ -524,8 +572,6 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         )
         btn_next.pack(side="left", padx=5)
 
-        right_spacer = ctk.CTkFrame(control_frame, fg_color="transparent")
-        right_spacer.pack(side="right", fill="x", expand=True)
 
     def _change_page(self, delta, data, is_partial):
         self.current_page += delta
@@ -576,7 +622,7 @@ class UserSigninsSubFrame(ctk.CTkFrame):
         self.btn_refresh.pack(side="right", padx=(10, 0))
 
         self.body_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.body_frame.pack(fill="x", expand=True)
+        self.body_frame.pack(fill="x")
 
         self.reset_view()
 
@@ -615,6 +661,7 @@ class UserSigninsSubFrame(ctk.CTkFrame):
         self.status = "loading"
         self.is_cancelled = False
         self.current_request_id += 1
+        self.current_page = 0
         self._set_state_loading("Downloading and parsing User Sign Ins...")
         self.on_status_change()
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
@@ -807,7 +854,7 @@ class UserSigninsSubFrame(ctk.CTkFrame):
         self.current_request_id += 1
         if self.status == "loading":
             self.status = "cancelled"
-            self._update_ui(self.last_data)
+            self._update_ui_paginated(self.last_data)
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
 
