@@ -101,6 +101,8 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         self.current_request_id += 1
         self._set_state_loading("Downloading and parsing Authentication Methods...")
         self.on_status_change()
+        if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
+            self.btn_refresh.configure(state="disabled")
 
         threading.Thread(
             target=self._execute_worker,
@@ -304,6 +306,8 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         self.current_request_id += 1
         self._set_state_loading("Downloading and parsing App Sign Ins...")
         self.on_status_change()
+        if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
+            self.btn_refresh.configure(state="disabled")
 
         threading.Thread(
             target=self._execute_worker,
@@ -515,6 +519,8 @@ class UserSigninsSubFrame(ctk.CTkFrame):
         self.current_request_id += 1
         self._set_state_loading("Downloading and parsing User Sign Ins...")
         self.on_status_change()
+        if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
+            self.btn_refresh.configure(state="disabled")
 
         threading.Thread(
             target=self._execute_worker,
