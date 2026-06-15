@@ -300,6 +300,9 @@ class DirectoryFrame(ctk.CTkFrame):
         self._update_domains_ui_paginated()
         self._render_groups_users_grid()
 
+        self.status = "success"
+        self.on_status_change()
+
     def _load_page_from_csv(self, page):
         if not self.csv_path or not os.path.exists(self.csv_path):
             return [], 0
@@ -340,7 +343,7 @@ class DirectoryFrame(ctk.CTkFrame):
         for col_idx, head_text in enumerate(domains_headers):
             cell = ctk.CTkFrame(self.domains_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, text_color=COLOR_TONAL_TEXT, pady=8, anchor="w")
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
         page_data, total_count = self._load_page_from_csv(self.current_page)
 
