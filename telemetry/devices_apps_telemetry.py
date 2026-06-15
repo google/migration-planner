@@ -181,6 +181,8 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         self.last_data = data
         self._update_ui(data, is_partial=False)
         self.on_status_change()
+        if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
+            self.btn_refresh.configure(state="normal")
 
     def _render_error(self, err_msg, request_id):
         if self.is_cancelled or request_id != self.current_request_id:
@@ -188,6 +190,8 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         self.status = "error"
         self._set_state_error(err_msg)
         self.on_status_change()
+        if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
+            self.btn_refresh.configure(state="normal")
 
     def _update_ui(self, data, is_partial=False):
         for w in self.body_frame.winfo_children():
@@ -386,6 +390,8 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         self.last_data = data
         self._update_ui(data, is_partial=False)
         self.on_status_change()
+        if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
+            self.btn_refresh.configure(state="normal")
 
     def _render_error(self, err_msg, request_id):
         if self.is_cancelled or request_id != self.current_request_id:
@@ -393,6 +399,8 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         self.status = "error"
         self._set_state_error(err_msg)
         self.on_status_change()
+        if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
+            self.btn_refresh.configure(state="normal")
 
     def _update_ui(self, data, is_partial=False):
         for w in self.body_frame.winfo_children():
@@ -641,6 +649,8 @@ class UserSigninsSubFrame(ctk.CTkFrame):
         self.last_data = data
         self._update_ui(data, is_partial=False)
         self.on_status_change()
+        if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
+            self.btn_refresh.configure(state="normal")
 
     def _render_error(self, err_msg, request_id):
         if self.is_cancelled or request_id != self.current_request_id:
@@ -648,6 +658,8 @@ class UserSigninsSubFrame(ctk.CTkFrame):
         self.status = "error"
         self._set_state_error(err_msg)
         self.on_status_change()
+        if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
+            self.btn_refresh.configure(state="normal")
 
     def _update_ui(self, data, is_partial=False):
         for w in self.body_frame.winfo_children():
