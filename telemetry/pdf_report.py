@@ -407,12 +407,14 @@ def generate_pdf_report(data: dict, filepath: str):
         else:
             domains_table_data = [[
                 Paragraph("Domain ID", table_cell_header),
+                Paragraph("Auth Type", table_cell_header),
                 Paragraph("Admin Managed", table_cell_header),
                 Paragraph("Default", table_cell_header),
                 Paragraph("Verified", table_cell_header),
                 Paragraph("Supported Services", table_cell_header)
             ]]
             for item in domains:
+                auth_type = item.get("authenticationType", "N/A") or "N/A"
                 admin_managed = "Yes" if item.get("isAdminManaged") else "No"
                 is_default = "Yes" if item.get("isDefault") else "No"
                 is_verified = "Yes" if item.get("isVerified") else "No"
@@ -421,12 +423,13 @@ def generate_pdf_report(data: dict, filepath: str):
                 
                 domains_table_data.append([
                     Paragraph(item.get("id", "-"), table_cell_bold),
+                    Paragraph(auth_type, table_cell_style),
                     Paragraph(admin_managed, table_cell_style),
                     Paragraph(is_default, table_cell_style),
                     Paragraph(is_verified, table_cell_style),
                     Paragraph(services_str, table_cell_style)
                 ])
-            domains_table = Table(domains_table_data, colWidths=[140, 85, 55, 55, 165])
+            domains_table = Table(domains_table_data, colWidths=[110, 65, 80, 45, 45, 155])
             domains_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), primary_color),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),

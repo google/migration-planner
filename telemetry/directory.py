@@ -17,6 +17,7 @@
 import os
 import logging
 import threading
+import webbrowser
 from typing import Any, Dict, List, Optional
 import customtkinter as ctk
 
@@ -83,6 +84,18 @@ class DirectoryFrame(ctk.CTkFrame):
             text_color=COLOR_TEXT_MAIN
         )
         self.domains_title.pack(side="left")
+        
+        self.domains_reference_link = ctk.CTkLabel(
+            self.domains_header_frame,
+            text="Domain API Reference ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.domains_reference_link.pack(side="left", padx=(15, 0))
+        self.domains_reference_link.bind("<Button-1>", lambda e: webbrowser.open("https://learn.microsoft.com/en-us/graph/api/resources/domain?view=graph-rest-1.0#properties"))
+        self.domains_reference_link.bind("<Enter>", lambda e: self.domains_reference_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.domains_reference_link.bind("<Leave>", lambda e: self.domains_reference_link.configure(text_color=COLOR_PRIMARY))
         self.domains_reload_btn = ctk.CTkButton(
             self.domains_header_frame, 
             state="disabled", text="↻ Reload", 
@@ -245,16 +258,17 @@ class DirectoryFrame(ctk.CTkFrame):
             os.makedirs(reports_dir, exist_ok=True)
             csv_path = os.path.join(reports_dir, "directory_domains.csv")
             
-            headers = ["Domain ID", "Admin Managed", "Default", "Verified", "Supported Services"]
+            headers = ["Domain ID", "Authentication Type", "Admin Managed", "Default", "Verified", "Supported Services"]
             rows = []
             
             for domain in telemetry_data.get("domains", []):
+                auth_type = domain.get("authenticationType", "N/A") or "N/A"
                 admin_managed = "Yes" if domain.get("isAdminManaged") else "No"
                 is_default = "Yes" if domain.get("isDefault") else "No"
                 is_verified = "Yes" if domain.get("isVerified") else "No"
                 services = domain.get("supportedServices", [])
                 services_str = ", ".join(services) if services else "-"
-                rows.append([domain.get("id", "-"), admin_managed, is_default, is_verified, services_str])
+                rows.append([domain.get("id", "-"), auth_type, admin_managed, is_default, is_verified, services_str])
 
             import csv
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
@@ -317,10 +331,11 @@ class DirectoryFrame(ctk.CTkFrame):
                     if row:
                         domains.append({
                             "id": row[0],
-                            "isAdminManaged": row[1] == "Yes",
-                            "isDefault": row[2] == "Yes",
-                            "isVerified": row[3] == "Yes",
-                            "supportedServices": [s.strip() for s in row[4].split(",")] if row[4] != "-" else []
+                            "authenticationType": row[1],
+                            "isAdminManaged": row[2] == "Yes",
+                            "isDefault": row[3] == "Yes",
+                            "isVerified": row[4] == "Yes",
+                            "supportedServices": [s.strip() for s in row[5].split(",")] if row[5] != "-" else []
                         })
         except Exception as e:
             usage_logger.error(f"Error reading CSV for Domains pagination: {e}")
@@ -336,10 +351,10 @@ class DirectoryFrame(ctk.CTkFrame):
         for w in self.domains_grid.winfo_children():
             w.destroy()
 
-        self.domains_grid.grid_columnconfigure((0, 4), weight=3)
-        self.domains_grid.grid_columnconfigure((1, 2, 3), weight=2)
+        self.domains_grid.grid_columnconfigure((0, 5), weight=3)
+        self.domains_grid.grid_columnconfigure((1, 2, 3, 4), weight=2)
 
-        domains_headers = ["Domain ID", "Admin Managed", "Default", "Verified", "Supported Services"]
+        domains_headers = ["Domain ID", "Auth Type", "Admin Managed", "Default", "Verified", "Supported Services"]
         for col_idx, head_text in enumerate(domains_headers):
             cell = ctk.CTkFrame(self.domains_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
@@ -349,12 +364,13 @@ class DirectoryFrame(ctk.CTkFrame):
 
         if not page_data:
             empty_cell = ctk.CTkFrame(self.domains_grid, fg_color="transparent")
-            empty_cell.grid(row=1, column=0, columnspan=5, sticky="nsew", pady=15)
+            empty_cell.grid(row=1, column=0, columnspan=6, sticky="nsew", pady=15)
             ctk.CTkLabel(empty_cell, text="No domains found under the organization.", text_color=COLOR_TEXT_SUB).pack()
         else:
             for item_idx, domain in enumerate(page_data, start=1):
                 bg_style = COLOR_SURFACE if item_idx % 2 == 0 else COLOR_SURFACE_VARIANT
 
+                auth_type = domain.get("authenticationType", "N/A")
                 admin_managed = "Yes" if domain.get("isAdminManaged") else "No"
                 is_default = "Yes" if domain.get("isDefault") else "No"
                 is_verified = "Yes" if domain.get("isVerified") else "No"
@@ -366,25 +382,30 @@ class DirectoryFrame(ctk.CTkFrame):
                 c0.grid(row=item_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
                 ctk.CTkLabel(c0, text=domain.get("id", "-"), font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
-                # Admin Managed
+                # Auth Type
                 c1 = ctk.CTkFrame(self.domains_grid, fg_color=bg_style, corner_radius=0)
                 c1.grid(row=item_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
-                ctk.CTkLabel(c1, text=admin_managed, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
+                ctk.CTkLabel(c1, text=auth_type, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
-                # Default
+                # Admin Managed
                 c2 = ctk.CTkFrame(self.domains_grid, fg_color=bg_style, corner_radius=0)
                 c2.grid(row=item_idx, column=2, sticky="nsew", padx=0, pady=(0, 1))
-                ctk.CTkLabel(c2, text=is_default, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
+                ctk.CTkLabel(c2, text=admin_managed, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
-                # Verified
+                # Default
                 c3 = ctk.CTkFrame(self.domains_grid, fg_color=bg_style, corner_radius=0)
                 c3.grid(row=item_idx, column=3, sticky="nsew", padx=0, pady=(0, 1))
-                ctk.CTkLabel(c3, text=is_verified, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
+                ctk.CTkLabel(c3, text=is_default, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
 
-                # Supported Services
+                # Verified
                 c4 = ctk.CTkFrame(self.domains_grid, fg_color=bg_style, corner_radius=0)
                 c4.grid(row=item_idx, column=4, sticky="nsew", padx=0, pady=(0, 1))
-                ctk.CTkLabel(c4, text=services_str, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=250).pack(padx=10, pady=8, anchor="nw")
+                ctk.CTkLabel(c4, text=is_verified, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
+
+                # Supported Services
+                c5 = ctk.CTkFrame(self.domains_grid, fg_color=bg_style, corner_radius=0)
+                c5.grid(row=item_idx, column=5, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(c5, text=services_str, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=250).pack(padx=10, pady=8, anchor="nw")
 
         # Draw pagination controls if we have multiple pages
         if total_count > 0:
