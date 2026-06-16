@@ -9,6 +9,8 @@ import logging
 from telemetry.power_automate import PowerAutomateScanner
 from telemetry.styles import *
 from telemetry.user_persona_analysis import run_user_persona_pipeline
+from telemetry.executive_summary import generate_executive_summary_json
+from telemetry.pdf_summary_report import generate_pdf_summary_report
 
 import queue
 import threading
@@ -1197,23 +1199,13 @@ class ReportsPage(ctk.CTkFrame):
 
 
 
-        # 3. Fetch Report button on the right side of the header panel (Stage 2)
-        self.fetch_btn = ctk.CTkButton(
-            self.nav_header,
-            text="Fetch Report",
-            command=self.on_fetch_report_clicked,
-            width=150,
-            height=36,
-            corner_radius=8,
-            fg_color=COLOR_PRIMARY,
-            hover_color=COLOR_PRIMARY_HOVER,
-            font=FONT_BODY_BOLD
-        )
-        self.fetch_btn.pack(side="right", padx=20, pady=17)
+        # Button container frame to group header actions cleanly on the right
+        self.btn_container = ctk.CTkFrame(self.nav_header, fg_color="transparent")
+        self.btn_container.pack(side="right", padx=20, pady=17)
 
-        # 4. Download PDF button next to Fetch Report
+        # 4. Download PDF button
         self.pdf_btn = ctk.CTkButton(
-            self.nav_header,
+            self.btn_container,
             text="Download PDF",
             command=self.on_download_pdf_clicked,
             width=150,
@@ -1227,7 +1219,34 @@ class ReportsPage(ctk.CTkFrame):
             font=FONT_BODY_BOLD,
             state="disabled"
         )
-        self.pdf_btn.pack(side="right", padx=(0, 20), pady=17)
+        self.pdf_btn.pack(side="left", padx=(0, 10))
+
+        # 3. Fetch Report button
+        self.fetch_btn = ctk.CTkButton(
+            self.btn_container,
+            text="Fetch Report",
+            command=self.on_fetch_report_clicked,
+            width=150,
+            height=36,
+            corner_radius=8,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            font=FONT_BODY_BOLD
+        )
+        self.fetch_btn.pack(side="left")
+
+        # 5. Generate Executive Summary button (initially hidden)
+        self.summary_btn = ctk.CTkButton(
+            self.btn_container,
+            text="Generate Executive Summary",
+            command=self.on_generate_summary_clicked,
+            width=210,
+            height=36,
+            corner_radius=8,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            font=FONT_BODY_BOLD
+        )
 
 
         # Initialize the telemetry view (No TabView layout)
@@ -1343,6 +1362,9 @@ class ReportsPage(ctk.CTkFrame):
         # Toggle button to Cancel and keep it enabled and active
         self.fetch_btn.configure(state="normal", text="Cancel", fg_color="#DC2626") # Red color for cancel
         self.pdf_btn.configure(state="disabled")
+        
+        if self.summary_btn.winfo_ismapped():
+            self.summary_btn.pack_forget()
 
         # Set variables of m365_telemetry_view directly
         self.m365_telemetry_view.lic_tenant_id.set(tenant)
@@ -1380,8 +1402,12 @@ class ReportsPage(ctk.CTkFrame):
         
         if has_any_data:
             self.pdf_btn.configure(state="normal")
+            if not self.summary_btn.winfo_ismapped():
+                self.summary_btn.pack(side="left", padx=(10, 0))
         else:
             self.pdf_btn.configure(state="disabled")
+            if self.summary_btn.winfo_ismapped():
+                self.summary_btn.pack_forget()
 
     def on_download_pdf_clicked(self):
         """Prompts the user to save the M365 usage report as a detailed PDF file."""
@@ -1408,6 +1434,145 @@ class ReportsPage(ctk.CTkFrame):
             logger.error("Failed to generate PDF report", exc_info=True)
             messagebox.showerror("Export Failed", f"Failed to generate PDF report: {e}", parent=self)
 
+    def on_generate_summary_clicked(self):
+        """Prompts the user for their Gemini API Key, queries Gemini, and saves the Executive Summary PDF."""
+        class ApiKeyDialog(ctk.CTkToplevel):
+            def __init__(self, parent):
+                super().__init__(parent)
+                self.title("Enter Gemini API Key")
+                self.geometry("440x260")
+                self.resizable(False, False)
+                
+                # Center on parent window
+                self.transient(parent)
+                self.grab_set()
+                
+                self.result = None
+                
+                # Frame
+                frame = ctk.CTkFrame(self, fg_color="transparent")
+                frame.pack(fill="both", expand=True, padx=20, pady=15)
+                
+                lbl = ctk.CTkLabel(frame, text="Please enter your Gemini API Key to analyze telemetry:", font=FONT_BODY_MEDIUM)
+                lbl.pack(anchor="w", pady=(0, 10))
+                
+                self.entry = ctk.CTkEntry(frame, show="*", width=400)
+                self.entry.pack(fill="x", pady=(0, 15))
+                self.entry.focus()
+                
+                # Disclaimer Box
+                disclaimer_frame = ctk.CTkFrame(frame, fg_color=COLOR_SURFACE_VARIANT, corner_radius=6)
+                disclaimer_frame.pack(fill="x", pady=(0, 15))
+                
+                disclaimer_lbl = ctk.CTkLabel(
+                    disclaimer_frame,
+                    text="⚠️ Disclaimer: This tool uses Generative AI (GenAI) to analyze telemetry data and generate the report. AI-generated outputs may not be fully accurate. Please review and verify all recommendations.",
+                    font=FONT_BODY_SMALL,
+                    text_color=COLOR_TEXT_SUB,
+                    wraplength=380,
+                    justify="left"
+                )
+                disclaimer_lbl.pack(padx=10, pady=8)
+                
+                btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
+                btn_frame.pack(anchor="e")
+                
+                cancel_btn = ctk.CTkButton(btn_frame, text="Cancel", width=80, fg_color="transparent", border_width=1, border_color=COLOR_PRIMARY, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, command=self.on_cancel)
+                cancel_btn.pack(side="left", padx=(0, 10))
+                
+                ok_btn = ctk.CTkButton(btn_frame, text="Generate", width=90, fg_color=COLOR_PRIMARY, hover_color=COLOR_PRIMARY_HOVER, command=self.on_ok)
+                ok_btn.pack(side="left")
+                
+                # Bind return key
+                self.entry.bind("<Return>", lambda e: self.on_ok())
+                
+                # Wait for window to close
+                parent.wait_window(self)
+                
+            def on_ok(self):
+                self.result = self.entry.get().strip()
+                self.destroy()
+                
+            def on_cancel(self):
+                self.result = None
+                self.destroy()
+
+        dialog = ApiKeyDialog(self)
+        api_key = dialog.result
+        if not api_key:
+            return
+            
+        # Get all telemetry data from view
+        data = self.m365_telemetry_view.get_all_telemetry_data()
+        
+        # Create a simple top-level progress window
+        progress_win = ctk.CTkToplevel(self)
+        progress_win.title("Generating Summary")
+        progress_win.geometry("320x100")
+        progress_win.resizable(False, False)
+        progress_win.transient(self)
+        progress_win.grab_set()
+        
+        frame = ctk.CTkFrame(progress_win, fg_color="transparent")
+        frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        lbl = ctk.CTkLabel(frame, text="Calling Gemini API and preparing PDF report...", font=FONT_BODY_MEDIUM)
+        lbl.pack(pady=(0, 10))
+        
+        progress_bar = ctk.CTkProgressBar(frame, width=280)
+        progress_bar.pack()
+        progress_bar.configure(mode="indefinite")
+        progress_bar.start()
+        
+        # Results container for threading communication
+        result_container = {}
+        
+        def bg_worker():
+            try:
+                # 1. Call Gemini to get summary JSON
+                summary_data = generate_executive_summary_json(api_key, data)
+                result_container["summary_data"] = summary_data
+                result_container["success"] = True
+            except Exception as ex:
+                logger.error("Failed to generate executive summary via Gemini", exc_info=True)
+                result_container["success"] = False
+                result_container["error"] = str(ex)
+            finally:
+                progress_bar.stop()
+                progress_win.destroy()
+                
+        thread = threading.Thread(target=bg_worker, daemon=True)
+        thread.start()
+        
+        # Wait for thread to finish
+        self.wait_window(progress_win)
+        
+        if not result_container.get("success"):
+            if "error" in result_container:
+                messagebox.showerror("Summary Generation Failed", f"Failed to generate Executive Summary:\n{result_container['error']}", parent=self)
+            return
+            
+        summary_data = result_container["summary_data"]
+        
+        # Prompt user where to save the PDF
+        import datetime
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"m365_executive_summary_{ts}.pdf",
+            defaultextension=".pdf",
+            filetypes=[("PDF Documents", "*.pdf"), ("All Files", "*.*")],
+            parent=self
+        )
+        if not f:
+            return
+            
+        try:
+            generate_pdf_summary_report(summary_data, f, tenant_id=self.controller.stored_tenant)
+            messagebox.showinfo("Export Successful", f"Executive Summary PDF report successfully saved to:\n{f}", parent=self)
+        except Exception as pdf_ex:
+            logger.error("Failed to generate PDF summary report", exc_info=True)
+            messagebox.showerror("Export Failed", f"Failed to generate PDF summary report: {pdf_ex}", parent=self)
+
     def clear_session_data(self):
         """Wipes the cached parameters from telemetry objects and resets the Fetch button."""
         logger.info("Clearing session data in ReportsPage.")
@@ -1417,6 +1582,9 @@ class ReportsPage(ctk.CTkFrame):
         # Reset Fetch Report button state
         self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color="#1E3A8A")
         self.pdf_btn.configure(state="disabled")
+        
+        if self.summary_btn.winfo_ismapped():
+            self.summary_btn.pack_forget()
 
         # Reset the telemetry coordinator tab and hide all grids
         self.m365_telemetry_view.reset_tab()
