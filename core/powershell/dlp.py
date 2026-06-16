@@ -9,18 +9,29 @@ class DLPService:
     
     def __init__(self, ps_client):
         self.ps_client = ps_client
-        self.script_dir = os.path.join(os.path.dirname(__file__), 'scripts')
 
     def fetch_dlp_policies(self) -> dict:
         """
         Executes the PowerShell script to retrieve DLP policies via Get-DlpCompliancePolicy.
         """
-        script_path = os.path.join(self.script_dir, 'get_dlp_policies.ps1')
+        try:
+            cert_path = self.ps_client.locate_certificate()
+        except Exception as e:
+            raise RuntimeError(f"Failed to locate certificate for authentication: {str(e)}")
+
+        args = [
+            "-AppId", self.ps_client.client_id,
+            "-Organization", self.ps_client.tenant_id,
+            "-CertificatePath", cert_path
+        ]
+        if self.ps_client.cert_password:
+            args += ["-CertificatePassword", self.ps_client.cert_password]
+
         logger.info("Executing fetch_dlp_policies script")
         
         try:
-            raw_output = self.ps_client.execute_script(script_path, [])
-            if not raw_output:
+            raw_output = self.ps_client.execute_script("scripts/get_dlp_policies.ps1", args)
+            if not raw_output or not raw_output.strip():
                 return {"value": []}
             
             try:
@@ -32,9 +43,21 @@ class DLPService:
                 else:
                     return {"value": [data]}
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON from get_dlp_policies.ps1: {e}")
-                logger.debug(f"Raw output was: {raw_output}")
-                raise Exception(f"Invalid JSON returned from PowerShell: {raw_output[:200]}")
+                # Parse JSON block in case of warning/header lines outputted by powershell environment
+                lines = raw_output.strip().split('\n')
+                json_str = ""
+                for line in lines:
+                    if line.startswith("[") or line.startswith("{") or json_str:
+                        json_str += line
+                if json_str:
+                    data = json.loads(json_str)
+                    if isinstance(data, dict) and "value" in data:
+                        return data
+                    elif isinstance(data, list):
+                        return {"value": data}
+                    else:
+                        return {"value": [data]}
+                raise RuntimeError(f"PowerShell returned non-JSON format: {raw_output}")
                 
         except Exception as e:
             logger.error("Error executing fetch_dlp_policies", exc_info=True)
