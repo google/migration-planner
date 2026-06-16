@@ -1440,25 +1440,37 @@ class ReportsPage(ctk.CTkFrame):
             def __init__(self, parent):
                 super().__init__(parent)
                 self.title("Enter Gemini API Key")
-                self.geometry("440x260")
+                self.geometry("440x380")
                 self.resizable(False, False)
                 
                 # Center on parent window
                 self.transient(parent)
                 self.grab_set()
                 
-                self.result = None
+                self.result_key = None
+                self.result_prompt = None
                 
                 # Frame
                 frame = ctk.CTkFrame(self, fg_color="transparent")
                 frame.pack(fill="both", expand=True, padx=20, pady=15)
                 
                 lbl = ctk.CTkLabel(frame, text="Please enter your Gemini API Key to analyze telemetry:", font=FONT_BODY_MEDIUM)
-                lbl.pack(anchor="w", pady=(0, 10))
+                lbl.pack(anchor="w", pady=(0, 5))
                 
                 self.entry = ctk.CTkEntry(frame, show="*", width=400)
                 self.entry.pack(fill="x", pady=(0, 15))
                 self.entry.focus()
+                
+                # Tailoring prompt instructions text field
+                prompt_lbl = ctk.CTkLabel(frame, text="Tailor Report Focus (Optional, e.g., focus on Teams; Max 100 words):", font=FONT_BODY_MEDIUM)
+                prompt_lbl.pack(anchor="w", pady=(0, 5))
+                
+                self.prompt_box = ctk.CTkTextbox(frame, height=60, width=400)
+                self.prompt_box.pack(fill="x", pady=(0, 10))
+                
+                # Error Label
+                self.error_lbl = ctk.CTkLabel(frame, text="", font=FONT_BODY_SMALL, text_color=COLOR_ERROR)
+                self.error_lbl.pack(anchor="w", pady=(0, 5))
                 
                 # Disclaimer Box
                 disclaimer_frame = ctk.CTkFrame(frame, fg_color=COLOR_SURFACE_VARIANT, corner_radius=6)
@@ -1490,15 +1502,29 @@ class ReportsPage(ctk.CTkFrame):
                 parent.wait_window(self)
                 
             def on_ok(self):
-                self.result = self.entry.get().strip()
+                key = self.entry.get().strip()
+                if not key:
+                    self.error_lbl.configure(text="API Key cannot be empty.")
+                    return
+                
+                prompt = self.prompt_box.get("1.0", "end-1c").strip()
+                word_count = len(prompt.split())
+                if word_count > 100:
+                    self.error_lbl.configure(text=f"Instructions exceed 100 words (currently {word_count} words).")
+                    return
+                
+                self.result_key = key
+                self.result_prompt = prompt if prompt else None
                 self.destroy()
                 
             def on_cancel(self):
-                self.result = None
+                self.result_key = None
+                self.result_prompt = None
                 self.destroy()
 
         dialog = ApiKeyDialog(self)
-        api_key = dialog.result
+        api_key = dialog.result_key
+        user_instructions = dialog.result_prompt
         if not api_key:
             return
             
@@ -1530,7 +1556,7 @@ class ReportsPage(ctk.CTkFrame):
         def bg_worker():
             try:
                 # 1. Call Gemini to get summary JSON
-                summary_data = generate_executive_summary_json(api_key, data)
+                summary_data = generate_executive_summary_json(api_key, data, user_instructions)
                 result_container["summary_data"] = summary_data
                 result_container["success"] = True
             except Exception as ex:
