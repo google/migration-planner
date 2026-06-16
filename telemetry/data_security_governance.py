@@ -902,7 +902,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         for w in self.dlp_grid.winfo_children():
             w.destroy()
         self.dlp_state_frame = ctk.CTkFrame(self.dlp_grid, fg_color="transparent")
-        ctk.CTkLabel(self.dlp_state_frame, text=f"⏳ {msg}", text_color="#6b7280").pack(pady=20)
+        self.loading_label = __import__("customtkinter").CTkLabel(self.dlp_state_frame, text=f"⏳ {msg}", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
+        self.loading_label.pack(pady=(20, 5))
+        pb = __import__("customtkinter").CTkProgressBar(self.dlp_state_frame, mode="indeterminate", width=250, fg_color="#F3F4F6", progress_color="#2563EB")
+        pb.pack(pady=(0, 20))
+        pb.start()
         self.dlp_state_frame.pack(fill="x", expand=True)
 
     def _handle_dlp_result(self, result: dict):
