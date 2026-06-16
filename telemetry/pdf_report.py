@@ -850,53 +850,10 @@ def generate_pdf_report(data: dict, filepath: str):
 
     # 3.3 Microsoft Entra Data
     story.append(Paragraph("Microsoft Entra Data", h2_style))
-    story.append(Paragraph("This section outlines user sign-in activity (apps, operating systems, and browsers used), application sign-in metrics, and authentication methods configuration summaries.", body_style))
+    story.append(Paragraph("This section outlines application sign-in metrics and authentication methods configuration summaries.", body_style))
     story.append(Spacer(1, 8))
     
     entra_data = data.get("devices_apps", {})
-    
-    # 3.3.1 User Sign Ins
-    story.append(Paragraph("<b>User Sign Ins</b>", body_style))
-    story.append(Spacer(1, 4))
-    
-    apps = entra_data.get("apps", [])
-    oss = entra_data.get("operating_systems", [])
-    browsers = entra_data.get("browsers", [])
-    
-    if not apps and not oss and not browsers:
-        story.append(Paragraph("No sign-in audit logs were discovered or permission restricted.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
-    else:
-        max_len = max(len(apps), len(oss), len(browsers))
-        apps_padded = list(apps) + [""] * (max_len - len(apps))
-        oss_padded = list(oss) + [""] * (max_len - len(oss))
-        browsers_padded = list(browsers) + [""] * (max_len - len(browsers))
-        
-        devices_table_data = [[
-            Paragraph("Apps Used", table_cell_header),
-            Paragraph("Operating Systems", table_cell_header),
-            Paragraph("Browsers Used", table_cell_header)
-        ]]
-        
-        for i in range(max_len):
-            devices_table_data.append([
-                Paragraph(apps_padded[i], table_cell_bold if apps_padded[i] else table_cell_style),
-                Paragraph(oss_padded[i], table_cell_style),
-                Paragraph(browsers_padded[i], table_cell_style)
-            ])
-            
-        devices_table = Table(devices_table_data, colWidths=[168, 168, 168])
-        devices_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
-            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
-        ]))
-        story.append(devices_table)
-        
-    story.append(Spacer(1, 15))
     
     # 3.3.2 App Sign Ins
     story.append(Paragraph("<b>App Sign Ins</b>", body_style))
