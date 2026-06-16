@@ -200,6 +200,41 @@ def fetch_dlp_policies_data(client_id, client_secret, tenant_id) -> dict:
         usage_logger.error("Failed to fetch DLP policies via PowerShell", exc_info=True)
         return {"policies": None, "error": str(e)}
 
+def fetch_sensitive_info_types_data(client_id, client_secret, tenant_id) -> dict:
+    """Fetch Sensitive Information Types using Security & Compliance PowerShell module."""
+    usage_logger.info("Starting Sensitive Information Types fetch...")
+    
+    # We must resolve the tenant domain since Organization cannot be a GUID for IPPSSession
+    from core.graph.client import GraphClient
+    from core.graph.directory import DirectoryService
+    
+    tenant_domain = tenant_id
+    client = GraphClient(tenant_id=tenant_id, client_ids=client_id, client_secrets=client_secret, concurrency=1)
+    try:
+        client.authenticate()
+        dir_svc = DirectoryService(client)
+        tenant_domain = dir_svc.get_tenant_primary_domain()
+        usage_logger.info(f"Retrieved primary tenant domain for SIT fetch: {tenant_domain}")
+    except Exception as e:
+        usage_logger.warning(f"Could not retrieve tenant domain for SIT fetch. Falling back to Tenant ID Guid: {e}")
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+            
+    try:
+        from core.powershell.client import PowerShellClient
+        from core.powershell.dlp import DLPService
+        
+        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret, cert_tenant_id=tenant_id)
+        dlp_service = DLPService(ps_client)
+        types_data = dlp_service.fetch_sensitive_info_types()
+        return {"sit_data": types_data, "error": None}
+    except Exception as e:
+        usage_logger.error("Failed to fetch Sensitive Info Types via PowerShell", exc_info=True)
+        return {"sit_data": None, "error": str(e)}
+
 def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
     """Fetch Entra ID Conditional Access authentication mechanics and Enterprise SSO modes."""
     usage_logger.info("Starting Authentication & Conditional Access fetch...")
@@ -490,7 +525,54 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             corner_radius=8
         )
 
+        # Sensitive Information Types Section
+        self.sit_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.sit_title = ctk.CTkLabel(
+            self.sit_header_frame,
+            text="Sensitive Information Types (SIT)",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.sit_title.pack(side="left", anchor="w")
 
+        self.sit_reload_btn = ctk.CTkButton(
+            self.sit_header_frame,
+            state="disabled",
+            text="↻ Reload",
+            width=80,
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent",
+            border_width=1,
+            text_color="#2563EB",
+            hover_color="#DBEAFE",
+            command=self._retry_sit_fetch
+        )
+        self.sit_reload_btn.pack(side="right", padx=(0, 15))
+
+        self.btn_export_sit = ctk.CTkButton(
+            self.sit_header_frame,
+            text="Export SIT Data",
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            text_color=COLOR_PRIMARY,
+            border_width=1,
+            border_color=COLOR_OUTLINE,
+            hover_color=COLOR_SECONDARY_HOVER,
+            width=150,
+            height=32,
+            corner_radius=16,
+            command=self.export_sit_csv,
+            state="disabled"
+        )
+        self.btn_export_sit.pack(side="right", anchor="e")
+        self.sit_grid = ctk.CTkFrame(
+            self.inner_pad,
+            fg_color=COLOR_SURFACE,
+            border_color=COLOR_OUTLINE_LIGHT,
+            border_width=1,
+            corner_radius=8
+        )
         
         # eDiscovery Cases section (Instructional Guidance)
         self.ediscovery_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
@@ -735,6 +817,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.dlp_grid.pack(fill="x", pady=(0, 15))
         self._set_dlp_loading("Retrieving DLP policies...")
         
+        # Pack Sensitive Information Types Section
+        self.sit_header_frame.pack(fill="x", pady=(20, 5))
+        self.sit_grid.pack(fill="x", pady=(0, 15))
+        self._set_sit_loading("Retrieving Sensitive Information Types...")
+        
         # Pack Authentication Section
         self.auth_header_frame.pack(fill="x", pady=(20, 5))
         self.auth_grid.pack(fill="x", pady=(0, 15))
@@ -748,10 +835,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.btn_export_labels.configure(state="disabled")
         self.btn_export_retention.configure(state="disabled")
         self.btn_export_dlp.configure(state="disabled")
+        self.btn_export_sit.configure(state="disabled")
         
         self.labels_status = "loading"
         self.retention_status = "loading"
         self.dlp_status = "loading"
+        self.sit_status = "loading"
         self.auth_status = "loading"
         
         threading.Thread(
@@ -768,6 +857,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         threading.Thread(
             target=self._execute_dlp_worker,
+            args=(tenant, client_id, client_secret),
+            daemon=True
+        ).start()
+
+        threading.Thread(
+            target=self._execute_sit_worker,
             args=(tenant, client_id, client_secret),
             daemon=True
         ).start()
@@ -977,7 +1072,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _draw_dlp_pagination_controls(self, total_count, data):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        control_frame = ctk.CTkFrame(self.dlp_grid, fg_color=COLOR_SURFACE)
+        control_frame = ctk.CTkFrame(self.dlp_grid, fg_color="transparent")
         control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=6, pady=0, sticky="ew")
         
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
@@ -1188,7 +1283,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _draw_auth_pagination_controls(self, total_count, data):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        control_frame = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_SURFACE)
+        control_frame = ctk.CTkFrame(self.auth_grid, fg_color="transparent")
         control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=5, pady=0, sticky="ew")
         
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
@@ -1225,9 +1320,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
 
     def _check_overall_status(self):
-        if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "dlp_status", None) == "loading" or getattr(self, "auth_status", None) == "loading":
+        if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "dlp_status", None) == "loading" or getattr(self, "sit_status", None) == "loading" or getattr(self, "auth_status", None) == "loading":
             self.status = "loading"
-        elif self.labels_status == "error" and self.retention_status == "error" and getattr(self, "dlp_status", None) == "error" and getattr(self, "auth_status", None) == "error":
+        elif self.labels_status == "error" and self.retention_status == "error" and getattr(self, "dlp_status", None) == "error" and getattr(self, "sit_status", None) == "error" and getattr(self, "auth_status", None) == "error":
             self.status = "error"
         else:
             self.status = "success"
@@ -1304,7 +1399,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _draw_labels_pagination_controls(self, total_count, data):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        control_frame = ctk.CTkFrame(self.labels_grid, fg_color=COLOR_SURFACE)
+        control_frame = ctk.CTkFrame(self.labels_grid, fg_color="transparent")
         control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=7, pady=0, sticky="ew")
         
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
@@ -1487,7 +1582,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _draw_retention_pagination_controls(self, total_count, data):
         total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
         
-        control_frame = ctk.CTkFrame(self.retention_grid, fg_color=COLOR_SURFACE)
+        control_frame = ctk.CTkFrame(self.retention_grid, fg_color="transparent")
         control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=5, pady=0, sticky="ew")
         
         center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
@@ -1637,5 +1732,197 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             messagebox.showinfo("Export Successful", f"Retention policies exported successfully to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
+
+    def _retry_sit_fetch(self):
+        """Manually trigger a re-fetch of Sensitive Information Types."""
+        if hasattr(self, 'sit_reload_btn') and self.sit_reload_btn.winfo_exists():
+            self.sit_reload_btn.configure(state="disabled")
+        if hasattr(self, 'btn_export_sit') and self.btn_export_sit.winfo_exists():
+            self.btn_export_sit.configure(state="disabled")
+            
+        if hasattr(self, "sub_section_start_times"):
+            import time
+            self.sub_section_start_times["sit"] = time.time()
+            
+        tenant, clients, secrets = self.get_credentials()
+        if tenant:
+            self.sit_status = "loading"
+            self.sit_grid.pack(fill="x", pady=(0, 15))
+            self._set_sit_loading("Retrieving Sensitive Information Types...")
+            threading.Thread(target=self._execute_sit_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
+
+    def _execute_sit_worker(self, tenant: str, client_id: str, client_secret: str):
+        usage_logger.info("Executing thread: _execute_sit_worker")
+        if self.semaphore:
+            self.semaphore.acquire()
+        try:
+            res = fetch_sensitive_info_types_data(client_id, client_secret, tenant)
+            self.after(0, self._handle_sit_result, res)
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
+
+    def _set_sit_loading(self, msg="Loading..."):
+        for w in self.sit_grid.winfo_children():
+            w.destroy()
+        self.sit_state_frame = ctk.CTkFrame(self.sit_grid, fg_color="transparent")
+        self.loading_label = __import__("customtkinter").CTkLabel(self.sit_state_frame, text=f"⏳ {msg}", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
+        self.loading_label.pack(pady=(20, 5))
+        pb = __import__("customtkinter").CTkProgressBar(self.sit_state_frame, mode="indeterminate", width=250, fg_color="#F3F4F6", progress_color="#2563EB")
+        pb.pack(pady=(0, 20))
+        pb.start()
+        self.sit_state_frame.pack(fill="x", expand=True)
+
+    def _handle_sit_result(self, result: dict):
+        if hasattr(self, 'sit_reload_btn') and self.sit_reload_btn.winfo_exists():
+            self.sit_reload_btn.configure(state="normal")
+        for w in self.sit_grid.winfo_children():
+            w.destroy()
+            
+        sit_data = result.get("sit_data")
+        err = result.get("error")
+        
+        if isinstance(sit_data, dict) and "value" in sit_data:
+            sit_data = sit_data["value"]
+            
+        self.last_sit_data = sit_data
+        
+        if err:
+            self.sit_status = "error"
+            # Re-use auth error renderer but generic
+            self.sit_state_frame = ctk.CTkFrame(self.sit_grid, fg_color="transparent")
+            ctk.CTkLabel(self.sit_state_frame, text=f"✖ {err}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
+            self.sit_state_frame.pack(fill="x", expand=True)
+            self.btn_export_sit.configure(state="disabled")
+        else:
+            self.sit_status = "success"
+            self.btn_export_sit.configure(state="normal")
+            self._render_sit_types(sit_data)
+            
+        self._check_overall_status()
+
+    def _render_sit_types(self, sit_data):
+        self.sit_grid.configure(fg_color=COLOR_SURFACE, border_width=1, border_color=COLOR_OUTLINE_LIGHT, corner_radius=8)
+        self.sit_current_page = 0
+        if not isinstance(sit_data, list):
+            sit_data = [sit_data] if sit_data else []
+        self._update_sit_ui_paginated(sit_data)
+
+    def _update_sit_ui_paginated(self, data=None):
+        if data is None:
+            data = self.last_sit_data
+            
+        for w in self.sit_grid.winfo_children():
+            info = w.grid_info()
+            if "row" in info and int(info["row"]) > 0:
+                w.destroy()
+
+        headers = ["SIT Name", "Type", "Confidence", "Description"]
+        for i in range(4):
+            self.sit_grid.grid_columnconfigure(i, weight=1 if i != 3 else 3)
+            
+        if not self.sit_grid.winfo_children():
+            for col_idx, head_text in enumerate(headers):
+                cell = ctk.CTkFrame(self.sit_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+                cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        total_count = len(data) if data else 0
+        start_idx = self.sit_current_page * self.ITEMS_PER_PAGE
+        end_idx = start_idx + self.ITEMS_PER_PAGE
+        page_data = data[start_idx:end_idx] if data else []
+
+        if not data:
+            c0 = ctk.CTkFrame(self.sit_grid, fg_color=COLOR_SURFACE, corner_radius=0)
+            c0.grid(row=1, column=0, columnspan=4, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c0, text="No Sensitive Information Types found.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(pady=20)
+            return
+
+        for idx, sit in enumerate(page_data):
+            r_idx = idx + 1
+            bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+            
+            name = sit.get("Name", "N/A")
+            desc = sit.get("Description", "N/A")
+            sit_type = sit.get("Type", "N/A")
+            conf = str(sit.get("RecommendedConfidence", "N/A"))
+
+            c0 = ctk.CTkFrame(self.sit_grid, fg_color=bg_style, corner_radius=0)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=1, pady=1)
+            lbl_name = ctk.CTkLabel(c0, text=name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN)
+            lbl_name.pack(padx=10, pady=6, anchor="w")
+            c0.bind("<Configure>", lambda e, l=lbl_name: l.configure(wraplength=e.width - 20))
+
+            c1 = ctk.CTkFrame(self.sit_grid, fg_color=bg_style, corner_radius=0)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=1, pady=1)
+            lbl_type = ctk.CTkLabel(c1, text=sit_type, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+            lbl_type.pack(padx=10, pady=6, anchor="w")
+            
+            c2 = ctk.CTkFrame(self.sit_grid, fg_color=bg_style, corner_radius=0)
+            c2.grid(row=r_idx, column=2, sticky="nsew", padx=1, pady=1)
+            lbl_conf = ctk.CTkLabel(c2, text=f"{conf}%" if conf.isdigit() else conf, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN)
+            lbl_conf.pack(padx=10, pady=6, anchor="w")
+
+            c3 = ctk.CTkFrame(self.sit_grid, fg_color=bg_style, corner_radius=0)
+            c3.grid(row=r_idx, column=3, sticky="nsew", padx=1, pady=1)
+            lbl_desc = ctk.CTkLabel(c3, text=desc, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, justify="left")
+            lbl_desc.pack(padx=10, pady=6, anchor="w")
+            c3.bind("<Configure>", lambda e, l=lbl_desc: l.configure(wraplength=e.width - 20))
+
+        self._draw_sit_pagination_controls(total_count, data)
+
+    def _draw_sit_pagination_controls(self, total_count, data):
+        total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
+        
+        control_frame = ctk.CTkFrame(self.sit_grid, fg_color="transparent")
+        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=4, pady=0, sticky="ew")
+        
+        center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
+        center_container.pack(pady=(5, 10))
+
+        prev_state = "normal" if self.sit_current_page > 0 else "disabled"
+        btn_prev = ctk.CTkButton(
+            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
+            command=lambda d=data: self._change_sit_page(-1, d)
+        )
+        btn_prev.pack(side="left", padx=5)
+
+        page_lbl = ctk.CTkLabel(center_container, text=f"Page {self.sit_current_page + 1} of {total_pages}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB)
+        page_lbl.pack(side="left", padx=15)
+
+        next_state = "normal" if self.sit_current_page < total_pages - 1 else "disabled"
+        btn_next = ctk.CTkButton(
+            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
+            command=lambda d=data: self._change_sit_page(1, d)
+        )
+        btn_next.pack(side="left", padx=5)
+
+    def _change_sit_page(self, delta, data):
+        self.sit_current_page += delta
+        self._update_sit_ui_paginated(data)
+
+    def export_sit_csv(self):
+        """Prompts the user to save Sensitive Information Types as a detailed CSV file."""
+        if not hasattr(self, "last_sit_data") or not self.last_sit_data:
+            messagebox.showinfo("No Data", "There is no SIT data to export.", parent=self)
+            return
+            
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"sensitive_info_types_{ts}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv")],
+            parent=self
+        )
+        if not f: return
+        try:
+            pd.DataFrame(self.last_sit_data).to_csv(f, index=False)
+            messagebox.showinfo("Export Successful", f"SIT exported to:\n{f}", parent=self)
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Error: {e}", parent=self)
 
 
