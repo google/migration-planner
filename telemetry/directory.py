@@ -47,6 +47,7 @@ class DirectoryFrame(ctk.CTkFrame):
         self.retries = retries_var
         self.backoff = backoff_var
         self.status = None  # 'loading', 'success', 'error', None
+        self.last_organization = []
         self.last_group_counts = {}
         self.last_user_counts = {}
         self.last_domains = []
@@ -55,6 +56,7 @@ class DirectoryFrame(ctk.CTkFrame):
         self.ITEMS_PER_PAGE = 10
         self.current_page = 0
         self.csv_path = None
+        self.org_csv_path = None
         
         self.build_ui()
 
@@ -74,6 +76,46 @@ class DirectoryFrame(ctk.CTkFrame):
         ).pack(anchor="w", pady=(0, 5))
         
         self.state_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        
+        # Organization sub-heading & grid
+        self.org_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.org_title = ctk.CTkLabel(
+            self.org_header_frame,
+            text="Organization",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.org_title.pack(side="left")
+        
+        self.org_reference_link = ctk.CTkLabel(
+            self.org_header_frame,
+            text="Organization API Reference ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.org_reference_link.pack(side="left", padx=(15, 0))
+        self.org_reference_link.bind("<Button-1>", lambda e: webbrowser.open("https://learn.microsoft.com/en-us/graph/api/resources/organization?view=graph-rest-1.0#properties"))
+        self.org_reference_link.bind("<Enter>", lambda e: self.org_reference_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.org_reference_link.bind("<Leave>", lambda e: self.org_reference_link.configure(text_color=COLOR_PRIMARY))
+        
+        self.org_reload_btn = ctk.CTkButton(
+            self.org_header_frame, 
+            state="disabled", text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_fetch
+        )
+        self.org_reload_btn.pack(side="right")
+        self.org_grid = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        
+        # Divider between Organization and Domains
+        self.divider_org_domains = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
         
         # Domains sub-heading & grid
         self.domains_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
@@ -144,6 +186,11 @@ class DirectoryFrame(ctk.CTkFrame):
         """Resets and hides grids."""
         self.pack_forget()
         self.state_frame.pack_forget()
+        
+        self.org_header_frame.pack_forget()
+        self.org_grid.pack_forget()
+        self.divider_org_domains.pack_forget()
+        
         self.domains_header_frame.pack_forget()
         self.domains_grid.pack_forget()
         self.divider.pack_forget()
@@ -152,13 +199,17 @@ class DirectoryFrame(ctk.CTkFrame):
         if hasattr(self, "pagination_frame") and self.pagination_frame.winfo_exists():
             self.pagination_frame.destroy()
 
+        self.last_organization = []
         self.last_group_counts = {}
         self.last_user_counts = {}
         self.last_domains = []
         self.current_page = 0
         self.csv_path = None
+        self.org_csv_path = None
         
         for w in self.state_frame.winfo_children():
+            w.destroy()
+        for w in self.org_grid.winfo_children():
             w.destroy()
         for w in self.domains_grid.winfo_children():
             w.destroy()
@@ -188,7 +239,7 @@ class DirectoryFrame(ctk.CTkFrame):
         self.state_frame.pack(fill="x", expand=True)
 
     def _retry_fetch(self):
-        for btn in ['domains_reload_btn', 'groups_users_reload_btn']:
+        for btn in ['org_reload_btn', 'domains_reload_btn', 'groups_users_reload_btn']:
             if hasattr(self, btn) and getattr(self, btn).winfo_exists():
                 getattr(self, btn).configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
@@ -205,8 +256,12 @@ class DirectoryFrame(ctk.CTkFrame):
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
         self.csv_path = os.path.join(reports_dir, "directory_domains.csv")
+        self.org_csv_path = os.path.join(reports_dir, "directory_organization.csv")
         
         self.pack(fill="x", expand=True, pady=10)
+        self.org_header_frame.pack_forget()
+        self.org_grid.pack_forget()
+        self.divider_org_domains.pack_forget()
         self.domains_header_frame.pack_forget()
         self.domains_grid.pack_forget()
         self.divider.pack_forget()
@@ -215,7 +270,7 @@ class DirectoryFrame(ctk.CTkFrame):
         if hasattr(self, "pagination_frame") and self.pagination_frame.winfo_exists():
             self.pagination_frame.destroy()
         
-        self._set_state_loading("Fetching directory domains, users, and group counts...")
+        self._set_state_loading("Fetching directory organization, domains, users, and group counts...")
         
         retries_val = self.retries.get() if self.retries else 5
         backoff_val = self.backoff.get() if self.backoff else 2
@@ -245,7 +300,7 @@ class DirectoryFrame(ctk.CTkFrame):
             required_scopes = ["Directory.Read.All"]
             client.authenticate(required_scopes=required_scopes)
             
-            self.log_msg("Querying directory domains, users, and group counts from Microsoft Graph...")
+            self.log_msg("Querying directory organization, domains, users, and group counts from Microsoft Graph...")
             dir_service = DirectoryService(client)
             telemetry_data = dir_service.get_directory_telemetry(self.log_msg)
             client.close()
@@ -256,11 +311,11 @@ class DirectoryFrame(ctk.CTkFrame):
             script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
             reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
             os.makedirs(reports_dir, exist_ok=True)
-            csv_path = os.path.join(reports_dir, "directory_domains.csv")
             
+            # 1. Write domains CSV
+            csv_path = os.path.join(reports_dir, "directory_domains.csv")
             headers = ["Domain ID", "Authentication Type", "Admin Managed", "Default", "Verified", "Supported Services"]
             rows = []
-            
             for domain in telemetry_data.get("domains", []):
                 auth_type = domain.get("authenticationType", "N/A") or "N/A"
                 admin_managed = "Yes" if domain.get("isAdminManaged") else "No"
@@ -275,8 +330,44 @@ class DirectoryFrame(ctk.CTkFrame):
                 writer = csv.writer(f)
                 writer.writerow(headers)
                 writer.writerows(rows)
+
+            # 2. Write organization CSV
+            org_csv_path = os.path.join(reports_dir, "directory_organization.csv")
+            org_headers = [
+                "displayName", 
+                "isMultipleDataLocationsForServicesEnabled", "onPremisesSyncEnabled", 
+                "onPremisesLastSyncDateTime", "partnerTenantType", "tenantType",
+                "provisionedPlans_service", "provisionedPlans_capabilityStatus", "provisionedPlans_provisioningStatus"
+            ]
+            org_rows = []
+            
+            def format_csv_val(v):
+                return "null" if v is None else str(v)
+
+            for org in telemetry_data.get("organization", []):
+                disp_name = format_csv_val(org.get("displayName"))
+                multi_loc = format_csv_val(org.get("isMultipleDataLocationsForServicesEnabled"))
+                sync_enabled = format_csv_val(org.get("onPremisesSyncEnabled"))
+                last_sync = format_csv_val(org.get("onPremisesLastSyncDateTime"))
+                partner_type = format_csv_val(org.get("partnerTenantType"))
+                tenant_type = format_csv_val(org.get("tenantType"))
                 
-            usage_logger.info(f"Successfully wrote Domains data to {csv_path}")
+                plans = org.get("provisionedPlans", [])
+                if not plans:
+                    org_rows.append([disp_name, multi_loc, sync_enabled, last_sync, partner_type, tenant_type, "null", "null", "null"])
+                else:
+                    for plan in plans:
+                        service = format_csv_val(plan.get("service"))
+                        cap_status = format_csv_val(plan.get("capabilityStatus"))
+                        prov_status = format_csv_val(plan.get("provisioningStatus"))
+                        org_rows.append([disp_name, multi_loc, sync_enabled, last_sync, partner_type, tenant_type, service, cap_status, prov_status])
+
+            with open(org_csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(org_headers)
+                writer.writerows(org_rows)
+                
+            usage_logger.info(f"Successfully wrote Domains and Organization data to disk.")
             
             self.after(0, self._render_success, telemetry_data)
         except Exception as e:
@@ -288,21 +379,29 @@ class DirectoryFrame(ctk.CTkFrame):
 
     def _render_success(self, telemetry_dict: Dict[str, Any]):
         usage_logger.info("Executing UI render for Directory domains, users & groups tables.")
-        for btn in ['domains_reload_btn', 'groups_users_reload_btn']:
+        for btn in ['org_reload_btn', 'domains_reload_btn', 'groups_users_reload_btn']:
             if hasattr(self, btn) and getattr(self, btn).winfo_exists():
                 getattr(self, btn).configure(state="normal")
         self.state_frame.pack_forget()
         
+        self.last_organization = telemetry_dict.get("organization", [])
         self.last_domains = telemetry_dict.get("domains", [])
         self.last_group_counts = telemetry_dict.get("group_counts", {})
         self.last_user_counts = telemetry_dict.get("user_counts", {})
 
+        for w in self.org_grid.winfo_children():
+            w.destroy()
         for w in self.domains_grid.winfo_children():
             w.destroy()
         for w in self.groups_users_grid.winfo_children():
             w.destroy()
 
         # Display UI titles and tables
+        self.org_header_frame.pack(fill="x", pady=(10, 10))
+        self.org_grid.pack(fill="x", expand=True, pady=(0, 10))
+        
+        self.divider_org_domains.pack(fill="x", pady=15)
+        
         self.domains_header_frame.pack(fill="x", pady=(10, 10))
         self.domains_grid.pack(fill="x", expand=True, pady=(0, 10))
         
@@ -311,11 +410,61 @@ class DirectoryFrame(ctk.CTkFrame):
         self.groups_users_header_frame.pack(fill="x", pady=(10, 10))
         self.groups_users_grid.pack(fill="x", expand=True, pady=(0, 10))
 
+        self._render_org_grid()
         self._update_domains_ui_paginated()
         self._render_groups_users_grid()
 
         self.status = "success"
         self.on_status_change()
+
+    def _render_org_grid(self):
+        self.org_grid.grid_columnconfigure(0, weight=1)
+        self.org_grid.grid_columnconfigure(1, weight=3)
+
+        org_headers = ["Property", "Value"]
+        for col_idx, head_text in enumerate(org_headers):
+            cell = ctk.CTkFrame(self.org_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        org = self.last_organization[0] if self.last_organization else {}
+        
+        # Unique provisioned plans
+        plans = org.get("provisionedPlans", [])
+        plan_services = sorted(list(set(
+            plan.get("service") for plan in plans 
+            if plan.get("service") and str(plan.get("capabilityStatus")).lower() in ["enabled", "warning"]
+        )))
+        plan_services_str = ", ".join(plan_services) if plan_services else "null"
+
+        def format_ui_val(v):
+            return "null" if v is None else str(v)
+
+        rows_data = [
+            ("displayName", format_ui_val(org.get("displayName"))),
+            ("isMultipleDataLocationsForServicesEnabled", format_ui_val(org.get("isMultipleDataLocationsForServicesEnabled"))),
+            ("onPremisesSyncEnabled", format_ui_val(org.get("onPremisesSyncEnabled"))),
+            ("onPremisesLastSyncDateTime", format_ui_val(org.get("onPremisesLastSyncDateTime"))),
+            ("partnerTenantType", format_ui_val(org.get("partnerTenantType"))),
+            ("tenantType", format_ui_val(org.get("tenantType"))),
+            ("provisionedPlans", plan_services_str)
+        ]
+
+        for r_idx, (prop_name, val) in enumerate(rows_data, start=1):
+            bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
+
+            c0 = ctk.CTkFrame(self.org_grid, fg_color=bg_style, corner_radius=0)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c0, text=prop_name, font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=8, anchor="nw")
+
+            c1 = ctk.CTkFrame(self.org_grid, fg_color=bg_style, corner_radius=0)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
+            
+            wraplen = 600 if prop_name == "provisionedPlans" else None
+            lbl = ctk.CTkLabel(c1, text=str(val), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left")
+            if wraplen:
+                lbl.configure(wraplength=wraplen)
+            lbl.pack(padx=10, pady=8, anchor="nw")
 
     def _load_page_from_csv(self, page):
         if not self.csv_path or not os.path.exists(self.csv_path):

@@ -396,7 +396,49 @@ def generate_pdf_report(data: dict, filepath: str):
     if not dir_data:
         story.append(Paragraph("No directory telemetry data was available.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
     else:
-        # 1. Domains Table
+        # 1. Organization Details Table
+        story.append(Paragraph("Organization Details", h2_style))
+        story.append(Paragraph("This section outlines general configuration parameters, tenant types, sync properties, and active services/plans configured for the tenant organization.", body_style))
+        story.append(Spacer(1, 8))
+        
+        org_list = dir_data.get("organization", [])
+        if not org_list:
+            story.append(Paragraph("No organization configuration details were available.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+        else:
+            org = org_list[0] if org_list else {}
+            plans = org.get("provisionedPlans", [])
+            plan_services = sorted(list(set(plan.get("service") for plan in plans if plan.get("service"))))
+            plan_services_str = ", ".join(plan_services) if plan_services else "null"
+            
+            def format_pdf_val(v):
+                return "null" if v is None else str(v)
+                
+            org_table_data = [
+                [Paragraph("Property", table_cell_header), Paragraph("Value", table_cell_header)],
+                [Paragraph("displayName", table_cell_bold), Paragraph(format_pdf_val(org.get("displayName")), table_cell_style)],
+                [Paragraph("isMultipleDataLocationsForServicesEnabled", table_cell_bold), Paragraph(format_pdf_val(org.get("isMultipleDataLocationsForServicesEnabled")), table_cell_style)],
+                [Paragraph("onPremisesSyncEnabled", table_cell_bold), Paragraph(format_pdf_val(org.get("onPremisesSyncEnabled")), table_cell_style)],
+                [Paragraph("onPremisesLastSyncDateTime", table_cell_bold), Paragraph(format_pdf_val(org.get("onPremisesLastSyncDateTime")), table_cell_style)],
+                [Paragraph("partnerTenantType", table_cell_bold), Paragraph(format_pdf_val(org.get("partnerTenantType")), table_cell_style)],
+                [Paragraph("tenantType", table_cell_bold), Paragraph(format_pdf_val(org.get("tenantType")), table_cell_style)],
+                [Paragraph("provisionedPlans", table_cell_bold), Paragraph(plan_services_str, table_cell_style)]
+            ]
+            
+            org_table = Table(org_table_data, colWidths=[200, 300])
+            org_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(org_table)
+            
+        story.append(Spacer(1, 15))
+
+        # 2. Domains Table
         story.append(Paragraph("Domains", h2_style))
         story.append(Paragraph("This section displays the configured internet domains associated with the tenant and their verified statuses.", body_style))
         story.append(Spacer(1, 8))
@@ -443,7 +485,7 @@ def generate_pdf_report(data: dict, filepath: str):
             
         story.append(Spacer(1, 15))
         
-        # 2. Groups & Users Table
+        # 3. Groups & Users Table
         story.append(Paragraph("Groups & Users", h2_style))
         story.append(Paragraph("This section displays counts of different directory user and group categories configured in Microsoft Entra ID.", body_style))
         story.append(Spacer(1, 8))

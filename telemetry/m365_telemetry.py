@@ -840,6 +840,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "tenant_id": self.lic_tenant_id.get().strip(),
             "skus": getattr(self.subscribed_skus_view, "last_licenses_items", []),
             "directory": {
+                "organization": getattr(self.directory_view, "last_organization", []),
                 "domains": getattr(self.directory_view, "last_domains", []),
                 "group_counts": getattr(self.directory_view, "last_group_counts", {}),
                 "user_counts": getattr(self.directory_view, "last_user_counts", {})

@@ -90,6 +90,11 @@ class DirectoryService:
 
         batch_requests = [
             {
+                "id": "organization",
+                "method": "GET",
+                "url": "/organization",
+            },
+            {
                 "id": "domains",
                 "method": "GET",
                 "url": "/domains",
@@ -170,6 +175,7 @@ class DirectoryService:
             context="DirectoryTelemetry"
         )
 
+        organization_list = []
         domains_list = []
         counts = {
             "total": 0,
@@ -196,7 +202,9 @@ class DirectoryService:
                 raise Exception(f"Failed to fetch directory telemetry for '{resp_id}': {error_msg}")
 
             body = resp.get("body", {})
-            if resp_id == "domains":
+            if resp_id == "organization":
+                organization_list = body.get("value", [])
+            elif resp_id == "domains":
                 domains_list = body.get("value", [])
             elif resp_id in counts:
                 count_val = body.get("@odata.count", 0)
@@ -215,6 +223,7 @@ class DirectoryService:
         }
 
         return {
+            "organization": organization_list,
             "domains": domains_list,
             "group_counts": counts,
             "user_counts": normalized_user_counts
