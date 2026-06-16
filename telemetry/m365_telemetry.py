@@ -639,6 +639,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             
             orig_labels_handle = view._handle_labels_result
             orig_retention_handle = view._handle_retention_result
+            orig_dlp_handle = view._handle_dlp_result
             orig_auth_handle = view._handle_auth_result
             
             def new_labels_handle(*args, **kwargs):
@@ -655,6 +656,13 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 display_sub_section_time("retention", view.retention_header_frame, elapsed)
                 orig_retention_handle(*args, **kwargs)
                 
+            def new_dlp_handle(*args, **kwargs):
+                if view.is_cancelled:
+                    return
+                elapsed = time.time() - view.sub_section_start_times.get("dlp", time.time())
+                display_sub_section_time("dlp", view.dlp_header_frame, elapsed)
+                orig_dlp_handle(*args, **kwargs)
+                
             def new_auth_handle(*args, **kwargs):
                 if view.is_cancelled:
                     return
@@ -664,6 +672,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 
             view._handle_labels_result = new_labels_handle
             view._handle_retention_result = new_retention_handle
+            view._handle_dlp_result = new_dlp_handle
             view._handle_auth_result = new_auth_handle
             
         if has_render:
@@ -745,6 +754,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                         thread_self.sub_section = "labels"
                     elif "retention" in target_name:
                         thread_self.sub_section = "retention"
+                    elif "dlp" in target_name:
+                        thread_self.sub_section = "dlp"
                     elif "auth" in target_name:
                         thread_self.sub_section = "auth"
                 
@@ -826,6 +837,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "intune": getattr(self.intune_policies_view, "last_data", {}),
             "security_labels": getattr(self.security_gov_view, "last_labels_data", []),
             "retention_policies": getattr(self.security_gov_view, "last_policies_data", []),
+            "dlp_policies": getattr(self.security_gov_view, "last_dlp_data", []),
             "power_automate": getattr(self.power_automate_view, "last_results", {})
         }
 
