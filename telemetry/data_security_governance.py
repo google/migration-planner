@@ -850,33 +850,21 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def _retry_dlp_fetch(self):
         """Manually trigger a re-fetch of DLP policies."""
-        if not self.status:
-            return
-        
-        creds = self.get_credentials()
-        if not creds.get("client_id") or not creds.get("client_secret"):
-            return
+        if hasattr(self, 'dlp_reload_btn') and self.dlp_reload_btn.winfo_exists():
+            self.dlp_reload_btn.configure(state="disabled")
+        if hasattr(self, 'btn_export_dlp') and self.btn_export_dlp.winfo_exists():
+            self.btn_export_dlp.configure(state="disabled")
             
-        self.dlp_reload_btn.configure(state="disabled")
-        self.btn_export_dlp.configure(state="disabled")
-        
-        # Explicitly tag the start time to prevent elapsed time inflation
-        self.sub_section_start_times["dlp"] = time.time()
-        
-        # Show loading explicitly on this grid
-        self._set_dlp_loading()
-        
-        def worker():
-            if self.semaphore:
-                self.semaphore.acquire()
-            try:
-                res = fetch_dlp_policies_data(creds["client_id"], creds["client_secret"], creds["tenant_id"])
-                self.after(0, lambda: self._handle_dlp_result(res))
-            finally:
-                if self.semaphore:
-                    self.semaphore.release()
-                    
-        threading.Thread(target=worker, daemon=True).start()
+        if hasattr(self, "sub_section_start_times"):
+            import time
+            self.sub_section_start_times["dlp"] = time.time()
+            
+        tenant, clients, secrets = self.get_credentials()
+        if tenant:
+            self.dlp_status = "loading"
+            self.dlp_grid.pack(fill="x", pady=(0, 15))
+            self._set_dlp_loading("Retrieving DLP policies...")
+            threading.Thread(target=self._execute_dlp_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
 
     def export_dlp_csv(self):
         """Prompts the user to save DLP policies as a detailed CSV file."""
