@@ -642,6 +642,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             orig_dlp_handle = view._handle_dlp_result
             orig_sit_handle = view._handle_sit_result
             orig_auth_handle = view._handle_auth_result
+            orig_sso_handle = view._handle_sso_result
             
             def new_labels_handle(*args, **kwargs):
                 if view.is_cancelled:
@@ -678,11 +679,19 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 display_sub_section_time("auth", view.auth_header_frame, elapsed)
                 orig_auth_handle(*args, **kwargs)
                 
+            def new_sso_handle(*args, **kwargs):
+                if view.is_cancelled:
+                    return
+                elapsed = time.time() - view.sub_section_start_times.get("sso", time.time())
+                display_sub_section_time("sso", view.sso_header_frame, elapsed)
+                orig_sso_handle(*args, **kwargs)
+                
             view._handle_labels_result = new_labels_handle
             view._handle_retention_result = new_retention_handle
             view._handle_dlp_result = new_dlp_handle
             view._handle_sit_result = new_sit_handle
             view._handle_auth_result = new_auth_handle
+            view._handle_sso_result = new_sso_handle
             
         if has_render:
             orig_success = view._render_success
@@ -850,6 +859,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "retention_policies": getattr(self.security_gov_view, "last_policies_data", []),
             "dlp_policies": getattr(self.security_gov_view, "last_dlp_data", []),
             "sensitive_info_types": getattr(self.security_gov_view, "last_sit_data", []),
+            "service_principals_sso": getattr(self.security_gov_view, "last_sso_data", []),
             "power_automate": getattr(self.power_automate_view, "last_results", {})
         }
 

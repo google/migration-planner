@@ -220,5 +220,27 @@ class DirectoryService:
             "user_counts": normalized_user_counts
         }
 
-
-
+    def fetch_service_principals_sso(self) -> list:
+        """Fetches all Service Principals (Enterprise Apps) and their SSO modes."""
+        logger.info("Fetching Service Principals and SSO modes...")
+        token_slot = self.client.get_active_token()
+        session = self.client.get_session()
+        headers = {
+            "Authorization": f"Bearer {token_slot['token']}",
+            "ConsistencyLevel": "eventual"
+        }
+        
+        principals = []
+        url = "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,appId,displayName,preferredSingleSignOnMode"
+        
+        try:
+            while url:
+                resp = session.get(url, headers=headers, timeout=30.0)
+                resp.raise_for_status()
+                data = resp.json()
+                principals.extend(data.get("value", []))
+                url = data.get("@odata.nextLink")
+        finally:
+            self.client.release_token(token_slot)
+            
+        return principals

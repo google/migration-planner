@@ -123,6 +123,32 @@ def fetch_sensitivity_labels_data(client_id, client_secret, tenant_id) -> dict:
         except Exception:
             pass
 
+def fetch_service_principals_sso_data(client_id, client_secret, tenant_id) -> dict:
+    """Fetch Service Principals SSO modes via Graph API."""
+    usage_logger.info("Starting Service Principals SSO fetch...")
+    client = GraphClient(
+        tenant_id=tenant_id,
+        client_ids=client_id,
+        client_secrets=client_secret,
+        concurrency=1,
+        retries=3,
+        backoff=2
+    )
+    try:
+        client.authenticate()
+        from core.graph.directory import DirectoryService
+        dir_svc = DirectoryService(client)
+        sso_data = dir_svc.fetch_service_principals_sso()
+        return {"sso": sso_data, "error": None}
+    except Exception as e:
+        usage_logger.error("Failed to fetch Service Principals SSO", exc_info=True)
+        return {"sso": None, "error": str(e)}
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
 def fetch_retention_policies_data(client_id, client_secret, tenant_id) -> dict:
     """Fetch retention policies via PowerShell client."""
     usage_logger.info("Starting Retention Policies fetch...")
@@ -683,6 +709,67 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             corner_radius=8
         )
         
+        # Service Principals SSO Section
+        self.sso_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.sso_title = ctk.CTkLabel(
+            self.sso_header_frame,
+            text="Service Principals Single Sign-On (SSO) Modes",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.sso_title.pack(side="left", anchor="w")
+        
+        self.sso_link = ctk.CTkLabel(
+            self.sso_header_frame,
+            text="Open Enterprise Applications ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.sso_link.pack(side="left", anchor="w", padx=(15, 0))
+        self.sso_link.bind("<Button-1>", lambda e: webbrowser.open("https://entra.microsoft.com/#view/Microsoft_AAD_IAM/StartboardApplicationsMenuBlade/~/AppAppsPreview"))
+        self.sso_link.bind("<Enter>", lambda e: self.sso_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.sso_link.bind("<Leave>", lambda e: self.sso_link.configure(text_color=COLOR_PRIMARY))
+
+        self.sso_reload_btn = ctk.CTkButton(
+            self.sso_header_frame, 
+            state="disabled", text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_sso_fetch
+        )
+        self.sso_reload_btn.pack(side="right", padx=(0, 15))
+
+        self.btn_export_sso = ctk.CTkButton(
+            self.sso_header_frame,
+            text="Export SSO Data",
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            text_color=COLOR_PRIMARY,
+            border_width=1,
+            border_color=COLOR_OUTLINE,
+            hover_color=COLOR_SECONDARY_HOVER,
+            width=150,
+            height=32,
+            corner_radius=16,
+            command=self.export_sso_csv,
+            state="disabled"
+        )
+        self.btn_export_sso.pack(side="right", anchor="e")
+
+        self.sso_grid = ctk.CTkFrame(
+            self.inner_pad,
+            fg_color=COLOR_SURFACE,
+            border_color=COLOR_OUTLINE_LIGHT,
+            border_width=1,
+            corner_radius=8
+        )
+
         self.reset_view()
 
     def reset_view(self):
@@ -827,6 +914,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.auth_grid.pack(fill="x", pady=(0, 15))
         self._set_auth_loading("Retrieving Conditional Access authentication mechanics...")
 
+        # Pack SSO Section
+        self.sso_header_frame.pack(fill="x", pady=(20, 5))
+        self.sso_grid.pack(fill="x", pady=(0, 15))
+        self._set_sso_loading("Retrieving Service Principals SSO modes...")
+
         
         # Pack eDiscovery Cases Section (static, show immediately)
         self.ediscovery_header_frame.pack(fill="x", pady=(20, 5))
@@ -842,6 +934,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.dlp_status = "loading"
         self.sit_status = "loading"
         self.auth_status = "loading"
+        self.sso_status = "loading"
+        
+        self.btn_export_sso.configure(state="disabled")
         
         threading.Thread(
             target=self._execute_labels_worker,
@@ -869,6 +964,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         threading.Thread(
             target=self._execute_auth_worker,
+            args=(tenant, client_id, client_secret),
+            daemon=True
+        ).start()
+
+        threading.Thread(
+            target=self._execute_sso_worker,
             args=(tenant, client_id, client_secret),
             daemon=True
         ).start()
@@ -1320,9 +1421,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
 
     def _check_overall_status(self):
-        if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "dlp_status", None) == "loading" or getattr(self, "sit_status", None) == "loading" or getattr(self, "auth_status", None) == "loading":
+        if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "dlp_status", None) == "loading" or getattr(self, "sit_status", None) == "loading" or getattr(self, "auth_status", None) == "loading" or getattr(self, "sso_status", None) == "loading":
             self.status = "loading"
-        elif self.labels_status == "error" and self.retention_status == "error" and getattr(self, "dlp_status", None) == "error" and getattr(self, "sit_status", None) == "error" and getattr(self, "auth_status", None) == "error":
+        elif self.labels_status == "error" and self.retention_status == "error" and getattr(self, "dlp_status", None) == "error" and getattr(self, "sit_status", None) == "error" and getattr(self, "auth_status", None) == "error" and getattr(self, "sso_status", None) == "error":
             self.status = "error"
         else:
             self.status = "success"
@@ -1925,4 +2026,139 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         except Exception as e:
             messagebox.showerror("Export Failed", f"Error: {e}", parent=self)
 
+    def _execute_sso_worker(self, tenant: str, client_id: str, client_secret: str):
+        usage_logger.info("Executing thread: _execute_sso_worker")
+        if self.semaphore:
+            self.semaphore.acquire()
+        try:
+            res = fetch_service_principals_sso_data(client_id, client_secret, tenant)
+            self.after(0, self._handle_sso_result, res)
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
 
+    def _handle_sso_result(self, res: dict):
+        if res.get("error"):
+            self.sso_status = "error"
+            self._set_sso_error(res["error"])
+        else:
+            self.sso_status = "success"
+            data = res.get("sso", [])
+            self.last_sso_data = data
+            self.btn_export_sso.configure(state="normal")
+            self._render_sso_counts(data)
+        
+        self.sso_reload_btn.configure(state="normal")
+        self._check_overall_status()
+
+    def _set_sso_loading(self, message="Retrieving data..."):
+        for w in self.sso_grid.winfo_children():
+            w.destroy()
+        self.sso_state_frame = ctk.CTkFrame(self.sso_grid, fg_color="transparent")
+        self.loading_label = __import__("customtkinter").CTkLabel(
+            self.sso_state_frame, 
+            text=f"⏳ {message}", 
+            text_color="#6b7280", 
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13)
+        )
+        self.loading_label.pack(pady=(20, 5))
+        pb = __import__("customtkinter").CTkProgressBar(
+            self.sso_state_frame, 
+            mode="indeterminate", 
+            width=250, 
+            fg_color="#F3F4F6", 
+            progress_color="#2563EB"
+        )
+        pb.pack(pady=(0, 20))
+        pb.start()
+        self.sso_state_frame.pack(fill="x", expand=True)
+        self.sso_reload_btn.configure(state="disabled")
+
+    def _set_sso_error(self, err_msg):
+        for w in self.sso_grid.winfo_children():
+            w.destroy()
+        lbl = ctk.CTkLabel(self.sso_grid, text=f"Failed to load SSO data: {err_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM)
+        lbl.pack(pady=20)
+
+    def _retry_sso_fetch(self):
+        self.sso_status = "loading"
+        self._set_sso_loading("Retrying SSO modes fetch...")
+        self.btn_export_sso.configure(state="disabled")
+        threading.Thread(target=self._execute_sso_worker, args=(self.tenant, self.client_id, self.client_secret), daemon=True).start()
+        self._check_overall_status()
+
+    def _render_sso_counts(self, data):
+        for w in self.sso_grid.winfo_children():
+            w.destroy()
+
+        # Configure columns so the table spans the full width equally
+        self.sso_grid.grid_columnconfigure(0, weight=1)
+        self.sso_grid.grid_columnconfigure(1, weight=1)
+
+        # Instructional Text (Row 0)
+        # sso_info_frame = ctk.CTkFrame(self.sso_grid, fg_color="transparent")
+        # sso_info_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 10))
+        # sso_info_text = "Specifies the single sign-on mode configured for this application. Microsoft Entra ID uses the preferred single sign-on mode to launch the application from Microsoft 365 or the My Apps portal. The supported values are password, saml, notSupported, and oidc. Note: This field might be null for older SAML apps and for OIDC applications where it isn't set automatically."
+        # ctk.CTkLabel(sso_info_frame, text=sso_info_text, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, wraplength=800, justify="left").pack(anchor="w")
+        
+        # Aggregate counts
+        saml_count = 0
+        oidc_count = 0
+        pwd_count = 0
+        null_count = 0
+
+        for app in data:
+            mode = app.get("preferredSingleSignOnMode")
+            if mode == "saml": saml_count += 1
+            elif mode == "oidc": oidc_count += 1
+            elif mode == "password": pwd_count += 1
+            else: null_count += 1
+
+        headers = ["SSO Mode", "Application Count"]
+        
+        # Build Grid Header (Row 1)
+        for col_idx, head_text in enumerate(headers):
+            cell = ctk.CTkFrame(self.sso_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=1, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        rows = [
+            ("SAML", saml_count),
+            ("OIDC", oidc_count),
+            ("Password", pwd_count),
+            ("Null / Not Supported", null_count)
+        ]
+
+        # Draw Grid Rows (Row 2+)
+        for r_idx, (mode_name, count) in enumerate(rows, start=2):
+            bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+            
+            # Column 0: Mode Name
+            c0 = ctk.CTkFrame(self.sso_grid, fg_color=bg_style, corner_radius=0)
+            c0.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c0, text=mode_name, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=12, anchor="w")
+
+            # Column 1: Count
+            c1 = ctk.CTkFrame(self.sso_grid, fg_color=bg_style, corner_radius=0)
+            c1.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(c1, text=str(count), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=12, anchor="w")
+
+    def export_sso_csv(self):
+        """Prompts the user to save Service Principals SSO as a detailed CSV file."""
+        if not hasattr(self, "last_sso_data") or not self.last_sso_data:
+            messagebox.showinfo("No Data", "There is no SSO data to export.", parent=self)
+            return
+            
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"service_principals_sso_{ts}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv")],
+            parent=self
+        )
+        if not f: return
+        try:
+            pd.DataFrame(self.last_sso_data).to_csv(f, index=False)
+            messagebox.showinfo("Export Successful", f"SSO exported to:\n{f}", parent=self)
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Error: {e}", parent=self)
