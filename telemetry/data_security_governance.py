@@ -161,6 +161,45 @@ def fetch_retention_policies_data(client_id, client_secret, tenant_id) -> dict:
         usage_logger.error("Failed to fetch retention policies via PowerShell", exc_info=True)
         return {"policies": None, "error": str(e)}
 
+def fetch_dlp_policies_data(client_id, client_secret, tenant_id) -> dict:
+    """Fetch DLP policies via PowerShell client."""
+    usage_logger.info("Starting DLP Policies fetch...")
+    from core.graph.client import GraphClient
+    client = GraphClient(
+        tenant_id=tenant_id,
+        client_ids=client_id,
+        client_secrets=client_secret,
+        concurrency=1,
+        retries=3,
+        backoff=2
+    )
+    tenant_domain = tenant_id
+    try:
+        client.authenticate()
+        from core.graph.directory import DirectoryService
+        dir_svc = DirectoryService(client)
+        tenant_domain = dir_svc.get_tenant_primary_domain()
+        usage_logger.info(f"Retrieved primary tenant domain for DLP fetch: {tenant_domain}")
+    except Exception as e:
+        usage_logger.warning(f"Could not retrieve tenant domain for DLP fetch. Falling back to Tenant ID Guid: {e}")
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+            
+    try:
+        from core.powershell.client import PowerShellClient
+        from core.powershell.dlp import DLPService
+        
+        ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret, cert_tenant_id=tenant_id)
+        dlp_service = DLPService(ps_client)
+        policies = dlp_service.fetch_dlp_policies()
+        return {"policies": policies, "error": None}
+    except Exception as e:
+        usage_logger.error("Failed to fetch DLP policies via PowerShell", exc_info=True)
+        return {"policies": None, "error": str(e)}
+
 def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
     """Fetch Entra ID Conditional Access authentication mechanics and Enterprise SSO modes."""
     usage_logger.info("Starting Authentication & Conditional Access fetch...")
@@ -243,9 +282,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         self.labels_current_page = 0
         self.retention_current_page = 0
+        self.dlp_current_page = 0
         self.ITEMS_PER_PAGE = 5
         self.last_labels_data = None
         self.last_policies_data = None
+        self.last_dlp_data = None
         
         self.build_ui()
 
@@ -389,6 +430,66 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             corner_radius=8
         )
         
+        # DLP Policies section
+        self.dlp_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.dlp_title = ctk.CTkLabel(
+            self.dlp_header_frame,
+            text="Data Loss Prevention (DLP) Policies",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.dlp_title.pack(side="left", anchor="w")
+        
+        self.dlp_link = ctk.CTkLabel(
+            self.dlp_header_frame,
+            text="Open Purview DLP Portal ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.dlp_link.pack(side="left", anchor="w", padx=(15, 0))
+        self.dlp_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/datalossprevention/policies"))
+        self.dlp_link.bind("<Enter>", lambda e: self.dlp_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.dlp_link.bind("<Leave>", lambda e: self.dlp_link.configure(text_color=COLOR_PRIMARY))
+
+        self.dlp_reload_btn = ctk.CTkButton(
+            self.dlp_header_frame, 
+            state="disabled", text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_dlp_fetch
+        )
+        self.dlp_reload_btn.pack(side="right", padx=(0, 15))
+
+        self.btn_export_dlp = ctk.CTkButton(
+            self.dlp_header_frame,
+            text="Export DLP Policies",
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            text_color=COLOR_PRIMARY,
+            border_width=1,
+            border_color=COLOR_OUTLINE,
+            hover_color=COLOR_SECONDARY_HOVER,
+            width=180,
+            height=32,
+            corner_radius=16,
+            command=self.export_dlp_csv,
+            state="disabled"
+        )
+        self.btn_export_dlp.pack(side="right", anchor="e")
+        self.dlp_grid = ctk.CTkFrame(
+            self.inner_pad,
+            fg_color=COLOR_SURFACE,
+            border_color=COLOR_OUTLINE_LIGHT,
+            border_width=1,
+            corner_radius=8
+        )
+
 
         
         # eDiscovery Cases section (Instructional Guidance)
@@ -511,6 +612,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.retention_header_frame.pack_forget()
         self.retention_grid.pack_forget()
         
+        self.dlp_header_frame.pack_forget()
+        self.dlp_grid.pack_forget()
+        
         self.ediscovery_header_frame.pack_forget()
         self.ediscovery_body_frame.pack_forget()
         
@@ -583,6 +687,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _retry_labels_fetch(self):
         if hasattr(self, 'labels_reload_btn') and self.labels_reload_btn.winfo_exists():
             self.labels_reload_btn.configure(state="disabled")
+        if hasattr(self, "sub_section_start_times"):
+            import time
+            self.sub_section_start_times["labels"] = time.time()
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.labels_status = "loading"
@@ -594,6 +701,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _retry_retention_fetch(self):
         if hasattr(self, 'retention_reload_btn') and self.retention_reload_btn.winfo_exists():
             self.retention_reload_btn.configure(state="disabled")
+        if hasattr(self, "sub_section_start_times"):
+            import time
+            self.sub_section_start_times["retention"] = time.time()
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.retention_status = "loading"
@@ -620,6 +730,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.retention_grid.pack(fill="x", pady=(0, 15))
         self._set_retention_loading("Retrieving Retention policies...")
         
+        # Pack DLP Policies Section
+        self.dlp_header_frame.pack(fill="x", pady=(20, 5))
+        self.dlp_grid.pack(fill="x", pady=(0, 15))
+        self._set_dlp_loading("Retrieving DLP policies...")
+        
         # Pack Authentication Section
         self.auth_header_frame.pack(fill="x", pady=(20, 5))
         self.auth_grid.pack(fill="x", pady=(0, 15))
@@ -632,9 +747,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         self.btn_export_labels.configure(state="disabled")
         self.btn_export_retention.configure(state="disabled")
+        self.btn_export_dlp.configure(state="disabled")
         
         self.labels_status = "loading"
         self.retention_status = "loading"
+        self.dlp_status = "loading"
         self.auth_status = "loading"
         
         threading.Thread(
@@ -645,6 +762,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         threading.Thread(
             target=self._execute_retention_worker,
+            args=(tenant, client_id, client_secret),
+            daemon=True
+        ).start()
+
+        threading.Thread(
+            target=self._execute_dlp_worker,
             args=(tenant, client_id, client_secret),
             daemon=True
         ).start()
@@ -677,6 +800,19 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         finally:
             if self.semaphore:
                 self.semaphore.release()
+
+    def _execute_dlp_worker(self, tenant: str, client_id: str, client_secret: str):
+        usage_logger.info("Executing thread: _execute_dlp_worker")
+        if self.semaphore:
+            self.semaphore.acquire()
+        try:
+            res = fetch_dlp_policies_data(client_id, client_secret, tenant)
+            self.after(0, self._handle_dlp_result, res)
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
+
+
 
     def _execute_auth_worker(self, tenant: str, client_id: str, client_secret: str):
         usage_logger.info("Executing thread: _execute_auth_worker")
@@ -712,9 +848,172 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         ctk.CTkButton(self.auth_state_frame, text="Try Again", command=self._retry_auth_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
         self.auth_state_frame.pack(fill="x", expand=True)
 
+    def _retry_dlp_fetch(self):
+        """Manually trigger a re-fetch of DLP policies."""
+        if hasattr(self, 'dlp_reload_btn') and self.dlp_reload_btn.winfo_exists():
+            self.dlp_reload_btn.configure(state="disabled")
+        if hasattr(self, 'btn_export_dlp') and self.btn_export_dlp.winfo_exists():
+            self.btn_export_dlp.configure(state="disabled")
+            
+        if hasattr(self, "sub_section_start_times"):
+            import time
+            self.sub_section_start_times["dlp"] = time.time()
+            
+        tenant, clients, secrets = self.get_credentials()
+        if tenant:
+            self.dlp_status = "loading"
+            self.dlp_grid.pack(fill="x", pady=(0, 15))
+            self._set_dlp_loading("Retrieving DLP policies...")
+            threading.Thread(target=self._execute_dlp_worker, args=(tenant, clients[0], secrets[0]), daemon=True).start()
+
+    def export_dlp_csv(self):
+        """Prompts the user to save DLP policies as a detailed CSV file."""
+        if not hasattr(self, "last_dlp_data") or not self.last_dlp_data:
+            messagebox.showinfo("No Data", "There is no DLP policy data to export.", parent=self)
+            return
+            
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        f = filedialog.asksaveasfilename(
+            initialfile=f"dlp_policies_{ts}.csv",
+            defaultextension=".csv",
+            filetypes=[("CSV Files", "*.csv")],
+            parent=self
+        )
+        if not f: return
+        try:
+            pd.DataFrame(self.last_dlp_data).to_csv(f, index=False)
+            messagebox.showinfo("Export Successful", f"DLP policies exported to:\n{f}", parent=self)
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Error: {e}", parent=self)
+
+    def _set_dlp_loading(self, msg="Loading..."):
+        for w in self.dlp_grid.winfo_children():
+            w.destroy()
+        self.dlp_state_frame = ctk.CTkFrame(self.dlp_grid, fg_color="transparent")
+        self.loading_label = __import__("customtkinter").CTkLabel(self.dlp_state_frame, text=f"⏳ {msg}", text_color="#6b7280", font=__import__("customtkinter").CTkFont(family="Segoe UI", size=13))
+        self.loading_label.pack(pady=(20, 5))
+        pb = __import__("customtkinter").CTkProgressBar(self.dlp_state_frame, mode="indeterminate", width=250, fg_color="#F3F4F6", progress_color="#2563EB")
+        pb.pack(pady=(0, 20))
+        pb.start()
+        self.dlp_state_frame.pack(fill="x", expand=True)
+
+    def _handle_dlp_result(self, result: dict):
+        if hasattr(self, 'dlp_reload_btn') and self.dlp_reload_btn.winfo_exists():
+            self.dlp_reload_btn.configure(state="normal")
+        for w in self.dlp_grid.winfo_children():
+            w.destroy()
+            
+        policies = result.get("policies")
+        err = result.get("error")
+        
+        if isinstance(policies, dict) and "value" in policies:
+            policies = policies["value"]
+            
+        self.last_dlp_data = policies
+        
+        if err:
+            self.dlp_status = "error"
+            ctk.CTkLabel(self.dlp_grid, text=f"✖ {err}", text_color=COLOR_ERROR).pack(pady=20)
+            self.btn_export_dlp.configure(state="disabled")
+        else:
+            self.dlp_status = "success"
+            if not policies:
+                ctk.CTkLabel(self.dlp_grid, text="No Data Loss Prevention (DLP) Policies configured in this tenant.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(padx=20, pady=20)
+                self.btn_export_dlp.configure(state="disabled")
+            else:
+                self.btn_export_dlp.configure(state="normal")
+                self.dlp_grid.grid_columnconfigure(0, weight=3)  # Policy Name
+                self.dlp_grid.grid_columnconfigure(1, weight=1)  # Mode
+                self.dlp_grid.grid_columnconfigure(2, weight=2)  # Workload
+                self.dlp_grid.grid_columnconfigure(3, weight=1)  # Enabled
+                self.dlp_grid.grid_columnconfigure(4, weight=2)  # Action
+                self.dlp_grid.grid_columnconfigure(5, weight=2)  # Created By
+                
+                headers = ["Policy Name", "Mode", "Workload", "State", "Actions", "Created By"]
+                for col_idx, head_text in enumerate(headers):
+                    cell = ctk.CTkFrame(self.dlp_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+                    cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+                    ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+                
+                self.dlp_current_page = 0
+                self._update_dlp_ui_paginated(policies)
+                
+        self._check_overall_status()
+
+    def _update_dlp_ui_paginated(self, data):
+        for w in self.dlp_grid.winfo_children():
+            info = w.grid_info()
+            if "row" in info and int(info["row"]) > 0:
+                w.destroy()
+
+        if not data:
+            return
+
+        total_count = len(data)
+        start_idx = self.dlp_current_page * self.ITEMS_PER_PAGE
+        end_idx = start_idx + self.ITEMS_PER_PAGE
+        page_data = data[start_idx:end_idx]
+
+        for offset, row_item in enumerate(page_data, start=1):
+            r_idx = offset
+            bg_style = COLOR_SURFACE if r_idx % 2 == 0 else COLOR_SURFACE_VARIANT
+            
+            name = row_item.get("Name", "N/A")
+            mode = row_item.get("Mode", "N/A")
+            workloads = row_item.get("Workload", "N/A")
+            enabled = "🟢 Enabled" if row_item.get("Enabled") else "🔴 Disabled"
+            actions = row_item.get("Actions", "None")
+            created_by = row_item.get("CreatedBy", "N/A")
+
+            vals = [name, mode, workloads, enabled, actions, created_by]
+            
+            for c_idx, val in enumerate(vals):
+                c = ctk.CTkFrame(self.dlp_grid, fg_color=bg_style, corner_radius=0)
+                c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(c, text=str(val), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=180).pack(padx=10, pady=12, anchor="nw")
+
+        self._draw_dlp_pagination_controls(total_count, data)
+
+    def _draw_dlp_pagination_controls(self, total_count, data):
+        total_pages = max(1, (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
+        
+        control_frame = ctk.CTkFrame(self.dlp_grid, fg_color=COLOR_SURFACE)
+        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=6, pady=0, sticky="ew")
+        
+        center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
+        center_container.pack(pady=(5, 10))
+
+        prev_state = "normal" if self.dlp_current_page > 0 else "disabled"
+        btn_prev = ctk.CTkButton(
+            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
+            command=lambda d=data: self._change_dlp_page(-1, d)
+        )
+        btn_prev.pack(side="left", padx=5)
+
+        page_lbl = ctk.CTkLabel(center_container, text=f"Page {self.dlp_current_page + 1} of {total_pages}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB)
+        page_lbl.pack(side="left", padx=15)
+
+        next_state = "normal" if self.dlp_current_page < total_pages - 1 else "disabled"
+        btn_next = ctk.CTkButton(
+            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
+            command=lambda d=data: self._change_dlp_page(1, d)
+        )
+        btn_next.pack(side="left", padx=5)
+
+    def _change_dlp_page(self, delta, data):
+        self.dlp_current_page += delta
+        self._update_dlp_ui_paginated(data)
+
     def _retry_auth_fetch(self):
         if hasattr(self, 'auth_reload_btn') and self.auth_reload_btn.winfo_exists():
             self.auth_reload_btn.configure(state="disabled")
+        if hasattr(self, "sub_section_start_times"):
+            import time
+            self.sub_section_start_times["auth"] = time.time()
         tenant, clients, secrets = self.get_credentials()
         if tenant:
             self.auth_status = "loading"
@@ -926,9 +1225,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
 
     def _check_overall_status(self):
-        if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "auth_status", None) == "loading":
+        if self.labels_status == "loading" or self.retention_status == "loading" or getattr(self, "dlp_status", None) == "loading" or getattr(self, "auth_status", None) == "loading":
             self.status = "loading"
-        elif self.labels_status == "error" and self.retention_status == "error" and getattr(self, "auth_status", None) == "error":
+        elif self.labels_status == "error" and self.retention_status == "error" and getattr(self, "dlp_status", None) == "error" and getattr(self, "auth_status", None) == "error":
             self.status = "error"
         else:
             self.status = "success"
