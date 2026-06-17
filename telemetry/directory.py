@@ -569,7 +569,7 @@ class DirectoryFrame(ctk.CTkFrame):
             self.pagination_frame.destroy()
 
         self.pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        self.pagination_frame.pack(fill="x", pady=(10, 0), after=self.domains_grid)
+        self.pagination_frame.pack(fill="x", pady=(2, 0), after=self.domains_grid)
 
         left_spacer = ctk.CTkFrame(self.pagination_frame, fg_color="transparent")
         left_spacer.pack(side="left", fill="x", expand=True)
@@ -579,7 +579,7 @@ class DirectoryFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             state=prev_state,
@@ -597,7 +597,7 @@ class DirectoryFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             state=next_state,

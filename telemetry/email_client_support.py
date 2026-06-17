@@ -314,6 +314,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def _render_client_success(self, data: dict):
+        self.last_client_data = data
         self.client_reload_btn.configure(state="normal")
         for w in self.client_grid_frame.winfo_children(): w.destroy()
         
@@ -380,6 +381,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def _render_pst_success(self, data: dict):
+        self.last_pst_data = data
         self.pst_reload_btn.configure(state="normal")
         for w in self.pst_grid_frame.winfo_children(): w.destroy()
         

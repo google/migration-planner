@@ -846,8 +846,28 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
     def get_all_telemetry_data(self) -> dict:
         """Retrieves cached telemetry data and charts from all sub-views."""
+        import os
+        import csv
+        
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        tenant = self.lic_tenant_id.get().strip()
+        client_str = self.lic_client_ids.get().strip()
+        client_ids = [x.strip() for x in client_str.split(",") if x.strip()]
+        client_id = client_ids[0] if client_ids else ""
+        reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+
+        def load_csv(filename):
+            path = os.path.join(reports_dir, filename)
+            if not os.path.exists(path):
+                return []
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return list(csv.DictReader(f))
+            except Exception:
+                return []
+
         return {
-            "tenant_id": self.lic_tenant_id.get().strip(),
+            "tenant_id": tenant,
             "skus": getattr(self.subscribed_skus_view, "last_licenses_items", []),
             "directory": {
                 "organization": getattr(self.directory_view, "last_organization", []),
@@ -857,20 +877,23 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             },
             "o365_usage": getattr(self.m365_apps_view.active_users_view, "o365_data", []),
             "o365_trend": getattr(self.m365_apps_view.active_users_trend_view, "trend_data", {}),
-            "m365_apps": getattr(self.m365_apps_view.m365_apps_view, "m365_data", []),
+            "m365_apps": getattr(self.m365_apps_view.m365_apps_view, "last_data", []),
             "mailbox": getattr(self.exchange_online_view.mailbox_view, "last_data", {}),
             "calendar": getattr(self.exchange_online_view.calendar_view, "last_data", {}),
             "email_clients": getattr(self.exchange_online_view.email_clients_view, "last_client_data", {}),
             "pst_files": getattr(self.exchange_online_view.email_clients_view, "last_pst_data", {}),
+            "exchange_connectors": getattr(self.exchange_online_view.connectors_view, "last_connectors_data", []),
+            "mail_security": getattr(self.exchange_online_view.mail_security_view, "last_data", {}),
             "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
             "onedrive": getattr(self.files_view.onedrive_view, "last_data", {}),
             "devices_apps": getattr(self.devices_apps_view, "last_data", {}),
             "intune": getattr(self.intune_policies_view, "last_data", {}),
-            "security_labels": getattr(self.security_gov_view, "last_labels_data", []),
-            "retention_policies": getattr(self.security_gov_view, "last_policies_data", []),
-            "dlp_policies": getattr(self.security_gov_view, "last_dlp_data", []),
-            "sensitive_info_types": getattr(self.security_gov_view, "last_sit_data", []),
-            "service_principals_sso": getattr(self.security_gov_view, "last_sso_data", []),
+            "security_labels": load_csv("sensitivity_labels.csv"),
+            "retention_policies": load_csv("retention_policies.csv"),
+            "dlp_policies": load_csv("dlp_policies.csv"),
+            "sensitive_info_types": load_csv("sensitive_info_types.csv"),
+            "service_principals_sso": load_csv("service_principals_sso.csv"),
+            "conditional_access": load_csv("auth_policies.csv"),
             "power_automate": getattr(self.power_automate_view, "last_results", {})
         }
 
