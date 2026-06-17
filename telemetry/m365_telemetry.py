@@ -467,6 +467,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.subscribed_skus_view,
             self.devices_apps_view.auth_methods_subframe,
             self.devices_apps_view.app_signins_subframe,
+            self.devices_apps_view.user_signins_subframe,
             self.directory_view,
             self.m365_apps_view.active_users_view,
             self.m365_apps_view.active_users_trend_view,

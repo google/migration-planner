@@ -305,16 +305,36 @@ class ReportsService:
         
         try:
             logger.info("Fetching Azure AD Application Sign-in Summary...")
-            if is_cancelled_callback and is_cancelled_callback():
-                return
-                
-            resp = session.get(url, headers=headers, timeout=40.0)
-            logger.info("App Sign-ins HTTP status: %d", resp.status_code)
-            if resp.status_code == 200:
-                data = resp.json()
-                value_list = data.get("value", [])
+            retries_left = 4
+            resp = None
+            value_list = []
+            
+            while retries_left > 0:
+                if is_cancelled_callback and is_cancelled_callback():
+                    return
+                    
+                try:
+                    resp = session.get(url, headers=headers, timeout=40.0)
+                    logger.info("App Sign-ins HTTP status: %d", resp.status_code)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        value_list = data.get("value", [])
+                        if value_list:
+                            break
+                        else:
+                            logger.warning("Received empty value collection for App Sign-ins summary, retrying...")
+                    else:
+                        break
+                except Exception as get_err:
+                    logger.warning("Query attempt failed: %s", get_err)
+                    
+                retries_left -= 1
+                if retries_left > 0:
+                    time.sleep(2)
+                    
+            if resp and resp.status_code == 200 and value_list:
                 logger.info("App Sign-ins value collection length: %d", len(value_list))
-                logger.info("App Sign-ins first 200 chars: %s", str(data)[:200])
+                logger.info("App Sign-ins first 200 chars: %s", str(resp.json())[:200])
                 
                 with open(csv_path, 'a', encoding='utf-8', newline='') as f:
                     writer = csv.writer(f)
@@ -332,11 +352,12 @@ class ReportsService:
                     
                 logger.info("Successfully fetched %d app sign-in summary records", rows_written)
             else:
-                if resp.status_code in [401, 403]:
+                if resp and resp.status_code in [401, 403]:
                     logger.error("App Sign-ins Summary endpoint access denied: %d %s", resp.status_code, resp.text)
                     raise PermissionError("Reports.Read.All permission required.")
                 else:
-                    logger.warning("App Sign-ins Summary query failed (HTTP %d).", resp.status_code)
+                    status_str = f"status {resp.status_code}" if resp else "connection/timeout error"
+                    logger.warning("App Sign-ins Summary query failed (%s) or remained empty.", status_str)
         finally:
             self.client.release_token(token_slot)
 
@@ -383,6 +404,92 @@ class ReportsService:
                     raise PermissionError("Reports.Read.All permission required.")
                 else:
                     logger.warning("Auth Methods Summary query failed (HTTP %d).", resp.status_code)
+        finally:
+            self.client.release_token(token_slot)
+
+    def fetch_user_signins(self, csv_path: str, max_rows: int = 20000, on_page_callback=None, is_cancelled_callback=None) -> None:
+        """Fetches Microsoft Entra user sign-in logs from the v1.0 auditLogs/signIns endpoint,
+        filters for successful sign-ins, flattens, and appends to CSV.
+        """
+        token_slot = self.client.get_active_token()
+        session = self.client.get_session()
+        
+        headers = {
+            "Authorization": f"Bearer {token_slot['token']}",
+            "Accept": "application/json"
+        }
+        
+        # Start URL with select query parameter to limit payload size
+        next_url = "https://graph.microsoft.com/v1.0/auditLogs/signIns?$select=appDisplayName,status,deviceDetail,isInteractive"
+        rows_written = 0
+        page_number = 1
+        import csv
+        
+        try:
+            logger.info("Starting User Sign-ins fetch...")
+            with open(csv_path, 'a', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                
+                while next_url and rows_written < max_rows:
+                    if is_cancelled_callback and is_cancelled_callback():
+                        logger.info("User Sign-ins fetch cancelled in-flight. Aborting pagination loop.")
+                        break
+                    
+                    logger.info("Querying MSFT Graph user sign-ins (Page: %d, Successful rows so far: %d)...", 
+                                page_number, rows_written)
+                    try:
+                        # Timeout must be 60.0 seconds, no retries on failure, just exit loop and display what was obtained
+                        resp = session.get(next_url, headers=headers, timeout=60.0)
+                    except Exception as get_err:
+                        logger.warning("Query attempt failed with exception: %s. Displaying data obtained till now.", get_err)
+                        break
+                        
+                    if not resp or resp.status_code != 200:
+                        if resp and resp.status_code in [401, 403]:
+                            logger.error("User Sign-ins endpoint permission error: %d %s", resp.status_code, resp.text)
+                            raise PermissionError("AuditLog.Read.All permission required.")
+                        else:
+                            status_str = f"status {resp.status_code}" if resp else "connection/timeout error"
+                            logger.warning("User Sign-ins query failed (%s). Displaying data obtained till now.", status_str)
+                            break
+                            
+                    page_number += 1
+                    data = resp.json()
+                    value_list = data.get("value", [])
+                    
+                    page_filtered_successful = []
+                    for log in value_list:
+                        status_obj = log.get("status") or {}
+                        # Successful sign-in records are those with status errorCode = 0
+                        error_code = status_obj.get("errorCode")
+                        if error_code == 0 or error_code == "0":
+                            app_name = log.get("appDisplayName") or ""
+                            device = log.get("deviceDetail") or {}
+                            os_name = device.get("operatingSystem") or ""
+                            browser_name = device.get("browser") or ""
+                            is_interactive = str(log.get("isInteractive", ""))
+                            
+                            writer.writerow([app_name, os_name, browser_name, is_interactive])
+                            rows_written += 1
+                            
+                            page_filtered_successful.append(log)
+                            if rows_written >= max_rows:
+                                break
+                                
+                    if on_page_callback:
+                        try:
+                            # Invoke callback with the filtered successful records of the page
+                            on_page_callback(page_filtered_successful)
+                        except Exception as cb_err:
+                            logger.warning("Error in User Sign-ins page callback: %s", cb_err)
+                            
+                    if rows_written >= max_rows:
+                        logger.info("Reached maximum rows limit of %d", max_rows)
+                        break
+                        
+                    next_url = data.get("@odata.nextLink")
+                    
+            logger.info("Successfully fetched and appended %d successful user sign-in records.", rows_written)
         finally:
             self.client.release_token(token_slot)
 

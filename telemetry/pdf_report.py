@@ -1005,7 +1005,37 @@ def generate_pdf_report(data: dict, filepath: str):
         
     story.append(Spacer(1, 15))
     
-    # 3.3.3 Authentication Methods
+    # 3.3.3 User Sign-Ins
+    story.append(Paragraph("<b>User Sign-Ins</b>", body_style))
+    story.append(Spacer(1, 4))
+    
+    user_signins = entra_data.get("user_signins", {})
+    if not user_signins or (not user_signins.get("apps") and not user_signins.get("os") and not user_signins.get("browsers")):
+        story.append(Paragraph("No successful user sign-in logs were discovered or permission restricted.", ParagraphStyle('ErrTxtUserSignins', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        user_signins_table_data = [
+            [Paragraph("Sign-in Attribute", table_cell_header), Paragraph("Successful Unique Values", table_cell_header)],
+            [Paragraph("App Display Names", table_cell_bold), Paragraph(", ".join(user_signins.get("apps", [])) or "None", table_cell_style)],
+            [Paragraph("Operating Systems", table_cell_bold), Paragraph(", ".join(user_signins.get("os", [])) or "None", table_cell_style)],
+            [Paragraph("Browsers", table_cell_bold), Paragraph(", ".join(user_signins.get("browsers", [])) or "None", table_cell_style)]
+        ]
+        user_table = Table(user_signins_table_data, colWidths=[150, 354])
+        user_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(user_table)
+        story.append(Spacer(1, 4))
+        story.append(Paragraph("<font size=8 color='#6B7280'>* Based on sample data collected from signins.</font>", body_style))
+        
+    story.append(Spacer(1, 15))
+    
+    # 3.3.4 Authentication Methods
     story.append(Paragraph("<b>Authentication Methods</b>", body_style))
     story.append(Spacer(1, 4))
     
