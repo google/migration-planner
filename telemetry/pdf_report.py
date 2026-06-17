@@ -850,6 +850,10 @@ def generate_pdf_report(data: dict, filepath: str):
     if not email_clients:
         story.append(Paragraph("No email client telemetry data available.", body_style))
     else:
+        ec_table_data = [[
+            Paragraph("Client Type", table_cell_header),
+            Paragraph("Active Users", table_cell_header)
+        ]]
         rows = [
             ("Outlook on the Web (OWA)", email_clients.get("client_browser", 0)),
             ("Outlook for Windows", email_clients.get("client_win_outlook", 0)),
