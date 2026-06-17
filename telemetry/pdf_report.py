@@ -850,24 +850,22 @@ def generate_pdf_report(data: dict, filepath: str):
     if not email_clients:
         story.append(Paragraph("No email client telemetry data available.", body_style))
     else:
-        c_adop = email_clients.get("client_adoption", {})
-        ec_table_data = [[
-            Paragraph("Client Type", table_cell_header),
-            Paragraph("Active Users", table_cell_header)
-        ]]
         rows = [
-            ("Outlook on the Web (OWA)", c_adop.get("browser_users", 0)),
-            ("Outlook for Windows", c_adop.get("desktop_win", 0)),
-            ("Outlook for Mac", c_adop.get("desktop_mac", 0)),
-            ("Apple Mail (macOS)", c_adop.get("desktop_mail_mac", 0)),
-            ("Outlook Mobile (iOS/Android)", c_adop.get("mobile_outlook", 0)),
-            ("IMAP4 Apps", c_adop.get("protocol_imap4", 0)),
-            ("POP3 Apps", c_adop.get("protocol_pop3", 0))
+            ("Outlook on the Web (OWA)", email_clients.get("client_browser", 0)),
+            ("Outlook for Windows", email_clients.get("client_win_outlook", 0)),
+            ("Outlook for Mac", email_clients.get("client_mac_outlook", 0)),
+            ("Apple Mail (macOS)", email_clients.get("client_mac_mail", 0)),
+            ("Other Desktop Apps", email_clients.get("client_desktop_other", 0)),
+            ("Outlook Mobile (iOS/Android)", email_clients.get("client_mobile_outlook", 0)),
+            ("Native / Other Mobile Apps", email_clients.get("client_mobile_other", 0)),
+            ("IMAP4 Apps", email_clients.get("client_imap", 0)),
+            ("POP3 Apps", email_clients.get("client_pop", 0)),
+            ("SMTP Apps", email_clients.get("client_smtp", 0))
         ]
         for label, val in rows:
             ec_table_data.append([
                 Paragraph(label, table_cell_bold),
-                Paragraph(f"{val:,} Users", table_cell_style)
+                Paragraph(f"{val:,} Users" if 'SMTP' not in label else f"{val:,} Accounts", table_cell_style)
             ])
         ec_table = Table(ec_table_data, colWidths=[250, 150])
         ec_table.setStyle(TableStyle([
@@ -885,9 +883,26 @@ def generate_pdf_report(data: dict, filepath: str):
     pst_files = data.get("pst_files", {})
     if pst_files:
         pst_table_data = [[Paragraph("PST Metric", table_cell_header), Paragraph("Value", table_cell_header)]]
-        for k, v in pst_files.items():
-            if k not in ["client_error", "pst_error"]:
-                pst_table_data.append([Paragraph(str(k), table_cell_bold), Paragraph(str(v), table_cell_style)])
+        pst_cloud = pst_files.get("pst_cloud_data", {})
+        cloud_count = 0
+        cloud_bytes = 0
+        if pst_cloud and "value" in pst_cloud:
+            for item in pst_cloud.get("value", []):
+                for hc in item.get("hitsContainers", []):
+                    cloud_count += hc.get("total", 0)
+                    for hit in hc.get("hits", []):
+                        cloud_bytes += int(hit.get("resource", {}).get("size", 0))
+
+        def format_bytes(size):
+            for unit in ['Bytes', 'KB', 'MB', 'GB', 'TB']:
+                if size < 1024.0: return f"{size:.2f} {unit}"
+                size /= 1024.0
+            return f"{size:.2f} PB"
+
+        cloud_size_str = f" ({format_bytes(cloud_bytes)})" if cloud_bytes > 0 else ""
+        cloud_str = f"{cloud_count:,} Files{cloud_size_str}" if cloud_count > 0 else "None Detected"
+
+        pst_table_data.append([Paragraph("Cloud (SharePoint & OneDrive)", table_cell_bold), Paragraph(cloud_str, table_cell_style)])
         
         pst_table = Table(pst_table_data, colWidths=[250, 150])
         pst_table.setStyle(TableStyle([
@@ -1201,6 +1216,78 @@ def generate_pdf_report(data: dict, filepath: str):
         story.append(ret_table)
     story.append(Spacer(1, 15))
 
+    # 4.3 Data Loss Prevention Policies
+    story.append(Paragraph("4.3 Data Loss Prevention Policies", h2_style))
+    story.append(Paragraph("This section outlines DLP policies configured in Microsoft Purview to prevent accidental data leaks.", body_style))
+    story.append(Spacer(1, 8))
+    
+    dlp_policies = data.get("dlp_policies", [])
+    if not dlp_policies:
+        story.append(Paragraph("No Purview Data Loss Prevention policies discovered.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        dlp_table_data = [[
+            Paragraph("Policy Name", table_cell_header),
+            Paragraph("Workloads", table_cell_header),
+            Paragraph("Mode", table_cell_header),
+            Paragraph("Status", table_cell_header)
+        ]]
+        for dlp in dlp_policies[:20]:
+            dlp_table_data.append([
+                Paragraph(dlp.get("Name", "-"), table_cell_bold),
+                Paragraph(dlp.get("Workload", "-"), table_cell_style),
+                Paragraph(dlp.get("Mode", "-"), table_cell_style),
+                Paragraph(dlp.get("DistributionStatus", "-"), table_cell_style)
+            ])
+        dlp_table = Table(dlp_table_data, colWidths=[200, 150, 80, 70])
+        dlp_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(dlp_table)
+        if len(dlp_policies) > 20:
+             story.append(Paragraph(f"...and {len(dlp_policies) - 20} more. See CSV export for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
+    story.append(Spacer(1, 15))
+
+    # 4.4 Sensitive Information Types
+    story.append(Paragraph("4.4 Sensitive Information Types", h2_style))
+    story.append(Paragraph("This section outlines custom and built-in sensitive information types active in the environment.", body_style))
+    story.append(Spacer(1, 8))
+    
+    sit_types = data.get("sensitive_info_types", [])
+    if not sit_types:
+        story.append(Paragraph("No Sensitive Information Types discovered.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        sit_table_data = [[
+            Paragraph("Name", table_cell_header),
+            Paragraph("Type", table_cell_header),
+            Paragraph("Confidence", table_cell_header)
+        ]]
+        for sit in sit_types[:30]:
+            sit_table_data.append([
+                Paragraph(sit.get("Name", "-"), table_cell_bold),
+                Paragraph(sit.get("Type", "-"), table_cell_style),
+                Paragraph(sit.get("RecommendedConfidence", "-"), table_cell_style)
+            ])
+        sit_table = Table(sit_table_data, colWidths=[280, 100, 120])
+        sit_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(sit_table)
+        if len(sit_types) > 30:
+             story.append(Paragraph(f"...and {len(sit_types) - 30} more. See CSV export for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
+    story.append(Spacer(1, 15))
+
     # =========================================================================
 
     # 4.5 Mail Security
@@ -1254,7 +1341,7 @@ def generate_pdf_report(data: dict, filepath: str):
         for app in sso_apps[:50]:
             sso_table_data.append([
                 Paragraph(app.get("displayName", "-"), table_cell_bold),
-                Paragraph(app.get("preferredSingleSignOnMode", "-"), table_cell_style)
+                Paragraph(app.get("preferredSingleSignOnMode", "").strip() or "None", table_cell_style)
             ])
         sso_table = Table(sso_table_data, colWidths=[300, 200])
         sso_table.setStyle(TableStyle([
@@ -1281,13 +1368,13 @@ def generate_pdf_report(data: dict, filepath: str):
         ca_table_data = [[
             Paragraph("Policy Name", table_cell_header),
             Paragraph("State", table_cell_header),
-            Paragraph("Created Date", table_cell_header)
+            Paragraph("Controls", table_cell_header)
         ]]
         for cap in ca_policies[:50]:
             ca_table_data.append([
-                Paragraph(cap.get("displayName", "-"), table_cell_bold),
+                Paragraph(cap.get("name", "-"), table_cell_bold),
                 Paragraph(cap.get("state", "-"), table_cell_style),
-                Paragraph(cap.get("createdDateTime", "-").split("T")[0], table_cell_style)
+                Paragraph(cap.get("controls", "-"), table_cell_style)
             ])
         ca_table = Table(ca_table_data, colWidths=[250, 100, 150])
         ca_table.setStyle(TableStyle([
