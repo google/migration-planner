@@ -100,7 +100,6 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
     def trigger_fetch(self, tenant, client_id, client_secret):
         self.status = "loading"
         self.is_cancelled = False
-        self.current_request_id += 1
         self.current_page = 0
         self._set_state_loading("Downloading and parsing Authentication Methods...")
         self.on_status_change()
@@ -363,9 +362,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
     def trigger_fetch(self, tenant, client_id, client_secret):
         self.status = "loading"
         self.is_cancelled = False
-        self.current_request_id += 1
         self.current_page = 0
-        self.current_page = 0  # Reset to page 0
 
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
