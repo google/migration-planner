@@ -201,6 +201,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.trigger_pst_fetch(tenant, client_id, client_secret)
 
     def trigger_client_fetch(self, tenant, client_id, client_secret):
+        self.client_status = "loading"
         for w in self.client_grid_frame.winfo_children(): w.destroy()
         f = ctk.CTkFrame(self.client_grid_frame, fg_color="transparent")
         ctk.CTkLabel(f, text="⏳ Analyzing Email Clients...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
@@ -211,6 +212,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         threading.Thread(target=self._execute_client_worker, args=(tenant, client_id, client_secret), daemon=True).start()
 
     def trigger_pst_fetch(self, tenant, client_id, client_secret):
+        self.pst_status = "loading"
         for w in self.pst_grid_frame.winfo_children(): w.destroy()
         f = ctk.CTkFrame(self.pst_grid_frame, fg_color="transparent")
         ctk.CTkLabel(f, text="⏳ Discovering PST Files...", text_color=COLOR_TEXT_SUB, font=FONT_BODY_MEDIUM).pack(pady=(20, 5))
@@ -241,22 +243,30 @@ class EmailClientSupportFrame(ctk.CTkFrame):
             if self.semaphore: self.semaphore.release()
 
     def _render_client_error(self, error_msg):
+        self.client_status = "error"
         self.client_reload_btn.configure(state="normal")
         for w in self.client_grid_frame.winfo_children(): w.destroy()
-        display_msg = "✖ " + error_msg
+        f = ctk.CTkFrame(self.client_grid_frame, fg_color="transparent")
+        display_msg = error_msg
         if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower():
-            display_msg = "✖ Reports permission required. Please grant 'Reports.Read.All'."
-        ctk.CTkLabel(self.client_grid_frame, text=display_msg, text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
+            display_msg = "Reports permission required. Please grant 'Reports.Read.All'."
+        ctk.CTkLabel(f, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
+        ctk.CTkButton(f, text="Try Again", command=self._retry_client_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
+        f.pack(fill="x", expand=True)
         self.status = "error"
         self.on_status_change()
 
     def _render_pst_error(self, error_msg):
+        self.pst_status = "error"
         self.pst_reload_btn.configure(state="normal")
         for w in self.pst_grid_frame.winfo_children(): w.destroy()
-        display_msg = "✖ " + error_msg
+        f = ctk.CTkFrame(self.pst_grid_frame, fg_color="transparent")
+        display_msg = error_msg
         if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower():
-            display_msg = "✖ Search permission required. Please grant 'Files.Read.All'."
-        ctk.CTkLabel(self.pst_grid_frame, text=display_msg, text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
+            display_msg = "Search permission required. Please grant 'Files.Read.All'."
+        ctk.CTkLabel(f, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
+        ctk.CTkButton(f, text="Try Again", command=self._retry_pst_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
+        f.pack(fill="x", expand=True)
         self.status = "error"
         self.on_status_change()
 
@@ -322,6 +332,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
             cc1.grid(row=cr_idx, column=1, sticky="nsew", padx=1, pady=1)
             ctk.CTkLabel(cc1, text=c_val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=10, anchor="nw")
 
+        self.client_status = "success"
         self.status = "success"
         self.on_status_change()
 
@@ -382,8 +393,15 @@ class EmailClientSupportFrame(ctk.CTkFrame):
             )
             self.pst_disclaimer_lbl.pack(anchor="w", pady=(10, 0))
 
+        self.pst_status = "success"
         self.status = "success"
         self.on_status_change()
+
+    def _set_state_error(self, error_msg):
+        if getattr(self, "client_status", None) == "loading":
+            self._render_client_error(error_msg)
+        if getattr(self, "pst_status", None) == "loading":
+            self._render_pst_error(error_msg)
 
     def cancel(self):
         self.status = None

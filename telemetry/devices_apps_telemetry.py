@@ -88,7 +88,8 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         display_msg = error_msg
         if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
             display_msg = "Reports.Read.All application permission required.\nPlease grant 'Reports.Read.All' to your App Registration in Microsoft Entra ID."
-        ctk.CTkLabel(self.body_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=10)
+        ctk.CTkLabel(self.body_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(10, 5))
+        ctk.CTkButton(self.body_frame, text="Try Again", command=self.trigger_fetch_individual, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 10))
 
     def trigger_fetch_individual(self):
         tenant, clients, secrets = self.get_credentials()
@@ -350,7 +351,8 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         display_msg = error_msg
         if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
             display_msg = "Reports.Read.All application permission required.\nPlease grant 'Reports.Read.All' to your App Registration in Microsoft Entra ID."
-        ctk.CTkLabel(self.body_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=10)
+        ctk.CTkLabel(self.body_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(10, 5))
+        ctk.CTkButton(self.body_frame, text="Try Again", command=self.trigger_fetch_individual, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 10))
 
     def trigger_fetch_individual(self):
         tenant, clients, secrets = self.get_credentials()

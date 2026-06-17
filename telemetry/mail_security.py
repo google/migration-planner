@@ -152,7 +152,10 @@ class MailSecurityFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def _render_error(self, err_msg):
-        self.error_msg = err_msg
+        self._set_state_error(err_msg)
+
+    def _set_state_error(self, error_msg):
+        self.error_msg = error_msg
         self.status = "error"
         self.loading = False
         self.on_status_change()
@@ -195,7 +198,10 @@ class MailSecurityFrame(ctk.CTkFrame):
             self.progress.start()
             return
         if self.error_msg:
-            ctk.CTkLabel(self.grid_frame, text=self.error_msg, text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM).pack(pady=20)
+            f = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+            ctk.CTkLabel(f, text=f"✖ {self.error_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
+            ctk.CTkButton(f, text="Try Again", command=self._retry_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
+            f.pack(fill="x", expand=True)
             return
             
         metrics_grid = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)

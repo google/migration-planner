@@ -827,7 +827,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         display_msg = error_msg
         if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
             display_msg = "Information Protection permission required.\nPlease grant the 'SensitivityLabels.Read.All' application permission to your App Registration in Microsoft Entra ID."
-        ctk.CTkLabel(self.labels_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
+        ctk.CTkLabel(self.labels_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
+        ctk.CTkButton(self.labels_state_frame, text="Try Again", command=self._retry_labels_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
         self.labels_state_frame.pack(fill="x", expand=True)
 
     def _set_retention_loading(self, msg="Loading..."):
@@ -850,7 +851,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             display_msg = "PowerShell Core ('pwsh') is not installed or configured on this machine."
         elif "exchangeonlinemanagement" in error_msg.lower():
             display_msg = "ExchangeOnlineManagement PowerShell module is missing."
-        ctk.CTkLabel(self.retention_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
+        ctk.CTkLabel(self.retention_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
+        ctk.CTkButton(self.retention_state_frame, text="Try Again", command=self._retry_retention_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
         self.retention_state_frame.pack(fill="x", expand=True)
 
     def _retry_labels_fetch(self):
@@ -1093,6 +1095,17 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         pb.start()
         self.dlp_state_frame.pack(fill="x", expand=True)
 
+    def _set_dlp_error(self, error_msg):
+        for w in self.dlp_grid.winfo_children():
+            w.destroy()
+        self.dlp_state_frame = ctk.CTkFrame(self.dlp_grid, fg_color="transparent")
+        display_msg = error_msg
+        if "401" in error_msg or "403" in error_msg or "permission" in error_msg.lower() or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
+            display_msg = "DLP policies telemetry permission required.\nPlease grant required application permissions to your App Registration in Microsoft Entra ID."
+        ctk.CTkLabel(self.dlp_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
+        ctk.CTkButton(self.dlp_state_frame, text="Try Again", command=self._retry_dlp_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
+        self.dlp_state_frame.pack(fill="x", expand=True)
+
     def _handle_dlp_result(self, result: dict):
         if hasattr(self, 'dlp_reload_btn') and self.dlp_reload_btn.winfo_exists():
             self.dlp_reload_btn.configure(state="normal")
@@ -1109,7 +1122,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         if err:
             self.dlp_status = "error"
-            ctk.CTkLabel(self.dlp_grid, text=f"✖ {err}", text_color=COLOR_ERROR).pack(pady=20)
+            self._set_dlp_error(err)
             self.btn_export_dlp.configure(state="disabled")
         else:
             self.dlp_status = "success"
@@ -1428,6 +1441,43 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         else:
             self.status = "success"
         self.on_status_change()
+
+    def _set_state_error(self, error_msg):
+        if getattr(self, "labels_status", None) == "loading":
+            self.labels_status = "error"
+            self._set_labels_error(error_msg)
+            if hasattr(self, 'labels_reload_btn') and self.labels_reload_btn.winfo_exists():
+                self.labels_reload_btn.configure(state="normal")
+                
+        if getattr(self, "retention_status", None) == "loading":
+            self.retention_status = "error"
+            self._set_retention_error(error_msg)
+            if hasattr(self, 'retention_reload_btn') and self.retention_reload_btn.winfo_exists():
+                self.retention_reload_btn.configure(state="normal")
+                
+        if getattr(self, "dlp_status", None) == "loading":
+            self.dlp_status = "error"
+            self._set_dlp_error(error_msg)
+            if hasattr(self, 'dlp_reload_btn') and self.dlp_reload_btn.winfo_exists():
+                self.dlp_reload_btn.configure(state="normal")
+                
+        if getattr(self, "sit_status", None) == "loading":
+            self.sit_status = "error"
+            self._set_sit_error(error_msg)
+            if hasattr(self, 'sit_reload_btn') and self.sit_reload_btn.winfo_exists():
+                self.sit_reload_btn.configure(state="normal")
+                
+        if getattr(self, "auth_status", None) == "loading":
+            self.auth_status = "error"
+            self._set_auth_error(error_msg)
+            if hasattr(self, 'auth_reload_btn') and self.auth_reload_btn.winfo_exists():
+                self.auth_reload_btn.configure(state="normal")
+                
+        if getattr(self, "sso_status", None) == "loading":
+            self.sso_status = "error"
+            self._set_sso_error(error_msg)
+            if hasattr(self, 'sso_reload_btn') and self.sso_reload_btn.winfo_exists():
+                self.sso_reload_btn.configure(state="normal")
 
     def _update_labels_ui_paginated(self, data):
         for w in self.labels_grid.winfo_children():
@@ -1874,6 +1924,17 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         pb.start()
         self.sit_state_frame.pack(fill="x", expand=True)
 
+    def _set_sit_error(self, error_msg):
+        for w in self.sit_grid.winfo_children():
+            w.destroy()
+        self.sit_state_frame = ctk.CTkFrame(self.sit_grid, fg_color="transparent")
+        display_msg = error_msg
+        if "401" in error_msg or "403" in error_msg or "permission" in error_msg.lower() or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
+            display_msg = "SIT telemetry permission required.\nPlease grant required application permissions to your App Registration in Microsoft Entra ID."
+        ctk.CTkLabel(self.sit_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
+        ctk.CTkButton(self.sit_state_frame, text="Try Again", command=self._retry_sit_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
+        self.sit_state_frame.pack(fill="x", expand=True)
+
     def _handle_sit_result(self, result: dict):
         if hasattr(self, 'sit_reload_btn') and self.sit_reload_btn.winfo_exists():
             self.sit_reload_btn.configure(state="normal")
@@ -1890,10 +1951,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         
         if err:
             self.sit_status = "error"
-            # Re-use auth error renderer but generic
-            self.sit_state_frame = ctk.CTkFrame(self.sit_grid, fg_color="transparent")
-            ctk.CTkLabel(self.sit_state_frame, text=f"✖ {err}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=20)
-            self.sit_state_frame.pack(fill="x", expand=True)
+            self._set_sit_error(err)
             self.btn_export_sit.configure(state="disabled")
         else:
             self.sit_status = "success"
@@ -2077,8 +2135,11 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _set_sso_error(self, err_msg):
         for w in self.sso_grid.winfo_children():
             w.destroy()
-        lbl = ctk.CTkLabel(self.sso_grid, text=f"Failed to load SSO data: {err_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM)
-        lbl.pack(pady=20)
+        self.sso_state_frame = ctk.CTkFrame(self.sso_grid, fg_color="transparent")
+        display_msg = f"Failed to load SSO data: {err_msg}" if err_msg else "SSO telemetry fetch failed."
+        ctk.CTkLabel(self.sso_state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
+        ctk.CTkButton(self.sso_state_frame, text="Try Again", command=self._retry_sso_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
+        self.sso_state_frame.pack(fill="x", expand=True)
 
     def _retry_sso_fetch(self):
         self.sso_status = "loading"
