@@ -819,7 +819,7 @@ def generate_pdf_report(data: dict, filepath: str):
             Paragraph("Type", table_cell_header),
             Paragraph("Comment", table_cell_header)
         ]]
-        for conn in connectors[:50]: # Limit to 50
+        for conn in connectors[:10]: # Limit to 10
             conn_table_data.append([
                 Paragraph(conn.get("Name", "-"), table_cell_bold),
                 Paragraph("Enabled" if conn.get("Enabled") else "Disabled", table_cell_style),
@@ -837,8 +837,8 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(conn_table)
-        if len(connectors) > 50:
-             story.append(Paragraph(f"...and {len(connectors) - 50} more. See CSV export for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
+        if len(connectors) > 10:
+             story.append(Paragraph(f"...and {len(connectors) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # 3.1d Email Clients & PST Files
@@ -1134,7 +1134,7 @@ def generate_pdf_report(data: dict, filepath: str):
                     "is_sub": True
                 })
                 
-        for item in flattened_labels:
+        for item in flattened_labels[:10]:
             bg_bold_s = table_cell_bold if not item["is_sub"] else table_cell_style
             protection_str = "Yes" if item["hasProtection"] else "No"
             status_str = "Enabled" if item["isEnabled"] else "Disabled"
@@ -1159,6 +1159,8 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(labels_table)
+        if len(flattened_labels) > 10:
+             story.append(Paragraph(f"...and {len(flattened_labels) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     
     story.append(PageBreak())
 
@@ -1177,7 +1179,7 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         
         policies_list = policies if isinstance(policies, list) else [policies]
-        for policy in policies_list:
+        for policy in policies_list[:10]:
             duration_val = str(policy.get("Duration", "N/A"))
             duration_str = duration_val
             if duration_val.lower() == "unlimited":
@@ -1218,6 +1220,8 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(ret_table)
+        if len(policies_list) > 10:
+             story.append(Paragraph(f"...and {len(policies_list) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # 4.3 Data Loss Prevention Policies
@@ -1235,7 +1239,7 @@ def generate_pdf_report(data: dict, filepath: str):
             Paragraph("Mode", table_cell_header),
             Paragraph("Status", table_cell_header)
         ]]
-        for dlp in dlp_policies[:20]:
+        for dlp in dlp_policies[:10]:
             dlp_table_data.append([
                 Paragraph(dlp.get("Name", "-"), table_cell_bold),
                 Paragraph(dlp.get("Workload", "-"), table_cell_style),
@@ -1253,8 +1257,8 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(dlp_table)
-        if len(dlp_policies) > 20:
-             story.append(Paragraph(f"...and {len(dlp_policies) - 20} more. See CSV export for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
+        if len(dlp_policies) > 10:
+             story.append(Paragraph(f"...and {len(dlp_policies) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # 4.4 Sensitive Information Types
@@ -1271,7 +1275,7 @@ def generate_pdf_report(data: dict, filepath: str):
             Paragraph("Type", table_cell_header),
             Paragraph("Confidence", table_cell_header)
         ]]
-        for sit in sit_types[:30]:
+        for sit in sit_types[:10]:
             sit_table_data.append([
                 Paragraph(sit.get("Name", "-"), table_cell_bold),
                 Paragraph(sit.get("Type", "-"), table_cell_style),
@@ -1288,8 +1292,8 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(sit_table)
-        if len(sit_types) > 30:
-             story.append(Paragraph(f"...and {len(sit_types) - 30} more. See CSV export for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
+        if len(sit_types) > 10:
+             story.append(Paragraph(f"...and {len(sit_types) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # =========================================================================
@@ -1309,7 +1313,7 @@ def generate_pdf_report(data: dict, filepath: str):
             Paragraph("Priority", table_cell_header),
             Paragraph("Rule Type", table_cell_header)
         ]]
-        for ms in mail_sec[:50]:
+        for ms in mail_sec[:10]:
             ms_table_data.append([
                 Paragraph(ms.get("Name", "-"), table_cell_bold),
                 Paragraph(ms.get("State", "-"), table_cell_style),
@@ -1327,6 +1331,8 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(ms_table)
+        if len(mail_sec) > 10:
+             story.append(Paragraph(f"...and {len(mail_sec) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # 4.6 SSO Service Principals
@@ -1342,7 +1348,7 @@ def generate_pdf_report(data: dict, filepath: str):
             Paragraph("Application Name", table_cell_header),
             Paragraph("SSO Mode", table_cell_header)
         ]]
-        for app in sso_apps[:50]:
+        for app in sso_apps[:10]:
             sso_table_data.append([
                 Paragraph(app.get("displayName", "-"), table_cell_bold),
                 Paragraph(app.get("preferredSingleSignOnMode", "").strip() or "None", table_cell_style)
@@ -1358,6 +1364,8 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(sso_table)
+        if len(sso_apps) > 10:
+             story.append(Paragraph(f"...and {len(sso_apps) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # 4.7 Conditional Access Policies
@@ -1374,7 +1382,7 @@ def generate_pdf_report(data: dict, filepath: str):
             Paragraph("State", table_cell_header),
             Paragraph("Controls", table_cell_header)
         ]]
-        for cap in ca_policies[:50]:
+        for cap in ca_policies[:10]:
             ca_table_data.append([
                 Paragraph(cap.get("name", "-"), table_cell_bold),
                 Paragraph(cap.get("state", "-"), table_cell_style),
@@ -1391,6 +1399,8 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(ca_table)
+        if len(ca_policies) > 10:
+             story.append(Paragraph(f"...and {len(ca_policies) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
     story.append(PageBreak())
 
