@@ -25,8 +25,8 @@ class SecurityService:
     def __init__(self, client: GraphClient) -> None:
         self.client = client
 
-    def fetch_sensitivity_labels(self) -> list[dict]:
-        """Fetches the sensitivity labels configured for the tenant in JSON format."""
+    def fetch_sensitivity_labels(self, csv_path: str = None, on_page_callback=None, is_cancelled_callback=None) -> None:
+        """Fetches the sensitivity labels configured for the tenant in JSON format and streams to CSV."""
         url = "https://graph.microsoft.com/v1.0/security/dataSecurityAndGovernance/sensitivityLabels"
         token_slot = self.client.get_active_token()
         session = self.client.get_session()
@@ -37,17 +37,58 @@ class SecurityService:
         }
         try:
             logger.info("Querying Microsoft Graph information protection sensitivity labels...")
-            resp = session.get(url, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("value", [])
+            import csv, os
+            if csv_path:
+                f = open(csv_path, 'w', encoding='utf-8', newline='')
+                writer = csv.writer(f)
+                writer.writerow(["name", "description", "hasProtection", "applicationMode", "priority", "applicableTo", "isEnabled", "is_sublabel"])
             else:
-                logger.error("Graph sensitivityLabels endpoint failed with status %d: %s", resp.status_code, resp.text)
-                raise ConnectionError(f"Microsoft Graph API request failed with status {resp.status_code}")
+                f = None
+                writer = None
+            
+            while url:
+                if is_cancelled_callback and is_cancelled_callback(): break
+                resp = session.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    value_list = data.get("value", [])
+                    if writer:
+                        for parent in value_list:
+                            writer.writerow([
+                                parent.get("name", "N/A"),
+                                parent.get("description", "") or parent.get("toolTip", "") or "N/A",
+                                1 if parent.get("hasProtection", False) else 0,
+                                parent.get("applicationMode", "N/A") or "N/A",
+                                parent.get("priority", 0),
+                                parent.get("applicableTo", ""),
+                                1 if parent.get("isEnabled", True) else 0,
+                                0
+                            ])
+                            sublabels = parent.get("sublabels", [])
+                            if sublabels:
+                                sublabels_sorted = sorted(sublabels, key=lambda x: x.get("priority", 0), reverse=True)
+                                for sub in sublabels_sorted:
+                                    writer.writerow([
+                                        f"    ↳  {sub.get('name', 'N/A')}",
+                                        sub.get("description", "") or sub.get("toolTip", "") or "N/A",
+                                        1 if sub.get("hasProtection", False) else 0,
+                                        sub.get("applicationMode", "N/A") or "N/A",
+                                        sub.get("priority", 0),
+                                        sub.get("applicableTo", ""),
+                                        1 if sub.get("isEnabled", True) else 0,
+                                        1
+                                    ])
+                    if on_page_callback:
+                        on_page_callback(value_list)
+                    url = data.get("@odata.nextLink")
+                else:
+                    logger.error("Graph sensitivityLabels endpoint failed with status %d: %s", resp.status_code, resp.text)
+                    raise ConnectionError(f"Microsoft Graph API request failed with status {resp.status_code}")
         finally:
+            if 'f' in locals() and f: f.close()
             self.client.release_token(token_slot)
 
-    def fetch_conditional_access_policies(self) -> list[dict]:
+    def fetch_conditional_access_policies(self, csv_path: str = None, on_page_callback=None, is_cancelled_callback=None) -> None:
         """Fetches the Microsoft Entra Conditional Access policies configured for the tenant."""
         url = "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
         token_slot = self.client.get_active_token()
@@ -59,20 +100,55 @@ class SecurityService:
         }
         try:
             logger.info("Querying Entra ID Conditional Access policies...")
-            resp = session.get(url, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("value", [])
-            elif resp.status_code in [401, 403]:
-                logger.error("Conditional Access endpoint permission error: %d %s", resp.status_code, resp.text)
-                raise PermissionError("Policy.Read.All or Policy.Read permission required.")
+            import csv, os
+            if csv_path:
+                f = open(csv_path, 'w', encoding='utf-8', newline='')
+                writer = csv.writer(f)
+                writer.writerow(["name", "state", "target_users", "target_apps", "controls"])
             else:
-                logger.error("Conditional Access endpoint failed with status %d: %s", resp.status_code, resp.text)
-                raise ConnectionError(f"Microsoft Graph API request failed with status {resp.status_code}")
+                f = None
+                writer = None
+            
+            while url:
+                if is_cancelled_callback and is_cancelled_callback(): break
+                resp = session.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    value_list = data.get("value", [])
+                    if writer:
+                        for p in value_list:
+                            name = p.get("displayName", "N/A")
+                            state = p.get("state", "N/A")
+                            
+                            conds = p.get("conditions", {})
+                            users_cond = conds.get("users", {})
+                            apps_cond = conds.get("applications", {})
+                            
+                            inc_users = users_cond.get("includeUsers", [])
+                            inc_groups = users_cond.get("includeGroups", [])
+                            user_target = "All Users" if "All" in inc_users else f"Specific ({len(inc_users)} users, {len(inc_groups)} groups)"
+                            
+                            inc_apps = apps_cond.get("includeApplications", [])
+                            app_target = "All Apps" if "All" in inc_apps else f"Specific ({len(inc_apps)} apps)"
+                            
+                            controls = p.get("grantControls", {}).get("builtInControls", [])
+                            ctrl_str = ", ".join(controls) if controls else "Block/None"
+                            
+                            writer.writerow([name, state, user_target, app_target, ctrl_str])
+                    if on_page_callback:
+                        on_page_callback(value_list)
+                    url = data.get("@odata.nextLink")
+                elif resp.status_code in [401, 403]:
+                    logger.error("Conditional Access endpoint permission error: %d %s", resp.status_code, resp.text)
+                    raise PermissionError("Policy.Read.All or Policy.Read permission required.")
+                else:
+                    logger.error("Conditional Access endpoint failed with status %d: %s", resp.status_code, resp.text)
+                    raise ConnectionError(f"Microsoft Graph API request failed with status {resp.status_code}")
         finally:
+            if 'f' in locals() and f: f.close()
             self.client.release_token(token_slot)
 
-    def fetch_sso_service_principals(self) -> list[dict]:
+    def fetch_sso_service_principals(self, csv_path: str = None, on_page_callback=None, is_cancelled_callback=None) -> None:
         """Fetches Microsoft Entra Enterprise Applications (Service Principals) to analyze Single Sign-On."""
         url = "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,appDisplayName,preferredSingleSignOnMode&$top=100"
         token_slot = self.client.get_active_token()
@@ -84,17 +160,30 @@ class SecurityService:
         }
         try:
             logger.info("Querying Entra ID Service Principals for Single Sign-On modes...")
-            resp = session.get(url, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data.get("value", [])
-            elif resp.status_code in [401, 403]:
-                logger.error("Service Principals endpoint permission error: %d %s", resp.status_code, resp.text)
-                raise PermissionError("Application.Read.All permission required.")
-            else:
-                logger.error("Service Principals endpoint failed with status %d: %s", resp.status_code, resp.text)
-                raise ConnectionError(f"Microsoft Graph API request failed with status {resp.status_code}")
+            import csv
+            f = open(csv_path, 'a', encoding='utf-8', newline='') if csv_path else None
+            writer = csv.writer(f) if f else None
+            
+            while url:
+                if is_cancelled_callback and is_cancelled_callback(): break
+                resp = session.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    value_list = data.get("value", [])
+                    if writer:
+                        for sp in value_list:
+                            writer.writerow([sp.get("appDisplayName", ""), sp.get("preferredSingleSignOnMode", "")])
+                    if on_page_callback:
+                        on_page_callback(value_list)
+                    url = data.get("@odata.nextLink")
+                elif resp.status_code in [401, 403]:
+                    logger.error("Service Principals endpoint permission error: %d %s", resp.status_code, resp.text)
+                    raise PermissionError("Application.Read.All permission required.")
+                else:
+                    logger.error("Service Principals endpoint failed with status %d: %s", resp.status_code, resp.text)
+                    raise ConnectionError(f"Microsoft Graph API request failed with status {resp.status_code}")
         finally:
+            if 'f' in locals() and f: f.close()
             self.client.release_token(token_slot)
 
     def search_cloud_pst_files(self) -> dict:

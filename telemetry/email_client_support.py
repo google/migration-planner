@@ -226,6 +226,27 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         if self.semaphore: self.semaphore.acquire()
         try:
             data = run_email_client_usage_pipeline(client_id, client_secret, tenant)
+            if not data.get("client_error"):
+                import csv, os
+                script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+                reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+                os.makedirs(reports_dir, exist_ok=True)
+                csv_path = os.path.join(reports_dir, "email_client_support_metrics.csv")
+                
+                with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Client Environment", "Active User Count"])
+                    adop = data.get("client_adoption", {})
+                    writer.writerow(["Browser Users (Web)", adop.get("browser_users", 0)])
+                    writer.writerow(["Desktop Windows (Outlook)", adop.get("desktop_win", 0)])
+                    writer.writerow(["Desktop Mac (Outlook)", adop.get("desktop_mac", 0)])
+                    writer.writerow(["Desktop Mac (Mail)", adop.get("desktop_mail_mac", 0)])
+                    writer.writerow(["Mobile Outlook", adop.get("mobile_outlook", 0)])
+                    writer.writerow(["Mobile Native (Exchange ActiveSync)", adop.get("mobile_native", 0)])
+                    writer.writerow(["IMAP Users", adop.get("imap_users", 0)])
+                    writer.writerow(["POP Users", adop.get("pop_users", 0)])
+                    writer.writerow(["SMTP Users", adop.get("smtp_users", 0)])
+
             self.after(0, self._render_client_success, data)
         except Exception as e:
             self.after(0, self._render_client_error, str(e))
@@ -236,6 +257,28 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         if self.semaphore: self.semaphore.acquire()
         try:
             data = run_pst_discovery_pipeline(client_id, client_secret, tenant)
+            if not data.get("pst_error"):
+                import csv, os
+                script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+                reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+                os.makedirs(reports_dir, exist_ok=True)
+                csv_path = os.path.join(reports_dir, "pst_discovery.csv")
+                
+                pst_cloud = data.get("pst_cloud_data", {})
+                cloud_count = 0
+                cloud_bytes = 0
+                if pst_cloud and "value" in pst_cloud:
+                    for item in pst_cloud.get("value", []):
+                        for hc in item.get("hitsContainers", []):
+                            cloud_count += hc.get("total", 0)
+                            for hit in hc.get("hits", []):
+                                cloud_bytes += int(hit.get("resource", {}).get("size", 0))
+                
+                with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Location", "Discovered File Count", "Total Size (Bytes)"])
+                    writer.writerow(["Cloud (SharePoint & OneDrive)", cloud_count, cloud_bytes])
+
             self.after(0, self._render_pst_success, data)
         except Exception as e:
             self.after(0, self._render_pst_error, str(e))

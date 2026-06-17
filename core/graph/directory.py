@@ -229,8 +229,8 @@ class DirectoryService:
             "user_counts": normalized_user_counts
         }
 
-    def fetch_service_principals_sso(self) -> list:
-        """Fetches all Service Principals (Enterprise Apps) and their SSO modes."""
+    def fetch_service_principals_sso(self, csv_path: str = None, on_page_callback=None, is_cancelled_callback=None) -> None:
+        """Fetches all Service Principals (Enterprise Apps) and their SSO modes, streaming to CSV."""
         logger.info("Fetching Service Principals and SSO modes...")
         token_slot = self.client.get_active_token()
         session = self.client.get_session()
@@ -239,17 +239,36 @@ class DirectoryService:
             "ConsistencyLevel": "eventual"
         }
         
-        principals = []
         url = "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id,appId,displayName,preferredSingleSignOnMode"
         
         try:
+            import csv, os
+            if csv_path:
+                f = open(csv_path, 'w', encoding='utf-8', newline='')
+                writer = csv.writer(f)
+                writer.writerow(["displayName", "preferredSingleSignOnMode"])
+            else:
+                f = None
+                writer = None
+            
             while url:
+                if is_cancelled_callback and is_cancelled_callback(): break
                 resp = session.get(url, headers=headers, timeout=30.0)
                 resp.raise_for_status()
                 data = resp.json()
-                principals.extend(data.get("value", []))
+                value_list = data.get("value", [])
+                
+                if writer:
+                    for sp in value_list:
+                        writer.writerow([
+                            sp.get("displayName", ""), 
+                            sp.get("preferredSingleSignOnMode", "")
+                        ])
+                
+                if on_page_callback:
+                    on_page_callback(value_list)
+                    
                 url = data.get("@odata.nextLink")
         finally:
+            if 'f' in locals() and f: f.close()
             self.client.release_token(token_slot)
-            
-        return principals
