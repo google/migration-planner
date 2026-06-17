@@ -43,12 +43,12 @@ def compile_essential_metrics(telemetry_data: dict) -> dict:
         })
 
     # 2. Directory / Accounts
-    dir_data = telemetry_data.get("directory", {})
-    user_counts = dir_data.get("user_counts", {})
+    dir_data = telemetry_data.get("directory") or {}
+    user_counts = dir_data.get("user_counts") or {}
     
     # 3. Active Usage (O365)
     usage_summary = {}
-    for row in telemetry_data.get("o365_usage", []):
+    for row in (telemetry_data.get("o365_usage") or []):
         if len(row) >= 4:
             service = row[0]
             usage_summary[service] = {
@@ -58,19 +58,19 @@ def compile_essential_metrics(telemetry_data: dict) -> dict:
             }
 
     # 4. Storage & Files
-    sp_data = telemetry_data.get("sharepoint", {})
-    od_data = telemetry_data.get("onedrive", {})
-    mailbox_data = telemetry_data.get("mailbox", {})
+    sp_data = telemetry_data.get("sharepoint") or {}
+    od_data = telemetry_data.get("onedrive") or {}
+    mailbox_data = telemetry_data.get("mailbox") or {}
     
     # 5. Data Security (Purview Labels & Retention)
-    labels = telemetry_data.get("security_labels", [])
-    policies = telemetry_data.get("retention_policies", [])
+    labels = telemetry_data.get("security_labels") or []
+    policies = telemetry_data.get("retention_policies") or []
     
     # 6. Power Automate
-    pa_data = telemetry_data.get("power_automate", {})
-    pa_counts = pa_data.get("counts", {})
-    pa_active = pa_data.get("active_counts", {})
-    complex_flows_count = len(pa_data.get("complex_logic_flows", []))
+    pa_data = telemetry_data.get("power_automate") or {}
+    pa_counts = pa_data.get("counts") or {}
+    pa_active = pa_data.get("active_counts") or {}
+    complex_flows_count = len(pa_data.get("complex_logic_flows") or [])
 
     return {
         "tenant_id": telemetry_data.get("tenant_id", "N/A"),
