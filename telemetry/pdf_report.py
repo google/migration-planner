@@ -1344,15 +1344,23 @@ def generate_pdf_report(data: dict, filepath: str):
     if not sso_apps:
         story.append(Paragraph("No SAML SSO applications discovered.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
     else:
+        from collections import Counter
+        mode_counts = Counter()
+        for app in sso_apps:
+            mode = app.get("preferredSingleSignOnMode", "").strip() or "None"
+            mode_counts[mode] += 1
+            
         sso_table_data = [[
-            Paragraph("Application Name", table_cell_header),
-            Paragraph("SSO Mode", table_cell_header)
+            Paragraph("SSO Mode", table_cell_header),
+            Paragraph("Number of Applications", table_cell_header)
         ]]
-        for app in sso_apps[:10]:
+        
+        for mode, count in sorted(mode_counts.items(), key=lambda x: x[1], reverse=True):
             sso_table_data.append([
-                Paragraph(app.get("displayName", "-"), table_cell_bold),
-                Paragraph(app.get("preferredSingleSignOnMode", "").strip() or "None", table_cell_style)
+                Paragraph(mode, table_cell_bold),
+                Paragraph(f"{count:,} Apps", table_cell_style)
             ])
+            
         sso_table = Table(sso_table_data, colWidths=[300, 200])
         sso_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
@@ -1364,8 +1372,6 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(sso_table)
-        if len(sso_apps) > 10:
-             story.append(Paragraph(f"...and {len(sso_apps) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # 4.7 Conditional Access Policies
