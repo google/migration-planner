@@ -402,10 +402,10 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
             hover_color="#DBEAFE",
             command=self._retry_fetch
         )
-        self.reload_btn.pack(side="right")
+        self.reload_btn.pack(side="right", padx=(10, 15))
         
         self.btn_export_pa = ctk.CTkButton(
-            self.pa_header, text="Export Complex Flows", width=160, height=32, corner_radius=16,
+            self.header, text="Export Complex Flows", width=160, height=32, corner_radius=16,
             font=FONT_BODY_BOLD, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             command=self.export_complex_flows, state="disabled"

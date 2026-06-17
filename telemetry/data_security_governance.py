@@ -398,7 +398,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             hover_color="#DBEAFE",
             command=self._retry_labels_fetch
         )
-        self.labels_reload_btn.pack(side="right", padx=(0, 15))
+        self.labels_reload_btn.pack(side="right", padx=(10, 15))
         
         self.btn_export_labels = ctk.CTkButton(
             self.labels_header_frame,
@@ -465,7 +465,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             hover_color="#DBEAFE",
             command=self._retry_retention_fetch
         )
-        self.retention_reload_btn.pack(side="right", padx=(0, 15))
+        self.retention_reload_btn.pack(side="right", padx=(10, 15))
 
         self.btn_export_retention = ctk.CTkButton(
             self.retention_header_frame,
@@ -525,7 +525,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             hover_color="#DBEAFE",
             command=self._retry_dlp_fetch
         )
-        self.dlp_reload_btn.pack(side="right", padx=(0, 15))
+        self.dlp_reload_btn.pack(side="right", padx=(10, 15))
 
         self.btn_export_dlp = ctk.CTkButton(
             self.dlp_header_frame,
@@ -574,7 +574,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             hover_color="#DBEAFE",
             command=self._retry_sit_fetch
         )
-        self.sit_reload_btn.pack(side="right", padx=(0, 15))
+        self.sit_reload_btn.pack(side="right", padx=(10, 15))
 
         self.btn_export_sit = ctk.CTkButton(
             self.sit_header_frame,
@@ -743,7 +743,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             hover_color="#DBEAFE",
             command=self._retry_sso_fetch
         )
-        self.sso_reload_btn.pack(side="right", padx=(0, 15))
+        self.sso_reload_btn.pack(side="right", padx=(10, 15))
 
         self.btn_export_sso = ctk.CTkButton(
             self.sso_header_frame,
