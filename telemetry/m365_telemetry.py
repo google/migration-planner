@@ -82,8 +82,15 @@ def update_log_directory(tenant_id: Optional[str] = None, client_id: Optional[st
     """Updates the log directory dynamically once tenant and client ID are known, or reverts to default."""
     global _file_handler, _queue_listener
 
-    _queue_listener.stop()
-    _file_handler.close()
+    try:
+        _queue_listener.stop()
+    except Exception:
+        pass
+        
+    try:
+        _file_handler.close()
+    except Exception:
+        pass
 
     if tenant_id and client_id:
         new_log_dir = os.path.join(_current_dir, 'logs', f"{tenant_id}_{client_id}")
@@ -332,6 +339,9 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
     def reset_tab(self):
         """Resets the coordinator status, credentials variables, submission button, and hides all grids."""
+        if getattr(self, "is_fetching", False):
+            self.cancel_fetching()
+            
         async_logger.info("Resetting M365TelemetryTab coordinator and hiding all sub-grids.")
         self.lic_tenant_id.set("")
         self.lic_client_ids.set("")
