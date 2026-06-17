@@ -342,6 +342,101 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         )
         self.show_config_view()
 
+  def _try_get_metrics_from_csv_report(self, config):
+    if self.user_source.get() != "csv" or not config.csv_path or not os.path.exists(config.csv_path):
+      return None
+      
+    try:
+      df = pd.read_csv(config.csv_path)
+    except Exception:
+      return None
+
+    df.columns = df.columns.str.strip()
+
+    req_cols = {
+        "Subsite Count",
+        "DL Count",
+        "List Count",
+        "Folder Count",
+        "File Count",
+        "Shortcut Count",
+        "Folder Count > Depth Limit 100",
+        "File Count > Depth Limit 100",
+        "Folder with > 500k item count",
+        "Corpus Size",
+    }
+    id_col = "Site URL/Name" if "Site URL/Name" in df.columns else ("Site Id" if "Site Id" in df.columns else ("Entity" if "Entity" in df.columns else None))
+    if not id_col or not req_cols.issubset(df.columns):
+      return None
+
+    for idx, row in df.iterrows():
+      val = str(row[id_col]).strip()
+      if "/personal/" not in val.lower():
+        raise ValueError(f"Row {idx+2}: URL '{val}' does not contain '/personal/'. Only OneDrive personal site reports are supported.")
+
+    def _parse_size_str(val):
+      if isinstance(val, (int, float)):
+        return float(val)
+      s = str(val).strip()
+      match = re.match(r'^([\d\.]+)\s*([A-Za-z]+)$', s)
+      if not match:
+        try:
+          return float(s)
+        except Exception:
+          return 0.0
+      num, unit = float(match.group(1)), match.group(2).upper()
+      multipliers = {
+          "PB": 1024**5, "TB": 1024**4, "GB": 1024**3,
+          "MB": 1024**2, "KB": 1024, "BYTES": 1
+      }
+      return num * multipliers.get(unit, 1)
+
+    site_metrics = {}
+    for _, row in df.iterrows():
+      site_id = str(row[id_col]).strip()
+      folder_cnt = int(pd.to_numeric(row.get("Folder Count", 0), errors="coerce") or 0)
+      file_cnt = int(pd.to_numeric(row.get("File Count", 0), errors="coerce") or 0)
+      shortcut_cnt = int(pd.to_numeric(row.get("Shortcut Count", 0), errors="coerce") or 0)
+      res_cnt = int(pd.to_numeric(row.get("Resource Count", folder_cnt + file_cnt + shortcut_cnt), errors="coerce") or 0)
+      
+      site_metrics[site_id] = {
+          "subsiteCount": int(pd.to_numeric(row.get("Subsite Count", 0), errors="coerce") or 0),
+          "dlCount": int(pd.to_numeric(row.get("DL Count", 0), errors="coerce") or 0),
+          "listCount": int(pd.to_numeric(row.get("List Count", 0), errors="coerce") or 0),
+          "folderCount": folder_cnt,
+          "fileCount": file_cnt,
+          "shortcutCount": shortcut_cnt,
+          "folderCountExceedingDepthLimit": int(pd.to_numeric(row.get("Folder Count > Depth Limit 100", 0), errors="coerce") or 0),
+          "fileCountExceedingDepthLimit": int(pd.to_numeric(row.get("File Count > Depth Limit 100", 0), errors="coerce") or 0),
+          "largeResourceCount": int(pd.to_numeric(row.get("Folder with > 500k item count", 0), errors="coerce") or 0),
+          "totalSize": _parse_size_str(row.get("Corpus Size", 0)),
+          "resourceCount": res_cnt,
+      }
+
+    self.skipped_actual_scan = True
+    dl_total = int(pd.to_numeric(df.get("DL Count", pd.Series([0])), errors="coerce").fillna(0).sum())
+    return {
+        "siteMetrics": site_metrics,
+        "siteCount": len(df),
+        "subsiteCount": int(pd.to_numeric(df.get("Subsite Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "personalSiteCount": len(df),
+        "teamSiteCount": 0,
+        "driveCounts": {"documentLibrary": dl_total},
+        "personalSiteDLCount": dl_total,
+        "teamSiteDLCount": 0,
+        "folderCount": int(pd.to_numeric(df.get("Folder Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "fileCount": int(pd.to_numeric(df.get("File Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "shortcutCount": int(pd.to_numeric(df.get("Shortcut Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "listCount": int(pd.to_numeric(df.get("List Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "folderCountExceedingDepthLimit": int(pd.to_numeric(df.get("Folder Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "fileCountExceedingDepthLimit": int(pd.to_numeric(df.get("File Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "tenantLevelLargeResourceCount": int(pd.to_numeric(df.get("Folder with > 500k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "siteClassification": {site_id: "personal" for site_id in site_metrics.keys()},
+        "licenseMetrics": {},
+        "tenantLevelFileSizeDistribution": {},
+        "tenantLevelLargeResources": [],
+    }
+
   def _get_input_from_csv_if_uploaded(self, config):
     if self.user_source.get() != "csv":
       return {}
@@ -415,14 +510,23 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.id_to_display_name = id_to_display
       self.factory = EstimatorFactory(config, logger=self.log_msg, stop_event=self.stop_scan_event, id_to_display_name=id_to_display)
       
-      manager = self.factory.get_manager()
-      manager.authenticate_all(self.log_msg, required_scopes=["Sites.Read.All", "Files.Read.All", "LicenseAssignment.Read.All"])
-      estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
-
-      # Calculate resource metrics for the tenant. Progress update to be made directly in the backend.
+      self.skipped_actual_scan = False
+      file_metrics = self._try_get_metrics_from_csv_report(config)
       failures = []
-      input_map = self._get_input_from_csv_if_uploaded(config)
-      file_metrics = estimator.calculate_resource_metrics(input_map, failures)
+      if file_metrics is None:
+        manager = self.factory.get_manager()
+        manager.authenticate_all(self.log_msg, required_scopes=["Sites.Read.All", "Files.Read.All", "LicenseAssignment.Read.All"])
+        estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
+
+        # Calculate resource metrics for the tenant. Progress update to be made directly in the backend.
+        input_map = self._get_input_from_csv_if_uploaded(config)
+        file_metrics = estimator.calculate_resource_metrics(input_map, failures)
+      else:
+        estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
+        self.ui_update("site_discovery", status="Done", count=file_metrics.get("siteCount", 0))
+        self.ui_update("drive_discovery", status="Done", count=sum(file_metrics.get("driveCounts", {}).values()))
+        self.ui_update("scan_progress", source="drive_parsing", progress=1.0)
+        self.ui_update("phase_status", source="drive_parsing", status="complete")
 
       self.log_msg("\n" + "=" * 60)
       self.log_msg("📊 Failures and Warnings:")
@@ -846,8 +950,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       card_frame.pack(fill="x", pady=10)
 
       self.create_stat_card(card_frame, "Total Corpus Size", f"{self.format_size(sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🏢")
-      self.create_stat_card(card_frame, "Site Collection Count", f"{data.get("siteCount"):,}", "🏢")
-      self.create_stat_card(card_frame, "Subsite Count", f"{data.get("subsiteCount"):,}", "🏢")
+      self.create_stat_card(card_frame, "Site Collection Count", f"{data.get('siteCount'):,}", "🏢")
+      self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsiteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Document Library Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
       self.create_stat_card(card_frame, "Folder Count", f"{data.get('folderCount', 0):,}", "📁")
       self.create_stat_card(card_frame, "File Count", f"{data.get('fileCount', 0):,}", "📄")
@@ -1058,24 +1162,48 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     include_personal = self.include_personal_sites.get()
     include_team = self.include_team_sites.get()
 
-    expected_cols = {"Entity"}
-    if set(df.columns) != expected_cols:
-      messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column.")
-      raise ValueError("CSV must contain exactly the 'Entity' column.")
+    if "Site URL/Name" in df.columns:
+      df.rename(columns={"Site URL/Name": "Entity"}, inplace=True)
+    elif "Site Id" in df.columns and "Entity" not in df.columns:
+      df.rename(columns={"Site Id": "Entity"}, inplace=True)
 
-    for idx, row in df.iterrows():
-      entity = str(row["Entity"]).strip()
-      if not self._is_valid_email(entity) and not self._is_valid_url(entity):
-        messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid UPN/Email ID or Site Collection URL.")
-        raise ValueError(f"Invalid Email ID / Site Collection Url at row {idx+2}")
-      
-      if self._is_valid_email(entity) and not include_personal:
-        messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is a UPN/Email ID. Please enable Include Personal Sites in the config.")
-        raise ValueError(f"Unexpected Email ID at row {idx+2}")
-      
-      if self._is_valid_url(entity) and not include_team:
-        messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is a Site Collection URL. Please enable Include Sharepoint Sites in the config.")
-        raise ValueError(f"Unexpected Site Collection URL at row {idx+2}")
+    expected_cols = {"Entity"}
+    report_cols = {
+        "Subsite Count",
+        "DL Count",
+        "List Count",
+        "Folder Count",
+        "File Count",
+        "Shortcut Count",
+        "Folder Count > Depth Limit 100",
+        "File Count > Depth Limit 100",
+        "Folder with > 500k item count",
+        "Corpus Size",
+    }
+    is_report_csv = "Entity" in df.columns and report_cols.issubset(df.columns)
+
+    if is_report_csv and include_team:
+      messagebox.showerror("Validation Error", "When calculating ETA from an uploaded site report CSV, SharePoint Sites must not be selected in Site Types to Scan.")
+      raise ValueError("SharePoint Sites selected for report CSV")
+
+    if set(df.columns) != expected_cols and not is_report_csv:
+      messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column or valid site report columns.")
+      raise ValueError("CSV must contain exactly the 'Entity' column or valid site report columns.")
+
+    if not is_report_csv:
+      for idx, row in df.iterrows():
+        entity = str(row["Entity"]).strip()
+        if not self._is_valid_email(entity) and not self._is_valid_url(entity):
+          messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is not a valid UPN/Email ID or Site Collection URL.")
+          raise ValueError(f"Invalid Email ID / Site Collection Url at row {idx+2}")
+        
+        if self._is_valid_email(entity) and not include_personal:
+          messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is a UPN/Email ID. Please enable Include Personal Sites in the config.")
+          raise ValueError(f"Unexpected Email ID at row {idx+2}")
+        
+        if self._is_valid_url(entity) and not include_team:
+          messagebox.showerror("Validation Error", f"Row {idx+2}: Entity '{entity}' is a Site Collection URL. Please enable Include Sharepoint Sites in the config.")
+          raise ValueError(f"Unexpected Site Collection URL at row {idx+2}")
 
   def export_current_report(self):
     if not hasattr(self, "last_scan_data"):
