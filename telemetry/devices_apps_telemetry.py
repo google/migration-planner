@@ -254,7 +254,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda: self._change_page(-1, data, is_partial)
@@ -269,7 +269,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda: self._change_page(1, data, is_partial)
@@ -545,7 +545,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             state=prev_state,
@@ -563,7 +563,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             state=next_state,

@@ -1194,7 +1194,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.dlp_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda d=data: self._change_dlp_page(-1, d)
@@ -1206,7 +1206,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.dlp_current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda d=data: self._change_dlp_page(1, d)
@@ -1405,7 +1405,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.auth_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda d=data: self._change_auth_page(-1, d)
@@ -1417,7 +1417,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.auth_current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda d=data: self._change_auth_page(1, d)
@@ -1558,7 +1558,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.labels_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda d=data: self._change_labels_page(-1, d)
@@ -1570,7 +1570,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.labels_current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda d=data: self._change_labels_page(1, d)
@@ -1741,7 +1741,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.retention_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda d=data: self._change_retention_page(-1, d)
@@ -1753,7 +1753,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.retention_current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda d=data: self._change_retention_page(1, d)
@@ -2041,7 +2041,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.sit_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda d=data: self._change_sit_page(-1, d)
@@ -2053,7 +2053,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.sit_current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda d=data: self._change_sit_page(1, d)
