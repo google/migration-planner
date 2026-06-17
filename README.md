@@ -37,6 +37,9 @@
 
 *   This tool only provides migration time estimates for the new Data Migration Service with specific enhancements for large scale migrations. It does not cover Google Workspace Migrate, or any other data migration tool.
 *   Microsoft Exchange Online, Microsoft OneDrive / SharePoint and Microsoft Teams / Private Chat scan and migration planning is supported. ETAs are based on Email and Chat/Channel corpus projections. ETA projections are not yet supported for Onedrive flow.
+*   **Shared & Private Channels Coverage**:
+    - **Private Channels**: Standard/private channels are fully scanned and included if their parent Team is resolved or specified.
+    - **Shared Channels**: Shared channels hosted within a user's member Team are included. Shared channels hosted in teams the user is *not* a member of are not discovered by the `/users/{id}/joinedTeams` API and thus are not scanned, unless their host Team is explicitly included in the scan scope.
 *   This tool only provides a guesstimate, and migration timelines should in no way be taken as guarantee or SLA.
 
 ---
@@ -299,6 +302,7 @@ Once started, you will see a real-time progress screen:
             user@xyz.com,User
             124-adc-445,Team
             ```
+        *   **User/Team Resolution**: If a CSV of users is supplied without teams, the tool automatically resolves all Teams these users are members of using the `/users/{id}/joinedTeams` MS Graph API endpoint in batch requests and performs the scan on these teams only. Note that this covers all private and shared channels hosted within those resolved Teams. Shared channels hosted in external teams the user does not belong to are not resolved, as MS Graph does not support querying external shared channel memberships directly.
 
 #### 2. Advanced Settings & Estimation Modes (Chat)
 Click **"Show Advanced Settings"** to tune the performance and select your estimation mode:

@@ -156,6 +156,30 @@ class TestMigrationScanner(unittest.TestCase):
 
     asyncio.run(_run())
 
+  def test_fetch_users_joined_teams_batch(self):
+    """Verify fetch_users_joined_teams_batch successfully resolves joined teams."""
+    users = [{"id": "user1"}, {"id": "user2"}]
+    
+    def mock_batch(*args, **kwargs):
+      requests = args[4]
+      self.assertEqual(len(requests), 2)
+      self.assertEqual(requests[0]["url"], "/users/user1/joinedTeams?$select=id,displayName")
+      self.assertEqual(requests[1]["url"], "/users/user2/joinedTeams?$select=id,displayName")
+      return {
+          "0": {"status": 200, "body": {"value": [{"id": "teamA", "displayName": "Team A"}]}},
+          "1": {"status": 200, "body": {"value": [{"id": "teamB", "displayName": "Team B"}]}}
+      }
+
+    self.client.execute_batch_request.side_effect = mock_batch
+    self.scanner.chat_batch_limiter = mock.Mock()
+    
+    unique_teams = self.scanner.fetch_users_joined_teams_batch(
+        self.token_manager, users
+    )
+    
+    self.assertEqual(unique_teams, {"teamA": "Team A", "teamB": "Team B"})
+
+
 
 from chat.chat_service import ChatScannerService
 import pandas as pd
@@ -299,6 +323,50 @@ class TestChatScannerService(unittest.TestCase):
             self.assertEqual(result["total_teams"], 2)
             self.assertEqual(result["channels"], 3)
             self.assertEqual(result["private_chats"], 0)
+
+  @mock.patch('pandas.read_csv')
+  @mock.patch('os.path.exists')
+  def test_execute_scan_sampling_with_only_users_csv(self, mock_exists, mock_read_csv):
+    """Verify sampling mode resolves teams from users if no teams in CSV."""
+    mock_exists.return_value = True
+    
+    real_df = pd.DataFrame({
+        "Email or Team ID": ["user1@test.com", "user2@test.com"],
+        "Type": ["User", "User"]
+    })
+    mock_read_csv.return_value = real_df
+
+    config = mock.Mock()
+    config.mode = "sampling"
+    config.user_source = "csv"
+    config.csv_path = "fake.csv"
+    config.tenant_id = "tenant_id"
+    config.percent = 100.0
+    config.sample_percentage = 100.0
+
+    scanner_mock = mock.Mock()
+    scanner_mock.fetch_user_chat_counts_batch.return_value = {"user1@test.com": ["chat1"], "user2@test.com": ["chat2"]}
+    scanner_mock.fetch_users_joined_teams_batch.return_value = {"team_resolved_1": "Team Resolved 1"}
+    scanner_mock.fetch_all_channels_for_teams_batch.return_value = {"team_resolved_1": {"channels": 2, "all_channel_ids": ["ch1", "ch2"]}}
+    scanner_mock.fetch_team_details_batch.return_value = {"team_resolved_1": {"members": 5}}
+
+    with mock.patch('chat.chat_service.MigrationScanner') as mock_scanner_class:
+        mock_scanner_class.return_value = scanner_mock
+        
+        self.service._scan_sampled_chats = mock.Mock(return_value=(10, 20, 2))
+        
+        async def mock_async_scan(*args, **kwargs):
+            return 100, 2
+            
+        self.service._scan_sampled_channels_async = mock_async_scan
+        
+        result = self.service.execute_scan(config, self.token_manager, 10)
+        
+        self.assertEqual(result["total_users"], 2)
+        self.assertEqual(result["total_teams"], 1)
+        self.assertEqual(result["channels"], 2)
+        scanner_mock.fetch_users_joined_teams_batch.assert_called_once()
+
 
 if __name__ == "__main__":
   unittest.main()

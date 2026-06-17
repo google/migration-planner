@@ -380,6 +380,15 @@ class ChatScannerService:
         all_teams = csv_teams
         team_ids = [t["id"] for t in all_teams if t.get("id")]
         teams = len(all_teams)
+      elif user_source == "csv" and csv_users:
+        self.log_func("CSV of users supplied without teams. Resolving teams from users...")
+        unique_teams = scanner.fetch_users_joined_teams_batch(auth, csv_users, self.ui_callback)
+        all_teams = [{"id": tid, "displayName": tname} for tid, tname in unique_teams.items()]
+        team_ids = [t["id"] for t in all_teams if t.get("id")]
+        teams = len(all_teams)
+        self.log_func(f"Resolved {teams} unique teams from users.")
+        if all_teams and self.stop_event and not self.stop_event.is_set():
+          scanner.db.save_roster_teams(all_teams)
       else:
         all_teams = scanner.fetch_all_teams_graph(auth)
         team_ids = [t["id"] for t in all_teams if t.get("id")]

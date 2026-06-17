@@ -550,6 +550,107 @@ class MigrationScanner:
           )
     return counts
 
+  def fetch_users_joined_teams_batch(
+      self,
+      token_manager: TokenManager,
+      users: list[dict[str, typing.Any]],
+      ui_callback: typing.Callable[..., None] | None = None,
+  ) -> dict[str, str]:
+    """Fetch unique teams that the given users are members of.
+
+    Returns:
+      A dictionary mapping team_id to team_displayName.
+    """
+    unique_teams: dict[str, str] = {}
+    to_do = []
+    for user in users:
+      user_id = user.get("id") or user.get("userPrincipalName")
+      if user_id:
+        to_do.append(user)
+
+    if not to_do:
+      return {}
+
+    chunks = [to_do[i : i + 20] for i in range(0, len(to_do), 20)]
+
+    def _worker(chunk: list[dict[str, typing.Any]]) -> dict[str, str]:
+      if self.stop_event.is_set():
+        return {}
+      token_data = token_manager.get_valid_token_slot()
+      batch_requests = []
+      request_map = {}
+      for index, user in enumerate(chunk):
+        user_id = user.get("id") or user.get("userPrincipalName")
+        request_map[str(index)] = user_id
+        batch_requests.append({
+            "id": str(index),
+            "method": "GET",
+            "url": f"/users/{user_id}/joinedTeams?$select=id,displayName",
+        })
+      try:
+        responses = self.client.execute_batch_request(
+            token_manager.get_session(),
+            f"{GRAPH_BASE_URL}/$batch",
+            token_manager,
+            token_data,
+            batch_requests,
+            self.metrics,
+            self.chat_batch_limiter,
+            self.stop_event,
+            "user_joined_teams",
+        )
+        local_teams = {}
+        for request_id, response in responses.items():
+          user_id = request_map.get(request_id)
+          if not user_id:
+            continue
+          if response.get("status") == 200:
+            body = response.get("body", {})
+            for team in body.get("value", []):
+              t_id = team.get("id")
+              t_name = team.get("displayName")
+              if t_id:
+                local_teams[t_id] = t_name or t_id
+          else:
+            status_val = response.get("status")
+            body = response.get("body", {})
+            error_msg = body.get("error", {}).get("message", "Unknown error")
+            if self.log_func:
+              self.log_func(
+                  f"WARNING: Batch request for user {user_id} joinedTeams returned status {status_val}: {error_msg}"
+              )
+        return local_teams
+      except Exception:
+        logger.exception("Async batch failure trapped inside joinedTeams worker.")
+        return {}
+      finally:
+        token_manager.return_token_slot(token_data)
+
+    processed_users = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+      futures = {executor.submit(_worker, chunk): chunk for chunk in chunks}
+      for future in concurrent.futures.as_completed(futures):
+        chunk = futures[future]
+        result = future.result()
+        unique_teams.update(result)
+        processed_users += len(chunk)
+        if ui_callback:
+          progress_val = 0.1 * (processed_users / max(1, len(to_do)))
+          ui_callback(
+              "scan_progress",
+              source="channels",
+              entity_type="Teams",
+              progress=progress_val,
+              extra_text=(
+                  f"Resolving user teams ({processed_users}/{len(to_do)} users)"
+              ),
+              processed=processed_users,
+              failed=0,
+              cumulative=len(unique_teams),
+          )
+    return unique_teams
+
+
   def fetch_all_channels_for_teams_batch(
       self,
       token_manager: TokenManager,
