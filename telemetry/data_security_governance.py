@@ -2194,3 +2194,82 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             messagebox.showinfo("Export Successful", f"SSO exported to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Error: {e}", parent=self)
+
+    def load_all_from_csv(self, filename) -> list:
+        import os, csv
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        tenant, clients, _ = self.get_credentials()
+        if not tenant or not clients:
+            return []
+        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", filename)
+        if not os.path.exists(csv_path):
+            return []
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+                
+                if filename == "sensitivity_labels.csv":
+                    labels = []
+                    current_parent = None
+                    for row in rows:
+                        is_sub = str(row.get("is_sublabel")) == "1"
+                        item = {
+                            "name": row.get("name", "N/A"),
+                            "description": row.get("description", "N/A"),
+                            "hasProtection": str(row.get("hasProtection")) == "1",
+                            "applicationMode": row.get("applicationMode", "N/A"),
+                            "priority": int(row.get("priority", 0)),
+                            "isEnabled": str(row.get("isEnabled")) == "1",
+                            "applicableTo": row.get("applicableTo", ""),
+                            "sublabels": []
+                        }
+                        if not is_sub:
+                            current_parent = item
+                            labels.append(item)
+                        else:
+                            if item["name"].startswith("    ↳  "):
+                                item["name"] = item["name"][7:]
+                            if current_parent is not None:
+                                current_parent["sublabels"].append(item)
+                    return labels
+                
+                elif filename == "auth_policies.csv":
+                    ca_policies = []
+                    for row in rows:
+                        ca_policies.append({
+                            "name": row.get("name", "N/A"),
+                            "state": row.get("state", "N/A"),
+                            "users": row.get("target_users", "N/A"),
+                            "apps": row.get("target_apps", "N/A"),
+                            "controls": row.get("controls", "N/A")
+                        })
+                    return ca_policies
+                    
+                elif filename == "dlp_policies.csv":
+                    dlp_policies = []
+                    for row in rows:
+                        enabled_str = str(row.get("Enabled", "")).strip().lower()
+                        dlp_policies.append({
+                            "Name": row.get("Name", "N/A"),
+                            "Mode": row.get("Mode", "N/A"),
+                            "Workload": row.get("Workload", "N/A"),
+                            "Enabled": enabled_str == "true",
+                            "Actions": row.get("Actions", "None"),
+                            "CreatedBy": row.get("CreatedBy", "N/A")
+                        })
+                    return dlp_policies
+                
+                elif filename == "service_principals_sso.csv":
+                    sso_list = []
+                    for row in rows:
+                        sso_list.append({
+                            "appDisplayName": row.get("appDisplayName", "N/A"),
+                            "preferredSingleSignOnMode": row.get("preferredSingleSignOnMode", "")
+                        })
+                    return sso_list
+
+                return rows
+        except Exception as e:
+            usage_logger.error(f"Error reading CSV {filename}: {e}")
+            return []

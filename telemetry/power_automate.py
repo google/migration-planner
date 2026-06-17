@@ -42,9 +42,11 @@ from telemetry.styles import *
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger")
 
 
-# =================================================================================
-# SCANNER LOGIC / PIPELINE
-# =================================================================================
+def run_power_automate_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
+    """Helper entrypoint matching pipeline naming patterns."""
+    scanner = PowerAutomateScanner(tenant_id, client_id, client_secret)
+    return scanner.scan_flows()
+
 
 class PowerAutomateScanner:
     def __init__(self, tenant_id, client_id, client_secret):

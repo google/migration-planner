@@ -131,6 +131,8 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         
         # We don't have a global status anymore, but we'll use it to notify parent
         self.status = None
+        self.last_client_data = {}
+        self.last_pst_data = {}
 
         self.build_ui()
 
@@ -175,6 +177,8 @@ class EmailClientSupportFrame(ctk.CTkFrame):
     def reset_view(self):
         self.pack_forget()
         self.status = None
+        self.last_client_data = {}
+        self.last_pst_data = {}
         for w in self.client_grid_frame.winfo_children(): w.destroy()
         for w in self.pst_grid_frame.winfo_children(): w.destroy()
         if hasattr(self, 'pst_disclaimer_lbl') and self.pst_disclaimer_lbl:
@@ -287,6 +291,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
 
     def _render_client_error(self, error_msg):
         self.client_status = "error"
+        self.last_client_data = {"client_error": error_msg}
         self.client_reload_btn.configure(state="normal")
         for w in self.client_grid_frame.winfo_children(): w.destroy()
         f = ctk.CTkFrame(self.client_grid_frame, fg_color="transparent")
@@ -301,6 +306,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
 
     def _render_pst_error(self, error_msg):
         self.pst_status = "error"
+        self.last_pst_data = {"pst_error": error_msg}
         self.pst_reload_btn.configure(state="normal")
         for w in self.pst_grid_frame.winfo_children(): w.destroy()
         f = ctk.CTkFrame(self.pst_grid_frame, fg_color="transparent")
@@ -314,6 +320,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def _render_client_success(self, data: dict):
+        self.last_client_data = data
         self.client_reload_btn.configure(state="normal")
         for w in self.client_grid_frame.winfo_children(): w.destroy()
         
@@ -380,6 +387,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def _render_pst_success(self, data: dict):
+        self.last_pst_data = data
         self.pst_reload_btn.configure(state="normal")
         for w in self.pst_grid_frame.winfo_children(): w.destroy()
         

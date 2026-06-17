@@ -31,7 +31,7 @@ try {
     $outbound = @()
 
     try {
-        $inboundRaw = Get-InboundConnector -ErrorAction Stop
+        $inboundRaw = Get-InboundConnector -ResultSize Unlimited -ErrorAction Stop
         if ($inboundRaw) {
             foreach ($conn in @($inboundRaw)) {
                 $inbound += @{
@@ -48,7 +48,7 @@ try {
     }
 
     try {
-        $outboundRaw = Get-OutboundConnector -ErrorAction Stop
+        $outboundRaw = Get-OutboundConnector -ResultSize Unlimited -ErrorAction Stop
         if ($outboundRaw) {
             foreach ($conn in @($outboundRaw)) {
                 $outbound += @{

@@ -7,6 +7,78 @@ from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.MailSecurityUI")
 
+def run_mail_security_pipeline(client_id, client_secret, tenant_id) -> dict:
+    """Standalone pipeline to query Graph API for mail security SKUs and user counts."""
+    if not tenant_id or not client_id or not client_secret:
+        raise ValueError("Missing credentials.")
+
+    from util.auth_manager import TokenManager
+    import requests
+    tm = TokenManager(tenant_id=tenant_id, client_ids=[client_id], client_secrets=[client_secret], concurrency=1, retries=1, backoff=0)
+    tm.authenticate_all()
+    
+    slot = tm.get_valid_token_slot()
+    if not slot:
+        raise ConnectionError("Authentication failed: No valid token.")
+
+    token = slot["token"]
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    
+    url = "https://graph.microsoft.com/v1.0/subscribedSkus"
+    data = []
+    
+    while url:
+        res = requests.get(url, headers=headers, timeout=15)
+        if res.status_code != 200:
+            tm.return_token_slot(slot)
+            raise ConnectionError(f"Graph API Error {res.status_code}: {res.text}")
+            
+        json_data = res.json()
+        data.extend(json_data.get("value", []))
+        url = json_data.get("@odata.nextLink")
+        
+    tm.return_token_slot(slot)
+    
+    defender_skus_set = set()
+    eop_skus_set = set()
+    
+    defender_users = 0
+    eop_users = 0
+    
+    for sku in data:
+        raw_part_num = sku.get("skuPartNumber", "Unknown")
+        if isinstance(raw_part_num, list):
+            part_num = ", ".join([str(x) for x in raw_part_num])
+        else:
+            part_num = str(raw_part_num)
+            
+        consumed = int(sku.get("consumedUnits", 0))
+        plans = sku.get("servicePlans", [])
+        
+        has_defender = False
+        has_eop = False
+        
+        for p in plans:
+            if p.get("provisioningStatus") == "Success":
+                name = p.get("servicePlanName", "").upper()
+                if "DEFENDER_PLATFORM_FOR_OFFICE" in name or "ATP_ENTERPRISE" in name:
+                    has_defender = True
+                elif "EXCHANGE_S_ENTERPRISE" in name or "EXCHANGE_S_STANDARD" in name or "EXCHANGE_S_FOUNDATION" in name:
+                    has_eop = True
+                    
+        if has_defender:
+            defender_skus_set.add(part_num)
+            defender_users += consumed
+        elif has_eop:
+            eop_skus_set.add(part_num)
+            eop_users += consumed
+            
+    return {
+        "defender": {"skus": list(defender_skus_set), "users": defender_users},
+        "eop": {"skus": list(eop_skus_set), "users": eop_users}
+    }
+
+
 class MailSecurityFrame(ctk.CTkFrame):
     def update_loading_text(self, text_msg):
         if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
@@ -56,14 +128,14 @@ class MailSecurityFrame(ctk.CTkFrame):
         self.loading_label = None
         self.progress = None
         self.render_ui_state()
-
+ 
     def trigger_fetch(self, tenant, client_id, client_secret):
         self.pack(fill="x", expand=True, pady=(0, 5))
         self.status = "loading"
         self.loading = True
         self.render_ui_state()
         threading.Thread(target=self._fetch_data, args=(tenant, client_id, client_secret), daemon=True).start()
-
+ 
     def _fetch_data(self, tenant, c_id, c_secret):
         if self.semaphore:
             self.semaphore.acquire()
@@ -83,14 +155,19 @@ class MailSecurityFrame(ctk.CTkFrame):
             headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
             
             url = "https://graph.microsoft.com/v1.0/subscribedSkus"
-            res = requests.get(url, headers=headers, timeout=15)
+            data = []
             
-            tm.return_token_slot(slot)
-            
-            if res.status_code != 200:
-                raise ConnectionError(f"Graph API Error {res.status_code}: {res.text}")
+            while url:
+                res = requests.get(url, headers=headers, timeout=15)
+                if res.status_code != 200:
+                    tm.return_token_slot(slot)
+                    raise ConnectionError(f"Graph API Error {res.status_code}: {res.text}")
+                    
+                json_data = res.json()
+                data.extend(json_data.get("value", []))
+                url = json_data.get("@odata.nextLink")
                 
-            data = res.json().get("value", [])
+            tm.return_token_slot(slot)
             
             defender_skus_set = set()
             eop_skus_set = set()
@@ -150,9 +227,7 @@ class MailSecurityFrame(ctk.CTkFrame):
                 writer.writerow(["Exchange Online Protection (EOP)", " | ".join(self.eop_skus) if self.eop_skus else "None", self.total_eop_users])
             
             usage_logger.info(f"Successfully streamed Mail Security data to {csv_path}")
-
             self.after(0, self._render_success, result_data)
-            
         except Exception as e:
             usage_logger.error(f"Error fetching mail security SKUs: {e}", exc_info=True)
             self.after(0, self._render_error, str(e))
