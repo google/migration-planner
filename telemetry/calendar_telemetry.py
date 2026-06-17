@@ -218,6 +218,22 @@ class CalendarTelemetryFrame(ctk.CTkFrame):
             self.semaphore.acquire()
         try:
             data = run_calendar_telemetry_pipeline(client_id, client_secret, tenant)
+            
+            # Stream to CSV in reports_dir
+            if not data.get("powershell_error"):
+                import csv, os
+                script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+                reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+                os.makedirs(reports_dir, exist_ok=True)
+                csv_path = os.path.join(reports_dir, "calendar_configurations.csv")
+                
+                with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Configuration", "Value"])
+                    for k, v in data.items():
+                        writer.writerow([k, v])
+                calendar_logger.info(f"Successfully streamed Calendar data to {csv_path}")
+
             calendar_logger.info("Successfully completed Calendar telemetry data fetch.")
             self.after(0, self._render_success, data)
         except Exception as e:

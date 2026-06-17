@@ -175,6 +175,24 @@ class ExchangeAppsFrame(ctk.CTkFrame):
         apps_list = data.get("OrganizationApps", [])
         apps_err = data.get("AppsError")
         self.last_apps = apps_list
+        
+        if apps_list and not apps_err:
+            import csv, os
+            script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+            tenant, clients, _ = self.get_credentials()
+            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, "exchange_organization_apps.csv")
+            
+            try:
+                with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["DisplayName", "Enabled"])
+                    for app in apps_list:
+                        writer.writerow([app.get("DisplayName", "-"), app.get("Enabled")])
+                usage_logger.info(f"Successfully streamed Exchange Apps to {csv_path}")
+            except Exception as e:
+                usage_logger.error(f"Failed to stream Exchange Apps to CSV: {e}")
 
         if apps_err:
             usage_logger.error(f"Exchange PowerShell query failed for organization apps: {apps_err}")

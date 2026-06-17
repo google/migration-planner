@@ -136,6 +136,21 @@ class MailSecurityFrame(ctk.CTkFrame):
                 "defender": {"skus": self.defender_skus, "users": self.total_defender_users},
                 "eop": {"skus": self.eop_skus, "users": self.total_eop_users}
             }
+            
+            import csv, os
+            script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{c_id}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, "mail_security_licensing.csv")
+            
+            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Protection Type", "Associated SKUs", "Covered User Count"])
+                writer.writerow(["Defender for Office 365", " | ".join(self.defender_skus) if self.defender_skus else "None", self.total_defender_users])
+                writer.writerow(["Exchange Online Protection (EOP)", " | ".join(self.eop_skus) if self.eop_skus else "None", self.total_eop_users])
+            
+            usage_logger.info(f"Successfully streamed Mail Security data to {csv_path}")
+
             self.after(0, self._render_success, result_data)
             
         except Exception as e:

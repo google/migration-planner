@@ -99,7 +99,11 @@ class PowerAutomateScanner:
                 continue
                 
             if res.status_code == 200:
-                data = res.json()
+                try:
+                    data = res.json()
+                except Exception as e:
+                    self.logger.error(f"[X] JSON Decode Error on {context_name} | HTTP {res.status_code}: {res.text[:100]}")
+                    break
                 results.extend(data.get("value", []))
                 url = data.get("nextLink") or data.get("@odata.nextLink")
             else:
@@ -118,7 +122,11 @@ class PowerAutomateScanner:
                 time.sleep(retry_after)
                 continue
             if res.status_code == 200:
-                return res.json()
+                try:
+                    return res.json()
+                except Exception as e:
+                    self.logger.error(f"[X] JSON Decode Error on {context_name} | HTTP {res.status_code}: {res.text[:100]}")
+                    return None
             self.logger.error(f"[X] {context_name} Request Failed | HTTP {res.status_code}: {res.text}")
             return None
 
@@ -156,10 +164,20 @@ class PowerAutomateScanner:
         active_tier_counts = {"Personal Productivity": 0, "Enterprise/Departmental": 0}
         premium_connectors_found = set()
         custom_connectors_found = set()
-        import tempfile
+        import csv
         import threading
-        cf_fd, complex_logic_flows_path = tempfile.mkstemp(suffix=".jsonl")
-        os.close(cf_fd)
+        import os
+        
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        reports_dir = os.path.join(script_dir, "reports", f"{self.tenant_id}_{self.client_id}")
+        os.makedirs(reports_dir, exist_ok=True)
+        complex_logic_flows_path = os.path.join(reports_dir, "power_automate_complex_flows.csv")
+        
+        # Initialize CSV and header
+        with open(complex_logic_flows_path, 'w', encoding='utf-8', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["Environment", "Name", "Type", "Tier", "Active", "Reason"])
+            
         complex_flows_lock = threading.Lock()
         PREMIUM_KEYWORDS = ['shared_sql', 'shared_httpaction', 'shared_salesforce', 'shared_oracle', 'shared_sap']
 
@@ -250,8 +268,16 @@ class PowerAutomateScanner:
                             "Reason": ", ".join(reasons)
                         }
                         with complex_flows_lock:
-                            with open(complex_logic_flows_path, 'a', encoding='utf-8') as cf_f:
-                                cf_f.write(json.dumps(flow_dict) + '\n')
+                            with open(complex_logic_flows_path, 'a', encoding='utf-8', newline='') as cf_f:
+                                import csv
+                                csv.writer(cf_f).writerow([
+                                    flow_dict.get("Environment", ""),
+                                    flow_dict.get("Name", ""),
+                                    flow_dict.get("Type", ""),
+                                    flow_dict.get("Tier", ""),
+                                    flow_dict.get("Active", ""),
+                                    flow_dict.get("Reason", "")
+                                ])
                     
                     del flow_detail
                     del res
@@ -322,8 +348,16 @@ class PowerAutomateScanner:
                                         "Reason": ", ".join(reasons)
                                     }
                                     with complex_flows_lock:
-                                        with open(complex_logic_flows_path, 'a', encoding='utf-8') as cf_f:
-                                            cf_f.write(json.dumps(flow_dict) + '\n')
+                                        with open(complex_logic_flows_path, 'a', encoding='utf-8', newline='') as cf_f:
+                                            import csv
+                                            csv.writer(cf_f).writerow([
+                                                flow_dict.get("Environment", ""),
+                                                flow_dict.get("Name", ""),
+                                                flow_dict.get("Type", ""),
+                                                flow_dict.get("Tier", ""),
+                                                flow_dict.get("Active", ""),
+                                                flow_dict.get("Reason", "")
+                                            ])
                             except Exception:
                                 pass
                 except Exception as e:
@@ -331,9 +365,11 @@ class PowerAutomateScanner:
 
         complex_active_count = 0
         complex_inactive_count = 0
+        import csv
         with open(complex_logic_flows_path, 'r', encoding='utf-8') as f_cf:
-            for line in f_cf:
-                if json.loads(line).get("Active") == "Yes":
+            reader = csv.DictReader(f_cf)
+            for row in reader:
+                if row.get("Active") == "Yes":
                     complex_active_count += 1
                 else:
                     complex_inactive_count += 1
@@ -352,6 +388,7 @@ class PowerAutomateScanner:
         }
 
         self.logger.info("Step End: Analysis complete.")
+        
         self.logger.info("Main Process End: Power Automate Telemetry scan finished.")
         return results
 
@@ -694,11 +731,8 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         headers = ["Environment", "Name", "Type", "Tier", "Active", "Reason"]
 
         try:
-            import pandas as pd
-            df_iter = pd.read_json(self.last_complex_flows_path, lines=True, chunksize=1000)
-            for i, chunk in enumerate(df_iter):
-                chunk = chunk[headers]
-                chunk.to_csv(f, mode='a' if i > 0 else 'w', header=(i == 0), index=False, encoding='utf-8')
+            import shutil
+            shutil.copyfile(self.last_complex_flows_path, f)
             usage_logger.info("Complex flows exported successfully.")
             messagebox.showinfo("Export Successful", f"Complex flows successfully saved to:\n{f}", parent=self)
         except Exception as e:

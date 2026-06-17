@@ -178,6 +178,34 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
             self.semaphore.acquire()
         try:
             res = fetch_exchange_connectors_data(client_id, client_secret, tenant)
+            
+            connectors_data = res.get("connectors")
+            if connectors_data and not connectors_data.get("Errors"):
+                import csv, os
+                script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+                reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+                os.makedirs(reports_dir, exist_ok=True)
+                
+                inbound_path = os.path.join(reports_dir, "exchange_inbound_connectors.csv")
+                outbound_path = os.path.join(reports_dir, "exchange_outbound_connectors.csv")
+                
+                inbound = connectors_data.get("InboundConnectors", [])
+                outbound = connectors_data.get("OutboundConnectors", [])
+                
+                with open(inbound_path, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Name", "Enabled", "SenderDomains", "ConnectorType", "RequireTls"])
+                    for c in inbound:
+                        writer.writerow([c.get("Name"), c.get("Enabled"), c.get("SenderDomains"), c.get("ConnectorType"), c.get("RequireTls")])
+                
+                with open(outbound_path, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Name", "Enabled", "RecipientDomains", "SmartHosts", "UseMxRecord"])
+                    for c in outbound:
+                        writer.writerow([c.get("Name"), c.get("Enabled"), c.get("RecipientDomains"), c.get("SmartHosts"), c.get("UseMxRecord")])
+                        
+                usage_logger.info("Successfully streamed inbound and outbound connectors to CSV.")
+                
             self.after(0, self._handle_result, res)
         finally:
             if self.semaphore:

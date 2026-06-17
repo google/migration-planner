@@ -96,8 +96,8 @@ def run_security_governance_pipeline(client_id, client_secret, tenant_id) -> dic
         "policies_error": policies_error
     }
 
-def fetch_sensitivity_labels_data(client_id, client_secret, tenant_id) -> dict:
-    """Fetch sensitivity labels and sort them."""
+def fetch_sensitivity_labels_data(client_id, client_secret, tenant_id, csv_path=None, on_page_callback=None, is_cancelled_callback=None) -> dict:
+    """Fetch sensitivity labels and stream them."""
     usage_logger.info("Starting Sensitivity Labels fetch...")
     client = GraphClient(
         tenant_id=tenant_id,
@@ -110,10 +110,8 @@ def fetch_sensitivity_labels_data(client_id, client_secret, tenant_id) -> dict:
     try:
         client.authenticate()
         service = SecurityService(client)
-        labels = service.fetch_sensitivity_labels()
-        # Sort labels by priority descending
-        labels.sort(key=lambda x: x.get("priority", 0), reverse=True)
-        return {"labels": labels, "error": None}
+        service.fetch_sensitivity_labels(csv_path=csv_path, on_page_callback=on_page_callback, is_cancelled_callback=is_cancelled_callback)
+        return {"labels": [], "error": None}
     except Exception as e:
         usage_logger.error("Failed to fetch sensitivity labels", exc_info=True)
         return {"labels": None, "error": str(e)}
@@ -123,7 +121,7 @@ def fetch_sensitivity_labels_data(client_id, client_secret, tenant_id) -> dict:
         except Exception:
             pass
 
-def fetch_service_principals_sso_data(client_id, client_secret, tenant_id) -> dict:
+def fetch_service_principals_sso_data(client_id, client_secret, tenant_id, csv_path=None, on_page_callback=None, is_cancelled_callback=None) -> dict:
     """Fetch Service Principals SSO modes via Graph API."""
     usage_logger.info("Starting Service Principals SSO fetch...")
     client = GraphClient(
@@ -138,8 +136,8 @@ def fetch_service_principals_sso_data(client_id, client_secret, tenant_id) -> di
         client.authenticate()
         from core.graph.directory import DirectoryService
         dir_svc = DirectoryService(client)
-        sso_data = dir_svc.fetch_service_principals_sso()
-        return {"sso": sso_data, "error": None}
+        dir_svc.fetch_service_principals_sso(csv_path=csv_path, on_page_callback=on_page_callback, is_cancelled_callback=is_cancelled_callback)
+        return {"sso": [], "error": None}
     except Exception as e:
         usage_logger.error("Failed to fetch Service Principals SSO", exc_info=True)
         return {"sso": None, "error": str(e)}
@@ -261,7 +259,7 @@ def fetch_sensitive_info_types_data(client_id, client_secret, tenant_id) -> dict
         usage_logger.error("Failed to fetch Sensitive Info Types via PowerShell", exc_info=True)
         return {"sit_data": None, "error": str(e)}
 
-def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
+def fetch_authentication_data(client_id, client_secret, tenant_id, csv_path=None, on_page_callback=None, is_cancelled_callback=None) -> dict:
     """Fetch Entra ID Conditional Access authentication mechanics and Enterprise SSO modes."""
     usage_logger.info("Starting Authentication & Conditional Access fetch...")
     client = GraphClient(
@@ -275,50 +273,12 @@ def fetch_authentication_data(client_id, client_secret, tenant_id) -> dict:
     try:
         client.authenticate()
         service = SecurityService(client)
-        policies = service.fetch_conditional_access_policies()
-        ca_policies = []
+        service.fetch_conditional_access_policies(csv_path=csv_path, on_page_callback=on_page_callback, is_cancelled_callback=is_cancelled_callback)
         
-        for p in policies:
-            name = p.get("displayName", "N/A")
-            state = p.get("state", "N/A")
-            
-            cond = p.get("conditions") or {}
-            grants = p.get("grantControls") or {}
-            sessions = p.get("sessionControls") or {}
-
-            users_obj = cond.get("users") or {}
-            users_arr = users_obj.get("includeUsers") or ["N/A"]
-            
-            apps_arr = cond.get("clientAppTypes") or ["N/A"]
-
-            controls_arr = grants.get("builtInControls") or ["N/A"]
-            
-            session_keys = list(sessions.keys()) if sessions else ["N/A"]
-            
-            ca_policies.append({
-                "name": name,
-                "state": state,
-                "users": ", ".join(users_arr),
-                "apps": ", ".join(apps_arr),
-                "controls": ", ".join(controls_arr)
-            })
-            
-        return {
-            "auth_data": {
-                "ca_policies": ca_policies
-            },
-            "error": None
-        }
-    except PermissionError as pe:
-        msg = str(pe)
-        if not msg or msg == "Policy.Read.All or Policy.Read permission required.":
-            msg = "Conditional Access telemetry permission required.\nPlease grant the 'Policy.Read.All' (or 'Policy.Read') application permission to your App Registration in Microsoft Entra ID."
-        return {"auth_data": None, "error": msg}
+        return {"auth_data": {"ca_policies": []}, "error": None}
     except Exception as e:
-        err_str = str(e)
-        if "401" in err_str or "403" in err_str or "permission" in err_str.lower() or "unauthorized" in err_str.lower():
-            err_str = "Conditional Access / Application telemetry permission required.\nPlease grant the 'Policy.Read.All' and 'Application.Read.All' application permissions to your App Registration in Microsoft Entra ID."
-        return {"auth_data": None, "error": err_str}
+        usage_logger.error("Failed to fetch Conditional Access policies", exc_info=True)
+        return {"auth_data": None, "error": str(e)}
     finally:
         try:
             client.close()
@@ -350,6 +310,31 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.last_dlp_data = None
         
         self.build_ui()
+
+    def _stream_to_csv(self, filename, data):
+        if not data: return
+        try:
+            import os, csv
+            script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+            tenant, clients, _ = self.get_credentials()
+            if not tenant or not clients: return
+            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, filename)
+            
+            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                    writer = csv.DictWriter(f, fieldnames=data[0].keys())
+                    writer.writeheader()
+                    writer.writerows(data)
+                elif isinstance(data, dict):
+                    writer = csv.DictWriter(f, fieldnames=data.keys())
+                    writer.writeheader()
+                    writer.writerow(data)
+            
+            usage_logger.info(f"Successfully streamed {filename} to {csv_path}")
+        except Exception as e:
+            usage_logger.error(f"Failed to stream {filename}: {e}", exc_info=True)
 
     def build_ui(self):
         """Creates card container for the tab."""
@@ -982,7 +967,17 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if self.semaphore:
             self.semaphore.acquire()
         try:
-            res = fetch_sensitivity_labels_data(client_id, client_secret, tenant)
+            import os
+            script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, "sensitivity_labels.csv")
+            
+            res = fetch_sensitivity_labels_data(
+                client_id, client_secret, tenant,
+                csv_path=csv_path,
+                is_cancelled_callback=lambda: hasattr(self, 'is_cancelled') and self.is_cancelled
+            )
             self.after(0, self._handle_labels_result, res)
         finally:
             if self.semaphore:
@@ -1017,7 +1012,17 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if self.semaphore:
             self.semaphore.acquire()
         try:
-            res = fetch_authentication_data(client_id, client_secret, tenant)
+            import os
+            script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, "auth_policies.csv")
+            
+            res = fetch_authentication_data(
+                client_id, client_secret, tenant,
+                csv_path=csv_path,
+                is_cancelled_callback=lambda: hasattr(self, 'is_cancelled') and self.is_cancelled
+            )
             self.after(0, self._handle_auth_result, res)
         finally:
             if self.semaphore:
@@ -1066,7 +1071,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def export_dlp_csv(self):
         """Prompts the user to save DLP policies as a detailed CSV file."""
-        if not hasattr(self, "last_dlp_data") or not self.last_dlp_data:
+        import shutil, os
+        tenant, clients, _ = self.get_credentials()
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "dlp_policies.csv")
+
+        if not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0:
             messagebox.showinfo("No Data", "There is no DLP policy data to export.", parent=self)
             return
             
@@ -1079,7 +1089,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         if not f: return
         try:
-            pd.DataFrame(self.last_dlp_data).to_csv(f, index=False)
+            shutil.copyfile(csv_path, f)
             messagebox.showinfo("Export Successful", f"DLP policies exported to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Error: {e}", parent=self)
@@ -1118,14 +1128,14 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if isinstance(policies, dict) and "value" in policies:
             policies = policies["value"]
             
-        self.last_dlp_data = policies
-        
         if err:
             self.dlp_status = "error"
             self._set_dlp_error(err)
             self.btn_export_dlp.configure(state="disabled")
         else:
             self.dlp_status = "success"
+            self._stream_to_csv("dlp_policies.csv", policies)
+            
             if not policies:
                 ctk.CTkLabel(self.dlp_grid, text="No Data Loss Prevention (DLP) Policies configured in this tenant.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(padx=20, pady=20)
                 self.btn_export_dlp.configure(state="disabled")
@@ -1145,23 +1155,26 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                     ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
                 
                 self.dlp_current_page = 0
-                self._update_dlp_ui_paginated(policies)
+                self._update_dlp_ui_paginated(None)
                 
         self._check_overall_status()
 
-    def _update_dlp_ui_paginated(self, data):
+    def _update_dlp_ui_paginated(self, data=None):
         for w in self.dlp_grid.winfo_children():
             info = w.grid_info()
             if "row" in info and int(info["row"]) > 0:
                 w.destroy()
 
-        if not data:
-            return
+        if data is not None:
+            total_count = len(data)
+            start_idx = self.dlp_current_page * self.ITEMS_PER_PAGE
+            end_idx = start_idx + self.ITEMS_PER_PAGE
+            page_data = data[start_idx:end_idx]
+        else:
+            page_data, total_count = self._load_page_from_csv("dlp_policies.csv", self.dlp_current_page)
 
-        total_count = len(data)
-        start_idx = self.dlp_current_page * self.ITEMS_PER_PAGE
-        end_idx = start_idx + self.ITEMS_PER_PAGE
-        page_data = data[start_idx:end_idx]
+        if not page_data:
+            return
 
         for offset, row_item in enumerate(page_data, start=1):
             r_idx = offset
@@ -1170,7 +1183,10 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             name = row_item.get("Name", "N/A")
             mode = row_item.get("Mode", "N/A")
             workloads = row_item.get("Workload", "N/A")
-            enabled = "🟢 Enabled" if row_item.get("Enabled") else "🔴 Disabled"
+            
+            en_val = str(row_item.get("Enabled", "")).lower()
+            enabled = "🟢 Enabled" if en_val in ("true", "1", "yes") else "🔴 Disabled"
+            
             actions = row_item.get("Actions", "None")
             created_by = row_item.get("CreatedBy", "N/A")
 
@@ -1238,9 +1254,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         for w in self.labels_grid.winfo_children():
             w.destroy()
             
-        labels = result.get("labels")
         err = result.get("error")
-        self.last_labels_data = labels
         
         if err:
             self.labels_status = "error"
@@ -1248,8 +1262,9 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self.btn_export_labels.configure(state="disabled")
         else:
             self.labels_status = "success"
+            page_data, total_count = self._load_page_from_csv("sensitivity_labels.csv", 0)
             
-            if not labels:
+            if total_count == 0:
                 ctk.CTkLabel(self.labels_grid, text="No Sensitivity Labels configured in this tenant.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(padx=20, pady=20)
                 if hasattr(self, 'labels_pagination_frame'): self.labels_pagination_frame.pack_forget()
                 self.btn_export_labels.configure(state="disabled")
@@ -1270,35 +1285,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                     cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
                     
-                flattened = []
-                for parent in labels:
-                    flattened.append({
-                        "name": parent.get("name", "N/A"),
-                        "description": parent.get("description", "") or parent.get("toolTip", "") or "N/A",
-                        "hasProtection": 1 if parent.get("hasProtection", False) else 0,
-                        "applicationMode": parent.get("applicationMode", "N/A") or "N/A",
-                        "priority": parent.get("priority", 0),
-                        "applicableTo": parent.get("applicableTo", ""),
-                        "isEnabled": 1 if parent.get("isEnabled", True) else 0,
-                        "is_sublabel": 0
-                    })
-                    sublabels = parent.get("sublabels", [])
-                    if sublabels:
-                        sublabels_sorted = sorted(sublabels, key=lambda x: x.get("priority", 0), reverse=True)
-                        for sub in sublabels_sorted:
-                            flattened.append({
-                                "name": f"    ↳  {sub.get('name', 'N/A')}",
-                                "description": sub.get("description", "") or sub.get("toolTip", "") or "N/A",
-                                "hasProtection": 1 if sub.get("hasProtection", False) else 0,
-                                "applicationMode": sub.get("applicationMode", "N/A") or "N/A",
-                                "priority": sub.get("priority", 0),
-                                "applicableTo": sub.get("applicableTo", ""),
-                                "isEnabled": 1 if sub.get("isEnabled", True) else 0,
-                                "is_sublabel": 1
-                            })
-                self.last_labels_data = flattened
                 self.labels_current_page = 0
-                self._update_labels_ui_paginated(self.last_labels_data)
+                self._update_labels_ui_paginated(None)
                     
         self._check_overall_status()
 
@@ -1342,36 +1330,34 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def _render_authentication_card(self, auth_data: dict):
         self.auth_grid.configure(fg_color=COLOR_SURFACE, border_width=1, border_color=COLOR_OUTLINE_LIGHT, corner_radius=8)
-        self.last_auth_data = auth_data.get("ca_policies", [])
         self.auth_current_page = 0
-        self._update_auth_ui_paginated()
+        self._update_auth_ui_paginated(None)
 
     def _update_auth_ui_paginated(self, data=None):
-        if data is None:
-            data = self.last_auth_data
-            
         for w in self.auth_grid.winfo_children():
             info = w.grid_info()
             if "row" in info and int(info["row"]) > 0:
                 w.destroy()
 
+        if data is not None:
+            total_count = len(data)
+            start_idx = self.auth_current_page * self.ITEMS_PER_PAGE
+            end_idx = start_idx + self.ITEMS_PER_PAGE
+            page_data = data[start_idx:end_idx]
+        else:
+            page_data, total_count = self._load_page_from_csv("auth_policies.csv", self.auth_current_page)
+
         headers = ["Policy Name", "State", "Target Users", "Target Apps", "Enforced Controls"]
         for i in range(5):
             self.auth_grid.grid_columnconfigure(i, weight=1)
             
-        # Draw headers only if not present
         if not self.auth_grid.winfo_children():
             for col_idx, head_text in enumerate(headers):
                 cell = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
                 cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
                 ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
-        total_count = len(data) if data else 0
-        start_idx = self.auth_current_page * self.ITEMS_PER_PAGE
-        end_idx = start_idx + self.ITEMS_PER_PAGE
-        page_data = data[start_idx:end_idx] if data else []
-
-        if not data:
+        if not page_data:
             c0 = ctk.CTkFrame(self.auth_grid, fg_color=COLOR_SURFACE, corner_radius=0)
             c0.grid(row=1, column=0, columnspan=5, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(c0, text="N/A (No Conditional Access Policies configured)", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=12, anchor="w")
@@ -1382,8 +1368,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 vals = [
                     policy.get("name", "N/A"),
                     policy.get("state", "N/A"),
-                    policy.get("users", "N/A"),
-                    policy.get("apps", "N/A"),
+                    policy.get("target_users", "N/A"),
+                    policy.get("target_apps", "N/A"),
                     policy.get("controls", "N/A")
                 ]
                 
@@ -1408,7 +1394,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
-            command=lambda d=data: self._change_auth_page(-1, d)
+            command=lambda: self._change_auth_page(-1, data)
         )
         btn_prev.pack(side="left", padx=5)
 
@@ -1420,7 +1406,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             center_container, text="Next ▶", width=70, height=26, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
-            command=lambda d=data: self._change_auth_page(1, d)
+            command=lambda: self._change_auth_page(1, data)
         )
         btn_next.pack(side="left", padx=5)
 
@@ -1479,21 +1465,44 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             if hasattr(self, 'sso_reload_btn') and self.sso_reload_btn.winfo_exists():
                 self.sso_reload_btn.configure(state="normal")
 
-    def _update_labels_ui_paginated(self, data):
+    def _load_page_from_csv(self, filename, page):
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        tenant, clients, _ = self.get_credentials()
+        if not tenant or not clients: return [], 0
+        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", filename)
+        if not os.path.exists(csv_path): return [], 0
+
+        items = []
+        total_count = 0
+        import csv
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                all_rows = list(reader)
+                total_count = len(all_rows)
+                start_idx = page * self.ITEMS_PER_PAGE
+                end_idx = start_idx + self.ITEMS_PER_PAGE
+                items = all_rows[start_idx:end_idx]
+        except Exception as e:
+            usage_logger.error(f"Error reading CSV for pagination: {e}")
+        return items, total_count
+
+    def _update_labels_ui_paginated(self, data=None):
         for w in self.labels_grid.winfo_children():
             info = w.grid_info()
             if "row" in info and int(info["row"]) > 0:
                 w.destroy()
-        
 
+        if data is not None:
+            total_count = len(data)
+            start_idx = self.labels_current_page * self.ITEMS_PER_PAGE
+            end_idx = start_idx + self.ITEMS_PER_PAGE
+            page_data = data[start_idx:end_idx]
+        else:
+            page_data, total_count = self._load_page_from_csv("sensitivity_labels.csv", self.labels_current_page)
 
-        if not data:
+        if not page_data:
             return
-
-        total_count = len(data)
-        start_idx = self.labels_current_page * self.ITEMS_PER_PAGE
-        end_idx = start_idx + self.ITEMS_PER_PAGE
-        page_data = data[start_idx:end_idx]
 
         for offset, row_item in enumerate(page_data, start=1):
             r_idx = offset
@@ -1501,12 +1510,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             
             name = row_item["name"]
             desc = row_item["description"]
-            protection = "🛡️ Yes" if row_item["hasProtection"] else "🔓 No"
+            protection = "🛡️ Yes" if str(row_item["hasProtection"]) == "1" else "🔓 No"
             mode = str(row_item["applicationMode"]).capitalize()
             priority = str(row_item["priority"])
-            applicable = ", ".join([x.capitalize() for x in row_item["applicableTo"].split(",") if x.strip()]) or "N/A"
-            status = "🟢 Enabled" if row_item["isEnabled"] else "🔴 Disabled"
-            is_sublabel = bool(row_item["is_sublabel"])
+            applicable = ", ".join([x.capitalize() for x in str(row_item["applicableTo"]).split(",") if x.strip()]) or "N/A"
+            status = "🟢 Enabled" if str(row_item["isEnabled"]) == "1" else "🔴 Disabled"
+            is_sublabel = str(row_item["is_sublabel"]) == "1"
 
             name_color = COLOR_TEXT_MAIN if not is_sublabel else COLOR_TEXT_SUB
             name_font = FONT_BODY_BOLD if not is_sublabel else FONT_BODY_MEDIUM
@@ -1622,11 +1631,10 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                 policies_list = policies["value"]
             else:
                 policies_list = policies if isinstance(policies, list) else [policies]
-            self.last_policies_data = policies_list
+            self._stream_to_csv("retention_policies.csv", policies_list)
             self.retention_current_page = 0
-            self._update_retention_ui_paginated(self.last_policies_data)
-            
-    def _update_retention_ui_paginated(self, data):
+            self._update_retention_ui_paginated(None)
+    def _update_retention_ui_paginated(self, data=None):
         for w in self.retention_grid.winfo_children():
             w.destroy()
 
@@ -1643,10 +1651,16 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
-        total_count = len(data)
-        start_idx = self.retention_current_page * self.ITEMS_PER_PAGE
-        end_idx = start_idx + self.ITEMS_PER_PAGE
-        page_data = data[start_idx:end_idx]
+        if data is not None:
+            total_count = len(data)
+            start_idx = self.retention_current_page * self.ITEMS_PER_PAGE
+            end_idx = start_idx + self.ITEMS_PER_PAGE
+            page_data = data[start_idx:end_idx]
+        else:
+            page_data, total_count = self._load_page_from_csv("retention_policies.csv", self.retention_current_page)
+
+        if not page_data:
+            return
 
         for offset, policy in enumerate(page_data, start=1):
             r_idx = offset
@@ -1688,7 +1702,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             # Enabled can be boolean or string
             enabled_val = policy.get("Enabled", True)
             if isinstance(enabled_val, str):
-                is_enabled = enabled_val.lower() == "true"
+                is_enabled = enabled_val.lower() in ("true", "1", "yes")
             else:
                 is_enabled = bool(enabled_val)
                     
@@ -1767,7 +1781,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def export_labels_csv(self):
         """Prompts the user to save sensitivity labels as a detailed CSV file."""
-        if not hasattr(self, "last_labels_data") or not self.last_labels_data:
+        import shutil, os
+        tenant, clients, _ = self.get_credentials()
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "sensitivity_labels.csv")
+
+        if not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0:
             messagebox.showinfo("No Data", "There is no sensitivity labels data to export. Please run a scan first.", parent=self)
             return
             
@@ -1781,52 +1800,20 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if not f:
             return
             
-        # Flatten the labels (including sublabels) to export detailed records
-        rows = []
-        for parent in self.last_labels_data:
-            parent_id = parent.get("id", "N/A")
-            parent_name = parent.get("name", "N/A")
-            
-            rows.append({
-                "Label ID": parent_id,
-                "Label Name": parent_name,
-                "Display Name": parent.get("displayName", "N/A"),
-                "Description": parent.get("description", "") or parent.get("toolTip", "") or "N/A",
-                "Priority": parent.get("priority", 0),
-                "Applicable Targets": parent.get("applicableTo", "N/A"),
-                "Is Enabled": parent.get("isEnabled", True),
-                "Is Sublabel": False,
-                "Parent Label ID": "",
-                "Parent Label Name": ""
-            })
-            
-            for sub in parent.get("sublabels", []):
-                rows.append({
-                    "Label ID": sub.get("id", "N/A"),
-                    "Label Name": sub.get("name", "N/A"),
-                    "Display Name": sub.get("displayName", "N/A"),
-                    "Description": sub.get("description", "") or sub.get("toolTip", "") or "N/A",
-                    "Priority": sub.get("priority", 0),
-                    "Applicable Targets": sub.get("applicableTo", "N/A"),
-                    "Is Enabled": sub.get("isEnabled", True),
-                    "Is Sublabel": True,
-                    "Parent Label ID": parent_id,
-                    "Parent Label Name": parent_name
-                })
-                
         try:
-            chunk_size = 1000
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i:i + chunk_size]
-                df = pd.DataFrame(chunk)
-                df.to_csv(f, mode='a' if i > 0 else 'w', header=(i == 0), index=False)
+            shutil.copyfile(csv_path, f)
             messagebox.showinfo("Export Successful", f"Sensitivity labels exported successfully to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
 
     def export_retention_csv(self):
         """Prompts the user to save retention policies as a detailed CSV file."""
-        if not hasattr(self, "last_policies_data") or not self.last_policies_data:
+        import shutil, os
+        tenant, clients, _ = self.get_credentials()
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "retention_policies.csv")
+
+        if not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0:
             messagebox.showinfo("No Data", "There is no retention policies data to export. Please run a scan first.", parent=self)
             return
             
@@ -1840,46 +1827,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if not f:
             return
             
-        policies_list = self.last_policies_data if isinstance(self.last_policies_data, list) else [self.last_policies_data]
-        
-        rows = []
-        for policy in policies_list:
-            duration_val = str(policy.get("Duration", "N/A"))
-            duration_str = duration_val
-            if duration_val.lower() == "unlimited":
-                duration_str = "Keep Forever"
-            elif duration_val.isdigit():
-                days = int(duration_val)
-                if days >= 365:
-                    years = days / 365.0
-                    duration_str = f"{int(years)} Years ({days} days)" if years.is_integer() else f"{years:.1f} Years ({days} days)"
-                else:
-                    duration_str = f"{days} days"
-                    
-            rows.append({
-                "Policy Name": policy.get("Name", "N/A"),
-                "Identity": policy.get("Identity", "N/A"),
-                "Description / Comment": policy.get("Comment", "N/A"),
-                "Workloads": policy.get("Workload", "N/A"),
-                "Mode": policy.get("Mode", "N/A"),
-                "Distribution Status": policy.get("DistributionStatus", "N/A"),
-                "Is Enabled": policy.get("Enabled", True),
-                "Duration Days": duration_val,
-                "Duration Description": duration_str,
-                "Retention Action": policy.get("RetentionAction", "N/A"),
-                "Retention Trigger Basis": policy.get("RetentionTrigger", "N/A"),
-                "When Created": policy.get("WhenCreated", "N/A"),
-                "When Changed": policy.get("WhenChanged", "N/A"),
-                "Created By": policy.get("CreatedBy", "N/A"),
-                "Last Modified By": policy.get("LastModifiedBy", "N/A")
-            })
-            
         try:
-            chunk_size = 1000
-            for i in range(0, len(rows), chunk_size):
-                chunk = rows[i:i + chunk_size]
-                df = pd.DataFrame(chunk)
-                df.to_csv(f, mode='a' if i > 0 else 'w', header=(i == 0), index=False)
+            shutil.copyfile(csv_path, f)
             messagebox.showinfo("Export Successful", f"Retention policies exported successfully to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Failed to export CSV: {e}", parent=self)
@@ -1948,6 +1897,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             sit_data = sit_data["value"]
             
         self.last_sit_data = sit_data
+        self._stream_to_csv("sensitive_info_types.csv", self.last_sit_data)
         
         if err:
             self.sit_status = "error"
@@ -2066,7 +2016,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def export_sit_csv(self):
         """Prompts the user to save Sensitive Information Types as a detailed CSV file."""
-        if not hasattr(self, "last_sit_data") or not self.last_sit_data:
+        import shutil, os
+        tenant, clients, _ = self.get_credentials()
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "sensitive_info_types.csv")
+
+        if not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0:
             messagebox.showinfo("No Data", "There is no SIT data to export.", parent=self)
             return
             
@@ -2079,7 +2034,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         if not f: return
         try:
-            pd.DataFrame(self.last_sit_data).to_csv(f, index=False)
+            shutil.copyfile(csv_path, f)
             messagebox.showinfo("Export Successful", f"SIT exported to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Error: {e}", parent=self)
@@ -2089,7 +2044,17 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if self.semaphore:
             self.semaphore.acquire()
         try:
-            res = fetch_service_principals_sso_data(client_id, client_secret, tenant)
+            import os
+            script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, "service_principals_sso.csv")
+            
+            res = fetch_service_principals_sso_data(
+                client_id, client_secret, tenant,
+                csv_path=csv_path,
+                is_cancelled_callback=lambda: hasattr(self, 'is_cancelled') and self.is_cancelled
+            )
             self.after(0, self._handle_sso_result, res)
         finally:
             if self.semaphore:
@@ -2101,10 +2066,8 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self._set_sso_error(res["error"])
         else:
             self.sso_status = "success"
-            data = res.get("sso", [])
-            self.last_sso_data = data
             self.btn_export_sso.configure(state="normal")
-            self._render_sso_counts(data)
+            self._render_sso_counts(None)
         
         self.sso_reload_btn.configure(state="normal")
         self._check_overall_status()
@@ -2152,28 +2115,31 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         for w in self.sso_grid.winfo_children():
             w.destroy()
 
-        # Configure columns so the table spans the full width equally
         self.sso_grid.grid_columnconfigure(0, weight=1)
         self.sso_grid.grid_columnconfigure(1, weight=1)
-
-        # Instructional Text (Row 0)
-        # sso_info_frame = ctk.CTkFrame(self.sso_grid, fg_color="transparent")
-        # sso_info_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 10))
-        # sso_info_text = "Specifies the single sign-on mode configured for this application. Microsoft Entra ID uses the preferred single sign-on mode to launch the application from Microsoft 365 or the My Apps portal. The supported values are password, saml, notSupported, and oidc. Note: This field might be null for older SAML apps and for OIDC applications where it isn't set automatically."
-        # ctk.CTkLabel(sso_info_frame, text=sso_info_text, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, wraplength=800, justify="left").pack(anchor="w")
         
-        # Aggregate counts
         saml_count = 0
         oidc_count = 0
         pwd_count = 0
         null_count = 0
 
-        for app in data:
-            mode = app.get("preferredSingleSignOnMode")
-            if mode == "saml": saml_count += 1
-            elif mode == "oidc": oidc_count += 1
-            elif mode == "password": pwd_count += 1
-            else: null_count += 1
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        tenant, clients, _ = self.get_credentials()
+        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "service_principals_sso.csv") if tenant and clients else None
+        
+        if csv_path and os.path.exists(csv_path):
+            import csv
+            try:
+                with open(csv_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        mode = row.get("preferredSingleSignOnMode", "")
+                        if mode == "saml": saml_count += 1
+                        elif mode == "oidc": oidc_count += 1
+                        elif mode == "password": pwd_count += 1
+                        else: null_count += 1
+            except Exception as e:
+                usage_logger.error(f"Error reading SSO CSV: {e}")
 
         headers = ["SSO Mode", "Application Count"]
         
@@ -2206,7 +2172,12 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def export_sso_csv(self):
         """Prompts the user to save Service Principals SSO as a detailed CSV file."""
-        if not hasattr(self, "last_sso_data") or not self.last_sso_data:
+        import shutil, os
+        tenant, clients, _ = self.get_credentials()
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "service_principals_sso.csv")
+
+        if not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0:
             messagebox.showinfo("No Data", "There is no SSO data to export.", parent=self)
             return
             
@@ -2219,7 +2190,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         if not f: return
         try:
-            pd.DataFrame(self.last_sso_data).to_csv(f, index=False)
+            shutil.copyfile(csv_path, f)
             messagebox.showinfo("Export Successful", f"SSO exported to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Error: {e}", parent=self)
