@@ -245,16 +245,6 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         )
 
 
-
-        # 5b. Email Client & PST Support Section
-        self.email_client_view = EmailClientSupportFrame(
-            master=self,
-            log_callback=self.log_msg,
-            credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done,
-            concurrency_semaphore=self.telemetry_semaphore
-        )
-
         # 5c. Files (SharePoint & OneDrive) Section
         self.files_view = FilesTelemetryFrame(
             master=self,
@@ -305,7 +295,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             [self.devices_apps_view],
             [self.directory_view],
             [self.m365_apps_view],
-            [self.exchange_online_view, self.email_client_view],
+            [self.exchange_online_view],
             [self.files_view],
             [self.intune_policies_view],
             [self.security_gov_view],
@@ -330,7 +320,6 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.directory_view,
             self.m365_apps_view,
             self.exchange_online_view,
-            self.email_client_view,
             self.files_view,
             self.devices_apps_view,
             self.security_gov_view,
@@ -464,7 +453,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         """Returns a list of all active leaf/base telemetry views across all cards."""
         return [
             self.subscribed_skus_view,
-            self.devices_apps_view,
+            self.devices_apps_view.auth_methods_subframe,
+            self.devices_apps_view.app_signins_subframe,
             self.directory_view,
             self.m365_apps_view.active_users_view,
             self.m365_apps_view.active_users_trend_view,
@@ -474,7 +464,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.exchange_online_view.apps_view,
             self.exchange_online_view.mail_security_view,
             self.exchange_online_view.connectors_view,
-            self.email_client_view,
+            self.exchange_online_view.email_clients_view,
             self.files_view.sharepoint_view,
             self.files_view.onedrive_view,
             self.security_gov_view,
@@ -555,9 +545,15 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             class WrappedSemaphore:
                 def __init__(self, sem):
                     self._sem = sem
+                    self._acquired_threads = set()
                 def acquire(self, *args, **kwargs):
                     res = self._sem.acquire(*args, **kwargs)
                     cur_thread = threading.current_thread()
+                    thread_req_id = getattr(cur_thread, "request_id", None)
+                    if thread_req_id is not None and thread_req_id < view.current_request_id:
+                        self._sem.release()
+                        raise InterruptedError("Thread execution cancelled (stale request).")
+                    self._acquired_threads.add(cur_thread.ident)
                     sub_sec = getattr(cur_thread, "sub_section", None)
                     if sub_sec:
                         view.sub_section_start_times[sub_sec] = time.time()
@@ -565,7 +561,11 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                         view.fetch_start_time = time.time()
                     return res
                 def release(self, *args, **kwargs):
-                    return self._sem.release(*args, **kwargs)
+                    cur_thread = threading.current_thread()
+                    if cur_thread.ident in self._acquired_threads:
+                        self._acquired_threads.remove(cur_thread.ident)
+                        return self._sem.release(*args, **kwargs)
+                    return None
                 def __getattr__(self, name):
                     return getattr(self._sem, name)
                     
@@ -850,8 +850,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "m365_apps": getattr(self.m365_apps_view.m365_apps_view, "m365_data", []),
             "mailbox": getattr(self.exchange_online_view.mailbox_view, "last_data", {}),
             "calendar": getattr(self.exchange_online_view.calendar_view, "last_data", {}),
-            "email_clients": getattr(self.email_client_view, "last_client_data", {}),
-            "pst_files": getattr(self.email_client_view, "last_pst_data", {}),
+            "email_clients": getattr(self.exchange_online_view.email_clients_view, "last_client_data", {}),
+            "pst_files": getattr(self.exchange_online_view.email_clients_view, "last_pst_data", {}),
             "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
             "onedrive": getattr(self.files_view.onedrive_view, "last_data", {}),
             "devices_apps": getattr(self.devices_apps_view, "last_data", {}),

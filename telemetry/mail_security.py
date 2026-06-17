@@ -1,7 +1,11 @@
 import customtkinter as ctk
 import time
 import requests
+import threading
+import logging
 from telemetry.styles import *
+
+usage_logger = logging.getLogger("M365TelemetryAsyncLogger.MailSecurityUI")
 
 class MailSecurityFrame(ctk.CTkFrame):
     def update_loading_text(self, text_msg):
@@ -58,16 +62,14 @@ class MailSecurityFrame(ctk.CTkFrame):
         self.status = "loading"
         self.loading = True
         self.render_ui_state()
-        import threading
         threading.Thread(target=self._fetch_data, args=(tenant, client_id, client_secret), daemon=True).start()
 
     def _fetch_data(self, tenant, c_id, c_secret):
+        if self.semaphore:
+            self.semaphore.acquire()
         try:
             if not tenant or not c_id or not c_secret:
-                self.error_msg = "Missing credentials."
-                self.loading = False
-                self.on_status_change()
-                return
+                raise ValueError("Missing credentials.")
 
             from util.auth_manager import TokenManager
             tm = TokenManager(tenant_id=tenant, client_ids=[c_id], client_secrets=[c_secret], concurrency=1, retries=1, backoff=0)
@@ -75,10 +77,7 @@ class MailSecurityFrame(ctk.CTkFrame):
             
             slot = tm.get_valid_token_slot()
             if not slot:
-                self.error_msg = "Authentication failed: No valid token."
-                self.loading = False
-                self.on_status_change()
-                return
+                raise ConnectionError("Authentication failed: No valid token.")
 
             token = slot["token"]
             headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -89,10 +88,7 @@ class MailSecurityFrame(ctk.CTkFrame):
             tm.return_token_slot(slot)
             
             if res.status_code != 200:
-                self.error_msg = f"Graph API Error {res.status_code}: {res.text}"
-                self.loading = False
-                self.on_status_change()
-                return
+                raise ConnectionError(f"Graph API Error {res.status_code}: {res.text}")
                 
             data = res.json().get("value", [])
             
@@ -136,20 +132,30 @@ class MailSecurityFrame(ctk.CTkFrame):
             self.eop_skus = list(eop_skus_set)
             self.total_eop_users = eop_users
             
-            self.last_data = {
+            result_data = {
                 "defender": {"skus": self.defender_skus, "users": self.total_defender_users},
                 "eop": {"skus": self.eop_skus, "users": self.total_eop_users}
             }
-            
-            self.status = "success"
-            self.loading = False
-            self.after(0, self.on_status_change)
+            self.after(0, self._render_success, result_data)
             
         except Exception as e:
-            self.error_msg = f"Exception: {str(e)}"
-            self.status = "error"
-            self.loading = False
-            self.after(0, self.on_status_change)
+            usage_logger.error(f"Error fetching mail security SKUs: {e}", exc_info=True)
+            self.after(0, self._render_error, str(e))
+        finally:
+            if self.semaphore:
+                self.semaphore.release()
+
+    def _render_success(self, data):
+        self.last_data = data
+        self.status = "success"
+        self.loading = False
+        self.on_status_change()
+
+    def _render_error(self, err_msg):
+        self.error_msg = err_msg
+        self.status = "error"
+        self.loading = False
+        self.on_status_change()
 
     def reset_view(self):
         self.pack_forget()
