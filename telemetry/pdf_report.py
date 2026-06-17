@@ -803,6 +803,105 @@ def generate_pdf_report(data: dict, filepath: str):
         story.append(apps_table)
         
     story.append(Spacer(1, 15))
+
+    # 3.1c Exchange Connectors
+    story.append(Paragraph("Exchange Connectors", h2_style))
+    story.append(Paragraph("This section displays mail routing connectors configured in Exchange Online.", body_style))
+    story.append(Spacer(1, 8))
+    
+    connectors = data.get("exchange_connectors", [])
+    if not connectors:
+        story.append(Paragraph("No Exchange connectors configured.", body_style))
+    else:
+        conn_table_data = [[
+            Paragraph("Name", table_cell_header),
+            Paragraph("Status", table_cell_header),
+            Paragraph("Type", table_cell_header),
+            Paragraph("Comment", table_cell_header)
+        ]]
+        for conn in connectors[:50]: # Limit to 50
+            conn_table_data.append([
+                Paragraph(conn.get("Name", "-"), table_cell_bold),
+                Paragraph("Enabled" if conn.get("Enabled") else "Disabled", table_cell_style),
+                Paragraph(conn.get("ConnectorType", "-"), table_cell_style),
+                Paragraph(conn.get("Comment", "-"), table_cell_style)
+            ])
+        conn_table = Table(conn_table_data, colWidths=[150, 70, 100, 180])
+        conn_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(conn_table)
+        if len(connectors) > 50:
+             story.append(Paragraph(f"...and {len(connectors) - 50} more. See CSV export for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
+    story.append(Spacer(1, 15))
+
+    # 3.1d Email Clients & PST Files
+    story.append(Paragraph("Email Clients & PST Environment", h2_style))
+    story.append(Paragraph("Overview of email client adoption and PST configuration.", body_style))
+    story.append(Spacer(1, 8))
+    
+    email_clients = data.get("email_clients", {})
+    if not email_clients:
+        story.append(Paragraph("No email client telemetry data available.", body_style))
+    else:
+        c_adop = email_clients.get("client_adoption", {})
+        ec_table_data = [[
+            Paragraph("Client Type", table_cell_header),
+            Paragraph("Active Users", table_cell_header)
+        ]]
+        rows = [
+            ("Outlook on the Web (OWA)", c_adop.get("browser_users", 0)),
+            ("Outlook for Windows", c_adop.get("desktop_win", 0)),
+            ("Outlook for Mac", c_adop.get("desktop_mac", 0)),
+            ("Apple Mail (macOS)", c_adop.get("desktop_mail_mac", 0)),
+            ("Outlook Mobile (iOS/Android)", c_adop.get("mobile_outlook", 0)),
+            ("IMAP4 Apps", c_adop.get("protocol_imap4", 0)),
+            ("POP3 Apps", c_adop.get("protocol_pop3", 0))
+        ]
+        for label, val in rows:
+            ec_table_data.append([
+                Paragraph(label, table_cell_bold),
+                Paragraph(f"{val:,} Users", table_cell_style)
+            ])
+        ec_table = Table(ec_table_data, colWidths=[250, 150])
+        ec_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(ec_table)
+    story.append(Spacer(1, 10))
+    
+    pst_files = data.get("pst_files", {})
+    if pst_files:
+        pst_table_data = [[Paragraph("PST Metric", table_cell_header), Paragraph("Value", table_cell_header)]]
+        for k, v in pst_files.items():
+            if k not in ["client_error", "pst_error"]:
+                pst_table_data.append([Paragraph(str(k), table_cell_bold), Paragraph(str(v), table_cell_style)])
+        
+        pst_table = Table(pst_table_data, colWidths=[250, 150])
+        pst_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(pst_table)
+    
+    story.append(Spacer(1, 15))
     story.append(PageBreak())
 
     # 3.2 SharePoint & OneDrive Storage
@@ -1103,6 +1202,107 @@ def generate_pdf_report(data: dict, filepath: str):
     story.append(Spacer(1, 15))
 
     # =========================================================================
+
+    # 4.5 Mail Security
+    story.append(Paragraph("4.5 Mail Security (Exchange)", h2_style))
+    story.append(Paragraph("This section displays configured email filtering and threat protection policies.", body_style))
+    story.append(Spacer(1, 8))
+    
+    mail_sec = data.get("mail_security", [])
+    if not mail_sec:
+        story.append(Paragraph("No mail security policies found.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        ms_table_data = [[
+            Paragraph("Policy Name", table_cell_header),
+            Paragraph("State", table_cell_header),
+            Paragraph("Priority", table_cell_header),
+            Paragraph("Rule Type", table_cell_header)
+        ]]
+        for ms in mail_sec[:50]:
+            ms_table_data.append([
+                Paragraph(ms.get("Name", "-"), table_cell_bold),
+                Paragraph(ms.get("State", "-"), table_cell_style),
+                Paragraph(ms.get("Priority", "-"), table_cell_style),
+                Paragraph(ms.get("RuleType", "-"), table_cell_style)
+            ])
+        ms_table = Table(ms_table_data, colWidths=[200, 80, 70, 150])
+        ms_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(ms_table)
+    story.append(Spacer(1, 15))
+
+    # 4.6 SSO Service Principals
+    story.append(Paragraph("4.6 Enterprise SAML SSO Apps", h2_style))
+    story.append(Paragraph("This section displays Enterprise Applications configured for SAML Single Sign-On.", body_style))
+    story.append(Spacer(1, 8))
+    
+    sso_apps = data.get("service_principals_sso", [])
+    if not sso_apps:
+        story.append(Paragraph("No SAML SSO applications discovered.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        sso_table_data = [[
+            Paragraph("Application Name", table_cell_header),
+            Paragraph("SSO Mode", table_cell_header)
+        ]]
+        for app in sso_apps[:50]:
+            sso_table_data.append([
+                Paragraph(app.get("displayName", "-"), table_cell_bold),
+                Paragraph(app.get("preferredSingleSignOnMode", "-"), table_cell_style)
+            ])
+        sso_table = Table(sso_table_data, colWidths=[300, 200])
+        sso_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(sso_table)
+    story.append(Spacer(1, 15))
+
+    # 4.7 Conditional Access Policies
+    story.append(Paragraph("4.7 Conditional Access Policies", h2_style))
+    story.append(Paragraph("This section displays Azure AD Auth Policies governing conditional access.", body_style))
+    story.append(Spacer(1, 8))
+    
+    ca_policies = data.get("conditional_access", [])
+    if not ca_policies:
+        story.append(Paragraph("No conditional access policies discovered.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        ca_table_data = [[
+            Paragraph("Policy Name", table_cell_header),
+            Paragraph("State", table_cell_header),
+            Paragraph("Created Date", table_cell_header)
+        ]]
+        for cap in ca_policies[:50]:
+            ca_table_data.append([
+                Paragraph(cap.get("displayName", "-"), table_cell_bold),
+                Paragraph(cap.get("state", "-"), table_cell_style),
+                Paragraph(cap.get("createdDateTime", "-").split("T")[0], table_cell_style)
+            ])
+        ca_table = Table(ca_table_data, colWidths=[250, 100, 150])
+        ca_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(ca_table)
+    story.append(Spacer(1, 15))
+    story.append(PageBreak())
+
     # SECTION 5: POWER AUTOMATE
     # =========================================================================
     story.append(Paragraph("5. Power Platform & Automate Flows Analytics", h1_style))
