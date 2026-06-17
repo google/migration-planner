@@ -19,6 +19,8 @@ import sys
 import time
 import queue
 import logging
+import csv
+import psutil
 import threading
 from typing import Any, Dict, List, Optional
 import customtkinter as ctk
@@ -846,8 +848,26 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
     def get_all_telemetry_data(self) -> dict:
         """Retrieves cached telemetry data and charts from all sub-views."""
+        
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        tenant = self.lic_tenant_id.get().strip()
+        client_str = self.lic_client_ids.get().strip()
+        client_ids = [x.strip() for x in client_str.split(",") if x.strip()]
+        client_id = client_ids[0] if client_ids else ""
+        reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+
+        def load_csv(filename):
+            path = os.path.join(reports_dir, filename)
+            if not os.path.exists(path):
+                return []
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return list(csv.DictReader(f))
+            except Exception:
+                return []
+
         return {
-            "tenant_id": self.lic_tenant_id.get().strip(),
+            "tenant_id": tenant,
             "skus": getattr(self.subscribed_skus_view, "last_licenses_items", []),
             "directory": {
                 "organization": getattr(self.directory_view, "last_organization", []),
@@ -864,14 +884,16 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "connectors": getattr(self.exchange_online_view.connectors_view, "last_data", []),
             "email_clients": getattr(self.exchange_online_view.email_clients_view, "last_client_data", {}),
             "pst_files": getattr(self.exchange_online_view.email_clients_view, "last_pst_data", {}),
+            "exchange_connectors": getattr(self.exchange_online_view.connectors_view, "last_connectors_data", []),
+            "mail_security": getattr(self.exchange_online_view.mail_security_view, "last_data", {}),
             "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
             "onedrive": getattr(self.files_view.onedrive_view, "last_data", {}),
             "devices_apps": getattr(self.devices_apps_view, "last_data", {}),
             "intune": getattr(self.intune_policies_view, "last_data", {}),
             "security_labels": self.security_gov_view.load_all_from_csv("sensitivity_labels.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
-            "retention_policies": getattr(self.security_gov_view, "last_policies_data", []) or [],
+            "retention_policies": self.security_gov_view.load_all_from_csv("retention_policies.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "dlp_policies": self.security_gov_view.load_all_from_csv("dlp_policies.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
-            "sensitive_info_types": getattr(self.security_gov_view, "last_sit_data", []) or [],
+            "sensitive_info_types": self.security_gov_view.load_all_from_csv("sensitive_info_types.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "service_principals_sso": self.security_gov_view.load_all_from_csv("service_principals_sso.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "conditional_access": self.security_gov_view.load_all_from_csv("auth_policies.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "power_automate": getattr(self.power_automate_view, "last_results", {})
@@ -914,9 +936,6 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
     def _monitor_memory_loop(self):
         """Periodically measures current resident set size (RSS) RAM usage of the python process and logs it."""
-        import time
-        import os
-        import psutil
         
         try:
             process = psutil.Process(os.getpid())

@@ -1,16 +1,18 @@
 import os
+import csv
 import logging
 import threading
 import customtkinter as ctk
+from core.graph.client import GraphClient
+from core.graph.directory import DirectoryService
 from core.powershell.client import PowerShellClient
+from core.powershell.calendar import CalendarStatsService
 from telemetry.styles import *
 
 calendar_logger = logging.getLogger("M365TelemetryAsyncLogger.CalendarTelemetry")
 
 def run_calendar_telemetry_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
     """Consolidated orchestration pipeline to download and audit Exchange Calendar telemetry config via PowerShell client."""
-    from core.graph.client import GraphClient
-    from core.graph.directory import DirectoryService
     
     calendar_logger.info("Starting PowerShell Calendar Telemetry Pipeline...")
     
@@ -56,7 +58,6 @@ def run_calendar_telemetry_pipeline(client_id: str, client_secret: str, tenant_i
             client_secret=client_secret,
             cert_tenant_id=tenant_id
         )
-        from core.powershell.calendar import CalendarStatsService
         cal_service = CalendarStatsService(ps_client)
         metadata = cal_service.fetch_calendar_attachments_policy()
         
@@ -221,7 +222,6 @@ class CalendarTelemetryFrame(ctk.CTkFrame):
             
             # Stream to CSV in reports_dir
             if not data.get("powershell_error"):
-                import csv, os
                 script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
                 reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
                 os.makedirs(reports_dir, exist_ok=True)

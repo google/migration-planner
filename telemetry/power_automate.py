@@ -15,6 +15,8 @@
 """Modular Power Automate telemetry scanner, analysis pipelines, and visual interfaces."""
 
 import os
+import csv
+import shutil
 import time
 import json
 import logging
@@ -166,9 +168,6 @@ class PowerAutomateScanner:
         active_tier_counts = {"Personal Productivity": 0, "Enterprise/Departmental": 0}
         premium_connectors_found = set()
         custom_connectors_found = set()
-        import csv
-        import threading
-        import os
         
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         reports_dir = os.path.join(script_dir, "reports", f"{self.tenant_id}_{self.client_id}")
@@ -271,7 +270,6 @@ class PowerAutomateScanner:
                         }
                         with complex_flows_lock:
                             with open(complex_logic_flows_path, 'a', encoding='utf-8', newline='') as cf_f:
-                                import csv
                                 csv.writer(cf_f).writerow([
                                     flow_dict.get("Environment", ""),
                                     flow_dict.get("Name", ""),
@@ -351,7 +349,6 @@ class PowerAutomateScanner:
                                     }
                                     with complex_flows_lock:
                                         with open(complex_logic_flows_path, 'a', encoding='utf-8', newline='') as cf_f:
-                                            import csv
                                             csv.writer(cf_f).writerow([
                                                 flow_dict.get("Environment", ""),
                                                 flow_dict.get("Name", ""),
@@ -367,7 +364,6 @@ class PowerAutomateScanner:
 
         complex_active_count = 0
         complex_inactive_count = 0
-        import csv
         with open(complex_logic_flows_path, 'r', encoding='utf-8') as f_cf:
             reader = csv.DictReader(f_cf)
             for row in reader:
@@ -733,7 +729,6 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         headers = ["Environment", "Name", "Type", "Tier", "Active", "Reason"]
 
         try:
-            import shutil
             shutil.copyfile(self.last_complex_flows_path, f)
             usage_logger.info("Complex flows exported successfully.")
             messagebox.showinfo("Export Successful", f"Complex flows successfully saved to:\n{f}", parent=self)

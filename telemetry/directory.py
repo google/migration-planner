@@ -15,6 +15,7 @@
 """Modular Directory Domains, Users & Groups summary telemetry scanners and visual interfaces."""
 
 import os
+import csv
 import logging
 import threading
 import webbrowser
@@ -325,7 +326,6 @@ class DirectoryFrame(ctk.CTkFrame):
                 services_str = ", ".join(services) if services else "-"
                 rows.append([domain.get("id", "-"), auth_type, admin_managed, is_default, is_verified, services_str])
 
-            import csv
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(headers)
@@ -472,7 +472,6 @@ class DirectoryFrame(ctk.CTkFrame):
 
         domains = []
         try:
-            import csv
             with open(self.csv_path, 'r', encoding='utf-8') as f:
                 reader = csv.reader(f)
                 next(reader, None)  # skip header
@@ -569,7 +568,7 @@ class DirectoryFrame(ctk.CTkFrame):
             self.pagination_frame.destroy()
 
         self.pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
-        self.pagination_frame.pack(fill="x", pady=(10, 0), after=self.domains_grid)
+        self.pagination_frame.pack(fill="x", pady=(2, 0), after=self.domains_grid)
 
         left_spacer = ctk.CTkFrame(self.pagination_frame, fg_color="transparent")
         left_spacer.pack(side="left", fill="x", expand=True)
@@ -579,7 +578,7 @@ class DirectoryFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             state=prev_state,
@@ -597,7 +596,7 @@ class DirectoryFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             state=next_state,

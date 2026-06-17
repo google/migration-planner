@@ -18,6 +18,7 @@ import logging
 import threading
 import webbrowser
 import customtkinter as ctk
+from collections import defaultdict
 from telemetry.styles import *
 from core.graph.client import GraphClient
 from core.graph.intune import IntuneService
@@ -98,8 +99,6 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
         
         if len(errors) == 3:
             raise errors[0]
-            
-        from collections import defaultdict
         counts = defaultdict(int)
         total_dc = 0
         total_cp = 0
@@ -268,8 +267,6 @@ class IntunePoliciesFrame(ctk.CTkFrame):
     def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
         if self.semaphore:
             self.semaphore.acquire()
-            
-        from collections import defaultdict
         platform_policy_counts = defaultdict(int)
         tot_dc = [0]
         tot_cp = [0]
@@ -470,7 +467,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda: self._change_page(-1, data)
@@ -485,7 +482,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda: self._change_page(1, data)

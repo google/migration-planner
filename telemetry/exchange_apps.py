@@ -14,6 +14,8 @@
 
 """Modular Exchange Online Organization-wide Apps telemetry scanners and visual interfaces."""
 
+import os
+import csv
 import logging
 import threading
 from typing import Any, Dict, List, Optional
@@ -177,7 +179,6 @@ class ExchangeAppsFrame(ctk.CTkFrame):
         self.last_apps = apps_list
         
         if apps_list and not apps_err:
-            import csv, os
             script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
             tenant, clients, _ = self.get_credentials()
             reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}")

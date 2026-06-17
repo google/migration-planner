@@ -23,11 +23,15 @@ from tkinter import messagebox, filedialog
 from datetime import datetime
 import pandas as pd
 
+import csv
+import shutil
+import time
 from core.graph.client import GraphClient
 from core.graph.security import SecurityService
 from core.graph.directory import DirectoryService
 from core.powershell.client import PowerShellClient
 from core.powershell.retention import RetentionService
+from core.powershell.dlp import DLPService
 
 # Bind to the async logger initialized in m365_telemetry.py
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger")
@@ -134,7 +138,6 @@ def fetch_service_principals_sso_data(client_id, client_secret, tenant_id, csv_p
     )
     try:
         client.authenticate()
-        from core.graph.directory import DirectoryService
         dir_svc = DirectoryService(client)
         dir_svc.fetch_service_principals_sso(csv_path=csv_path, on_page_callback=on_page_callback, is_cancelled_callback=is_cancelled_callback)
         return {"sso": [], "error": None}
@@ -161,7 +164,6 @@ def fetch_retention_policies_data(client_id, client_secret, tenant_id) -> dict:
     tenant_domain = tenant_id
     try:
         client.authenticate()
-        from core.graph.directory import DirectoryService
         dir_svc = DirectoryService(client)
         tenant_domain = dir_svc.get_tenant_primary_domain()
         usage_logger.info(f"Retrieved primary tenant domain: {tenant_domain}")
@@ -174,9 +176,6 @@ def fetch_retention_policies_data(client_id, client_secret, tenant_id) -> dict:
             pass
             
     try:
-        from core.powershell.client import PowerShellClient
-        from core.powershell.retention import RetentionService
-        
         ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret, cert_tenant_id=tenant_id)
         retention_service = RetentionService(ps_client)
         policies = retention_service.fetch_retention_policies()
@@ -188,7 +187,6 @@ def fetch_retention_policies_data(client_id, client_secret, tenant_id) -> dict:
 def fetch_dlp_policies_data(client_id, client_secret, tenant_id) -> dict:
     """Fetch DLP policies via PowerShell client."""
     usage_logger.info("Starting DLP Policies fetch...")
-    from core.graph.client import GraphClient
     client = GraphClient(
         tenant_id=tenant_id,
         client_ids=client_id,
@@ -200,7 +198,6 @@ def fetch_dlp_policies_data(client_id, client_secret, tenant_id) -> dict:
     tenant_domain = tenant_id
     try:
         client.authenticate()
-        from core.graph.directory import DirectoryService
         dir_svc = DirectoryService(client)
         tenant_domain = dir_svc.get_tenant_primary_domain()
         usage_logger.info(f"Retrieved primary tenant domain for DLP fetch: {tenant_domain}")
@@ -213,9 +210,6 @@ def fetch_dlp_policies_data(client_id, client_secret, tenant_id) -> dict:
             pass
             
     try:
-        from core.powershell.client import PowerShellClient
-        from core.powershell.dlp import DLPService
-        
         ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret, cert_tenant_id=tenant_id)
         dlp_service = DLPService(ps_client)
         policies = dlp_service.fetch_dlp_policies()
@@ -229,9 +223,6 @@ def fetch_sensitive_info_types_data(client_id, client_secret, tenant_id) -> dict
     usage_logger.info("Starting Sensitive Information Types fetch...")
     
     # We must resolve the tenant domain since Organization cannot be a GUID for IPPSSession
-    from core.graph.client import GraphClient
-    from core.graph.directory import DirectoryService
-    
     tenant_domain = tenant_id
     client = GraphClient(tenant_id=tenant_id, client_ids=client_id, client_secrets=client_secret, concurrency=1)
     try:
@@ -248,9 +239,6 @@ def fetch_sensitive_info_types_data(client_id, client_secret, tenant_id) -> dict
             pass
             
     try:
-        from core.powershell.client import PowerShellClient
-        from core.powershell.dlp import DLPService
-        
         ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret, cert_tenant_id=tenant_id)
         dlp_service = DLPService(ps_client)
         types_data = dlp_service.fetch_sensitive_info_types()
@@ -314,7 +302,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     def _stream_to_csv(self, filename, data):
         if not data: return
         try:
-            import os, csv
             script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
             tenant, clients, _ = self.get_credentials()
             if not tenant or not clients: return
@@ -844,7 +831,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if hasattr(self, 'labels_reload_btn') and self.labels_reload_btn.winfo_exists():
             self.labels_reload_btn.configure(state="disabled")
         if hasattr(self, "sub_section_start_times"):
-            import time
             self.sub_section_start_times["labels"] = time.time()
         tenant, clients, secrets = self.get_credentials()
         if tenant:
@@ -858,7 +844,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if hasattr(self, 'retention_reload_btn') and self.retention_reload_btn.winfo_exists():
             self.retention_reload_btn.configure(state="disabled")
         if hasattr(self, "sub_section_start_times"):
-            import time
             self.sub_section_start_times["retention"] = time.time()
         tenant, clients, secrets = self.get_credentials()
         if tenant:
@@ -967,7 +952,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if self.semaphore:
             self.semaphore.acquire()
         try:
-            import os
             script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
             reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
             os.makedirs(reports_dir, exist_ok=True)
@@ -1012,7 +996,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if self.semaphore:
             self.semaphore.acquire()
         try:
-            import os
             script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
             reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
             os.makedirs(reports_dir, exist_ok=True)
@@ -1059,7 +1042,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self.btn_export_dlp.configure(state="disabled")
             
         if hasattr(self, "sub_section_start_times"):
-            import time
             self.sub_section_start_times["dlp"] = time.time()
             
         tenant, clients, secrets = self.get_credentials()
@@ -1071,7 +1053,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def export_dlp_csv(self):
         """Prompts the user to save DLP policies as a detailed CSV file."""
-        import shutil, os
         tenant, clients, _ = self.get_credentials()
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "dlp_policies.csv")
@@ -1210,7 +1191,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.dlp_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda d=data: self._change_dlp_page(-1, d)
@@ -1222,7 +1203,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.dlp_current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda d=data: self._change_dlp_page(1, d)
@@ -1237,7 +1218,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if hasattr(self, 'auth_reload_btn') and self.auth_reload_btn.winfo_exists():
             self.auth_reload_btn.configure(state="disabled")
         if hasattr(self, "sub_section_start_times"):
-            import time
             self.sub_section_start_times["auth"] = time.time()
         tenant, clients, secrets = self.get_credentials()
         if tenant:
@@ -1391,7 +1371,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.auth_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda: self._change_auth_page(-1, data)
@@ -1403,7 +1383,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.auth_current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda: self._change_auth_page(1, data)
@@ -1474,7 +1454,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         items = []
         total_count = 0
-        import csv
         try:
             with open(csv_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
@@ -1567,7 +1546,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.labels_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda d=data: self._change_labels_page(-1, d)
@@ -1579,7 +1558,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.labels_current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda d=data: self._change_labels_page(1, d)
@@ -1755,7 +1734,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.retention_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda d=data: self._change_retention_page(-1, d)
@@ -1767,7 +1746,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.retention_current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda d=data: self._change_retention_page(1, d)
@@ -1781,7 +1760,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def export_labels_csv(self):
         """Prompts the user to save sensitivity labels as a detailed CSV file."""
-        import shutil, os
         tenant, clients, _ = self.get_credentials()
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "sensitivity_labels.csv")
@@ -1808,7 +1786,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def export_retention_csv(self):
         """Prompts the user to save retention policies as a detailed CSV file."""
-        import shutil, os
         tenant, clients, _ = self.get_credentials()
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "retention_policies.csv")
@@ -1841,7 +1818,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
             self.btn_export_sit.configure(state="disabled")
             
         if hasattr(self, "sub_section_start_times"):
-            import time
             self.sub_section_start_times["sit"] = time.time()
             
         tenant, clients, secrets = self.get_credentials()
@@ -1991,7 +1967,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         prev_state = "normal" if self.sit_current_page > 0 else "disabled"
         btn_prev = ctk.CTkButton(
-            center_container, text="◀ Prev", width=70, height=26, corner_radius=6,
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=prev_state,
             command=lambda d=data: self._change_sit_page(-1, d)
@@ -2003,7 +1979,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
         next_state = "normal" if self.sit_current_page < total_pages - 1 else "disabled"
         btn_next = ctk.CTkButton(
-            center_container, text="Next ▶", width=70, height=26, corner_radius=6,
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
             font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state=next_state,
             command=lambda d=data: self._change_sit_page(1, d)
@@ -2016,7 +1992,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def export_sit_csv(self):
         """Prompts the user to save Sensitive Information Types as a detailed CSV file."""
-        import shutil, os
         tenant, clients, _ = self.get_credentials()
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "sensitive_info_types.csv")
@@ -2044,7 +2019,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         if self.semaphore:
             self.semaphore.acquire()
         try:
-            import os
             script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
             reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
             os.makedirs(reports_dir, exist_ok=True)
@@ -2128,7 +2102,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "service_principals_sso.csv") if tenant and clients else None
         
         if csv_path and os.path.exists(csv_path):
-            import csv
             try:
                 with open(csv_path, 'r', encoding='utf-8') as f:
                     reader = csv.DictReader(f)
@@ -2172,7 +2145,6 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
 
     def export_sso_csv(self):
         """Prompts the user to save Service Principals SSO as a detailed CSV file."""
-        import shutil, os
         tenant, clients, _ = self.get_credentials()
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "service_principals_sso.csv")
@@ -2259,6 +2231,33 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
                             "CreatedBy": row.get("CreatedBy", "N/A")
                         })
                     return dlp_policies
+                
+                elif filename == "retention_policies.csv":
+                    ret_policies = []
+                    for row in rows:
+                        enabled_str = str(row.get("Enabled", "")).strip().lower()
+                        ret_policies.append({
+                            "Name": row.get("Name", "N/A"),
+                            "Comment": row.get("Comment", ""),
+                            "Workload": row.get("Workload", "N/A"),
+                            "Duration": row.get("Duration", "N/A"),
+                            "RetentionTrigger": row.get("RetentionTrigger", "N/A"),
+                            "Mode": row.get("Mode", "Enforce"),
+                            "DistributionStatus": row.get("DistributionStatus", "Success"),
+                            "Enabled": enabled_str in ("true", "1", "yes")
+                        })
+                    return ret_policies
+                    
+                elif filename == "sensitive_info_types.csv":
+                    sit_list = []
+                    for row in rows:
+                        sit_list.append({
+                            "Name": row.get("Name", "N/A"),
+                            "Type": row.get("Type", "N/A"),
+                            "RecommendedConfidence": row.get("RecommendedConfidence", "N/A"),
+                            "Description": row.get("Description", "N/A")
+                        })
+                    return sit_list
                 
                 elif filename == "service_principals_sso.csv":
                     sso_list = []
