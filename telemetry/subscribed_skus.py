@@ -15,6 +15,7 @@
 """Modular Subscribed SKUs Inventory Summary telemetry scanners and visual interfaces."""
 
 import os
+import csv
 import logging
 import threading
 import webbrowser
@@ -241,7 +242,6 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
                         else:
                             rows.append(["", "", "", p_name, p_scope])
 
-            import csv
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(headers)
@@ -274,7 +274,6 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
 
         skus = []
         try:
-            import csv
             with open(self.csv_path, 'r', encoding='utf-8') as f:
                 reader = csv.reader(f)
                 next(reader, None)  # skip header

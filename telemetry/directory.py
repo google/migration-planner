@@ -15,6 +15,7 @@
 """Modular Directory Domains, Users & Groups summary telemetry scanners and visual interfaces."""
 
 import os
+import csv
 import logging
 import threading
 import webbrowser
@@ -325,7 +326,6 @@ class DirectoryFrame(ctk.CTkFrame):
                 services_str = ", ".join(services) if services else "-"
                 rows.append([domain.get("id", "-"), auth_type, admin_managed, is_default, is_verified, services_str])
 
-            import csv
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(headers)
@@ -472,7 +472,6 @@ class DirectoryFrame(ctk.CTkFrame):
 
         domains = []
         try:
-            import csv
             with open(self.csv_path, 'r', encoding='utf-8') as f:
                 reader = csv.reader(f)
                 next(reader, None)  # skip header

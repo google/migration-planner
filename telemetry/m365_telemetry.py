@@ -19,6 +19,8 @@ import sys
 import time
 import queue
 import logging
+import csv
+import psutil
 import threading
 from typing import Any, Dict, List, Optional
 import customtkinter as ctk
@@ -846,8 +848,6 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
     def get_all_telemetry_data(self) -> dict:
         """Retrieves cached telemetry data and charts from all sub-views."""
-        import os
-        import csv
         
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         tenant = self.lic_tenant_id.get().strip()
@@ -934,9 +934,6 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
     def _monitor_memory_loop(self):
         """Periodically measures current resident set size (RSS) RAM usage of the python process and logs it."""
-        import time
-        import os
-        import psutil
         
         try:
             process = psutil.Process(os.getpid())

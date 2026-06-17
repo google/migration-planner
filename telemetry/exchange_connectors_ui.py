@@ -3,6 +3,12 @@ import threading
 import logging
 import traceback
 import webbrowser
+import os
+import csv
+from core.graph.client import GraphClient
+from core.graph.directory import DirectoryService
+from core.powershell.client import PowerShellClient
+from core.powershell.exchange_connectors import ExchangeConnectorsService
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("ExchangeConnectorsUI")
@@ -13,7 +19,6 @@ def fetch_exchange_connectors_data(client_id, client_secret, tenant_id) -> dict:
     
     tenant_domain = tenant_id
     try:
-        from core.graph.client import GraphClient
         client = GraphClient(
             tenant_id=tenant_id,
             client_ids=client_id,
@@ -23,7 +28,6 @@ def fetch_exchange_connectors_data(client_id, client_secret, tenant_id) -> dict:
             backoff=2
         )
         client.authenticate()
-        from core.graph.directory import DirectoryService
         dir_svc = DirectoryService(client)
         tenant_domain = dir_svc.get_tenant_primary_domain()
         usage_logger.info(f"Retrieved primary tenant domain for Connectors: {tenant_domain}")
@@ -36,9 +40,6 @@ def fetch_exchange_connectors_data(client_id, client_secret, tenant_id) -> dict:
             pass
             
     try:
-        from core.powershell.client import PowerShellClient
-        from core.powershell.exchange_connectors import ExchangeConnectorsService
-        
         ps_client = PowerShellClient(tenant_id=tenant_domain, client_id=client_id, client_secret=client_secret, cert_tenant_id=tenant_id)
         connector_svc = ExchangeConnectorsService(ps_client)
         data = connector_svc.fetch_exchange_connectors()
@@ -181,7 +182,6 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
             
             connectors_data = res.get("connectors")
             if connectors_data and not connectors_data.get("Errors"):
-                import csv, os
                 script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
                 reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
                 os.makedirs(reports_dir, exist_ok=True)

@@ -15,6 +15,7 @@
 """Standalone Exchange Online Supported Email Clients telemetry scanner and UI presentation."""
 
 import os
+import csv
 import logging
 import threading
 import pandas as pd
@@ -84,8 +85,6 @@ def parse_email_client_support_csv(filepath: str) -> dict:
         return {}
 
 def run_email_client_usage_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
-    from core.graph.client import GraphClient
-    from core.graph.reports import ReportsService
     client = GraphClient(tenant_id=tenant_id, client_ids=client_id, client_secrets=client_secret, concurrency=1, retries=3, backoff=2)
     client.authenticate()
     service = ReportsService(client)
@@ -104,8 +103,6 @@ def run_email_client_usage_pipeline(client_id: str, client_secret: str, tenant_i
     return {"client_adoption": client_stats, "client_error": client_error}
 
 def run_pst_discovery_pipeline(client_id: str, client_secret: str, tenant_id: str) -> dict:
-    from core.graph.client import GraphClient
-    from core.graph.reports import ReportsService
     client = GraphClient(tenant_id=tenant_id, client_ids=client_id, client_secrets=client_secret, concurrency=1, retries=3, backoff=2)
     client.authenticate()
     service = ReportsService(client)
@@ -227,7 +224,6 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         try:
             data = run_email_client_usage_pipeline(client_id, client_secret, tenant)
             if not data.get("client_error"):
-                import csv, os
                 script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
                 reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
                 os.makedirs(reports_dir, exist_ok=True)
@@ -258,7 +254,6 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         try:
             data = run_pst_discovery_pipeline(client_id, client_secret, tenant)
             if not data.get("pst_error"):
-                import csv, os
                 script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
                 reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
                 os.makedirs(reports_dir, exist_ok=True)

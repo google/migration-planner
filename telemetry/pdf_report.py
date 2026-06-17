@@ -16,6 +16,9 @@
 
 import io
 from datetime import datetime
+from collections import Counter
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -85,8 +88,6 @@ def format_prepaid_units(item: dict) -> str:
 
 def generate_trend_chart_bytes(trend_data: dict) -> io.BytesIO:
     """Generates the O365 Active User Trend Chart on-the-fly to minimize persistent memory footprint."""
-    from matplotlib.figure import Figure
-    from matplotlib.backends.backend_agg import FigureCanvasAgg
     
     dates = trend_data.get("dates", [])
     if not dates:
@@ -127,8 +128,6 @@ def generate_trend_chart_bytes(trend_data: dict) -> io.BytesIO:
 
 def generate_pa_chart_bytes(pa: dict) -> io.BytesIO:
     """Generates the Power Automate Flows breakdown bar chart on-the-fly."""
-    from matplotlib.figure import Figure
-    from matplotlib.backends.backend_agg import FigureCanvasAgg
     
     counts = pa.get("counts", {})
     if not counts:
@@ -1352,7 +1351,6 @@ def generate_pdf_report(data: dict, filepath: str):
     if not sso_apps:
         story.append(Paragraph("No SAML SSO applications discovered.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
     else:
-        from collections import Counter
         mode_counts = Counter()
         for app in sso_apps:
             mode = app.get("preferredSingleSignOnMode", "").strip() or "None"

@@ -18,6 +18,7 @@ import logging
 import threading
 import webbrowser
 import customtkinter as ctk
+from collections import defaultdict
 from telemetry.styles import *
 from core.graph.client import GraphClient
 from core.graph.intune import IntuneService
@@ -98,8 +99,6 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
         
         if len(errors) == 3:
             raise errors[0]
-            
-        from collections import defaultdict
         counts = defaultdict(int)
         total_dc = 0
         total_cp = 0
@@ -268,8 +267,6 @@ class IntunePoliciesFrame(ctk.CTkFrame):
     def _execute_worker(self, tenant: str, client_id: str, client_secret: str):
         if self.semaphore:
             self.semaphore.acquire()
-            
-        from collections import defaultdict
         platform_policy_counts = defaultdict(int)
         tot_dc = [0]
         tot_cp = [0]

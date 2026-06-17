@@ -1,9 +1,12 @@
 import customtkinter as ctk
 import time
+import csv
+import os
 import requests
 import threading
 import logging
 from telemetry.styles import *
+from util.auth_manager import TokenManager
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.MailSecurityUI")
 
@@ -71,7 +74,6 @@ class MailSecurityFrame(ctk.CTkFrame):
             if not tenant or not c_id or not c_secret:
                 raise ValueError("Missing credentials.")
 
-            from util.auth_manager import TokenManager
             tm = TokenManager(tenant_id=tenant, client_ids=[c_id], client_secrets=[c_secret], concurrency=1, retries=1, backoff=0)
             tm.authenticate_all()
             
@@ -137,7 +139,6 @@ class MailSecurityFrame(ctk.CTkFrame):
                 "eop": {"skus": self.eop_skus, "users": self.total_eop_users}
             }
             
-            import csv, os
             script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
             reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{c_id}")
             os.makedirs(reports_dir, exist_ok=True)
