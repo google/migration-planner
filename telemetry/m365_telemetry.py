@@ -851,8 +851,9 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         tenant = self.lic_tenant_id.get().strip()
-        client_ids = self.app_client_ids.get("0.0", "end-1c").strip().split('\n')
-        client_id = client_ids[0].strip() if client_ids else ""
+        client_str = self.lic_client_ids.get().strip()
+        client_ids = [x.strip() for x in client_str.split(",") if x.strip()]
+        client_id = client_ids[0] if client_ids else ""
         reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
 
         def load_csv(filename):
@@ -874,7 +875,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 "group_counts": getattr(self.directory_view, "last_group_counts", {}),
                 "user_counts": getattr(self.directory_view, "last_user_counts", {})
             },
-            "o365_usage": getattr(self.m365_apps_view.active_users_view, "last_data", []),
+            "o365_usage": getattr(self.m365_apps_view.active_users_view, "o365_data", []),
             "o365_trend": getattr(self.m365_apps_view.active_users_trend_view, "trend_data", {}),
             "m365_apps": getattr(self.m365_apps_view.m365_apps_view, "last_data", []),
             "mailbox": getattr(self.exchange_online_view.mailbox_view, "last_data", {}),
