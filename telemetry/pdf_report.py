@@ -1303,24 +1303,34 @@ def generate_pdf_report(data: dict, filepath: str):
     story.append(Paragraph("This section displays configured email filtering and threat protection policies.", body_style))
     story.append(Spacer(1, 8))
     
-    mail_sec = data.get("mail_security", [])
-    if not mail_sec:
-        story.append(Paragraph("No mail security policies found.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    mail_sec = data.get("mail_security", {})
+    if not mail_sec or (not mail_sec.get("defender", {}).get("skus") and not mail_sec.get("eop", {}).get("skus")):
+        story.append(Paragraph("No mail security SKUs detected.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
     else:
         ms_table_data = [[
-            Paragraph("Policy Name", table_cell_header),
-            Paragraph("State", table_cell_header),
-            Paragraph("Priority", table_cell_header),
-            Paragraph("Rule Type", table_cell_header)
+            Paragraph("Mail Security Configuration", table_cell_header),
+            Paragraph("Detected SKUs", table_cell_header),
+            Paragraph("Affected Users", table_cell_header)
         ]]
-        for ms in mail_sec[:10]:
+        
+        defender_data = mail_sec.get("defender", {})
+        eop_data = mail_sec.get("eop", {})
+        
+        if defender_data.get("skus"):
             ms_table_data.append([
-                Paragraph(ms.get("Name", "-"), table_cell_bold),
-                Paragraph(ms.get("State", "-"), table_cell_style),
-                Paragraph(ms.get("Priority", "-"), table_cell_style),
-                Paragraph(ms.get("RuleType", "-"), table_cell_style)
+                Paragraph("Microsoft Defender for Office 365", table_cell_bold),
+                Paragraph(", ".join(defender_data.get("skus", [])), table_cell_style),
+                Paragraph(f"{defender_data.get('users', 0):,} Users", table_cell_style)
             ])
-        ms_table = Table(ms_table_data, colWidths=[200, 80, 70, 150])
+            
+        if eop_data.get("skus"):
+            ms_table_data.append([
+                Paragraph("Exchange Online Protection (Baseline)", table_cell_bold),
+                Paragraph(", ".join(eop_data.get("skus", [])), table_cell_style),
+                Paragraph(f"{eop_data.get('users', 0):,} Users", table_cell_style)
+            ])
+            
+        ms_table = Table(ms_table_data, colWidths=[200, 200, 100])
         ms_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
@@ -1331,8 +1341,6 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(ms_table)
-        if len(mail_sec) > 10:
-             story.append(Paragraph(f"...and {len(mail_sec) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # 4.6 SSO Service Principals

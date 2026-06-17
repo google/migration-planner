@@ -883,7 +883,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "email_clients": getattr(self.exchange_online_view.email_clients_view, "last_client_data", {}),
             "pst_files": getattr(self.exchange_online_view.email_clients_view, "last_pst_data", {}),
             "exchange_connectors": getattr(self.exchange_online_view.connectors_view, "last_connectors_data", []),
-            "mail_security": getattr(self.exchange_online_view.mail_security_view, "last_policies_data", []),
+            "mail_security": getattr(self.exchange_online_view.mail_security_view, "last_data", {}),
             "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
             "onedrive": getattr(self.files_view.onedrive_view, "last_data", {}),
             "devices_apps": getattr(self.devices_apps_view, "last_data", {}),
