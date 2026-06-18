@@ -13,15 +13,16 @@ class TransportRulesFetcher:
         self.runner = PowerShellClient(tenant_id, client_id, client_secret)
         self.script_path = "scripts/get_transport_rules.ps1"
 
-    def fetch_rules(self) -> dict:
+    def fetch_rules(self, csv_path: str) -> dict:
         """
-        Executes the get_transport_rules.ps1 script.
-        Returns a dictionary: {"TransportRules": [...], "Errors": {...}}
+        Executes the get_transport_rules.ps1 script, exporting data to csv_path.
+        Returns a dict: {"success": bool, "errors": dict}
         """
         args = [
             "-AppId", self.client_id,
             "-Organization", self.tenant_id,
-            "-ClientSecret", self.client_secret
+            "-ClientSecret", self.client_secret,
+            "-CsvPath", csv_path
         ]
 
         try:
@@ -29,11 +30,14 @@ class TransportRulesFetcher:
             stdout = self.runner.execute_script(self.script_path, args)
             
             if not stdout.strip():
-                return {"TransportRules": [], "Errors": {"ParseError": "Empty response from script"}}
+                return {"success": False, "errors": {"ParseError": "Empty response from script"}}
 
             data = json.loads(stdout)
-            return data
+            return {
+                "success": data.get("Success", False),
+                "errors": data.get("Errors", {})
+            }
 
         except Exception as e:
             logger.error(f"Failed to fetch transport rules: {e}", exc_info=True)
-            return {"TransportRules": [], "Errors": {"ExecutionError": str(e)}}
+            return {"success": False, "errors": {"ExecutionError": str(e)}}

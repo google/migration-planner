@@ -7,6 +7,50 @@ from core.powershell.transport_rules import TransportRulesFetcher
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.TransportRulesUI")
 
+import os
+import csv
+
+class CsvLazyList:
+    """A lazy list-like wrapper around a CSV file to provide O(1) memory slicing and length for reports."""
+    def __init__(self, csv_path):
+        self.csv_path = csv_path
+        self._len = None
+
+    def __len__(self):
+        if not os.path.exists(self.csv_path):
+            return 0
+        if self._len is None:
+            with open(self.csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                self._len = max(0, sum(1 for _ in reader))
+        return self._len
+
+    def __bool__(self):
+        return len(self) > 0
+
+    def __getitem__(self, key):
+        if not os.path.exists(self.csv_path):
+            raise IndexError("File does not exist")
+        if isinstance(key, slice):
+            start = key.start or 0
+            stop = key.stop or len(self)
+            res = []
+            with open(self.csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for i, row in enumerate(reader):
+                    if start <= i < stop:
+                        res.append(row)
+                    elif i >= stop:
+                        break
+            return res
+        else:
+            with open(self.csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for i, row in enumerate(reader):
+                    if i == key:
+                        return row
+            raise IndexError("list index out of range")
+            
 class TransportRulesFrame(ctk.CTkFrame):
     def update_loading_text(self, text_msg):
         if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
@@ -76,36 +120,22 @@ class TransportRulesFrame(ctk.CTkFrame):
 
             self.update_loading_text("Fetching Exchange Transport Rules via PowerShell...")
             
-            fetcher = TransportRulesFetcher(tenant, c_id, c_secret)
-            res = fetcher.fetch_rules()
+            import os, csv
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{c_id}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, "exchange_transport_rules.csv")
             
-            if res.get("Errors") and not res.get("TransportRules"):
-                errs = res["Errors"]
+            fetcher = TransportRulesFetcher(tenant, c_id, c_secret)
+            res = fetcher.fetch_rules(csv_path)
+            
+            if not res.get("success", False):
+                errs = res.get("errors", {})
                 first_err = list(errs.values())[0] if errs else "Unknown Script Error"
                 raise ConnectionError(f"PowerShell Execution Error: {first_err}")
             
-            data = res.get("TransportRules", [])
-            
-            # Export to CSV
-            try:
-                import os, csv
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{c_id}")
-                os.makedirs(reports_dir, exist_ok=True)
-                csv_path = os.path.join(reports_dir, "exchange_transport_rules.csv")
-                
-                with open(csv_path, 'w', newline='', encoding='utf-8') as f:
-                    if data:
-                        writer = csv.DictWriter(f, fieldnames=data[0].keys())
-                        writer.writeheader()
-                        writer.writerows(data)
-                    else:
-                        writer = csv.writer(f)
-                        writer.writerow(["No rules found"])
-            except Exception as e:
-                usage_logger.error(f"Failed to write transport rules CSV: {e}")
-
-            self.after(0, self._render_success, data)
+            self.csv_path = csv_path
+            self.after(0, self._render_success)
             
         except Exception as e:
             usage_logger.error(f"Error fetching transport rules: {e}", exc_info=True)
@@ -114,8 +144,8 @@ class TransportRulesFrame(ctk.CTkFrame):
             if self.semaphore:
                 self.semaphore.release()
 
-    def _render_success(self, data):
-        self.last_data = data
+    def _render_success(self):
+        self.last_data = CsvLazyList(self.csv_path)
         self.status = "success"
         self.loading = False
         self.page_index = 0
@@ -196,7 +226,19 @@ class TransportRulesFrame(ctk.CTkFrame):
         for widget in self.pagination_frame.winfo_children():
             widget.destroy()
 
-        if not self.last_data:
+        if not hasattr(self, 'csv_path') or not __import__("os").path.exists(self.csv_path):
+            c = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
+            c.pack(fill="x", expand=True)
+            ctk.CTkLabel(c, text="No Transport Rules discovered.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=20)
+            return
+            
+        import csv
+        total_items = 0
+        with open(self.csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            total_items = sum(1 for _ in reader)
+            
+        if total_items <= 0:
             c = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
             c.pack(fill="x", expand=True)
             ctk.CTkLabel(c, text="No Transport Rules discovered.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=20)
@@ -220,10 +262,17 @@ class TransportRulesFrame(ctk.CTkFrame):
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
-        total_items = len(self.last_data)
         start_idx = self.page_index * self.page_size
         end_idx = min(start_idx + self.page_size, total_items)
-        page_items = self.last_data[start_idx:end_idx]
+        
+        page_items = []
+        with open(self.csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for i, row in enumerate(reader):
+                if i >= start_idx and i < end_idx:
+                    page_items.append(row)
+                elif i >= end_idx:
+                    break
 
         for r_idx, rule in enumerate(page_items, start=1):
             bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT

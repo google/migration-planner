@@ -4,7 +4,9 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$Organization,
     [Parameter(Mandatory=$true)]
-    [string]$ClientSecret
+    [string]$ClientSecret,
+    [Parameter(Mandatory=$true)]
+    [string]$CsvPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,31 +31,25 @@ try {
     Connect-ExchangeOnline -AccessToken $token -Organization $Organization -ShowBanner:$false -WarningAction SilentlyContinue
     
     $rules = Get-TransportRule -ErrorAction Stop
-    $output = @()
     if ($rules) {
-        foreach ($rule in @($rules)) {
-            $output += @{
-                Name = $rule.Name
-                State = $rule.State
-                Priority = $rule.Priority
-                Mode = $rule.Mode
-                Description = $rule.Description
-                Conditions = if ($rule.Conditions) { $rule.Conditions -join ", " } else { $null }
-                Actions = if ($rule.Actions) { $rule.Actions -join ", " } else { $null }
-                Exceptions = if ($rule.Exceptions) { $rule.Exceptions -join ", " } else { $null }
-                Comments = $rule.Comments
-            }
-        }
+        $rules | Select-Object Name, State, Priority, Mode, Description, 
+            @{Name="Conditions"; Expression={if ($_.Conditions) { $_.Conditions -join ", " } else { $null }}},
+            @{Name="Actions"; Expression={if ($_.Actions) { $_.Actions -join ", " } else { $null }}},
+            @{Name="Exceptions"; Expression={if ($_.Exceptions) { $_.Exceptions -join ", " } else { $null }}},
+            Comments | Export-Csv -Path $CsvPath -NoTypeInformation -Encoding UTF8 -Force
+    } else {
+        # Create an empty CSV with headers
+        "" | Select-Object Name, State, Priority, Mode, Description, Conditions, Actions, Exceptions, Comments | ConvertTo-Csv -NoTypeInformation | Select-Object -Skip 1 | Out-File -FilePath $CsvPath -Encoding UTF8 -Force
     }
     
     $result = [PSCustomObject]@{
-        TransportRules = $output
+        Success = $true
         Errors = @{}
     }
     $result | ConvertTo-Json -Depth 4
 } catch {
     $result = [PSCustomObject]@{
-        TransportRules = @()
+        Success = $false
         Errors = @{ "TransportRules" = $_.Exception.Message }
     }
     $result | ConvertTo-Json -Depth 4
