@@ -512,16 +512,10 @@ class EOInPlaceArchiveEstimator(Estimator):
                 if "totalItemCount" in sub_folder:
                     try:
                         count = int(sub_folder["totalItemCount"])
-                        if self.logger and count > 0:
-                            self.logger(f"Received a folder with {count} item count {sub_folder.get('id')}. Archive Mail Box id: {mail_box_id}. Display Name: {sub_folder.get('displayName')}")
-
                         archived_mail_count[mail_box_id].increment(count)
                         mail_box_id_received_from_response = _get_mail_box_id_from_response(sub_folder, mail_box_id)
 
                         if mail_box_id_received_from_response != mail_box_id:
-                            if self.logger:
-                                self.logger(f"Received an aux mailbox {mail_box_id_received_from_response} for folder {sub_folder.get('displayName')} and originally used mail box id: {mail_box_id}. Item Count received in original request: {count}")
-                            
                             futures.append(
                                 self.aux_executor.submit(
                                     _get_item_count_from_redirected_folder,
@@ -531,10 +525,6 @@ class EOInPlaceArchiveEstimator(Estimator):
                                 )
                             )
                         
-                        elif count == 0:
-                            if self.logger:
-                                self.logger(f"Received a folder with 0 item count {sub_folder.get('id')}. Archive Mail Box id: {mail_box_id}. ")
-
                     except (ValueError, TypeError):
                         if self.logger:
                             self.logger(f"Warning: Invalid totalItemCount '{sub_folder.get('totalItemCount')}' for mailbox {self.get_display_name_from_id(mail_box_id)}. Skipping count.")
