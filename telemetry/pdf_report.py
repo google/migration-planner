@@ -1382,8 +1382,48 @@ def generate_pdf_report(data: dict, filepath: str):
         story.append(ms_table)
     story.append(Spacer(1, 15))
 
-    # 4.6 SSO Service Principals
-    story.append(Paragraph("4.6 Enterprise SAML SSO Apps", h2_style))
+    # 4.6 Exchange Transport Rules
+    story.append(Paragraph("4.6 Exchange Transport Rules", h2_style))
+    story.append(Paragraph("This section displays mail flow rules configured in Exchange Online.", body_style))
+    story.append(Spacer(1, 8))
+    
+    transport_rules = data.get("transport_rules", [])
+    if not transport_rules:
+        story.append(Paragraph("No Exchange Transport Rules discovered.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        rules_table_data = [[
+            Paragraph("Rule Name", table_cell_header),
+            Paragraph("State", table_cell_header),
+            Paragraph("Mode", table_cell_header)
+        ]]
+        
+        display_rules = transport_rules[:10]
+        for rule in display_rules:
+            rules_table_data.append([
+                Paragraph(str(rule.get("Name", "-")), table_cell_bold),
+                Paragraph(str(rule.get("State", "-")), table_cell_style),
+                Paragraph(str(rule.get("Mode", "-")), table_cell_style)
+            ])
+            
+        rules_table = Table(rules_table_data, colWidths=[250, 100, 150])
+        rules_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(rules_table)
+        
+        if len(transport_rules) > 10:
+            story.append(Spacer(1, 4))
+            story.append(Paragraph(f"...and {len(transport_rules) - 10} more. See generated CSV reports for full details.", ParagraphStyle('ItalicRef', parent=body_style, textColor=colors.HexColor("#64748B"), fontName="Helvetica-Oblique")))
+    story.append(Spacer(1, 15))
+
+    # 4.7 SSO Service Principals
+    story.append(Paragraph("4.7 Enterprise SAML SSO Apps", h2_style))
     story.append(Paragraph("This section displays Enterprise Applications configured for SAML Single Sign-On.", body_style))
     story.append(Spacer(1, 8))
     
@@ -1420,8 +1460,8 @@ def generate_pdf_report(data: dict, filepath: str):
         story.append(sso_table)
     story.append(Spacer(1, 15))
 
-    # 4.7 Conditional Access Policies
-    story.append(Paragraph("4.7 Conditional Access Policies", h2_style))
+    # 4.8 Conditional Access Policies
+    story.append(Paragraph("4.8 Conditional Access Policies", h2_style))
     story.append(Paragraph("This section displays Azure AD Auth Policies governing conditional access.", body_style))
     story.append(Spacer(1, 8))
     
