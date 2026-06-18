@@ -1,7 +1,7 @@
 from typing import Any, Callable, Dict, List, Optional
 
 from estimators.estimator import Estimator
-from util.connectors import UrlInvoker
+from util.connectors import UrlInvoker, TokenManager
 from util.utils import ScanConfig, group_responses_by_key, process_pagination_responses, get_relative_url, get_batch_responses_map, create_batches
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -28,7 +28,26 @@ class EOInPlaceArchiveEstimator(Estimator):
         self.logger = logger
         self.stop_event = stop_event
         self.use_delta_api = use_delta_api
-        
+
+        self.aux_manager = TokenManager(
+            config.tenant_id,
+            config.client_ids,
+            config.client_secrets,
+            config.concurrency,
+            config.retries,
+            config.backoff,
+        )
+
+        try:
+          self.aux_manager.authenticate_all(logger, required_scopes=[
+            "User.Read.All", "MailboxFolder.Read.All"])
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Failed to authenticate aux manager. Please check if the client id and client secret are correct. Error: {e}")
+            self.stop_event.set()
+
+        self.aux_invoker = UrlInvoker(self.aux_manager, self.config.retries, self.config.backoff, 1, 0.5)
+        self.aux_executor = ThreadPoolExecutor(max_workers=self.config.hierarchial_crawl_batch_limit)
         self.archive_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
         if self.use_delta_api is False:
             self.tree_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
@@ -124,7 +143,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             user_to_count[user_id] = mail_box_to_count.get(mail_box_id, 0)
 
         failures.extend([{
-            "userId": mailbox_to_user[mailbox_failure["mailboxId"]],
+            "userId": mailbox_to_user.get(mailbox_failure["mailboxId"]),
             "isPartial": mailbox_failure["isPartial"],
             "folderId": mailbox_failure["folderId"] if "folderId" in mailbox_failure else None,
             "type": mailbox_failure["type"],
@@ -138,8 +157,6 @@ class EOInPlaceArchiveEstimator(Estimator):
         if self.is_hard_stop_requested():
             return {mail_box_id: 0 for mail_box_id in mail_box_ids}
 
-        self.aux_mailbox_to_root = ThreadSafeMap()
-
         # Extract all the top level folders. This is done separately as a different API is used for top level folders compared to child folders
         mail_box_id_maps = [{"mailboxId": mail_box_id} for mail_box_id in mail_box_ids]
         folder_api = ""
@@ -147,7 +164,7 @@ class EOInPlaceArchiveEstimator(Estimator):
         if self.use_delta_api is True:
             folder_api = "admin/exchange/mailboxes/{mailboxId}/folders/delta?$select=id,childFolderCount,totalItemCount"
         else:
-            folder_api = "admin/exchange/mailboxes/{mailboxId}/folders?$select=id,childFolderCount,totalItemCount&$top=999"
+            folder_api = "admin/exchange/mailboxes/{mailboxId}/folders?$select=id,parentMailboxUrl,displayName,childFolderCount,totalItemCount&$top=999"
 
         top_level_folders: Dict[str, List[Dict[str, Any]]] = {}      # Map of Mail box to top level folder list.
         mail_box_batches = create_batches(folder_api, mail_box_id_maps, self.config.parallel_batches, True)
@@ -281,7 +298,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             failures: List[Dict[str, Any]]
     ) -> None:
         try:
-            child_folder_api = "admin/exchange/mailboxes/{mailboxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount&$top=999"
+            child_folder_api = "admin/exchange/mailboxes/{mailboxId}/folders/{folderId}/childFolders?$select=id,parentMailboxUrl,displayName,childFolderCount,totalItemCount&$top=999"
 
             mail_box_id_to_folder_id: List[Dict[str, Any]] = []
             for mail_box_id, folder_list in folders.items():
@@ -411,7 +428,84 @@ class EOInPlaceArchiveEstimator(Estimator):
         archived_mail_count: Dict[str, AtomicInt],
         failures: List[Dict[str, Any]],
     ) -> Dict[str, List[Dict[str, Any]]]:
+
+        def _get_mail_box_id_from_response(folder: Dict[str, Any], default_mail_box_id: str) -> str:
+            if "parentMailboxUrl" in folder:
+                url = folder.get("parentMailboxUrl", "").strip()
+                match = re.search(r'/admin/exchange/mailboxes/(.*)$', url, re.IGNORECASE)
+                if match:
+                    return match.group(1).strip()
+                return url.split("/")[-1].strip()
+            return default_mail_box_id
+
+        
+        def _get_item_count_from_redirected_folder(
+            received_id: str,
+            curr_folder: Dict[str, Any],
+            orig_id: str
+        ):
+            # Although we have added the folder to get the childFolders for we still need the totalItemCount for the same. For that we'll simply invoke an API sequentially
+            token_data = None
+            try:
+                token_data = self.aux_invoker.token_manager.get_valid_token_slot(self.logger)
+                session = self.aux_invoker.token_manager.get_session()
+                req = {
+                    "id": 0,
+                    "method": "GET",
+                    "url": f"admin/exchange/mailboxes/{received_id}/folders/{curr_folder['id']}?$select=id,totalItemCount",
+                    "headers": {
+                        "mailboxId": received_id,
+                        "folderId": curr_folder["id"]
+                    }
+                }
+
+                batch_responses = self.aux_invoker.execute_batch_request(
+                    session=session,
+                    batch_url=f"{GRAPH_BETA_URL}/$batch",
+                    token_manager=self.aux_invoker.token_manager,
+                    token_data=token_data,
+                    requests_payload=[req],
+                    logger=self.logger,
+                    stop_event=self.stop_event,
+                    context="Auxiliary Archive Redirect check"
+                )
+
+                if 0 in batch_responses or "0" in batch_responses:
+                    resp = batch_responses.get(0) or batch_responses.get("0")
+                    if resp.get("status", 500) >= 200 and resp.get("status", 500) < 300:
+                        response = resp.get("body", {})
+                        new_count = int(response.get("totalItemCount", 0) or 0)
+                        archived_mail_count[orig_id].increment(new_count)
+                        if self.logger:
+                            self.logger(f"Received an aux mailbox {received_id} for folder {curr_folder.get('displayName')} and originally used mail box id: {orig_id}. Item Count received in new request: {new_count}")
+                    else:
+                        if self.logger:
+                            self.logger(f"Failed to receive item count for mailbox {self.get_display_name_from_id(orig_id)} and folder {curr_folder.get('id')}")
+                        failures.append({
+                            "mailboxId": orig_id,
+                            "isPartial": True,
+                            "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                            "statusCode": resp.get("status"),
+                            "message": f"Error while fetching totalItemCount for mailbox {self.get_display_name_from_id(orig_id)} and folder {curr_folder.get('id')}: {str(resp.get('error', 'Unknown Error'))}"
+                        })
+
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Error while fetching totalItemCount for mailbox {self.get_display_name_from_id(orig_id)} and folder {curr_folder.get('id')}: {str(e)}")
+                failures.append({
+                    "mailboxId": orig_id,
+                    "isPartial": True,
+                    "type": FailureType.OTHER_REASON,
+                    "message": f"Error while fetching totalItemCount for mailbox {self.get_display_name_from_id(orig_id)} and folder {curr_folder.get('id')}: {str(e)}"
+                })
+            finally:
+                if token_data is not None:
+                    self.aux_invoker.token_manager.return_token_slot(token_data)
+
         parseable_sub_folders: Dict[str, List[Dict[str, Any]]] = {}
+
+        futures = []
+
         for mail_box_id, sub_folders in child_folders.items():
             for sub_folder in sub_folders:
                 redirected = False
@@ -419,58 +513,29 @@ class EOInPlaceArchiveEstimator(Estimator):
                 if "totalItemCount" in sub_folder:
                     try:
                         count = int(sub_folder["totalItemCount"])
-                        root_mailbox_id = self.aux_mailbox_to_root.get(mail_box_id, mail_box_id)
-                        archived_mail_count[root_mailbox_id].increment(count)
+                        if self.logger and count > 0:
+                            self.logger(f"Received a folder with {count} item count {sub_folder.get('id')}. Archive Mail Box id: {mail_box_id}. Display Name: {sub_folder.get('displayName')}")
 
-                        if count == 0:
-                            # Possibility that the folder is moved to an aux archive
-                            # We thus try to invoke the folders API for the same. If a 308 status code is observed
-                            # We retry the folder again by adding it to parseable sub folders under the new mailbox ID
-                            # For avoiding deadlocks we will make a synchronous calls for this folder with a TTL.
-                            token_data = None
-                            try:
-                                token_data = self.child_folder_url_invoker.token_manager.get_valid_token_slot(self.logger)
-                                session = self.child_folder_url_invoker.token_manager.get_session()
-                                req = {
-                                    "id": 0,
-                                    "method": "GET",
-                                    "url": f"admin/exchange/mailboxes/{mail_box_id}/folders/{sub_folder['id']}?$select=id,childFolderCount,totalItemCount",
-                                    "headers": {
-                                        "mailboxId": mail_box_id,
-                                        "folderId": sub_folder["id"]
-                                    }
-                                }
-                                batch_responses = self.child_folder_url_invoker.execute_batch_request(
-                                    session=session,
-                                    batch_url=f"{GRAPH_BETA_URL}/$batch",
-                                    token_manager=self.child_folder_url_invoker.token_manager,
-                                    token_data=token_data,
-                                    requests_payload=[req],
-                                    logger=self.logger,
-                                    stop_event=self.stop_event,
-                                    context="Auxiliary Archive Redirect check"
+                        archived_mail_count[mail_box_id].increment(count)
+                        mail_box_id_received_from_response = _get_mail_box_id_from_response(sub_folder, mail_box_id)
+
+                        if mail_box_id_received_from_response != mail_box_id:
+                            if self.logger:
+                                self.logger(f"Received an aux mailbox {mail_box_id_received_from_response} for folder {sub_folder.get('displayName')} and originally used mail box id: {mail_box_id}. Item Count received in original request: {count}")
+
+                            
+                            futures.append(
+                                self.aux_executor.submit(
+                                    _get_item_count_from_redirected_folder,
+                                    mail_box_id_received_from_response,
+                                    sub_folder,
+                                    mail_box_id
                                 )
-                                if 0 in batch_responses or "0" in batch_responses:
-                                    resp = batch_responses.get(0) or batch_responses.get("0")
-                                    if resp.get("status") == 308:
-                                        headers_308 = resp.get("headers", {})
-                                        redirect_url = next((val for key, val in headers_308.items() if key.lower() == "location"), None)
-                                        if redirect_url:
-                                            new_mail_box_id = self._extract_mailbox_id(redirect_url)
-                                            if new_mail_box_id:
-                                                redirected = True
-                                                if new_mail_box_id not in parseable_sub_folders:
-                                                    parseable_sub_folders[new_mail_box_id] = []
-                                                parseable_sub_folders[new_mail_box_id].append(sub_folder)
-                                                
-                                                root_mailbox_id = self.aux_mailbox_to_root.get(mail_box_id, mail_box_id)
-                                                self.aux_mailbox_to_root.update(new_mail_box_id, root_mailbox_id)
-                            except Exception as e:
-                                if self.logger:
-                                    self.logger(f"Error checking auxiliary archive redirect for folder {sub_folder.get('id')}: {e}")
-                            finally:
-                                if token_data is not None:
-                                    self.child_folder_url_invoker.token_manager.return_token_slot(token_data)
+                            )
+                        
+                        elif count == 0:
+                            if self.logger:
+                                self.logger(f"Received a folder with 0 item count {sub_folder.get('id')}. Archive Mail Box id: {mail_box_id}. ")
 
                     except (ValueError, TypeError):
                         if self.logger:
@@ -499,10 +564,12 @@ class EOInPlaceArchiveEstimator(Estimator):
                             "message": f"Invalid childFolderCount '{sub_folder.get('childFolderCount')}'"
                         })
                 
-                if not redirected and child_count > 0:
+                if child_count > 0:
                     if mail_box_id not in parseable_sub_folders:
                         parseable_sub_folders[mail_box_id] = []
                     parseable_sub_folders[mail_box_id].append(sub_folder)
+
+        [f.result() for f in futures]
 
         return parseable_sub_folders
 
@@ -526,3 +593,72 @@ class EOInPlaceArchiveEstimator(Estimator):
             active_thread_count.decrement()
             with condition:
                 condition.notify_all()
+
+    def _fetch_pending_aux_item_counts(self, archived_mail_count: Dict[str, AtomicInt], failures: List[Dict[str, Any]]) -> None:
+        with self.aux_lock:
+            pending_list = list(self.pending_aux_folders)
+            self.pending_aux_folders.clear()
+
+        if not pending_list or self.is_hard_stop_requested():
+            return
+
+        if self.logger:
+            self.logger(f"Fetching item counts for {len(pending_list)} moved auxiliary archive folders...")
+
+        batch_items = []
+        for item in pending_list:
+            batch_items.append({
+                "auxMailboxId": item["aux_mailbox_id"],
+                "rootMailboxId": item["root_mailbox_id"],
+                "folderId": item["folder_id"],
+                "displayName": item["display_name"]
+            })
+
+        api_url = "admin/exchange/mailboxes/{auxMailboxId}/folders/{folderId}?$select=id,totalItemCount"
+        batches = create_batches(api_url, batch_items, self.config.parallel_batches, True)
+
+        futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
+        batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
+        idx = 0
+        for batch in batches:
+            futures_map[idx] = self.aux_executor.submit(self.aux_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, "Auxiliary Archive Item Count")
+            batch_id_to_batch_map[idx] = batch
+            idx += 1
+
+        response_map: Dict[int, List[Dict[str, Any]]] = {}
+        for batch_id, future in futures_map.items():
+            response_map[batch_id] = future.result()
+
+        for batch_id, responses in response_map.items():
+            batch = batch_id_to_batch_map[batch_id]
+            batch_responses_map = get_batch_responses_map(responses, self.logger)
+            for req in batch:
+                req_id = req["id"]
+                root_mbx = req["headers"]["rootMailboxId"]
+                folder_id = req["headers"]["folderId"]
+                display_name = req["headers"].get("displayName", "")
+                if req_id in batch_responses_map:
+                    resp = batch_responses_map[req_id]
+                    if "body" in resp and resp["body"] is not None and "totalItemCount" in resp["body"]:
+                        new_count = int(resp["body"].get("totalItemCount", 0))
+                        archived_mail_count[root_mbx].increment(new_count)
+                        if self.logger:
+                            self.logger(f"Received aux item count {new_count} for folder '{display_name}' in root mailbox.")
+                    elif "body" in resp and resp["body"] is not None and "error" in resp["body"]:
+                        failures.append({
+                            "mailboxId": root_mbx,
+                            "isPartial": True,
+                            "folderId": folder_id,
+                            "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                            "statusCode": resp.get("status"),
+                            "message": f"Error while fetching aux item count for folder '{display_name}': {resp['body']['error'].get('message', 'Unknown Error')}"
+                        })
+                else:
+                    failures.append({
+                        "mailboxId": root_mbx,
+                        "isPartial": True,
+                        "folderId": folder_id,
+                        "type": FailureType.NOT_FOUND,
+                        "statusCode": None,
+                        "message": f"No response found while fetching aux item count for folder '{display_name}'."
+                    })
