@@ -1149,7 +1149,13 @@ class TelemetryApp(ctk.CTk):
         logger.info("Showing Reports Dashboard Page.")
         self.auth_frame.pack_forget()
         self.report_frame.pack(fill="both", expand=True)
-        
+
+        # Sync connection credentials
+        if hasattr(self, "reports_page") and hasattr(self.reports_page, "m365_telemetry_view"):
+            self.reports_page.m365_telemetry_view.lic_tenant_id.set(self.stored_tenant or "")
+            self.reports_page.m365_telemetry_view.lic_client_ids.set(self.stored_client or "")
+            self.reports_page.m365_telemetry_view.lic_client_secrets.set(self.stored_secret or "")
+
         # Force Tkinter to finish all geometry calculations and draw operations synchronously
         # This prevents the macOS window manager from capturing a "half-drawn" frame with only the sidebar.
         self.update_idletasks()
@@ -1208,7 +1214,7 @@ class ReportsPage(ctk.CTkFrame):
         # 3. Fetch Report button (Far Right)
         self.fetch_btn = ctk.CTkButton(
             self.nav_header,
-            text="Fetch Report",
+            text="Fetch All Reports",
             command=self.on_fetch_report_clicked,
             width=150,
             height=36,
@@ -1265,6 +1271,7 @@ class ReportsPage(ctk.CTkFrame):
         )
         self.m365_telemetry_view.pack(fill="both", expand=True)
         self.m365_telemetry_view.on_all_done_callback = self.on_telemetry_fetch_completed
+        self.m365_telemetry_view.on_fetch_started_callback = self.on_telemetry_fetch_started
 
         # Initialize the migration planner view (initially hidden)
         self.migration_planner_view = MigrationPlannerView(
@@ -1291,6 +1298,12 @@ class ReportsPage(ctk.CTkFrame):
             self.fetch_btn.pack(side="right", padx=(10, 20), pady=17)
             self.pdf_btn.pack(side="right", padx=(10, 0), pady=17)
             self.summary_btn.pack(side="right", padx=(10, 0), pady=17)
+
+            # Sync saved credentials
+            self.m365_telemetry_view.lic_tenant_id.set(self.controller.stored_tenant or "")
+            self.m365_telemetry_view.lic_client_ids.set(self.controller.stored_client or "")
+            self.m365_telemetry_view.lic_client_secrets.set(self.controller.stored_secret or "")
+
             self.m365_telemetry_view.pack(fill="both", expand=True)
             self.after(500, gc.collect)
         elif label == "Migration planner":
@@ -1354,6 +1367,10 @@ class ReportsPage(ctk.CTkFrame):
             self.m365_telemetry_view.inputs_frame.pack_forget()
             self.m365_telemetry_view.inputs_frame.grid_forget()
 
+        if hasattr(self.m365_telemetry_view, "actions_frame"):
+            self.m365_telemetry_view.actions_frame.pack_forget()
+            self.m365_telemetry_view.actions_frame.grid_forget()
+
     def on_fetch_report_clicked(self):
         """Stage 2: Migrates stored variables into the telemetry coordinator and triggers fetch directly, or cancels if in progress."""
         if getattr(self.m365_telemetry_view, "is_fetching", False):
@@ -1382,9 +1399,15 @@ class ReportsPage(ctk.CTkFrame):
         # Directly call the fetch command
         self.m365_telemetry_view.authenticate_licenses_tab()
 
+    def on_telemetry_fetch_started(self):
+        """Callback from M365TelemetryTab when any tab scan starts fetching."""
+        self.fetch_btn.configure(state="normal", text="Cancel", fg_color="#DC2626")
+        self.pdf_btn.configure(state="disabled")
+        self.summary_btn.configure(state="disabled")
+
     def on_telemetry_fetch_completed(self, success: bool):
         """Callback from M365TelemetryTab when all parallel reports complete or are cancelled."""
-        self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color=COLOR_PRIMARY)
+        self.fetch_btn.configure(state="normal", text="Fetch All Reports", fg_color=COLOR_PRIMARY)
         
         # Check if any data has been successfully fetched (enables partial downloads post-cancellation or partial failures)
         data = self.m365_telemetry_view.get_all_telemetry_data()
@@ -1629,7 +1652,7 @@ class ReportsPage(ctk.CTkFrame):
             entry.delete(0, "end")
         
         # Reset Fetch Report button state
-        self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color="#1E3A8A")
+        self.fetch_btn.configure(state="normal", text="Fetch All Reports", fg_color="#1E3A8A")
         self.pdf_btn.configure(state="disabled")
         self.summary_btn.configure(state="disabled")
 

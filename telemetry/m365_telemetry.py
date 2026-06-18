@@ -113,15 +113,13 @@ def update_log_directory(tenant_id: Optional[str] = None, client_id: Optional[st
 # MAIN TAB COORDINATOR
 # =================================================================================
 
-class M365TelemetryTab(ctk.CTkScrollableFrame):
+class M365TelemetryTab(ctk.CTkFrame):
     """Encapsulates the UI coordinator for the Microsoft 365 Telemetry & Audit dashboard tab."""
 
     def __init__(self, master, log_callback, retries_var, backoff_var, **kwargs):
         super().__init__(
             master,
             fg_color="transparent",
-            scrollbar_button_color="white",
-            scrollbar_button_hover_color=COLOR_SECONDARY_HOVER,
             **kwargs
         )
         async_logger.info("Initializing M365TelemetryTab instance.")
@@ -135,27 +133,49 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.lic_client_secrets = ctk.StringVar()
 
         self.on_all_done_callback = None
+        self.on_fetch_started_callback = None
         self.telemetry_semaphore = threading.Semaphore(3)
         self.is_fetching = False
 
+        self.tabs = [
+            ("tenant_identity", "Tenant & Identity"),
+            ("comm_storage", "Communication & Storage"),
+            ("apps_automation", "Apps & Automation"),
+            ("security_compliance", "Security & Compliance")
+        ]
+
+        self.tab_status = {
+            "tenant_identity": "pending",
+            "comm_storage": "pending",
+            "apps_automation": "pending",
+            "security_compliance": "pending"
+        }
+
+        self.tab_descriptions = {
+            "tenant_identity": "Directory Summary, Subscribed SKUs, and Microsoft Entra Data.",
+            "comm_storage": "Email mailboxes, Exchange Calendar/contacts telemetry, and Files storage (SharePoint & OneDrive).",
+            "apps_automation": "Microsoft 365 Apps active users usage and Power Automate workflows.",
+            "security_compliance": "Data Security & Governance (Sensitivity labels, retention/DLP policies) and Microsoft Intune policies."
+        }
+
+        self.tab_frames = {}
+        self.tab_labels = {}
+        self.tab_reload_buttons = {}
+        self.tab_containers = {}
+        self.tab_prefetch_frames = {}
+        self.tab_scroll_frames = {}
+        self.active_tab = "tenant_identity"
+
         self.build_ui()
 
-        self.batches = [
-            [self.subscribed_skus_view],
-            [self.directory_view],
-            [self.m365_apps_view],
-            [self.exchange_online_view],
-            [self.files_view],
-            [self.devices_apps_view, self.intune_policies_view],
-            [self.security_gov_view],
-            [self.power_automate_view]
-        ]
-        self.current_batch_index = 0
+        self.tab_views_mapping = {
+            "tenant_identity": [self.subscribed_skus_view, self.directory_view, self.devices_apps_view],
+            "comm_storage": [self.exchange_online_view, self.files_view],
+            "apps_automation": [self.m365_apps_view, self.power_automate_view],
+            "security_compliance": [self.security_gov_view, self.intune_policies_view]
+        }
 
-        # Bind mouse wheel globally to scroll this tab when hovered
-        self.bind_all("<MouseWheel>", self._handle_global_mousewheel, add="+")
-        self.bind_all("<Button-4>", self._handle_global_mousewheel, add="+")
-        self.bind_all("<Button-5>", self._handle_global_mousewheel, add="+")
+
 
         # Start a background daemon thread to monitor memory consumption every 30s
         self.mem_monitor_active = True
@@ -172,10 +192,110 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             text_color=COLOR_TEXT_MAIN,
         ).pack(side="left", fill="x", expand=True)
 
+    def _create_prefetch_view(self, parent, tab_key, tab_title, description):
+        f = ctk.CTkFrame(parent, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12)
+        
+        # Center the box
+        inner = ctk.CTkFrame(f, fg_color="transparent")
+        inner.place(relx=0.5, rely=0.5, anchor="center")
+        
+        ctk.CTkLabel(inner, text=f"{tab_title} Report", font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"), text_color=COLOR_TEXT_MAIN).pack(pady=(0, 10))
+        
+        desc_lbl = ctk.CTkLabel(inner, text=description, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, justify="center", wraplength=450)
+        desc_lbl.pack(pady=(0, 20))
+        
+        btn = ctk.CTkButton(
+            inner,
+            text="Fetch Report",
+            width=200,
+            height=40,
+            corner_radius=8,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            font=FONT_BODY_BOLD,
+            command=lambda k=tab_key: self.fetch_tab_data(k)
+        )
+        btn.pack(pady=(0, 10))
+        
+        return f
+
     def build_ui(self):
         async_logger.info("Building graphical UI elements for M365 Telemetry Tab.")
 
-        ctk.CTkLabel(self, text="Connect your Microsoft Azure account to authenticate and audit tenant licensing bundle inventories and usage.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(anchor="w", pady=(0, 15))
+        # ----------------------------------------------------
+        # HORIZONTAL TAB STRIP
+        # ----------------------------------------------------
+        self.tab_strip_frame = ctk.CTkFrame(self, fg_color="transparent", height=40)
+        self.tab_strip_frame.pack(fill="x", pady=(0, 0))
+
+        for tab_key, tab_title in self.tabs:
+            # Container box styled to look like a modern button
+            btn_frame = ctk.CTkFrame(self.tab_strip_frame, height=40, corner_radius=8, fg_color="transparent")
+            btn_frame.pack(side="left", fill="x", expand=True, padx=2)
+            self.tab_frames[tab_key] = btn_frame
+
+            # Centered inner container hosting label & reload icon
+            inner_content = ctk.CTkFrame(btn_frame, fg_color="transparent")
+            inner_content.place(relx=0.5, rely=0.5, anchor="center")
+
+            # Main text label
+            lbl = ctk.CTkLabel(
+                inner_content,
+                text=tab_title,
+                font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+                text_color=COLOR_TEXT_SUB
+            )
+            lbl.pack(side="left")
+            self.tab_labels[tab_key] = lbl
+
+            # Nested reload button (larger icon, placed at the right edge)
+            reload_btn = ctk.CTkButton(
+                btn_frame,
+                text="↻",
+                width=28,
+                height=28,
+                corner_radius=14,
+                fg_color="transparent",
+                text_color=COLOR_TEXT_SUB,
+                hover_color=COLOR_SECONDARY_HOVER,
+                font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+                command=lambda k=tab_key: self.refetch_tab(k)
+            )
+            self.tab_reload_buttons[tab_key] = reload_btn
+            ToolTip(reload_btn, "Refetch Tab Report")
+
+            # Click & Hover bindings to simulate native CTkButton behavior
+            def make_click_handler(k=tab_key):
+                return lambda event: self.select_tab(k)
+
+            def make_enter_handler(f=btn_frame, k=tab_key):
+                return lambda event: f.configure(fg_color=COLOR_SECONDARY_HOVER) if self.active_tab != k else None
+
+            def make_leave_handler(f=btn_frame, k=tab_key):
+                return lambda event: f.configure(fg_color="transparent") if self.active_tab != k else None
+
+            click_handler = make_click_handler()
+            enter_handler = make_enter_handler()
+            leave_handler = make_leave_handler()
+
+            btn_frame.bind("<Button-1>", click_handler)
+            lbl.bind("<Button-1>", click_handler)
+            inner_content.bind("<Button-1>", click_handler)
+
+            btn_frame.bind("<Enter>", enter_handler)
+            btn_frame.bind("<Leave>", leave_handler)
+            lbl.bind("<Enter>", enter_handler)
+            lbl.bind("<Leave>", leave_handler)
+            inner_content.bind("<Enter>", enter_handler)
+            inner_content.bind("<Leave>", leave_handler)
+
+        # Status indicator packed directly below the tabs
+        self.lbl_lic_status = ctk.CTkLabel(self, text="", font=FONT_BODY_MEDIUM)
+        self.lbl_lic_status.pack(anchor="w", pady=(2, 2))
+
+        # Hidden elements (will be hidden programmatically by adapt_embedded_view)
+        self.top_desc_lbl = ctk.CTkLabel(self, text="Connect your Microsoft Azure account to authenticate and audit tenant licensing bundle inventories and usage.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB)
+        self.top_desc_lbl.pack(anchor="w", pady=(0, 15))
 
         self.inputs_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         self.inputs_frame.pack(fill="x", pady=5)
@@ -187,18 +307,42 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self._create_entry(inner_pad, "Client ID", self.lic_client_ids)
         self._create_entry(inner_pad, "Client Secret", self.lic_client_secrets, show="*")
 
-        actions_frame = ctk.CTkFrame(self, fg_color="transparent")
-        actions_frame.pack(fill="x", pady=(20, 5))
+        self.actions_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.actions_frame.pack(fill="x", pady=(20, 5))
 
         self.btn_lic_submit = ctk.CTkButton(
-            actions_frame, text="Submit", width=160, height=40, corner_radius=20,
+            self.actions_frame, text="Submit", width=160, height=40, corner_radius=20,
             font=FONT_BODY_BOLD, fg_color=COLOR_PRIMARY, hover_color=COLOR_PRIMARY_HOVER,
             command=self.authenticate_licenses_tab,
         )
         self.btn_lic_submit.pack(side="left")
 
-        self.lbl_lic_status = ctk.CTkLabel(actions_frame, text="", font=FONT_BODY_MEDIUM)
-        self.lbl_lic_status.pack(side="left", padx=20)
+
+
+        # ----------------------------------------------------
+        # TAB CONTENT HOST FRAME
+        # ----------------------------------------------------
+        self.tab_content_area = ctk.CTkFrame(self, fg_color="transparent")
+        self.tab_content_area.pack(fill="both", expand=True)
+
+        for tab_key, tab_title in self.tabs:
+            tab_container = ctk.CTkFrame(self.tab_content_area, fg_color="transparent")
+            self.tab_containers[tab_key] = tab_container
+
+            # 1. Pre-fetch view
+            desc = self.tab_descriptions[tab_key]
+            prefetch = self._create_prefetch_view(tab_container, tab_key, tab_title, desc)
+            prefetch.pack(fill="both", expand=True)
+            self.tab_prefetch_frames[tab_key] = prefetch
+
+            # 2. Report view (scrollable frame)
+            scroll = ctk.CTkScrollableFrame(
+                tab_container,
+                fg_color="transparent",
+                scrollbar_button_color="white",
+                scrollbar_button_hover_color=COLOR_SECONDARY_HOVER
+            )
+            self.tab_scroll_frames[tab_key] = scroll
 
         # ----------------------------------------------------
         # MODULAR UI SECTIONS
@@ -206,7 +350,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # 1. Subscribed SKUs Section
         self.subscribed_skus_view = SubscribedSKUsFrame(
-            master=self,
+            master=self.tab_scroll_frames["tenant_identity"],
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
@@ -217,7 +361,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # 5d. Devices & Apps Section (Microsoft Entra Data)
         self.devices_apps_view = DevicesAppsTelemetryFrame(
-            master=self,
+            master=self.tab_scroll_frames["tenant_identity"],
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
@@ -226,7 +370,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # 1b. Directory Groups Section
         self.directory_view = DirectoryFrame(
-            master=self,
+            master=self.tab_scroll_frames["tenant_identity"],
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
@@ -237,7 +381,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # 2. M365 Apps Section (Uber Container)
         self.m365_apps_view = M365AppsTelemetryFrame(
-            master=self,
+            master=self.tab_scroll_frames["apps_automation"],
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
@@ -246,17 +390,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # 5. Exchange Online Usage Section
         self.exchange_online_view = ExchangeOnlineFrame(
-            master=self,
-            log_callback=self.log_msg,
-            credentials_callback=self._get_credentials,
-            status_change_callback=self._check_all_done,
-            concurrency_semaphore=self.telemetry_semaphore
-        )
-
-
-        # 5c. Files (SharePoint & OneDrive) Section
-        self.files_view = FilesTelemetryFrame(
-            master=self,
+            master=self.tab_scroll_frames["comm_storage"],
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
@@ -265,7 +399,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # 5c. Files (SharePoint & OneDrive) Section
         self.files_view = FilesTelemetryFrame(
-            master=self,
+            master=self.tab_scroll_frames["comm_storage"],
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
@@ -274,7 +408,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # 6. Data Security & Governance Section
         self.security_gov_view = DataSecurityGovernanceFrame(
-            master=self,
+            master=self.tab_scroll_frames["security_compliance"],
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
@@ -283,7 +417,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # 6.5. Intune Policies Section
         self.intune_policies_view = IntunePoliciesFrame(
-            master=self,
+            master=self.tab_scroll_frames["security_compliance"],
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
@@ -292,36 +426,94 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         # 7. Power Automate Section
         self.power_automate_view = PowerAutomateUsageFrame(
-            master=self,
+            master=self.tab_scroll_frames["apps_automation"],
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
             concurrency_semaphore=self.telemetry_semaphore
         )
 
-        self.batches = [
-            [self.subscribed_skus_view],
-            [self.devices_apps_view],
-            [self.directory_view],
-            [self.m365_apps_view],
-            [self.exchange_online_view],
-            [self.files_view],
-            [self.intune_policies_view],
-            [self.security_gov_view],
-            [self.power_automate_view]
-        ]
-        self.current_batch_index = 0
-
-        # Bind mouse wheel globally to scroll this tab when hovered
-        self.bind_all("<MouseWheel>", self._handle_global_mousewheel, add="+")
-        self.bind_all("<Button-4>", self._handle_global_mousewheel, add="+")
-        self.bind_all("<Button-5>", self._handle_global_mousewheel, add="+")
-
         self._hide_all_grids()
 
         # Wrap all leaf views to support cancellation and prevent race conditions
         for leaf in self._get_all_leaf_views():
             self._wrap_view_for_cancellation(leaf)
+
+        # Select the default active tab
+        self.select_tab("tenant_identity")
+
+    def select_tab(self, tab_key):
+        self.active_tab = tab_key
+        for key in self.tab_frames:
+            frame = self.tab_frames[key]
+            lbl = self.tab_labels[key]
+            reload_btn = self.tab_reload_buttons.get(key)
+            if key == tab_key:
+                frame.configure(fg_color=COLOR_PRIMARY)
+                lbl.configure(text_color="white")
+                if reload_btn:
+                    reload_btn.configure(text_color="white", hover_color="#2563EB")
+            else:
+                frame.configure(fg_color="transparent")
+                lbl.configure(text_color=COLOR_TEXT_SUB)
+                if reload_btn:
+                    reload_btn.configure(text_color=COLOR_TEXT_SUB, hover_color=COLOR_SECONDARY_HOVER)
+
+        for key, container in self.tab_containers.items():
+            if key == tab_key:
+                container.pack(fill="both", expand=True)
+            else:
+                container.pack_forget()
+
+        self._update_refetch_buttons_visibility()
+
+    def _update_refetch_buttons_visibility(self):
+        """Shows or hides each tab's nested reload button based on its scan completion status."""
+        for tab_key, reload_btn in self.tab_reload_buttons.items():
+            status = self.tab_status.get(tab_key)
+            if status in ["success", "error"] and not getattr(self, "is_fetching", False):
+                reload_btn.place(relx=1.0, x=-22, rely=0.5, anchor="center")
+            else:
+                reload_btn.place_forget()
+
+    def refetch_tab(self, tab_key):
+        """Triggers a refetch of a specific tab."""
+        self.reset_single_tab(tab_key)
+        self.fetch_tab_data(tab_key)
+
+    def reset_single_tab(self, tab_key):
+        """Resets a single tab back to pending (prefetch) state."""
+        self.tab_status[tab_key] = "pending"
+        self.tab_scroll_frames[tab_key].pack_forget()
+        self.tab_prefetch_frames[tab_key].pack(fill="both", expand=True)
+        # Clear specific grids/data for this tab
+        for view in self.tab_views_mapping[tab_key]:
+            if hasattr(view, "reset_view"):
+                view.reset_view()
+
+    def fetch_tab_data(self, tab_key):
+        tenant, clients, secrets = self._get_credentials()
+        if not tenant:
+            messagebox.showerror("Credential Error", "Please provide complete Tenant ID, Client ID, and Client Secret strings.", parent=self)
+            return
+
+        self.tab_prefetch_frames[tab_key].pack_forget()
+        self.tab_scroll_frames[tab_key].pack(fill="both", expand=True)
+
+        self.tab_status[tab_key] = "loading"
+        self.is_fetching = True
+        if hasattr(self, "on_fetch_started_callback") and self.on_fetch_started_callback:
+            self.on_fetch_started_callback()
+
+        self.lbl_lic_status.configure(text=f"Scanning {self.tab_labels[tab_key].cget('text')} tab...", text_color=COLOR_TEXT_SUB)
+        self._update_refetch_buttons_visibility()
+
+        views = self.tab_views_mapping[tab_key]
+        for view in views:
+            if isinstance(view, SubscribedSKUsFrame):
+                view.trigger_fetch(tenant, clients, secrets)
+            else:
+                view.trigger_fetch(tenant, clients[0], secrets[0])
 
     def _hide_all_grids(self):
         views = [
@@ -348,10 +540,17 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.lic_tenant_id.set("")
         self.lic_client_ids.set("")
         self.lic_client_secrets.set("")
+
+        for tab_key in self.tab_status:
+            self.tab_status[tab_key] = "pending"
+            self.tab_scroll_frames[tab_key].pack_forget()
+            self.tab_prefetch_frames[tab_key].pack(fill="both", expand=True)
+
+        self._hide_all_grids()
         self.btn_lic_submit.configure(state="normal", text="Submit")
         self.lbl_lic_status.configure(text="")
-        self.current_batch_index = 0
-        self._hide_all_grids()
+        self._update_refetch_buttons_visibility()
+        self.select_tab("tenant_identity")
 
     def _get_credentials(self):
         tenant = self.lic_tenant_id.get().strip()
@@ -366,59 +565,42 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         return tenant, clients, secrets
 
     def _check_all_done(self):
-        """Checks if all sections of the current batch have resolved, then triggers next batch or finishes."""
+        """Checks the completion status of the sub-views in the currently loading tabs."""
         if not getattr(self, "is_fetching", False):
-            # If fetching was cancelled, ignore any further background thread completions
             return
 
-        if not hasattr(self, "batches"):
-            return
+        for tab_key, views in self.tab_views_mapping.items():
+            if self.tab_status[tab_key] == "loading":
+                statuses = [v.status for v in views]
+                if "loading" in statuses:
+                    continue
+                elif all(s == "success" for s in statuses):
+                    self.tab_status[tab_key] = "success"
+                elif "error" in statuses:
+                    self.tab_status[tab_key] = "error"
+                else:
+                    self.tab_status[tab_key] = None
 
-        current_views = self.batches[self.current_batch_index]
-        batch_states = [view.status for view in current_views if view not in [self.devices_apps_view, self.intune_policies_view]]
-
-        if "loading" in batch_states:
-            return
-
-        # Current batch completed. Check if there are more batches to run
-        if self.current_batch_index < len(self.batches) - 1:
-            self.current_batch_index += 1
-            self.trigger_current_batch()
-            return
-
-        # All batches have finished. Make sure no individual retries are still loading
-        all_views = [view for batch in self.batches for view in batch]
-        global_states = [v.status for v in all_views if v not in [self.devices_apps_view, self.intune_policies_view]]
-        if "loading" in global_states:
-            return
-
-        # Re-enable the submit button
-        self.is_fetching = False
-        self.btn_lic_submit.configure(state="normal", text="Submit")
-
-        success = all(s == "success" for s in global_states)
-        if success:
-            self.lbl_lic_status.configure(text="✔ All Inventory and Usage Reports Pulled Successfully!", text_color=COLOR_SUCCESS)
-        else:
-            self.lbl_lic_status.configure(text="⚠ Some reports failed. Please retry individually.", text_color=COLOR_ERROR)
-
-        if hasattr(self, "on_all_done_callback") and self.on_all_done_callback:
-            self.on_all_done_callback(success)
-
-    def trigger_current_batch(self):
-        """Triggers the fetches for the current batch of sections."""
-        tenant, clients, secrets = self._get_credentials()
-        if not tenant:
-            return
-
-        current_views = self.batches[self.current_batch_index]
-        async_logger.info(f"Triggering batch {self.current_batch_index + 1} with {len(current_views)} views.")
-
-        for view in current_views:
-            if isinstance(view, SubscribedSKUsFrame):
-                view.trigger_fetch(tenant, clients, secrets)
+        loading_tabs = [k for k, status in self.tab_status.items() if status == "loading"]
+        
+        if not loading_tabs:
+            self.is_fetching = False
+            self.btn_lic_submit.configure(state="normal", text="Submit")
+            
+            any_failed = any(s == "error" for s in self.tab_status.values())
+            any_succeeded = any(s == "success" for s in self.tab_status.values())
+            
+            if not any_failed and any_succeeded:
+                self.lbl_lic_status.configure(text="✔ Telemetry tab scan completed successfully!", text_color=COLOR_SUCCESS)
+            elif any_succeeded:
+                self.lbl_lic_status.configure(text="⚠ Some tab scans completed with errors.", text_color=COLOR_ERROR)
             else:
-                view.trigger_fetch(tenant, clients[0], secrets[0])
+                self.lbl_lic_status.configure(text="✖ Scans failed or cancelled.", text_color=COLOR_ERROR)
+
+            self._update_refetch_buttons_visibility()
+
+            if hasattr(self, "on_all_done_callback") and self.on_all_done_callback:
+                self.on_all_done_callback(any_succeeded)
 
     def authenticate_licenses_tab(self):
         """Master full sequential fetch of sections, or cancel if already fetching."""
@@ -426,7 +608,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.cancel_fetching()
             return
 
-        async_logger.info("Master Submit triggered. Restarting all fetches sequentially.")
+        async_logger.info("Master Submit triggered. Restarting all tab fetches.")
 
         tenant, clients, secrets = self._get_credentials()
         if not tenant:
@@ -435,14 +617,15 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             return
 
         self.is_fetching = True
+        if hasattr(self, "on_fetch_started_callback") and self.on_fetch_started_callback:
+            self.on_fetch_started_callback()
+
         self.btn_lic_submit.configure(state="normal", text="Cancel")
-        self.lbl_lic_status.configure(text="Querying Microsoft Graph APIs and Reports sequentially...", text_color=COLOR_TEXT_SUB)
+        self.lbl_lic_status.configure(text="Querying Microsoft Graph APIs and Reports...", text_color=COLOR_TEXT_SUB)
 
-        # Reset all views first
-        self._hide_all_grids()
-
-        self.current_batch_index = 0
-        self.trigger_current_batch()
+        # Trigger fetch on all tabs
+        for tab_key in ["tenant_identity", "comm_storage", "apps_automation", "security_compliance"]:
+            self.fetch_tab_data(tab_key)
 
     def cancel_fetching(self):
         """Cancels the current fetching process and stops all subsequent batches."""
@@ -452,11 +635,15 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.btn_lic_submit.configure(state="normal", text="Submit")
         self.lbl_lic_status.configure(text="✖ Query cancelled by user.", text_color=COLOR_ERROR)
         
-        # Propagate cancel to all top-level views
-        for batch in self.batches:
-            for view in batch:
-                if hasattr(view, "cancel"):
-                    view.cancel()
+        for leaf in self._get_all_leaf_views():
+            if hasattr(leaf, "cancel"):
+                leaf.cancel()
+
+        for tab_key in self.tab_status:
+            if self.tab_status[tab_key] == "loading":
+                self.tab_status[tab_key] = "error"
+
+        self._update_refetch_buttons_visibility()
 
         if hasattr(self, "on_all_done_callback") and self.on_all_done_callback:
             self.on_all_done_callback(False)
@@ -868,6 +1055,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
 
         return {
             "tenant_id": tenant,
+            "fetched_tabs": [k for k, s in self.tab_status.items() if s == "success"],
             "skus": getattr(self.subscribed_skus_view, "last_licenses_items", []),
             "directory": {
                 "organization": getattr(self.directory_view, "last_organization", []),
@@ -897,40 +1085,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "power_automate": getattr(self.power_automate_view, "last_results", {})
         }
 
-    def is_descendant(self, parent, widget) -> bool:
-        """Recursively checks if a widget (or its Tkinter path name) is a descendant of parent."""
-        if not widget:
-            return False
-        if isinstance(widget, str):
-            try:
-                widget = self.nametowidget(widget)
-            except Exception:
-                return False
-        if widget == parent:
-            return True
-        if hasattr(widget, "master") and widget.master is not None:
-            return self.is_descendant(parent, widget.master)
-        return False
 
-    def _handle_global_mousewheel(self, event):
-        """Redirects mousewheel scrolling to the tab's parent canvas if hovered."""
-        try:
-            widget = self.winfo_containing(event.x_root, event.y_root)
-        except Exception:
-            return
-
-        if self.is_descendant(self, widget):
-            if event.num == 4:  # Linux scroll up
-                self._parent_canvas.yview("scroll", -1, "units")
-            elif event.num == 5:  # Linux scroll down
-                self._parent_canvas.yview("scroll", 1, "units")
-            else:  # Windows / macOS
-                if sys.platform == "darwin":
-                    # macOS trackpad/mouse delta
-                    self._parent_canvas.yview("scroll", -event.delta, "units")
-                else:
-                    # Windows delta (usually multiple of 120)
-                    self._parent_canvas.yview("scroll", -int(event.delta / 120), "units")
 
     def _monitor_memory_loop(self):
         """Periodically measures current resident set size (RSS) RAM usage of the python process and logs it."""
@@ -952,3 +1107,70 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             
             async_logger.info(f"💾 Application Current Memory Usage (RSS): {mem_mb:.2f} MB")
             time.sleep(30)
+
+
+import tkinter as tk
+
+class ToolTip:
+    """Standard lightweight Tkinter tooltip overlay helper class."""
+    
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_label = None
+        self.id = None
+        self.widget.bind("<Enter>", self.enter)
+        self.widget.bind("<Leave>", self.leave)
+
+    def enter(self, event=None):
+        self.schedule()
+
+    def leave(self, event=None):
+        self.unschedule()
+        self.hidetip()
+
+    def schedule(self):
+        self.unschedule()
+        self.id = self.widget.after(400, self.showtip)
+
+    def unschedule(self):
+        id_ = self.id
+        self.id = None
+        if id_:
+            self.widget.after_cancel(id_)
+
+    def showtip(self, event=None):
+        if self.tip_label or not self.text:
+            return
+            
+        root = self.widget.winfo_toplevel()
+        
+        # Calculate screen coordinates relative to the main application window
+        rx = self.widget.winfo_rootx() - root.winfo_rootx()
+        ry = self.widget.winfo_rooty() - root.winfo_rooty()
+        
+        x = rx + (self.widget.winfo_width() / 2) - 55
+        y = ry + self.widget.winfo_height() + 4
+        
+        self.tip_label = ctk.CTkLabel(
+            root,
+            text=self.text,
+            fg_color="#1E293B",
+            text_color="white",
+            corner_radius=4,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="normal"),
+            padx=6,
+            pady=3
+        )
+        self.tip_label.place(x=x, y=y)
+        self.tip_label.lift()
+
+    def hidetip(self):
+        lbl = self.tip_label
+        self.tip_label = None
+        if lbl:
+            try:
+                lbl.place_forget()
+                lbl.destroy()
+            except Exception:
+                pass
