@@ -163,7 +163,7 @@ class EOGroupMailBoxEstimator(Estimator):
         if not group_ids:
             return group_to_thread_ids
             
-        thread_api = "groups/{group_id}/threads?$select=id&$top=100"
+        thread_api = "groups/{group_id}/threads?$select=id&$top=10"
         
         group_id_maps = [{"group_id": group_id} for group_id in group_ids]
         group_batches = create_batches(thread_api, group_id_maps, self.config.parallel_batches, True)
