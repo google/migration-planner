@@ -190,6 +190,8 @@ class DirectoryFrame(ctk.CTkFrame):
         
         self.org_header_frame.pack_forget()
         self.org_grid.pack_forget()
+        if hasattr(self, "org_footnote") and self.org_footnote.winfo_exists():
+            self.org_footnote.pack_forget()
         self.divider_org_domains.pack_forget()
         
         self.domains_header_frame.pack_forget()
@@ -262,6 +264,8 @@ class DirectoryFrame(ctk.CTkFrame):
         self.pack(fill="x", expand=True, pady=10)
         self.org_header_frame.pack_forget()
         self.org_grid.pack_forget()
+        if hasattr(self, "org_footnote") and self.org_footnote.winfo_exists():
+            self.org_footnote.pack_forget()
         self.divider_org_domains.pack_forget()
         self.domains_header_frame.pack_forget()
         self.domains_grid.pack_forget()
@@ -399,6 +403,19 @@ class DirectoryFrame(ctk.CTkFrame):
         # Display UI titles and tables
         self.org_header_frame.pack(fill="x", pady=(10, 10))
         self.org_grid.pack(fill="x", expand=True, pady=(0, 10))
+        
+        if hasattr(self, "org_footnote") and self.org_footnote.winfo_exists():
+            self.org_footnote.destroy()
+            
+        self.org_footnote = ctk.CTkLabel(
+            self.inner_pad,
+            text="* If OnPremisesSyncEnabled returns True, on-premises Active Directory is a primary source of truth. If it returns Null or False, the directory is cloud-managed or driven by a 3rd-party application.",
+            font=FONT_BODY_SMALL,
+            text_color=COLOR_TEXT_SUB,
+            justify="left",
+            wraplength=800
+        )
+        self.org_footnote.pack(anchor="w", padx=10, pady=(0, 10))
         
         self.divider_org_domains.pack(fill="x", pady=15)
         

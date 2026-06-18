@@ -434,6 +434,8 @@ def generate_pdf_report(data: dict, filepath: str):
                 ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
             ]))
             story.append(org_table)
+            story.append(Spacer(1, 4))
+            story.append(Paragraph("<font size=8 color='#6B7280'>* If OnPremisesSyncEnabled returns True, on-premises Active Directory is a primary source of truth. If it returns Null or False, the directory is cloud-managed or driven by a 3rd-party application.</font>", body_style))
             
         story.append(Spacer(1, 15))
 
