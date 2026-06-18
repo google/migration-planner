@@ -412,10 +412,11 @@ class DirectoryFrame(ctk.CTkFrame):
             text="* If OnPremisesSyncEnabled returns True, on-premises Active Directory is a primary source of truth. If it returns Null or False, the directory is cloud-managed or driven by a 3rd-party application.",
             font=FONT_BODY_SMALL,
             text_color=COLOR_TEXT_SUB,
+            anchor="w",
             justify="left",
-            wraplength=800
+            wraplength=1100
         )
-        self.org_footnote.pack(anchor="w", padx=10, pady=(0, 10))
+        self.org_footnote.pack(fill="x", padx=10, pady=(0, 10))
         
         self.divider_org_domains.pack(fill="x", pady=15)
         
