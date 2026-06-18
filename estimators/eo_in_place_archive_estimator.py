@@ -508,7 +508,6 @@ class EOInPlaceArchiveEstimator(Estimator):
 
         for mail_box_id, sub_folders in child_folders.items():
             for sub_folder in sub_folders:
-                redirected = False
                 # 1. Safely handle totalItemCount
                 if "totalItemCount" in sub_folder:
                     try:
@@ -522,7 +521,6 @@ class EOInPlaceArchiveEstimator(Estimator):
                         if mail_box_id_received_from_response != mail_box_id:
                             if self.logger:
                                 self.logger(f"Received an aux mailbox {mail_box_id_received_from_response} for folder {sub_folder.get('displayName')} and originally used mail box id: {mail_box_id}. Item Count received in original request: {count}")
-
                             
                             futures.append(
                                 self.aux_executor.submit(
