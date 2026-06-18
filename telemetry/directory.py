@@ -323,7 +323,7 @@ class DirectoryFrame(ctk.CTkFrame):
             
             # 1. Write domains CSV
             csv_path = os.path.join(reports_dir, "directory_domains.csv")
-            headers = ["Domain ID", "Authentication Type", "Admin Managed", "Default", "Verified", "Supported Services"]
+            headers = ["Domain ID", "Authentication Type", "Admin Managed", "Default", "Verified", "Supported Services", "Federation Display Name", "Federation Issuer URI"]
             rows = []
             for domain in telemetry_data.get("domains", []):
                 auth_type = domain.get("authenticationType", "N/A") or "N/A"
@@ -332,7 +332,9 @@ class DirectoryFrame(ctk.CTkFrame):
                 is_verified = "Yes" if domain.get("isVerified") else "No"
                 services = domain.get("supportedServices", [])
                 services_str = ", ".join(services) if services else "-"
-                rows.append([domain.get("id", "-"), auth_type, admin_managed, is_default, is_verified, services_str])
+                fed_idp = domain.get("federationDisplayName") or "-"
+                fed_issuer = domain.get("federationIssuerUri") or "-"
+                rows.append([domain.get("id", "-"), auth_type, admin_managed, is_default, is_verified, services_str, fed_idp, fed_issuer])
 
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
@@ -520,7 +522,9 @@ class DirectoryFrame(ctk.CTkFrame):
                             "isAdminManaged": row[2] == "Yes",
                             "isDefault": row[3] == "Yes",
                             "isVerified": row[4] == "Yes",
-                            "supportedServices": [s.strip() for s in row[5].split(",")] if row[5] != "-" else []
+                            "supportedServices": [s.strip() for s in row[5].split(",")] if row[5] != "-" else [],
+                            "federationDisplayName": row[6] if len(row) > 6 else "-",
+                            "federationIssuerUri": row[7] if len(row) > 7 else "-"
                         })
         except Exception as e:
             usage_logger.error(f"Error reading CSV for Domains pagination: {e}")
@@ -536,10 +540,10 @@ class DirectoryFrame(ctk.CTkFrame):
         for w in self.domains_grid.winfo_children():
             w.destroy()
 
-        self.domains_grid.grid_columnconfigure((0, 5), weight=3)
+        self.domains_grid.grid_columnconfigure((0, 5, 6, 7), weight=3)
         self.domains_grid.grid_columnconfigure((1, 2, 3, 4), weight=2)
 
-        domains_headers = ["Domain ID", "Auth Type", "Admin Managed", "Default", "Verified", "Supported Services"]
+        domains_headers = ["Domain ID", "Auth Type", "Admin Managed", "Default", "Verified", "Supported Services", "Federation Display Name", "Federation Issuer URI"]
         for col_idx, head_text in enumerate(domains_headers):
             cell = ctk.CTkFrame(self.domains_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
@@ -549,7 +553,7 @@ class DirectoryFrame(ctk.CTkFrame):
 
         if not page_data:
             empty_cell = ctk.CTkFrame(self.domains_grid, fg_color="transparent")
-            empty_cell.grid(row=1, column=0, columnspan=6, sticky="nsew", pady=15)
+            empty_cell.grid(row=1, column=0, columnspan=8, sticky="nsew", pady=15)
             ctk.CTkLabel(empty_cell, text="No domains found under the organization.", text_color=COLOR_TEXT_SUB).pack()
         else:
             for item_idx, domain in enumerate(page_data, start=1):
@@ -590,7 +594,17 @@ class DirectoryFrame(ctk.CTkFrame):
                 # Supported Services
                 c5 = ctk.CTkFrame(self.domains_grid, fg_color=bg_style, corner_radius=0)
                 c5.grid(row=item_idx, column=5, sticky="nsew", padx=0, pady=(0, 1))
-                ctk.CTkLabel(c5, text=services_str, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=250).pack(padx=10, pady=8, anchor="nw")
+                ctk.CTkLabel(c5, text=services_str, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=180).pack(padx=10, pady=8, anchor="nw")
+
+                # Federated IdP Name
+                c6 = ctk.CTkFrame(self.domains_grid, fg_color=bg_style, corner_radius=0)
+                c6.grid(row=item_idx, column=6, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(c6, text=domain.get("federationDisplayName", "-"), text_color=COLOR_TEXT_MAIN, justify="left", wraplength=180).pack(padx=10, pady=8, anchor="nw")
+
+                # Federated Issuer URI
+                c7 = ctk.CTkFrame(self.domains_grid, fg_color=bg_style, corner_radius=0)
+                c7.grid(row=item_idx, column=7, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(c7, text=domain.get("federationIssuerUri", "-"), text_color=COLOR_TEXT_MAIN, justify="left", wraplength=200).pack(padx=10, pady=8, anchor="nw")
 
         # Draw pagination controls if we have multiple pages
         if total_count > 0:

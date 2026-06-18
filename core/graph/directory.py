@@ -213,6 +213,53 @@ class DirectoryService:
                 count_val = body.get("@odata.count", 0)
                 user_counts[resp_id] = count_val
 
+        # Fetch federation configuration details for federated domains
+        federated_domains = [d for d in domains_list if str(d.get("authenticationType", "")).lower() == "federated"]
+        if federated_domains:
+            token_slot = self.client.get_active_token()
+            session = self.client.get_session()
+            headers = {
+                "Authorization": f"Bearer {token_slot['token']}",
+                "Accept": "application/json"
+            }
+            try:
+                for domain in federated_domains:
+                    domain_id = domain.get("id")
+                    fed_url = f"https://graph.microsoft.com/v1.0/domains/{domain_id}/federationConfiguration"
+                    logger.info("Fetching federation configuration for domain: %s", domain_id)
+                    try:
+                        fed_resp = session.get(fed_url, headers=headers, timeout=30.0)
+                        if fed_resp.status_code == 200:
+                            fed_vals = fed_resp.json().get("value", [])
+                            if fed_vals:
+                                domain["federationDisplayName"] = fed_vals[0].get("displayName") or "N/A"
+                                domain["federationIssuerUri"] = fed_vals[0].get("issuerUri") or "N/A"
+                            else:
+                                domain["federationDisplayName"] = "N/A"
+                                domain["federationIssuerUri"] = "N/A"
+                        else:
+                            try:
+                                err_msg = fed_resp.json().get("error", {}).get("message", f"HTTP {fed_resp.status_code}")
+                            except Exception:
+                                err_msg = f"HTTP {fed_resp.status_code}"
+                            if len(err_msg) > 50:
+                                err_msg = err_msg[:47] + "..."
+                            domain["federationDisplayName"] = err_msg
+                            domain["federationIssuerUri"] = err_msg
+                    except Exception as err:
+                        logger.warning("Error fetching federation configuration for %s: %s", domain_id, err)
+                        err_msg = str(err)
+                        if "timeout" in err_msg.lower():
+                            err_msg = "Timeout Error"
+                        elif "connection" in err_msg.lower():
+                            err_msg = "Connection Error"
+                        else:
+                            err_msg = "Request Error"
+                        domain["federationDisplayName"] = err_msg
+                        domain["federationIssuerUri"] = err_msg
+            finally:
+                self.client.release_token(token_slot)
+
         # Normalize user counts dictionary keys for the UI
         normalized_user_counts = {
             "total": user_counts["users_total"],

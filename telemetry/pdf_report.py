@@ -454,7 +454,9 @@ def generate_pdf_report(data: dict, filepath: str):
                 Paragraph("Admin Managed", table_cell_header),
                 Paragraph("Default", table_cell_header),
                 Paragraph("Verified", table_cell_header),
-                Paragraph("Supported Services", table_cell_header)
+                Paragraph("Supported Services", table_cell_header),
+                Paragraph("Federation Display Name", table_cell_header),
+                Paragraph("Federation Issuer URI", table_cell_header)
             ]]
             for item in domains:
                 auth_type = item.get("authenticationType", "N/A") or "N/A"
@@ -463,6 +465,8 @@ def generate_pdf_report(data: dict, filepath: str):
                 is_verified = "Yes" if item.get("isVerified") else "No"
                 services = item.get("supportedServices", [])
                 services_str = ", ".join(services) if services else "-"
+                fed_idp = item.get("federationDisplayName") or "-"
+                fed_issuer = item.get("federationIssuerUri") or "-"
                 
                 domains_table_data.append([
                     Paragraph(item.get("id", "-"), table_cell_bold),
@@ -470,9 +474,11 @@ def generate_pdf_report(data: dict, filepath: str):
                     Paragraph(admin_managed, table_cell_style),
                     Paragraph(is_default, table_cell_style),
                     Paragraph(is_verified, table_cell_style),
-                    Paragraph(services_str, table_cell_style)
+                    Paragraph(services_str, table_cell_style),
+                    Paragraph(fed_idp, table_cell_style),
+                    Paragraph(fed_issuer, table_cell_style)
                 ])
-            domains_table = Table(domains_table_data, colWidths=[110, 65, 80, 45, 45, 155])
+            domains_table = Table(domains_table_data, colWidths=[80, 50, 45, 35, 35, 95, 80, 80])
             domains_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), primary_color),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
