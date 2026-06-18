@@ -53,17 +53,17 @@ class FileEstimator(Estimator):
         """Calculates duration in HOURS based on batching throughput constraints."""
         items = data.get("items", {})
         batch_corpus_size = sum(item["size"] for item in items)
-        batch_resource_count = sum(item["files"] + item["folders"] + item["shortcuts"] for item in items)
-        
-        global_count_limit = data.get("FILES_GLOBAL_COUNT_LIMIT")
-        global_corpus_size_limit = data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT")
-        
-        # Since there is no per site throttling limit using the min of the global limits by count, corpus
-        seconds_by_count = batch_resource_count / global_count_limit
-        seconds_by_size = batch_corpus_size / global_corpus_size_limit
+        batch_resource_count = sum(item["files"] for item in items)
 
-        total_seconds = max(seconds_by_count, seconds_by_size)
-        return total_seconds / 3600.0
+        average_batch_file_size = batch_corpus_size / batch_resource_count if batch_resource_count > 0 else 0
+
+        max_qps_from_file_size = data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT") / average_batch_file_size if average_batch_file_size > 0 else data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT")
+        max_qps_from_license_counts = data.get("FILES_GLOBAL_COUNT_LIMIT")
+        
+        qps = min(max_qps_from_license_counts, max_qps_from_file_size)
+        
+        time_in_seconds =  batch_resource_count / qps
+        return time_in_seconds / 3600
 
     def calculate_resource_metrics(
         self, 
@@ -892,7 +892,17 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ) -> Dict[str, int]:
         try:
-            drive_url = "/sites/{siteId}/drives?$select=id,driveType,webUrl&$top=999"
+            def filter_personal_cache_library(batch_responses):
+                if not batch_responses:
+                    return
+                for resp in batch_responses:
+                    if "body" in resp and "value" in resp["body"] and isinstance(resp["body"]["value"], list):
+                        resp["body"]["value"] = [
+                            d for d in resp["body"]["value"]
+                            if d.get("name") != "PersonalCacheLibrary"
+                        ]
+
+            drive_url = "/sites/{siteId}/drives?$select=id,name,driveType,webUrl&$top=999"
             batches = create_batches(drive_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -924,6 +934,7 @@ class FileEstimator(Estimator):
             for future in as_completed(futures_map.values()):
                 batch_id = future_to_batch_id[future]
                 responses = future.result()
+                filter_personal_cache_library(responses)
                 batch = batch_id_to_batch_map[batch_id]
                 batch_responses_map = get_batch_responses_map(responses, self.logger)
                 for req in batch:
@@ -975,6 +986,7 @@ class FileEstimator(Estimator):
                 for future in as_completed(next_futures_map.values()):
                     batch_id = future_to_batch_id[future]
                     responses = future.result()
+                    filter_personal_cache_library(responses)
                     batch = next_batch_id_to_batch_map[batch_id]
                     new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BASE_URL, failures, False, local_progress_callback))
                     

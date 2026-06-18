@@ -1403,7 +1403,7 @@ class MigrationEstimatorTool(ctk.CTk):
       one_token_per_app_manager = None
       if config.scan_in_place_archives:
         one_token_per_app_manager = self._authenticate_if_needed(config, use_single_app=True)
-      self.factory = EstimatorFactory(config, manager, self.log_msg, self.stop_scan_event, None)
+      self.factory = EstimatorFactory(config, manager, one_token_per_app_manager, self.log_msg, self.stop_scan_event, None)
       
       # 3. User Discovery
       all_users, existing_data, groups, shared_mailboxes = self._resolve_target_users(config, manager, one_token_per_app_manager)
@@ -1802,7 +1802,7 @@ class MigrationEstimatorTool(ctk.CTk):
     executor = ThreadPoolExecutor(max_workers=config.concurrency)
     estimator: Estimator = None
     if resource_type == "in_place_archives":
-      estimator = self.factory.get_in_place_archive_estimator(use_delta_api=True)
+      estimator = self.factory.get_in_place_archive_estimator(use_delta_api=False)
     elif resource_type == "shared_mails":
       estimator = self.factory.get_shared_mailbox_estimator()
     

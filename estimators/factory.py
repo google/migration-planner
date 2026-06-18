@@ -15,6 +15,7 @@ class EstimatorFactory:
     self,
     config: ScanConfig,
     manager: TokenManager = None,
+    one_token_per_app_manager = None,
     logger = None,
     stop_event = None,
     id_to_display_name = None
@@ -31,6 +32,8 @@ class EstimatorFactory:
     self.url_invoker = None
     self.chat_estimator = None
     self.mock_url_invoker = None
+    self.one_token_per_app_manager = one_token_per_app_manager
+    self.child_folder_url_invoker = None
   
   def isEmpty(self, data):
     return data is None or len(data) == 0
@@ -62,6 +65,16 @@ class EstimatorFactory:
       )
 
     return self.url_invoker
+  
+  def get_child_folder_url_invoker(self, hard_reset=False):
+    if self.child_folder_url_invoker is None or hard_reset:
+      if self.one_token_per_app_manager is None:
+        raise Exception("One token per app manager not initialized!!")
+      self.child_folder_url_invoker = UrlInvoker(
+        self.one_token_per_app_manager, self.config.retries, self.config.backoff, 1, 0.5
+      )
+
+    return self.child_folder_url_invoker
 
   def get_mock_url_invoker(self, hard_reset=False, seed=None):
     if self.mock_url_invoker is None or hard_reset:
@@ -120,10 +133,11 @@ class EstimatorFactory:
       if self.in_place_archive_estimator is not None:
         self.in_place_archive_estimator.shutdown()
       url_invoker = self.get_url_invoker()
+      child_folder_url_invoker = self.get_child_folder_url_invoker()
       self.in_place_archive_estimator = EOInPlaceArchiveEstimator(
           self.config,
           url_invoker,
-          None,  # TODO Add support for non delta API based flow through factory
+          child_folder_url_invoker,
           logger=self.logger,
           stop_event=self.stop_event,
           use_delta_api=use_delta_api,

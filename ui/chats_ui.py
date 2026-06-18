@@ -1606,7 +1606,7 @@ class ChatMigrationEstimatorTool(ctk.CTk):
       manager = self._authenticate_if_needed(config)
 
       self.factory = EstimatorFactory(
-          config, manager, self.log_msg, self.stop_scan_event, None
+          config, manager, None, self.log_msg, self.stop_scan_event, None
       )
 
       # 3. User Discovery
