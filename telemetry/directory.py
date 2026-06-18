@@ -196,6 +196,8 @@ class DirectoryFrame(ctk.CTkFrame):
         
         self.domains_header_frame.pack_forget()
         self.domains_grid.pack_forget()
+        if hasattr(self, "domains_footnote") and self.domains_footnote.winfo_exists():
+            self.domains_footnote.pack_forget()
         self.divider.pack_forget()
         self.groups_users_header_frame.pack_forget()
         self.groups_users_grid.pack_forget()
@@ -269,6 +271,8 @@ class DirectoryFrame(ctk.CTkFrame):
         self.divider_org_domains.pack_forget()
         self.domains_header_frame.pack_forget()
         self.domains_grid.pack_forget()
+        if hasattr(self, "domains_footnote") and self.domains_footnote.winfo_exists():
+            self.domains_footnote.pack_forget()
         self.divider.pack_forget()
         self.groups_users_header_frame.pack_forget()
         self.groups_users_grid.pack_forget()
@@ -420,8 +424,23 @@ class DirectoryFrame(ctk.CTkFrame):
         
         self.divider_org_domains.pack(fill="x", pady=15)
         
+        self.domains_header_frame.pack_forget()
         self.domains_header_frame.pack(fill="x", pady=(10, 10))
         self.domains_grid.pack(fill="x", expand=True, pady=(0, 10))
+        
+        if hasattr(self, "domains_footnote") and self.domains_footnote.winfo_exists():
+            self.domains_footnote.destroy()
+            
+        self.domains_footnote = ctk.CTkLabel(
+            self.inner_pad,
+            text="* AuthenticationType=Managed indicates a cloud managed domain where Microsoft Entra ID performs user authentication. Federated indicates authentication is federated with an identity provider (eg. AD FS, Okta etc.)",
+            font=FONT_BODY_SMALL,
+            text_color=COLOR_TEXT_SUB,
+            anchor="w",
+            justify="left",
+            wraplength=1100
+        )
+        self.domains_footnote.pack(fill="x", padx=10, pady=(0, 10))
         
         self.divider.pack(fill="x", pady=15)
         

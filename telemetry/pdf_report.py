@@ -483,6 +483,8 @@ def generate_pdf_report(data: dict, filepath: str):
                 ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
             ]))
             story.append(domains_table)
+            story.append(Spacer(1, 4))
+            story.append(Paragraph("<font size=8 color='#6B7280'>* AuthenticationType=Managed indicates a cloud managed domain where Microsoft Entra ID performs user authentication. Federated indicates authentication is federated with an identity provider (eg. AD FS, Okta etc.)</font>", body_style))
             
         story.append(Spacer(1, 15))
         
