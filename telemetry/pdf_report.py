@@ -493,6 +493,48 @@ def generate_pdf_report(data: dict, filepath: str):
             story.append(Paragraph("<font size=8 color='#6B7280'>* AuthenticationType=Managed indicates a cloud managed domain where Microsoft Entra ID performs user authentication. Federated indicates authentication is federated with an identity provider (eg. AD FS, Okta etc.)</font>", body_style))
             
         story.append(Spacer(1, 15))
+
+        # 2b. User Creation/Deletion Logs Table
+        story.append(Paragraph("User Creation/Deletion Logs", h2_style))
+        story.append(Paragraph("This section displays directory audit logs for user creation and deletion events, indicating who initiated the action and the associated details.", body_style))
+        story.append(Spacer(1, 8))
+        
+        user_creation_logs = dir_data.get("user_creation_logs", [])
+        if not user_creation_logs:
+            story.append(Paragraph("No user creation or deletion audit logs discovered.", body_style))
+        elif user_creation_logs[0].get("activity") == "ERROR":
+            err_msg = user_creation_logs[0].get("initiatedBy")
+            story.append(Paragraph(f"Error: {err_msg}", ParagraphStyle('ErrTxtUserCreation', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+        else:
+            user_creation_table_data = [[
+                Paragraph("Activity", table_cell_header),
+                Paragraph("Initiated By", table_cell_header)
+            ]]
+            
+            for log in user_creation_logs:
+                activity = log.get("activity") or "-"
+                init_by = log.get("initiatedBy") or "-"
+                
+                user_creation_table_data.append([
+                    Paragraph(activity, table_cell_bold),
+                    Paragraph(init_by, table_cell_style)
+                ])
+                
+            user_creation_table = Table(user_creation_table_data, colWidths=[124, 380])
+            user_creation_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(user_creation_table)
+            story.append(Spacer(1, 4))
+            story.append(Paragraph("<font size=8 color='#6B7280'>* Based on sampled data collected from audit logs.</font>", body_style))
+        
+        story.append(Spacer(1, 15))
         
         # 3. Groups & Users Table
         story.append(Paragraph("Groups & Users", h2_style))

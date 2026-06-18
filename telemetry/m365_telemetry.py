@@ -873,6 +873,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "directory": {
                 "organization": getattr(self.directory_view, "last_organization", []),
                 "domains": getattr(self.directory_view, "last_domains", []),
+                "user_creation_logs": getattr(self.directory_view, "last_user_creation_logs", []),
                 "group_counts": getattr(self.directory_view, "last_group_counts", {}),
                 "user_counts": getattr(self.directory_view, "last_user_counts", {})
             },

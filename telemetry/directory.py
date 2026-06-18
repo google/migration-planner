@@ -52,12 +52,15 @@ class DirectoryFrame(ctk.CTkFrame):
         self.last_group_counts = {}
         self.last_user_counts = {}
         self.last_domains = []
+        self.last_user_creation_logs = []
         
-        # Pagination variables for Domains
+        # Pagination variables for Domains and User Creation logs
         self.ITEMS_PER_PAGE = 10
         self.current_page = 0
+        self.user_creation_current_page = 0
         self.csv_path = None
         self.org_csv_path = None
+        self.user_creation_csv_path = None
         
         self.build_ui()
 
@@ -154,8 +157,48 @@ class DirectoryFrame(ctk.CTkFrame):
         self.domains_reload_btn.pack(side="right")
         self.domains_grid = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
-        # Divider between sections
-        self.divider = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
+        # Divider between Domains and User Creation logs
+        self.divider_domains_user_creation = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
+        
+        # User Creation logs sub-heading & grid
+        self.user_creation_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.user_creation_title = ctk.CTkLabel(
+            self.user_creation_header_frame,
+            text="User Creation/Deletion logs",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.user_creation_title.pack(side="left")
+        
+        self.user_creation_reference_link = ctk.CTkLabel(
+            self.user_creation_header_frame,
+            text="Directory Audit API Reference ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.user_creation_reference_link.pack(side="left", padx=(15, 0))
+        self.user_creation_reference_link.bind("<Button-1>", lambda e: webbrowser.open("https://learn.microsoft.com/en-us/graph/api/resources/directoryaudit?view=graph-rest-1.0"))
+        self.user_creation_reference_link.bind("<Enter>", lambda e: self.user_creation_reference_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.user_creation_reference_link.bind("<Leave>", lambda e: self.user_creation_reference_link.configure(text_color=COLOR_PRIMARY))
+        
+        self.user_creation_reload_btn = ctk.CTkButton(
+            self.user_creation_header_frame, 
+            state="disabled", text="↻ Reload", 
+            width=80, 
+            height=24,
+            font=__import__("customtkinter").CTkFont(family="Segoe UI", size=12),
+            fg_color="transparent", 
+            border_width=1, 
+            text_color="#2563EB", 
+            hover_color="#DBEAFE",
+            command=self._retry_fetch
+        )
+        self.user_creation_reload_btn.pack(side="right")
+        self.user_creation_grid = ctk.CTkFrame(self.inner_pad, fg_color=COLOR_OUTLINE_LIGHT, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
+        
+        # Divider between User Creation logs and Groups & Users
+        self.divider_user_creation_groups = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
         
         # Groups & Users sub-heading & grid
         self.groups_users_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
@@ -198,25 +241,39 @@ class DirectoryFrame(ctk.CTkFrame):
         self.domains_grid.pack_forget()
         if hasattr(self, "domains_footnote") and self.domains_footnote.winfo_exists():
             self.domains_footnote.pack_forget()
-        self.divider.pack_forget()
+        self.divider_domains_user_creation.pack_forget()
+        
+        self.user_creation_header_frame.pack_forget()
+        self.user_creation_grid.pack_forget()
+        if hasattr(self, "user_creation_footnote") and self.user_creation_footnote.winfo_exists():
+            self.user_creation_footnote.pack_forget()
+        self.divider_user_creation_groups.pack_forget()
+        
         self.groups_users_header_frame.pack_forget()
         self.groups_users_grid.pack_forget()
         if hasattr(self, "pagination_frame") and self.pagination_frame.winfo_exists():
             self.pagination_frame.destroy()
-
+        if hasattr(self, "user_creation_pagination_frame") and self.user_creation_pagination_frame.winfo_exists():
+            self.user_creation_pagination_frame.destroy()
+ 
         self.last_organization = []
         self.last_group_counts = {}
         self.last_user_counts = {}
         self.last_domains = []
+        self.last_user_creation_logs = []
         self.current_page = 0
+        self.user_creation_current_page = 0
         self.csv_path = None
         self.org_csv_path = None
+        self.user_creation_csv_path = None
         
         for w in self.state_frame.winfo_children():
             w.destroy()
         for w in self.org_grid.winfo_children():
             w.destroy()
         for w in self.domains_grid.winfo_children():
+            w.destroy()
+        for w in self.user_creation_grid.winfo_children():
             w.destroy()
         for w in self.groups_users_grid.winfo_children():
             w.destroy()
@@ -244,7 +301,7 @@ class DirectoryFrame(ctk.CTkFrame):
         self.state_frame.pack(fill="x", expand=True)
 
     def _retry_fetch(self):
-        for btn in ['org_reload_btn', 'domains_reload_btn', 'groups_users_reload_btn']:
+        for btn in ['org_reload_btn', 'domains_reload_btn', 'user_creation_reload_btn', 'groups_users_reload_btn']:
             if hasattr(self, btn) and getattr(self, btn).winfo_exists():
                 getattr(self, btn).configure(state="disabled")
         tenant, clients, secrets = self.get_credentials()
@@ -258,10 +315,12 @@ class DirectoryFrame(ctk.CTkFrame):
         self.on_status_change()
         
         self.current_page = 0
+        self.user_creation_current_page = 0
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
         self.csv_path = os.path.join(reports_dir, "directory_domains.csv")
         self.org_csv_path = os.path.join(reports_dir, "directory_organization.csv")
+        self.user_creation_csv_path = os.path.join(reports_dir, "directory_user_creation_logs.csv")
         
         self.pack(fill="x", expand=True, pady=10)
         self.org_header_frame.pack_forget()
@@ -269,17 +328,27 @@ class DirectoryFrame(ctk.CTkFrame):
         if hasattr(self, "org_footnote") and self.org_footnote.winfo_exists():
             self.org_footnote.pack_forget()
         self.divider_org_domains.pack_forget()
+        
         self.domains_header_frame.pack_forget()
         self.domains_grid.pack_forget()
         if hasattr(self, "domains_footnote") and self.domains_footnote.winfo_exists():
             self.domains_footnote.pack_forget()
-        self.divider.pack_forget()
+        self.divider_domains_user_creation.pack_forget()
+        
+        self.user_creation_header_frame.pack_forget()
+        self.user_creation_grid.pack_forget()
+        if hasattr(self, "user_creation_footnote") and self.user_creation_footnote.winfo_exists():
+            self.user_creation_footnote.pack_forget()
+        self.divider_user_creation_groups.pack_forget()
+        
         self.groups_users_header_frame.pack_forget()
         self.groups_users_grid.pack_forget()
         if hasattr(self, "pagination_frame") and self.pagination_frame.winfo_exists():
             self.pagination_frame.destroy()
+        if hasattr(self, "user_creation_pagination_frame") and self.user_creation_pagination_frame.winfo_exists():
+            self.user_creation_pagination_frame.destroy()
         
-        self._set_state_loading("Fetching directory organization, domains, users, and group counts...")
+        self._set_state_loading("Fetching directory organization, domains, user creation logs, and group counts...")
         
         retries_val = self.retries.get() if self.retries else 5
         backoff_val = self.backoff.get() if self.backoff else 2
@@ -309,17 +378,31 @@ class DirectoryFrame(ctk.CTkFrame):
             required_scopes = ["Directory.Read.All"]
             client.authenticate(required_scopes=required_scopes)
             
-            self.log_msg("Querying directory organization, domains, users, and group counts from Microsoft Graph...")
-            dir_service = DirectoryService(client)
-            telemetry_data = dir_service.get_directory_telemetry(self.log_msg)
-            client.close()
-            
-            usage_logger.info("Successfully fetched directory telemetry data. Writing to disk...")
-            
-            # Write to CSV on disk
             script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
             reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
             os.makedirs(reports_dir, exist_ok=True)
+
+            self.log_msg("Querying directory organization, domains, users, and group counts from Microsoft Graph...")
+            dir_service = DirectoryService(client)
+            telemetry_data = dir_service.get_directory_telemetry(self.log_msg)
+
+            self.log_msg("Querying User Creation logs from Microsoft Graph...")
+            user_creation_csv_path = os.path.join(reports_dir, "directory_user_creation_logs.csv")
+            user_creation_logs = []
+            
+            def handle_user_creation_page(page_rows):
+                user_creation_logs.extend(page_rows)
+                
+            dir_service.fetch_user_creation_logs(
+                csv_path=user_creation_csv_path,
+                max_rows=50,
+                on_page_callback=handle_user_creation_page,
+                is_cancelled_callback=lambda: getattr(self, "is_cancelled", False)
+            )
+            telemetry_data["user_creation_logs"] = user_creation_logs
+            client.close()
+            
+            usage_logger.info("Successfully fetched directory telemetry data. Writing to disk...")
             
             # 1. Write domains CSV
             csv_path = os.path.join(reports_dir, "directory_domains.csv")
@@ -389,19 +472,22 @@ class DirectoryFrame(ctk.CTkFrame):
 
     def _render_success(self, telemetry_dict: Dict[str, Any]):
         usage_logger.info("Executing UI render for Directory domains, users & groups tables.")
-        for btn in ['org_reload_btn', 'domains_reload_btn', 'groups_users_reload_btn']:
+        for btn in ['org_reload_btn', 'domains_reload_btn', 'user_creation_reload_btn', 'groups_users_reload_btn']:
             if hasattr(self, btn) and getattr(self, btn).winfo_exists():
                 getattr(self, btn).configure(state="normal")
         self.state_frame.pack_forget()
         
         self.last_organization = telemetry_dict.get("organization", [])
         self.last_domains = telemetry_dict.get("domains", [])
+        self.last_user_creation_logs = telemetry_dict.get("user_creation_logs", [])
         self.last_group_counts = telemetry_dict.get("group_counts", {})
         self.last_user_counts = telemetry_dict.get("user_counts", {})
 
         for w in self.org_grid.winfo_children():
             w.destroy()
         for w in self.domains_grid.winfo_children():
+            w.destroy()
+        for w in self.user_creation_grid.winfo_children():
             w.destroy()
         for w in self.groups_users_grid.winfo_children():
             w.destroy()
@@ -444,13 +530,34 @@ class DirectoryFrame(ctk.CTkFrame):
         )
         self.domains_footnote.pack(fill="x", padx=10, pady=(0, 10))
         
-        self.divider.pack(fill="x", pady=15)
+        self.divider_domains_user_creation.pack(fill="x", pady=15)
+        
+        self.user_creation_header_frame.pack_forget()
+        self.user_creation_header_frame.pack(fill="x", pady=(10, 10))
+        self.user_creation_grid.pack(fill="x", expand=True, pady=(0, 10))
+        
+        if hasattr(self, "user_creation_footnote") and self.user_creation_footnote.winfo_exists():
+            self.user_creation_footnote.destroy()
+            
+        self.user_creation_footnote = ctk.CTkLabel(
+            self.inner_pad,
+            text="* Based on sampled data collected from audit logs.",
+            font=FONT_BODY_SMALL,
+            text_color=COLOR_TEXT_SUB,
+            anchor="w",
+            justify="left",
+            wraplength=1100
+        )
+        self.user_creation_footnote.pack(fill="x", padx=10, pady=(0, 10))
+        
+        self.divider_user_creation_groups.pack(fill="x", pady=15)
         
         self.groups_users_header_frame.pack(fill="x", pady=(10, 10))
         self.groups_users_grid.pack(fill="x", expand=True, pady=(0, 10))
 
         self._render_org_grid()
         self._update_domains_ui_paginated()
+        self._update_user_creation_ui_paginated()
         self._render_groups_users_grid()
 
         self.status = "success"
@@ -713,10 +820,132 @@ class DirectoryFrame(ctk.CTkFrame):
 
             current_row += 1
 
+    def _load_user_creation_page_from_csv(self, page):
+        if not self.user_creation_csv_path or not os.path.exists(self.user_creation_csv_path):
+            return [], 0
+
+        logs = []
+        try:
+            with open(self.user_creation_csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # skip header
+                for row in reader:
+                    if row:
+                        logs.append({
+                            "activity": row[0],
+                            "initiatedBy": row[1]
+                        })
+        except Exception as e:
+            usage_logger.error(f"Error reading CSV for User Creation logs pagination: {e}")
+            
+        total_count = len(logs)
+        start_idx = page * self.ITEMS_PER_PAGE
+        end_idx = start_idx + self.ITEMS_PER_PAGE
+        page_data = logs[start_idx:end_idx]
+        
+        return page_data, total_count
+
+    def _update_user_creation_ui_paginated(self):
+        for w in self.user_creation_grid.winfo_children():
+            w.destroy()
+
+        self.user_creation_grid.grid_columnconfigure(0, weight=1)
+        self.user_creation_grid.grid_columnconfigure(1, weight=3)
+
+        headers = ["Activity", "Initiated By"]
+        for col_idx, head_text in enumerate(headers):
+            cell = ctk.CTkFrame(self.user_creation_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        page_data, total_count = self._load_user_creation_page_from_csv(self.user_creation_current_page)
+
+        if not page_data:
+            empty_cell = ctk.CTkFrame(self.user_creation_grid, fg_color="transparent")
+            empty_cell.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=15)
+            ctk.CTkLabel(empty_cell, text="No user creation/deletion logs found.", text_color=COLOR_TEXT_SUB).pack()
+        elif page_data[0].get("activity") == "ERROR":
+            err_msg = page_data[0].get("initiatedBy")
+            error_cell = ctk.CTkFrame(self.user_creation_grid, fg_color="transparent")
+            error_cell.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=15)
+            ctk.CTkLabel(error_cell, text=f"⚠️ {err_msg}", font=FONT_BODY_MEDIUM, text_color="#DC2626", justify="left", wraplength=1000).pack(padx=10, pady=5)
+        else:
+            for item_idx, log in enumerate(page_data, start=1):
+                bg_style = COLOR_SURFACE if item_idx % 2 == 0 else COLOR_SURFACE_VARIANT
+
+                vals = [
+                    log.get("activity", "-"),
+                    log.get("initiatedBy", "-")
+                ]
+
+                for col_idx, val in enumerate(vals):
+                    c = ctk.CTkFrame(self.user_creation_grid, fg_color=bg_style, corner_radius=0)
+                    c.grid(row=item_idx, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+                    
+                    wraplen = 600 if col_idx == 1 else 180
+                    ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=wraplen).pack(padx=10, pady=8, anchor="nw")
+
+        # Draw pagination controls if we have multiple pages
+        if total_count > 0:
+            self._draw_user_creation_pagination_controls(total_count)
+
+    def _draw_user_creation_pagination_controls(self, total_count):
+        total_pages = (total_count + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE
+        if total_pages <= 1:
+            return
+
+        if hasattr(self, "user_creation_pagination_frame") and self.user_creation_pagination_frame.winfo_exists():
+            self.user_creation_pagination_frame.destroy()
+
+        self.user_creation_pagination_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
+        self.user_creation_pagination_frame.pack(fill="x", pady=(2, 0), after=self.user_creation_grid)
+
+        left_spacer = ctk.CTkFrame(self.user_creation_pagination_frame, fg_color="transparent")
+        left_spacer.pack(side="left", fill="x", expand=True)
+
+        center_container = ctk.CTkFrame(self.user_creation_pagination_frame, fg_color="transparent")
+        center_container.pack(side="left")
+
+        prev_state = "normal" if self.user_creation_current_page > 0 else "disabled"
+        btn_prev = ctk.CTkButton(
+            center_container, text="◀ Prev", width=70, height=22, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
+            state=prev_state,
+            command=lambda: self._change_user_creation_page(-1)
+        )
+        btn_prev.pack(side="left", padx=5)
+
+        page_lbl = ctk.CTkLabel(
+            center_container,
+            text=f"Page {self.user_creation_current_page + 1} of {total_pages} ({total_count} logs)",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_SUB
+        )
+        page_lbl.pack(side="left", padx=15)
+
+        next_state = "normal" if self.user_creation_current_page < total_pages - 1 else "disabled"
+        btn_next = ctk.CTkButton(
+            center_container, text="Next ▶", width=70, height=22, corner_radius=6,
+            font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
+            state=next_state,
+            command=lambda: self._change_user_creation_page(1)
+        )
+        btn_next.pack(side="left", padx=5)
+
+        right_spacer = ctk.CTkFrame(self.user_creation_pagination_frame, fg_color="transparent")
+        right_spacer.pack(side="right", fill="x", expand=True)
+
+    def _change_user_creation_page(self, delta):
+        self.user_creation_current_page += delta
+        self._update_user_creation_ui_paginated()
+
     def _render_error(self, err_msg):
         usage_logger.warning(f"Rendering Directory error state: {err_msg}")
-        if hasattr(self, 'reload_btn') and self.reload_btn.winfo_exists():
-            self.reload_btn.configure(state="normal")
+        for btn in ['org_reload_btn', 'domains_reload_btn', 'user_creation_reload_btn', 'groups_users_reload_btn']:
+            if hasattr(self, btn) and getattr(self, btn).winfo_exists():
+                getattr(self, btn).configure(state="normal")
         self._set_state_error(err_msg)
         self.status = "error"
         self.on_status_change()
