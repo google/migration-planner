@@ -267,6 +267,8 @@ Click **"Show Advanced Settings"** to tune the performance:
 
     NOTE: If we already have the corpus data and we only want to re-calculate ETA then we can use the "Upload CSV" feature and upload the CSV report generated in the `outputs` directory for the corresponding run (for example `outputs/20260618_103419/site_report_20260618_103419.csv`). Note that this ETA calculation without re-scan would only be performed for legitimate OneDrive exported CSVs only (i.e., only the CSVs containing all the fields present in the original report and only personal oneDrive sites would be supported).
 
+    DISCLAIMER: If using the "Upload CSV" feature to re-calculate ETA, the final output would be missing some metadata like "Large Resources", "File Size Distribution", etc.. So the original corpus report should be used as the source of truth and the generated report without scan should be used only for batch planning.
+
 #### 2. Advanced Settings
 Click **"Show Advanced Settings"** to tune the performance and select your estimation mode:
 *   **Site Types to Scan**:
