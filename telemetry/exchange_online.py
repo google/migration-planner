@@ -22,6 +22,7 @@ from telemetry.exchange_apps import ExchangeAppsFrame
 from telemetry.email_client_support import EmailClientSupportFrame
 from telemetry.exchange_connectors_ui import ExchangeConnectorsFrame
 from telemetry.mail_security import MailSecurityFrame
+from telemetry.transport_rules_ui import TransportRulesFrame
 
 class ExchangeOnlineFrame(ctk.CTkFrame):
     def update_loading_text(self, text_msg):
@@ -98,6 +99,17 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.mail_security_view.configure(fg_color="transparent", border_width=0)
         self.mail_security_view.pack(fill="x", expand=True, pady=(0, 5))
 
+        # Transport Rules Sub-frame
+        self.transport_rules_view = TransportRulesFrame(
+            master=self.inner_pad,
+            log_callback=self.log_msg,
+            credentials_callback=self.get_credentials,
+            status_change_callback=self._check_overall_status,
+            concurrency_semaphore=self.semaphore
+        )
+        self.transport_rules_view.configure(fg_color="transparent", border_width=0)
+        self.transport_rules_view.pack(fill="x", expand=True, pady=(0, 5))
+
         # Exchange Connectors Sub-frame
         self.connectors_view = ExchangeConnectorsFrame(
             master=self.inner_pad,
@@ -134,6 +146,9 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         else:
             self.mail_security_view.pack_forget()
             
+        if hasattr(self, 'transport_rules_view'):
+            self.transport_rules_view.reset_view()
+            
         self.connectors_view.reset_view()
         self.email_clients_view.reset_view()
 
@@ -151,6 +166,9 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         if hasattr(self.mail_security_view, 'trigger_fetch'):
             self.mail_security_view.trigger_fetch(tenant, client_id, client_secret)
             
+        if hasattr(self, 'transport_rules_view'):
+            self.transport_rules_view.trigger_fetch(tenant, client_id, client_secret)
+            
         self.connectors_view.trigger_fetch(tenant, client_id, client_secret)
         self.email_clients_view.trigger_fetch(tenant, client_id, client_secret)
 
@@ -161,10 +179,11 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
             self.calendar_view.status,
             self.apps_view.status,
             getattr(self.mail_security_view, 'status', None),
+            getattr(self, 'transport_rules_view', type('obj', (object,), {'status': None})).status,
             self.connectors_view.status,
             self.email_clients_view.status
         ]
-        if "loading" in sub_statuses or getattr(self.mail_security_view, 'loading', False):
+        if "loading" in sub_statuses or getattr(self.mail_security_view, 'loading', False) or getattr(getattr(self, 'transport_rules_view', None), 'loading', False):
             self.status = "loading"
         else:
             if "success" in sub_statuses:
@@ -182,5 +201,7 @@ class ExchangeOnlineFrame(ctk.CTkFrame):
         self.email_clients_view.cancel()
         if hasattr(self.mail_security_view, 'cancel'):
             self.mail_security_view.cancel()
+        if hasattr(self, 'transport_rules_view'):
+            self.transport_rules_view.cancel()
         self.status = None
 
