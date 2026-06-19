@@ -1621,6 +1621,46 @@ def generate_pdf_report(data: dict, filepath: str):
     story.append(Spacer(1, 15))
     story.append(PageBreak())
 
+    # 4.9 eDiscovery Cases
+    story.append(Paragraph("4.9 Microsoft Purview eDiscovery Cases", h2_style))
+    story.append(Paragraph("This section lists the active and closed eDiscovery cases across the tenant, providing visibility into compliance and legal discovery workloads.", body_style))
+    story.append(Spacer(1, 8))
+    
+    ediscovery_cases = data.get("ediscovery_cases", [])
+    if not ediscovery_cases:
+        story.append(Paragraph("No eDiscovery cases were discovered or Delegated Authentication was not used.", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        edisc_table_data = [[
+            Paragraph("Display Name", table_cell_header),
+            Paragraph("Status", table_cell_header),
+            Paragraph("Created Date", table_cell_header),
+            Paragraph("Closed By", table_cell_header)
+        ]]
+        for case in ediscovery_cases[:10]:
+            created_date = str(case.get("createdDateTime", "-")).split("T")[0]
+            edisc_table_data.append([
+                Paragraph(case.get("displayName", "-"), table_cell_bold),
+                Paragraph(case.get("status", "-"), table_cell_style),
+                Paragraph(created_date, table_cell_style),
+                Paragraph(case.get("closedBy", "-"), table_cell_style)
+            ])
+            
+        edisc_table = Table(edisc_table_data, colWidths=[200, 80, 100, 120])
+        edisc_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(edisc_table)
+        if len(ediscovery_cases) > 10:
+             story.append(Paragraph(f"...and {len(ediscovery_cases) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
+    story.append(Spacer(1, 15))
+    story.append(PageBreak())
+
     # SECTION 5: POWER AUTOMATE
     # =========================================================================
     story.append(Paragraph("5. Power Platform & Automate Flows Analytics", h1_style))
