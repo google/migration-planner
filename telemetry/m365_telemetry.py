@@ -885,9 +885,9 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "calendar": getattr(self.exchange_online_view.calendar_view, "last_data", {}),
             "mail_security": getattr(self.exchange_online_view.mail_security_view, "last_data", {}),
             "connectors": getattr(self.exchange_online_view.connectors_view, "last_data", []),
-            "email_clients": getattr(self.exchange_online_view.email_clients_view, "last_client_data", {}),
+            "email_clients": self._get_email_clients_pdf_mapped(),
             "pst_files": getattr(self.exchange_online_view.email_clients_view, "last_pst_data", {}),
-            "exchange_connectors": getattr(self.exchange_online_view.connectors_view, "last_connectors_data", []),
+            "exchange_connectors": getattr(self.exchange_online_view.connectors_view, "last_data", []),
             "mail_security": getattr(self.exchange_online_view.mail_security_view, "last_data", {}),
             "transport_rules": getattr(getattr(self.exchange_online_view, 'transport_rules_view', None), "last_data", []),
             "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
@@ -901,6 +901,28 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "service_principals_sso": self.security_gov_view.load_all_from_csv("service_principals_sso.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "conditional_access": self.security_gov_view.load_all_from_csv("auth_policies.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "power_automate": getattr(self.power_automate_view, "last_results", {})
+        }
+
+    def _get_email_clients_pdf_mapped(self) -> dict:
+        raw = getattr(self.exchange_online_view.email_clients_view, "last_client_data", {})
+        if not raw:
+            return {}
+        if raw.get("client_error"):
+            return {"client_error": raw["client_error"]}
+        adop = raw.get("client_adoption", {})
+        if not adop:
+            return {}
+        return {
+            "client_browser": adop.get("browser_users", 0),
+            "client_win_outlook": adop.get("desktop_win", 0),
+            "client_mac_outlook": adop.get("desktop_mac", 0),
+            "client_mac_mail": adop.get("desktop_mail_mac", 0),
+            "client_desktop_other": 0,
+            "client_mobile_outlook": adop.get("mobile_outlook", 0),
+            "client_mobile_other": adop.get("mobile_other", 0),
+            "client_imap": adop.get("protocol_imap4", 0),
+            "client_pop": adop.get("protocol_pop3", 0),
+            "client_smtp": adop.get("protocol_smtp", 0)
         }
 
     def is_descendant(self, parent, widget) -> bool:

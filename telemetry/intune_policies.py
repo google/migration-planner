@@ -32,17 +32,20 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     reports_dir = os.path.join(script_dir, "reports", f"{tenant_id}_{client_id}")
     os.makedirs(reports_dir, exist_ok=True)
-    
     csv_path_device_configs = os.path.join(reports_dir, "intune_device_configs.csv")
     csv_path_config_policies = os.path.join(reports_dir, "intune_config_policies.csv")
     csv_path_apps = os.path.join(reports_dir, "intune_apps.csv")
     
-    for path in [csv_path_device_configs, csv_path_config_policies]:
+    temp_path_device_configs = csv_path_device_configs + ".tmp"
+    temp_path_config_policies = csv_path_config_policies + ".tmp"
+    temp_path_apps = csv_path_apps + ".tmp"
+
+    for path in [temp_path_device_configs, temp_path_config_policies]:
         with open(path, 'w', encoding='utf-8', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(["displayName", "platform", "policyType"])
             
-    with open(csv_path_apps, 'w', encoding='utf-8', newline='') as f:
+    with open(temp_path_apps, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(["displayName"])
             
@@ -85,9 +88,9 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
             errors.append(thread_err)
             
     try:
-        t1 = threading.Thread(target=run_fetch, args=("deviceConfigurations", csv_path_device_configs), daemon=True)
-        t2 = threading.Thread(target=run_fetch, args=("configurationPolicies", csv_path_config_policies), daemon=True)
-        t3 = threading.Thread(target=run_fetch_apps, args=(csv_path_apps,), daemon=True)
+        t1 = threading.Thread(target=run_fetch, args=("deviceConfigurations", temp_path_device_configs), daemon=True)
+        t2 = threading.Thread(target=run_fetch, args=("configurationPolicies", temp_path_config_policies), daemon=True)
+        t3 = threading.Thread(target=run_fetch_apps, args=(temp_path_apps,), daemon=True)
         
         t1.start()
         t2.start()
@@ -99,6 +102,18 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
         
         if len(errors) == 3:
             raise errors[0]
+
+        # Rename successful temp files to final paths
+        for temp, final in [
+            (temp_path_device_configs, csv_path_device_configs),
+            (temp_path_config_policies, csv_path_config_policies),
+            (temp_path_apps, csv_path_apps)
+        ]:
+            if os.path.exists(temp):
+                if os.path.exists(final):
+                    os.remove(final)
+                os.rename(temp, final)
+
         counts = defaultdict(int)
         total_dc = 0
         total_cp = 0
@@ -148,6 +163,12 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
         }
     finally:
         client.close()
+        for temp in [temp_path_device_configs, temp_path_config_policies, temp_path_apps]:
+            if 'temp' in locals() and os.path.exists(temp):
+                try:
+                    os.remove(temp)
+                except Exception:
+                    pass
 
 
 class IntunePoliciesFrame(ctk.CTkFrame):

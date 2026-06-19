@@ -128,8 +128,8 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         
         # We don't have a global status anymore, but we'll use it to notify parent
         self.status = None
-        self.last_client_data = {}
-        self.last_pst_data = {}
+        self._cached_client_data = {}
+        self._cached_pst_data = {}
 
         self.build_ui()
 
@@ -174,8 +174,8 @@ class EmailClientSupportFrame(ctk.CTkFrame):
     def reset_view(self):
         self.pack_forget()
         self.status = None
-        self.last_client_data = {}
-        self.last_pst_data = {}
+        self._cached_client_data = {}
+        self._cached_pst_data = {}
         for w in self.client_grid_frame.winfo_children(): w.destroy()
         for w in self.pst_grid_frame.winfo_children(): w.destroy()
         if hasattr(self, 'pst_disclaimer_lbl') and self.pst_disclaimer_lbl:
@@ -286,7 +286,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
 
     def _render_client_error(self, error_msg):
         self.client_status = "error"
-        self.last_client_data = {"client_error": error_msg}
+        self._cached_client_data = {"client_error": error_msg}
         self.client_reload_btn.configure(state="normal")
         for w in self.client_grid_frame.winfo_children(): w.destroy()
         f = ctk.CTkFrame(self.client_grid_frame, fg_color="transparent")
@@ -301,7 +301,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
 
     def _render_pst_error(self, error_msg):
         self.pst_status = "error"
-        self.last_pst_data = {"pst_error": error_msg}
+        self._cached_pst_data = {"pst_error": error_msg}
         self.pst_reload_btn.configure(state="normal")
         for w in self.pst_grid_frame.winfo_children(): w.destroy()
         f = ctk.CTkFrame(self.pst_grid_frame, fg_color="transparent")
@@ -315,7 +315,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def _render_client_success(self, data: dict):
-        self.last_client_data = data
+        self._cached_client_data = data
         self.client_reload_btn.configure(state="normal")
         for w in self.client_grid_frame.winfo_children(): w.destroy()
         
@@ -382,7 +382,7 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def _render_pst_success(self, data: dict):
-        self.last_pst_data = data
+        self._cached_pst_data = data
         self.pst_reload_btn.configure(state="normal")
         for w in self.pst_grid_frame.winfo_children(): w.destroy()
         
@@ -451,3 +451,101 @@ class EmailClientSupportFrame(ctk.CTkFrame):
 
     def cancel(self):
         self.status = None
+
+    def _load_client_data_from_csv(self):
+        tenant, clients, secrets = self.get_credentials()
+        if not tenant or not clients:
+            return {}
+            
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "email_client_support_metrics.csv")
+        
+        if not os.path.exists(csv_path):
+            return {}
+            
+        adop = {}
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # skip header
+                for row in reader:
+                    if len(row) >= 2:
+                        name, val = row[0], int(row[1])
+                        if "Browser Users" in name:
+                            adop["browser_users"] = val
+                        elif "Desktop Windows" in name:
+                            adop["desktop_win"] = val
+                        elif "Desktop Mac (Outlook)" in name:
+                            adop["desktop_mac"] = val
+                        elif "Desktop Mac (Mail)" in name:
+                            adop["desktop_mail_mac"] = val
+                        elif "Mobile Outlook" in name:
+                            adop["mobile_outlook"] = val
+                        elif "Mobile Native" in name:
+                            adop["mobile_other"] = val
+                        elif "IMAP" in name:
+                            adop["protocol_imap4"] = val
+                        elif "POP" in name:
+                            adop["protocol_pop3"] = val
+                        elif "SMTP" in name:
+                            adop["protocol_smtp"] = val
+            return {"client_adoption": adop, "client_error": None}
+        except Exception as e:
+            usage_logger.error(f"Error loading client data from CSV: {e}")
+            return {"client_error": str(e)}
+
+    def _load_pst_data_from_csv(self):
+        tenant, clients, secrets = self.get_credentials()
+        if not tenant or not clients:
+            return {}
+            
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "pst_discovery.csv")
+        
+        if not os.path.exists(csv_path):
+            return {}
+            
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # skip header
+                row = next(reader, None)
+                if row and len(row) >= 3:
+                    count, size = int(row[1]), int(row[2])
+                    return {
+                        "pst_cloud_data": {
+                            "value": [
+                                {
+                                    "hitsContainers": [
+                                        {
+                                            "total": count,
+                                            "hits": [
+                                                {
+                                                    "resource": {
+                                                        "size": size
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        "pst_error": None
+                    }
+            return {}
+        except Exception as e:
+            usage_logger.error(f"Error loading PST data from CSV: {e}")
+            return {"pst_error": str(e)}
+
+    @property
+    def last_client_data(self):
+        if hasattr(self, "_cached_client_data") and self._cached_client_data:
+            return self._cached_client_data
+        return self._load_client_data_from_csv()
+
+    @property
+    def last_pst_data(self):
+        if hasattr(self, "_cached_pst_data") and self._cached_pst_data:
+            return self._cached_pst_data
+        return self._load_pst_data_from_csv()

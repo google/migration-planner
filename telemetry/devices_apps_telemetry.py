@@ -43,11 +43,12 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         self.on_status_change = status_change_callback
         self.semaphore = semaphore
         self.status = None
-        self.last_data = []
+        self._cached_auth_methods = []
         self.is_cancelled = False
         self.current_request_id = 0
         self.current_page = 0
         self.ITEMS_PER_PAGE = 5
+        self.csv_path = None
 
         self.build_ui()
 
@@ -72,8 +73,9 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
 
     def reset_view(self):
         self.status = None
-        self.last_data = []
+        self._cached_auth_methods = []
         self.is_cancelled = False
+        self.csv_path = None
         for w in self.body_frame.winfo_children():
             w.destroy()
 
@@ -102,6 +104,11 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         self.status = "loading"
         self.is_cancelled = False
         self.current_page = 0
+        
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
+        self.csv_path = os.path.join(reports_dir, "entra_auth_methods.csv")
+        
         self._set_state_loading("Downloading and parsing Authentication Methods...")
         self.on_status_change()
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
@@ -123,7 +130,6 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
             script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
             reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
             os.makedirs(reports_dir, exist_ok=True)
-            csv_path = os.path.join(reports_dir, "entra_auth_methods.csv")
 
             client = GraphClient(
                 tenant_id=tenant,
@@ -150,12 +156,13 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
                 if page_count % 3 == 0:
                     self.after(0, self._render_partial, list(auth_methods), request_id)
 
-            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+            temp_csv_path = self.csv_path + ".tmp"
+            with open(temp_csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(["authenticationMethod", "successActivityCount"])
 
             reports_service.fetch_auth_methods_summary(
-                csv_path=csv_path,
+                csv_path=temp_csv_path,
                 max_rows=5000,
                 on_page_callback=handle_page,
                 is_cancelled_callback=lambda: self.is_cancelled or request_id != self.current_request_id
@@ -163,12 +170,21 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
             client.close()
 
             if not self.is_cancelled and request_id == self.current_request_id:
+                if os.path.exists(temp_csv_path):
+                    if os.path.exists(self.csv_path):
+                        os.remove(self.csv_path)
+                    os.rename(temp_csv_path, self.csv_path)
                 self.after(0, self._render_success, auth_methods, request_id)
         except Exception as e:
             usage_logger.error(f"Error fetching auth methods: {e}", exc_info=True)
             if not self.is_cancelled and request_id == self.current_request_id:
                 self.after(0, self._render_error, str(e), request_id)
         finally:
+            if 'temp_csv_path' in locals() and os.path.exists(temp_csv_path):
+                try:
+                    os.remove(temp_csv_path)
+                except Exception:
+                    pass
             if self.semaphore:
                 self.semaphore.release()
 
@@ -181,7 +197,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         if self.is_cancelled or request_id != self.current_request_id:
             return
         self.status = "success"
-        self.last_data = data
+        self._cached_auth_methods = data
         self._update_ui_paginated(data, is_partial=False)
         self.on_status_change()
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
@@ -196,7 +212,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
 
-    def _update_ui_paginated(self, data, is_partial=False):
+    def _update_ui_paginated(self, data=None, is_partial=False):
         for w in self.body_frame.winfo_children():
             w.destroy()
 
@@ -209,6 +225,9 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
                 font=FONT_BODY_SMALL,
                 text_color=COLOR_TONAL_TEXT
             ).pack(padx=10, pady=2, anchor="w")
+
+        if data is None:
+            data = self._load_data_from_csv()
 
         metrics_grid = ctk.CTkFrame(self.body_frame, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         metrics_grid.pack(fill="x", pady=(5, 10))
@@ -290,6 +309,36 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
 
+    def _load_data_from_csv(self):
+        if not self.csv_path or not os.path.exists(self.csv_path):
+            tenant, clients, secrets = self.get_credentials()
+            if tenant and clients:
+                script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+                self.csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "entra_auth_methods.csv")
+            else:
+                return []
+                
+        if not os.path.exists(self.csv_path):
+            return []
+            
+        items = []
+        try:
+            with open(self.csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # skip header
+                for row in reader:
+                    if len(row) >= 2:
+                        items.append((row[0], row[1]))
+        except Exception as e:
+            usage_logger.error(f"Error reading CSV for AuthMethodsSubFrame: {e}")
+        return items
+
+    @property
+    def last_data(self):
+        if hasattr(self, "_cached_auth_methods") and self._cached_auth_methods:
+            return self._cached_auth_methods
+        return self._load_data_from_csv()
+
 
 class AppSigninsSubFrame(ctk.CTkFrame):
     """Sub-frame for Microsoft Entra App Sign Ins with UI Pagination."""
@@ -301,7 +350,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         self.on_status_change = status_change_callback
         self.semaphore = semaphore
         self.status = None
-        self.last_data = []
+        self._cached_app_signins = []
         self.is_cancelled = False
         self.current_request_id = 0
 
@@ -333,7 +382,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
 
     def reset_view(self):
         self.status = None
-        self.last_data = []
+        self._cached_app_signins = []
         self.is_cancelled = False
         self.current_page = 0
         self.csv_path = None
@@ -413,12 +462,13 @@ class AppSigninsSubFrame(ctk.CTkFrame):
                 if page_count % 3 == 0:
                     self.after(0, self._render_partial, list(app_signins), request_id)
 
-            with open(self.csv_path, 'w', encoding='utf-8', newline='') as f:
+            temp_csv_path = self.csv_path + ".tmp"
+            with open(temp_csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(["appDisplayName", "successSignInCount"])
 
             reports_service.fetch_app_signin_summary(
-                csv_path=self.csv_path,
+                csv_path=temp_csv_path,
                 max_rows=5000,
                 on_page_callback=handle_page,
                 is_cancelled_callback=lambda: self.is_cancelled or request_id != self.current_request_id
@@ -426,12 +476,21 @@ class AppSigninsSubFrame(ctk.CTkFrame):
             client.close()
 
             if not self.is_cancelled and request_id == self.current_request_id:
+                if os.path.exists(temp_csv_path):
+                    if os.path.exists(self.csv_path):
+                        os.remove(self.csv_path)
+                    os.rename(temp_csv_path, self.csv_path)
                 self.after(0, self._render_success, app_signins, request_id)
         except Exception as e:
             usage_logger.error(f"Error fetching app sign-ins: {e}", exc_info=True)
             if not self.is_cancelled and request_id == self.current_request_id:
                 self.after(0, self._render_error, str(e), request_id)
         finally:
+            if 'temp_csv_path' in locals() and os.path.exists(temp_csv_path):
+                try:
+                    os.remove(temp_csv_path)
+                except Exception:
+                    pass
             if self.semaphore:
                 self.semaphore.release()
 
@@ -444,7 +503,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         if self.is_cancelled or request_id != self.current_request_id:
             return
         self.status = "success"
-        self.last_data = data
+        self._cached_app_signins = data
         self._update_ui_paginated(data=None, is_partial=False)
         self.on_status_change()
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
@@ -585,6 +644,36 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
 
+    def _load_data_from_csv(self):
+        if not self.csv_path or not os.path.exists(self.csv_path):
+            tenant, clients, secrets = self.get_credentials()
+            if tenant and clients:
+                script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+                self.csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "entra_app_signins.csv")
+            else:
+                return []
+                
+        if not os.path.exists(self.csv_path):
+            return []
+            
+        items = []
+        try:
+            with open(self.csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)  # skip header
+                for row in reader:
+                    if len(row) >= 2:
+                        items.append((row[0], row[1]))
+        except Exception as e:
+            usage_logger.error(f"Error reading CSV for AppSigninsSubFrame: {e}")
+        return items
+
+    @property
+    def last_data(self):
+        if hasattr(self, "_cached_app_signins") and self._cached_app_signins:
+            return self._cached_app_signins
+        return self._load_data_from_csv()
+
 class UserSigninsSubFrame(ctk.CTkFrame):
     """Sub-frame for Microsoft Entra User Sign Ins with unique set displays."""
 
@@ -714,12 +803,13 @@ class UserSigninsSubFrame(ctk.CTkFrame):
                     self.after(0, self._render_partial, current_data, request_id)
 
             # Initialize/overwrite CSV path
-            with open(self.csv_path, 'w', encoding='utf-8', newline='') as f:
+            temp_csv_path = self.csv_path + ".tmp"
+            with open(temp_csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(["appDisplayName", "operatingSystem", "browser", "isInteractive"])
 
             reports_service.fetch_user_signins(
-                csv_path=self.csv_path,
+                csv_path=temp_csv_path,
                 max_rows=20000,
                 on_page_callback=handle_page,
                 is_cancelled_callback=lambda: self.is_cancelled or request_id != self.current_request_id
@@ -734,12 +824,21 @@ class UserSigninsSubFrame(ctk.CTkFrame):
             }
 
             if not self.is_cancelled and request_id == self.current_request_id:
+                if os.path.exists(temp_csv_path):
+                    if os.path.exists(self.csv_path):
+                        os.remove(self.csv_path)
+                    os.rename(temp_csv_path, self.csv_path)
                 self.after(0, self._render_success, final_data, request_id)
         except Exception as e:
             usage_logger.error(f"Error fetching user sign-ins: {e}", exc_info=True)
             if not self.is_cancelled and request_id == self.current_request_id:
                 self.after(0, self._render_error, str(e), request_id)
         finally:
+            if 'temp_csv_path' in locals() and os.path.exists(temp_csv_path):
+                try:
+                    os.remove(temp_csv_path)
+                except Exception:
+                    pass
             if self.semaphore:
                 self.semaphore.release()
 

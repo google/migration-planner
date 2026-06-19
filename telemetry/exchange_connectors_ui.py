@@ -62,7 +62,7 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
         self.status = None
         self.current_page = 0
         self.ITEMS_PER_PAGE = 5
-        self.last_data = []
+        self._cached_connectors_data = []
 
         self.build_ui()
 
@@ -120,6 +120,7 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
         self.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
+        self._cached_connectors_data = []
         
         for w in self.state_frame.winfo_children():
             w.destroy()
@@ -256,11 +257,67 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
                         "Routing": f"SmartHosts: {conn.get('SmartHosts', 'N/A')}\nUse MX: {'Yes' if conn.get('UseMxRecord') else 'No'}"
                     })
                 
-                self.last_data = unified_data
+                self._cached_connectors_data = unified_data
                 self.current_page = 0
                 self._update_ui_paginated(self.last_data)
                 
         self.on_status_change()
+
+    @property
+    def last_data(self):
+        if hasattr(self, "_cached_connectors_data") and self._cached_connectors_data:
+            return self._cached_connectors_data
+            
+        tenant, clients, secrets = self.get_credentials()
+        if not tenant or not clients:
+            return []
+            
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}")
+        inbound_path = os.path.join(reports_dir, "exchange_inbound_connectors.csv")
+        outbound_path = os.path.join(reports_dir, "exchange_outbound_connectors.csv")
+        
+        unified_data = []
+        
+        # Load inbound
+        if os.path.exists(inbound_path):
+            try:
+                with open(inbound_path, 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    next(reader, None)  # skip header
+                    for row in reader:
+                        if len(row) >= 5:
+                            enabled = row[1]
+                            unified_data.append({
+                                "Direction": "📥 Inbound",
+                                "Name": row[0] or "N/A",
+                                "Status": "🟢 Enabled" if enabled == "True" or enabled == "1" else "🔴 Disabled",
+                                "Domains": row[2] or "N/A",
+                                "Routing": f"Type: {row[3]}\nRequire TLS: {'Yes' if row[4] == 'True' or row[4] == '1' else 'No'}"
+                            })
+            except Exception as e:
+                usage_logger.error(f"Error loading inbound connectors from CSV: {e}")
+                
+        # Load outbound
+        if os.path.exists(outbound_path):
+            try:
+                with open(outbound_path, 'r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    next(reader, None)  # skip header
+                    for row in reader:
+                        if len(row) >= 5:
+                            enabled = row[1]
+                            unified_data.append({
+                                "Direction": "📤 Outbound",
+                                "Name": row[0] or "N/A",
+                                "Status": "🟢 Enabled" if enabled == "True" or enabled == "1" else "🔴 Disabled",
+                                "Domains": row[2] or "N/A",
+                                "Routing": f"SmartHosts: {row[3]}\nUse MX: {'Yes' if row[4] == 'True' or row[4] == '1' else 'No'}"
+                            })
+            except Exception as e:
+                usage_logger.error(f"Error loading outbound connectors from CSV: {e}")
+                
+        return unified_data
 
     def _update_ui_paginated(self, data):
         for w in self.grid_frame.winfo_children():

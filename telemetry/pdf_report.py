@@ -948,19 +948,22 @@ def generate_pdf_report(data: dict, filepath: str):
         story.append(Paragraph("No Exchange connectors configured.", body_style))
     else:
         conn_table_data = [[
-            Paragraph("Name", table_cell_header),
+            Paragraph("Direction", table_cell_header),
+            Paragraph("Connector Name", table_cell_header),
             Paragraph("Status", table_cell_header),
-            Paragraph("Type", table_cell_header),
-            Paragraph("Comment", table_cell_header)
+            Paragraph("Domains", table_cell_header),
+            Paragraph("Routing Config", table_cell_header)
         ]]
-        for conn in connectors[:10]: # Limit to 10
+        for conn in connectors:
+            routing_txt = conn.get("Routing", "-").replace("\n", "<br/>")
             conn_table_data.append([
+                Paragraph(conn.get("Direction", "-"), table_cell_style),
                 Paragraph(conn.get("Name", "-"), table_cell_bold),
-                Paragraph("Enabled" if conn.get("Enabled") else "Disabled", table_cell_style),
-                Paragraph(conn.get("ConnectorType", "-"), table_cell_style),
-                Paragraph(conn.get("Comment", "-"), table_cell_style)
+                Paragraph(conn.get("Status", "-"), table_cell_style),
+                Paragraph(conn.get("Domains", "-"), table_cell_style),
+                Paragraph(routing_txt, table_cell_style)
             ])
-        conn_table = Table(conn_table_data, colWidths=[150, 70, 100, 180])
+        conn_table = Table(conn_table_data, colWidths=[70, 120, 60, 100, 154])
         conn_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
@@ -971,8 +974,6 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(conn_table)
-        if len(connectors) > 10:
-             story.append(Paragraph(f"...and {len(connectors) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # 3.1d Email Clients & PST Files
@@ -1298,7 +1299,7 @@ def generate_pdf_report(data: dict, filepath: str):
                     "is_sub": True
                 })
                 
-        for item in flattened_labels[:10]:
+        for item in flattened_labels:
             bg_bold_s = table_cell_bold if not item["is_sub"] else table_cell_style
             protection_str = "Yes" if item["hasProtection"] else "No"
             status_str = "Enabled" if item["isEnabled"] else "Disabled"
@@ -1323,8 +1324,6 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(labels_table)
-        if len(flattened_labels) > 10:
-             story.append(Paragraph(f"...and {len(flattened_labels) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     
     story.append(PageBreak())
 
@@ -1343,7 +1342,7 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         
         policies_list = policies if isinstance(policies, list) else [policies]
-        for policy in policies_list[:10]:
+        for policy in policies_list:
             duration_val = str(policy.get("Duration", "N/A"))
             duration_str = duration_val
             if duration_val.lower() == "unlimited":
@@ -1384,8 +1383,6 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(ret_table)
-        if len(policies_list) > 10:
-             story.append(Paragraph(f"...and {len(policies_list) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # 4.3 Data Loss Prevention Policies
@@ -1399,18 +1396,25 @@ def generate_pdf_report(data: dict, filepath: str):
     else:
         dlp_table_data = [[
             Paragraph("Policy Name", table_cell_header),
-            Paragraph("Workloads", table_cell_header),
             Paragraph("Mode", table_cell_header),
-            Paragraph("Status", table_cell_header)
+            Paragraph("Workload", table_cell_header),
+            Paragraph("State", table_cell_header),
+            Paragraph("Actions", table_cell_header),
+            Paragraph("Created By", table_cell_header)
         ]]
-        for dlp in dlp_policies[:10]:
+        for dlp in dlp_policies:
+            en_val = str(dlp.get("Enabled", "")).lower()
+            state_str = "Enabled" if en_val in ("true", "1", "yes") else "Disabled"
+            
             dlp_table_data.append([
                 Paragraph(dlp.get("Name", "-"), table_cell_bold),
-                Paragraph(dlp.get("Workload", "-"), table_cell_style),
                 Paragraph(dlp.get("Mode", "-"), table_cell_style),
-                Paragraph(dlp.get("DistributionStatus", "-"), table_cell_style)
+                Paragraph(dlp.get("Workload", "-"), table_cell_style),
+                Paragraph(state_str, table_cell_style),
+                Paragraph(dlp.get("Actions", "-"), table_cell_style),
+                Paragraph(dlp.get("CreatedBy", "-"), table_cell_style)
             ])
-        dlp_table = Table(dlp_table_data, colWidths=[200, 150, 80, 70])
+        dlp_table = Table(dlp_table_data, colWidths=[110, 50, 110, 60, 90, 80])
         dlp_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
@@ -1421,8 +1425,6 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(dlp_table)
-        if len(dlp_policies) > 10:
-             story.append(Paragraph(f"...and {len(dlp_policies) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # 4.4 Sensitive Information Types
@@ -1439,7 +1441,7 @@ def generate_pdf_report(data: dict, filepath: str):
             Paragraph("Type", table_cell_header),
             Paragraph("Confidence", table_cell_header)
         ]]
-        for sit in sit_types[:10]:
+        for sit in sit_types:
             sit_table_data.append([
                 Paragraph(sit.get("Name", "-"), table_cell_bold),
                 Paragraph(sit.get("Type", "-"), table_cell_style),
@@ -1456,8 +1458,6 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(sit_table)
-        if len(sit_types) > 10:
-             story.append(Paragraph(f"...and {len(sit_types) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
 
     # =========================================================================
@@ -1519,18 +1519,23 @@ def generate_pdf_report(data: dict, filepath: str):
         rules_table_data = [[
             Paragraph("Rule Name", table_cell_header),
             Paragraph("State", table_cell_header),
-            Paragraph("Mode", table_cell_header)
+            Paragraph("Priority", table_cell_header),
+            Paragraph("Mode", table_cell_header),
+            Paragraph("Rule Logic", table_cell_header)
         ]]
         
-        display_rules = transport_rules[:10]
+        display_rules = transport_rules
         for rule in display_rules:
+            desc_text = rule.get("Description") or "N/A"
             rules_table_data.append([
                 Paragraph(str(rule.get("Name", "-")), table_cell_bold),
                 Paragraph(str(rule.get("State", "-")), table_cell_style),
-                Paragraph(str(rule.get("Mode", "-")), table_cell_style)
+                Paragraph(str(rule.get("Priority", "-")), table_cell_style),
+                Paragraph(str(rule.get("Mode", "-")), table_cell_style),
+                Paragraph(str(desc_text), small_table_cell_style)
             ])
             
-        rules_table = Table(rules_table_data, colWidths=[250, 100, 150])
+        rules_table = Table(rules_table_data, colWidths=[120, 50, 40, 60, 234])
         rules_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
@@ -1541,10 +1546,6 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(rules_table)
-        
-        if len(transport_rules) > 10:
-            story.append(Spacer(1, 4))
-            story.append(Paragraph(f"...and {len(transport_rules) - 10} more. See generated CSV reports for full details.", ParagraphStyle('ItalicRef', parent=body_style, textColor=colors.HexColor("#64748B"), fontName="Helvetica-Oblique")))
     story.append(Spacer(1, 15))
 
     # 4.7 SSO Service Principals
@@ -1599,7 +1600,7 @@ def generate_pdf_report(data: dict, filepath: str):
             Paragraph("State", table_cell_header),
             Paragraph("Controls", table_cell_header)
         ]]
-        for cap in ca_policies[:10]:
+        for cap in ca_policies:
             ca_table_data.append([
                 Paragraph(cap.get("name", "-"), table_cell_bold),
                 Paragraph(cap.get("state", "-"), table_cell_style),
@@ -1616,8 +1617,6 @@ def generate_pdf_report(data: dict, filepath: str):
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
         story.append(ca_table)
-        if len(ca_policies) > 10:
-             story.append(Paragraph(f"...and {len(ca_policies) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
     story.append(Spacer(1, 15))
     story.append(PageBreak())
 
