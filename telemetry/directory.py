@@ -53,14 +53,17 @@ class DirectoryFrame(ctk.CTkFrame):
         self.last_user_counts = {}
         self.last_domains = []
         self.last_user_creation_logs = []
+        self.last_provisioning_logs = []
         
-        # Pagination variables for Domains and User Creation logs
+        # Pagination variables for Domains, User Creation, and Provisioning logs
         self.ITEMS_PER_PAGE = 10
         self.current_page = 0
         self.user_creation_current_page = 0
+        self.provisioning_current_page = 0
         self.csv_path = None
         self.org_csv_path = None
         self.user_creation_csv_path = None
+        self.provisioning_csv_path = None
         
         self.build_ui()
 

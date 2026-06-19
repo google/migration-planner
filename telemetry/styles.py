@@ -35,4 +35,5 @@ FONT_SUBSECTION_HEADER = ("Segoe UI", 14, "bold")
 FONT_BODY_BOLD = ("Segoe UI", 12, "bold")
 FONT_BODY_MEDIUM = ("Segoe UI", 12, "normal")
 FONT_BODY_SMALL = ("Segoe UI", 10, "normal")
+FONT_BODY_SMALL_UNDERLINED = ("Segoe UI", 10, "underline")
 
