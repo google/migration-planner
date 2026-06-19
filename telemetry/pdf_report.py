@@ -304,6 +304,27 @@ def generate_pdf_report(data: dict, filepath: str):
         fontName='Helvetica-Bold',
         textColor=colors.white
     )
+
+    small_table_cell_style = ParagraphStyle(
+        'SmallTableCell',
+        parent=styles['Normal'],
+        fontSize=6.0,
+        leading=7.5
+    )
+    
+    small_table_cell_bold = ParagraphStyle(
+        'SmallTableCellBold',
+        parent=small_table_cell_style,
+        fontName='Helvetica-Bold',
+        textColor=primary_color
+    )
+    
+    small_table_cell_header = ParagraphStyle(
+        'SmallTableCellHeader',
+        parent=small_table_cell_style,
+        fontName='Helvetica-Bold',
+        textColor=colors.white
+    )
     
     meta_label_style = ParagraphStyle(
         'MetaLabel',
@@ -531,6 +552,68 @@ def generate_pdf_report(data: dict, filepath: str):
                 ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
             ]))
             story.append(user_creation_table)
+            story.append(Spacer(1, 4))
+            story.append(Paragraph("<font size=8 color='#6B7280'>* Based on sampled data collected from audit logs.</font>", body_style))
+        
+        story.append(Spacer(1, 15))
+
+        # 2c. Provisioning Logs Table
+        story.append(Paragraph("Provisioning Logs", h2_style))
+        story.append(Paragraph("This section displays directory provisioning audit logs, indicating identity synchronization actions, status info, and target details.", body_style))
+        story.append(Spacer(1, 8))
+        
+        provisioning_logs = dir_data.get("provisioning_logs", [])
+        if not provisioning_logs:
+            story.append(Paragraph("No provisioning audit logs discovered.", body_style))
+        elif provisioning_logs[0].get("initiatedBy") == "ERROR":
+            err_msg = provisioning_logs[0].get("provisioningAction")
+            story.append(Paragraph(f"Error: {err_msg}", ParagraphStyle('ErrTxtProvisioning', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+        else:
+            prov_table_data = [[
+                Paragraph("Initiated By", small_table_cell_header),
+                Paragraph("Action", small_table_cell_header),
+                Paragraph("Steps", small_table_cell_header),
+                Paragraph("Service Principal", small_table_cell_header),
+                Paragraph("Source System", small_table_cell_header),
+                Paragraph("Target System", small_table_cell_header),
+                Paragraph("Tenant ID", small_table_cell_header),
+                Paragraph("Status Info", small_table_cell_header)
+            ]]
+            
+            for log in provisioning_logs:
+                initiatedBy = log.get("initiatedBy") or "-"
+                action = log.get("provisioningAction") or "-"
+                steps = log.get("provisioningSteps") or "-"
+                sp = log.get("servicePrincipal") or "-"
+                src = log.get("sourceSystem") or "-"
+                tgt = log.get("targetSystem") or "-"
+                tenant = log.get("tenantId") or "-"
+                statusInfo = log.get("provisioningStatusInfo") or "-"
+                
+                prov_table_data.append([
+                    Paragraph(initiatedBy, small_table_cell_style),
+                    Paragraph(action, small_table_cell_bold),
+                    Paragraph(steps, small_table_cell_style),
+                    Paragraph(sp, small_table_cell_style),
+                    Paragraph(src, small_table_cell_style),
+                    Paragraph(tgt, small_table_cell_style),
+                    Paragraph(tenant, small_table_cell_style),
+                    Paragraph(statusInfo, small_table_cell_style)
+                ])
+                
+            prov_table = Table(prov_table_data, colWidths=[64, 60, 80, 60, 40, 40, 40, 120])
+            prov_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(prov_table)
             story.append(Spacer(1, 4))
             story.append(Paragraph("<font size=8 color='#6B7280'>* Based on sampled data collected from audit logs.</font>", body_style))
         
