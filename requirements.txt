@@ -8,3 +8,4 @@ google-genai
 scikit-learn
 aiohttp
 sortedcontainers
+msal

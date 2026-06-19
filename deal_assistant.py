@@ -294,6 +294,7 @@ class TelemetryApp(ctk.CTk):
         self.stored_tenant = ""
         self.stored_client = ""
         self.stored_secret = ""
+        self.stored_use_delegated = False
 
         # Page containers
         self.auth_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -406,8 +407,40 @@ class TelemetryApp(ctk.CTk):
         )
         self.secret_entry.pack(fill="both", expand=True, padx=10, pady=2)
 
+        # Delegated Auth Checkbox
+        self.use_delegated_var = ctk.BooleanVar(value=False)
+        self.delegated_checkbox = ctk.CTkCheckBox(
+            self.form_container,
+            text="Enable Delegated Authentication (Required for eDiscovery)",
+            variable=self.use_delegated_var,
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            command=self._on_delegated_toggled
+        )
+        self.delegated_checkbox.pack(anchor="w", pady=(0, 5))
+        
+        self.delegated_warning_lbl = ctk.CTkLabel(
+            self.form_container,
+            text="⚠️ Requires 'Allow public client flows' to be Yes and 'http://localhost' Redirect URI in Azure App Reg.",
+            font=FONT_BODY_SMALL,
+            text_color=COLOR_TEXT_SUB,
+            wraplength=800,
+            justify="left"
+        )
+        # Initially hidden until checked
+        # self.delegated_warning_lbl.pack(anchor="w", pady=(0, 20))
+
         # Status & Feedback Display
-        self.auth_status_lbl = ctk.CTkLabel(self.form_container, text="", font=FONT_BODY_MEDIUM, text_color=COLOR_ERROR)
+        self.auth_status_lbl = ctk.CTkLabel(
+            self.form_container, 
+            text="", 
+            font=FONT_BODY_MEDIUM, 
+            text_color=COLOR_ERROR,
+            wraplength=450,
+            justify="center"
+        )
         self.auth_status_lbl.pack(pady=(0, 15))
 
         # Action Submission Trigger
@@ -421,8 +454,13 @@ class TelemetryApp(ctk.CTk):
             hover_color=COLOR_PRIMARY_HOVER,
             font=FONT_BODY_BOLD
         )
-        self.connect_btn.pack(fill="x", pady=(0, 10))
+        self.connect_btn.pack(fill="x", pady=(15, 10))
 
+    def _on_delegated_toggled(self):
+        if self.use_delegated_var.get():
+            self.delegated_warning_lbl.pack(anchor="w", pady=(0, 20))
+        else:
+            self.delegated_warning_lbl.pack_forget()
 
     def setup_report_ui(self):
         """Instantiates the ReportsPage frame which contains the collapsible navigation structure."""
@@ -441,17 +479,88 @@ class TelemetryApp(ctk.CTk):
         secret = self.secret_entry.get().strip()
 
         logger.info("Connect & Continue clicked. Verifying connection credentials...")
+        
+        use_delegated = getattr(self, 'use_delegated_var', None) and self.use_delegated_var.get()
+        
         if not tenant or not client or not secret:
             logger.warning("Connection failed: Missing one or more required credential fields.")
             self.auth_status_lbl.configure(text="Error: Tenant ID, Client ID, and Client Secret are required.", text_color="red")
             return
 
+        self.auth_status_lbl.configure(text="⏳ Authenticating in browser...", text_color=COLOR_TEXT_MAIN)
+        self._cancel_auth_flag = False
+        
+        # Turn the connect button into a Cancel button
+        original_command = self.connect_btn.cget("command")
+        self.connect_btn.configure(
+            text="Cancel Authentication", 
+            fg_color=COLOR_ERROR, 
+            hover_color="#b91c1c",
+            command=lambda: self._cancel_auth(original_command)
+        )
+        self.update_idletasks()
+        
+        def _reset_btn():
+            self.connect_btn.configure(
+                text="Connect & Continue",
+                fg_color=COLOR_PRIMARY,
+                hover_color=COLOR_PRIMARY_HOVER,
+                command=original_command
+            )
+        
+        def _on_success():
+            if getattr(self, '_cancel_auth_flag', False):
+                return
+            _reset_btn()
+            self._complete_connection(tenant, client, secret, use_delegated)
+        
+        if use_delegated:
+            import threading
+            def _auth_worker():
+                try:
+                    from core.graph.delegated_auth import DelegatedAuthClient
+                    auth_client = DelegatedAuthClient(tenant, client, secret)
+                    # Use a shorter timeout to prevent hanging forever
+                    token = auth_client.get_token(scopes=["https://graph.microsoft.com/.default"], force_interactive=True)
+                    
+                    if getattr(self, '_cancel_auth_flag', False):
+                        return
+                        
+                    if not token:
+                        self.after(0, lambda: self.auth_status_lbl.configure(text="Error: Failed to authenticate via browser popup.", text_color="red"))
+                        self.after(0, _reset_btn)
+                        return
+                    self.after(0, _on_success)
+                except Exception as e:
+                    if getattr(self, '_cancel_auth_flag', False):
+                        return
+                    self.after(0, lambda err=str(e): self.auth_status_lbl.configure(text=f"Error during delegated auth: {err}", text_color="red"))
+                    self.after(0, _reset_btn)
+            
+            threading.Thread(target=_auth_worker, daemon=True).start()
+            return
+        
+        _on_success()
+
+    def _cancel_auth(self, original_command):
+        """Allows the user to abort if the browser flow is stuck or throws a Microsoft error."""
+        self._cancel_auth_flag = True
+        self.auth_status_lbl.configure(text="Authentication cancelled.", text_color=COLOR_TEXT_SUB)
+        self.connect_btn.configure(
+            text="Connect & Continue",
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            command=original_command
+        )
+
+    def _complete_connection(self, tenant, client, secret, use_delegated):
         self.auth_status_lbl.configure(text="")
 
         # Cache connection details safely in memory
         self.stored_tenant = tenant
         self.stored_client = client
         self.stored_secret = secret
+        self.stored_use_delegated = use_delegated
 
         logger.info("Credentials validated and cached in memory. Updating log directories...")
 
@@ -883,6 +992,7 @@ class ReportsPage(ctk.CTkFrame):
         self.m365_telemetry_view.lic_tenant_id.set(tenant)
         self.m365_telemetry_view.lic_client_ids.set(client)
         self.m365_telemetry_view.lic_client_secrets.set(secret)
+        self.m365_telemetry_view.use_delegated_auth.set(self.controller.stored_use_delegated)
 
         # Directly call the fetch command
         self.m365_telemetry_view.authenticate_licenses_tab()

@@ -22,6 +22,7 @@ import webbrowser
 from tkinter import messagebox, filedialog
 from datetime import datetime
 import pandas as pd
+from telemetry.ediscovery_ui import EDiscoveryFrame
 
 import csv
 import shutil
@@ -283,6 +284,7 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
     
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
+        self.get_delegated_auth = kwargs.pop("delegated_auth_callback", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -591,11 +593,10 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         )
         
         self.ediscovery_content = ctk.CTkFrame(self.ediscovery_body_frame, fg_color="transparent")
-        self.ediscovery_content.pack(fill="x", padx=20, pady=20)
         
         lbl_inst1 = ctk.CTkLabel(
             self.ediscovery_content,
-            text="eDiscovery cases cannot be scanned directly under standard Application permissions. To view your active cases, please navigate to Microsoft Purview:",
+            text="eDiscovery cases cannot be scanned directly under standard Application permissions. To view your active cases, please navigate to Microsoft Purview, or enable Delegated Authentication on the Connection screen to view them directly here.",
             font=FONT_BODY_MEDIUM,
             text_color=COLOR_TEXT_MAIN,
             justify="left",
@@ -636,6 +637,16 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         lbl_roles_link.bind("<Button-1>", lambda e: webbrowser.open("https://purview.microsoft.com/settings/purviewpermissions"))
         lbl_roles_link.bind("<Enter>", lambda e: lbl_roles_link.configure(text_color=COLOR_PRIMARY_HOVER))
         lbl_roles_link.bind("<Leave>", lambda e: lbl_roles_link.configure(text_color=COLOR_PRIMARY))
+        
+        # New EDiscovery UI Frame
+        self.ediscovery_ui_view = EDiscoveryFrame(
+            master=self.ediscovery_body_frame,
+            log_callback=self.log_msg,
+            credentials_callback=self.get_credentials,
+            status_change_callback=self.on_status_change,
+            concurrency_semaphore=self.semaphore,
+            delegated_auth_callback=self.get_delegated_auth
+        )
         
         # Authentication Mechanics Section
         self.auth_header_frame = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
@@ -900,6 +911,15 @@ class DataSecurityGovernanceFrame(ctk.CTkFrame):
         self.btn_export_retention.configure(state="disabled")
         self.btn_export_dlp.configure(state="disabled")
         self.btn_export_sit.configure(state="disabled")
+        
+        use_delegated = self.get_delegated_auth() if self.get_delegated_auth else False
+        if use_delegated:
+            self.ediscovery_content.pack_forget()
+            self.ediscovery_ui_view.pack(fill="x", expand=True)
+            self.ediscovery_ui_view.trigger_fetch(tenant, client_id, client_secret, use_delegated_auth=True)
+        else:
+            self.ediscovery_ui_view.pack_forget()
+            self.ediscovery_content.pack(fill="x", padx=20, pady=20)
         
         self.labels_status = "loading"
         self.retention_status = "loading"

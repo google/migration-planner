@@ -42,6 +42,7 @@ from telemetry.exchange_online import ExchangeOnlineFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
 from telemetry.intune_policies import IntunePoliciesFrame
 
+
 from telemetry.styles import *
 
 
@@ -133,6 +134,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         self.lic_tenant_id = ctk.StringVar()
         self.lic_client_ids = ctk.StringVar()
         self.lic_client_secrets = ctk.StringVar()
+        self.use_delegated_auth = ctk.BooleanVar(value=False)
 
         self.on_all_done_callback = None
         self.telemetry_semaphore = threading.Semaphore(3)
@@ -278,7 +280,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
-            concurrency_semaphore=self.telemetry_semaphore
+            concurrency_semaphore=self.telemetry_semaphore,
+            delegated_auth_callback=self._get_delegated_auth_state
         )
 
         # 6.5. Intune Policies Section
@@ -289,6 +292,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             status_change_callback=self._check_all_done,
             concurrency_semaphore=self.telemetry_semaphore
         )
+
 
         # 7. Power Automate Section
         self.power_automate_view = PowerAutomateUsageFrame(
@@ -364,6 +368,9 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         clients = [x.strip() for x in client_str.split(",") if x.strip()]
         secrets = [x.strip() for x in secret_str.split(",") if x.strip()]
         return tenant, clients, secrets
+
+    def _get_delegated_auth_state(self):
+        return self.use_delegated_auth.get()
 
     def _check_all_done(self):
         """Checks if all sections of the current batch have resolved, then triggers next batch or finishes."""
@@ -900,6 +907,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "sensitive_info_types": self.security_gov_view.load_all_from_csv("sensitive_info_types.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "service_principals_sso": self.security_gov_view.load_all_from_csv("service_principals_sso.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "conditional_access": self.security_gov_view.load_all_from_csv("auth_policies.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
+            "ediscovery_cases": self.security_gov_view.load_all_from_csv("ediscovery_cases.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "power_automate": getattr(self.power_automate_view, "last_results", {})
         }
 

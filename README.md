@@ -167,9 +167,13 @@ To scan your tenant, you need to register an app in the Microsoft Entra ID (form
 3.  Name the app (e.g., "Migration Planner Tool").
 4.  Select **"Accounts in this organizational directory only"** (Single Tenant).
 5.  Click **Register**.
+6.  **(Required for Delegated Auth & eDiscovery)**: Go to **Authentication**. Under **Platform configurations**, click **Add a platform** -> **Mobile and desktop applications**. Add `http://localhost` as the redirect URI.
+7.  **(Required for Delegated Auth & eDiscovery)**: Scroll down to **Advanced settings** and set **Allow public client flows** to **Yes**. Click **Save**.
 
 ### 2. Grant Permissions
-In your new app, go to **API permissions > Add a permission > Microsoft Graph > Application permissions** (NOT Delegated), and assign permissions based on the workloads you plan to scan:
+In your new app, go to **API permissions > Add a permission > Microsoft Graph**, and assign permissions based on the workloads you plan to scan.
+
+> **⚠️ IMPORTANT WARNING**: eDiscovery features require **Delegated permissions**, while other features require **Application permissions**. If you plan to use Delegated Authentication, ensure you have enabled "Allow public client flows" and configured the redirect URI as described in step 1, otherwise the interactive login popup will fail!
 
 #### Shared Permissions (Required for Both Workloads)
 *   `User.Read.All` (To list users and enumerate rosters)
