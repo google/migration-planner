@@ -1256,9 +1256,122 @@ def generate_pdf_report(data: dict, filepath: str):
     story.append(Spacer(1, 15))
 
     # =========================================================================
-    # SECTION 4: DATA SECURITY & GOVERNANCE
+    # SECTION 4: NETWORK SECURITY
     # =========================================================================
-    story.append(Paragraph("4. Data Security, Governance & Compliance", h1_style))
+    story.append(Paragraph("4. Network Security", h1_style))
+    story.append(Paragraph("A summary of Entra Global Secure Access filtering policies, Conditional Access exclusions, and Intune Firewall and Proxy configurations.", body_style))
+    story.append(Spacer(1, 10))
+
+    net_sec = data.get("network_security", {})
+    filtering_policies = net_sec.get("filtering_policies", [])
+    ca_policies = net_sec.get("conditional_access", [])
+    fw_policies = net_sec.get("firewall_policies", [])
+
+    # 4.1 Filtering Policies (GSA)
+    story.append(Paragraph("Filtering Policies (Global Secure Access)", h2_style))
+    if not filtering_policies:
+        story.append(Paragraph("No Global Secure Access filtering policies configured or permission restricted.", ParagraphStyle('ErrTxtNetSec', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        table_data = [[
+            Paragraph("Policy Name", table_cell_header),
+            Paragraph("Description", table_cell_header),
+            Paragraph("Version", table_cell_header),
+            Paragraph("Action", table_cell_header),
+            Paragraph("Rules", table_cell_header)
+        ]]
+        for item in filtering_policies:
+            table_data.append([
+                Paragraph(item.get("name", "N/A"), table_cell_bold),
+                Paragraph(item.get("description", "N/A"), table_cell_style),
+                Paragraph(item.get("version", "N/A"), table_cell_style),
+                Paragraph(item.get("action", "N/A"), table_cell_style),
+                Paragraph(item.get("rules_count", "0"), table_cell_style)
+            ])
+        t = Table(table_data, colWidths=[120, 180, 70, 70, 64])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(t)
+        
+    story.append(Spacer(1, 12))
+
+    # 4.2 Conditional Access policies
+    story.append(Paragraph("Conditional Access (Network Exclusions & Scope)", h2_style))
+    if not ca_policies:
+        story.append(Paragraph("No Conditional Access policies configured or permission restricted.", ParagraphStyle('ErrTxtNetSecCA', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        table_data = [[
+            Paragraph("Policy Name", table_cell_header),
+            Paragraph("State", table_cell_header),
+            Paragraph("Target Users", table_cell_header),
+            Paragraph("Target Apps", table_cell_header),
+            Paragraph("Grant Controls", table_cell_header)
+        ]]
+        for item in ca_policies:
+            table_data.append([
+                Paragraph(item.get("name", "N/A"), table_cell_bold),
+                Paragraph(item.get("state", "N/A"), table_cell_style),
+                Paragraph(item.get("target_users", "N/A"), table_cell_style),
+                Paragraph(item.get("target_apps", "N/A"), table_cell_style),
+                Paragraph(item.get("controls", "N/A"), table_cell_style)
+            ])
+        t = Table(table_data, colWidths=[130, 60, 100, 100, 114])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(t)
+
+    story.append(Spacer(1, 12))
+
+    # 4.3 Firewall/Proxy Policies
+    story.append(Paragraph("Firewall and Proxy Configurations", h2_style))
+    if not fw_policies:
+        story.append(Paragraph("No Firewall or Proxy configurations discovered in Intune policies.", ParagraphStyle('ErrTxtNetSecFW', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        table_data = [[
+            Paragraph("Configuration Name", table_cell_header),
+            Paragraph("Policy Type", table_cell_header),
+            Paragraph("Firewall Status", table_cell_header),
+            Paragraph("Proxy Status", table_cell_header)
+        ]]
+        for item in fw_policies:
+            table_data.append([
+                Paragraph(item.get("name", "N/A"), table_cell_bold),
+                Paragraph(item.get("policy_type", "N/A"), table_cell_style),
+                Paragraph(item.get("firewall_status", "N/A"), table_cell_style),
+                Paragraph(item.get("proxy_status", "N/A"), table_cell_style)
+            ])
+        t = Table(table_data, colWidths=[150, 150, 100, 104])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(t)
+
+    story.append(Spacer(1, 15))
+    story.append(PageBreak())
+
+    # =========================================================================
+    # SECTION 5: DATA SECURITY & GOVERNANCE
+    # =========================================================================
+    story.append(Paragraph("5. Data Security, Governance & Compliance", h1_style))
     story.append(Paragraph("A summary of classification sensitivity labels and data retention lifecycle policies configured within Microsoft Purview to protect corporate properties.", body_style))
     
     # 4.1 Sensitivity Labels
@@ -1660,9 +1773,9 @@ def generate_pdf_report(data: dict, filepath: str):
     story.append(Spacer(1, 15))
     story.append(PageBreak())
 
-    # SECTION 5: POWER AUTOMATE
+    # SECTION 6: POWER AUTOMATE
     # =========================================================================
-    story.append(Paragraph("5. Power Platform & Automate Flows Analytics", h1_style))
+    story.append(Paragraph("6. Power Platform & Automate Flows Analytics", h1_style))
     story.append(Paragraph("An analysis of low-code cloud and desktop workflows configured inside the tenant environments, identifying complex workflows and premium connectors.", body_style))
     story.append(Spacer(1, 8))
     

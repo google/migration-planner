@@ -149,6 +149,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             [self.exchange_online_view],
             [self.files_view],
             [self.devices_apps_view, self.intune_policies_view],
+            [self.network_security_view],
             [self.security_gov_view],
             [self.power_automate_view]
         ]
@@ -274,6 +275,16 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
+        # 5e. Network Security Section
+        from telemetry.network_security import NetworkSecurityFrame
+        self.network_security_view = NetworkSecurityFrame(
+            master=self,
+            log_callback=self.log_msg,
+            credentials_callback=self._get_credentials,
+            status_change_callback=self._check_all_done,
+            concurrency_semaphore=self.telemetry_semaphore
+        )
+
         # 6. Data Security & Governance Section
         self.security_gov_view = DataSecurityGovernanceFrame(
             master=self,
@@ -335,6 +346,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.exchange_online_view,
             self.files_view,
             self.devices_apps_view,
+            self.network_security_view,
             self.security_gov_view,
             self.intune_policies_view,
             self.power_automate_view
@@ -901,6 +913,11 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "onedrive": getattr(self.files_view.onedrive_view, "last_data", {}),
             "devices_apps": getattr(self.devices_apps_view, "last_data", {}),
             "intune": getattr(self.intune_policies_view, "last_data", {}),
+            "network_security": {
+                "filtering_policies": load_csv("network_filtering_policies.csv"),
+                "conditional_access": load_csv("network_conditional_access.csv"),
+                "firewall_policies": load_csv("network_firewall_policies.csv")
+            },
             "security_labels": self.security_gov_view.load_all_from_csv("sensitivity_labels.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "retention_policies": self.security_gov_view.load_all_from_csv("retention_policies.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
             "dlp_policies": self.security_gov_view.load_all_from_csv("dlp_policies.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
