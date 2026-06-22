@@ -180,8 +180,8 @@ Graph Application permissions:
 *   `Directory.Read.All`: Used to read tenant organization configuration data, Domain, User, and Group summaries.
 *   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
 *   `DeviceManagementConfiguration.Read.All`: Required for Intune Policies.
-*   `DeviceManagementApps.Read.All`: Required to read all intune apps
-*   `DeviceManagementManagedDevices.Read.All`: Required to read all intune managed devices
+*   `DeviceManagementApps.Read.All`: Required to read all Intune apps
+*   `DeviceManagementManagedDevices.Read.All`: Required to read all Intune managed devices
 *   `Organization.Read.All`: Required to resolve tenant domains and Subscribed SKUs.
 *   `Place.Read.All`: Used to list meeting rooms and resource device counts.
 *   `Calendars.ReadBasic.All`: Used to audit organizational calendar permissions.
