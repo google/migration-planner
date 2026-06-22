@@ -4,6 +4,11 @@
 import os
 import pandas as pd
 import customtkinter as ctk
+
+# Performance optimizations for CustomTkinter across OS
+ctk.set_window_scaling(1.0)
+ctk.set_widget_scaling(1.0)
+
 from telemetry.m365_telemetry import M365TelemetryTab, async_logger
 import logging
 from telemetry.power_automate import PowerAutomateScanner
@@ -379,6 +384,15 @@ class TelemetryApp(ctk.CTk):
         logger.info("Initializing TelemetryApp application...")
         self.title("Deal Assistant")  # CITATION: self.title("Deal Assistant")
         self.geometry("1230x950")  # Expanded window width to support increased sidebar dimensions
+        
+        # Maximize window cross-platform
+        try:
+            self.state('zoomed')
+        except Exception:
+            try:
+                self.attributes('-zoomed', True)
+            except Exception:
+                pass
 
         # FIX: Bind the window close button to a custom exit handler
         # to prevent CustomTkinter 'after script' errors when closing.

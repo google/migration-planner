@@ -4,6 +4,10 @@ from util.constants import *
 from datetime import timedelta, datetime
 import os
 import customtkinter as ctk
+
+# Performance optimizations for CustomTkinter across OS
+ctk.set_window_scaling(1.0)
+ctk.set_widget_scaling(1.0)
 import time
 import psutil
 from tkinter import messagebox

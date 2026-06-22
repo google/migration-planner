@@ -54,6 +54,11 @@ import os
 import subprocess
 import sys
 import customtkinter as ctk
+
+# Performance optimizations for CustomTkinter across OS
+ctk.set_window_scaling(1.0)
+ctk.set_widget_scaling(1.0)
+
 from util.constants import *
 
 class SelectorApp(ctk.CTk):

@@ -24,6 +24,10 @@ import psutil
 import threading
 from typing import Any, Dict, List, Optional
 import customtkinter as ctk
+
+# Performance optimizations for CustomTkinter across OS
+ctk.set_window_scaling(1.0)
+ctk.set_widget_scaling(1.0)
 from tkinter import messagebox
 from logging.handlers import QueueHandler, QueueListener
 

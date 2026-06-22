@@ -1,5 +1,10 @@
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
+
+# Performance optimizations for CustomTkinter across OS
+ctk.set_window_scaling(1.0)
+ctk.set_widget_scaling(1.0)
+
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import queue
