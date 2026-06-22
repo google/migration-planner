@@ -217,9 +217,25 @@ Office 365 Exchange Online Permissions:
 *   `LicenseAssignment.Read.All`
 
 ### 3. Power Platform & Dataverse Permissions
-The tool can also scan Power Automate flows (Tenant-Wide Cloud Flows and Desktop Flows).
-*   **Tenant-Wide Cloud Flows**: Assign the **Power Platform Administrator** role to your App Registration in the Entra ID Portal under *Roles and administrators*.
-*   **Desktop Flows (Dataverse)**: In the Power Platform Admin Center > Environments > [Select Environment] > Settings > Users + permissions > Application users, click **+ New app user**, add your App Registration, and assign it the **System Administrator** role.
+The tool can also scan Power Automate flows (Tenant-Wide Cloud Flows and Desktop Flows). To enable this scan, the App Registration must have the following configuration:
+
+1. **Register as a Power Platform Management App (Via PowerShell)**:
+   The App Registration must be registered as an administrative management application with the Power Platform backend. Log in using a Global Administrator or Power Platform Administrator account and run the following PowerShell commands:
+   ```powershell
+   # 1. Install the Power Apps Admin module
+   Install-Module -Name Microsoft.PowerApps.Administration.PowerShell -AllowClobber -Force
+
+   # 2. Log in to your tenant
+   Add-PowerAppsAccount -Endpoint prod -TenantID "{tenant_id}"
+
+   # 3. Register your App Registration as a Management App
+   New-PowerAppManagementApp -ApplicationId "{client_id}"
+   ```
+
+2. **Dataverse Environment Permissions (Desktop Flows)**:
+   The App Registration must be added as an application user and assigned the **System Administrator** role in every Dataverse environment where you want to scan desktop flows:
+   * Go to the **Power Platform Admin Center** > **Environments** > [Select Environment] > **Settings** > **Users + permissions** > **Application users**.
+   * Click **+ New app user**, select your App Registration, choose the default business unit, and assign the **System Administrator** security role.
 
 ### 4. Data Governance and Security Permissions
 To allow the App Registration's Service Principal to read Compliance, Retention data, and Exchange settings via PowerShell, it must be assigned the following directory roles in the [Entra portal](https://entra.microsoft.com/) 

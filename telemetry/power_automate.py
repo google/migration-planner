@@ -522,9 +522,24 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
 
         display_msg = error_msg
         if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
-            display_msg = "Management Link / Flow read permissions required."
+            try:
+                tenant, clients, secrets = self.get_credentials()
+                tenant_id = tenant if tenant else "<tenant_id>"
+                client_id = clients[0] if clients else "<client_id>"
+            except Exception:
+                tenant_id = "<tenant_id>"
+                client_id = "<client_id>"
 
-        ctk.CTkLabel(self.state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(20, 5))
+            display_msg = (
+                "Power Platform Admin / Dataverse Permissions required.\n\n"
+                "1. Register the App Registration as a Management App via PowerShell (Global/Power Platform Admin):\n"
+                "   Install-Module -Name Microsoft.PowerApps.Administration.PowerShell -Force\n"
+                f"   Add-PowerAppsAccount -Endpoint prod -TenantID \"{tenant_id}\"\n"
+                f"   New-PowerAppManagementApp -ApplicationId \"{client_id}\"\n\n"
+                "2. Assign the App Registration the 'System Administrator' security role in target Dataverse environments."
+            )
+
+        ctk.CTkLabel(self.state_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="left", wraplength=700).pack(pady=(20, 15))
         ctk.CTkButton(self.state_frame, text="Try Again", command=self._retry_fetch, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 20))
         self.state_frame.pack(fill="x", expand=True)
 
