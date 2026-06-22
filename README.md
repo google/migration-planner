@@ -123,33 +123,15 @@ Please ensure you have **Python 3.10** or newer installed on your system.
 
 ### 3. PowerShell Core (pwsh) Installation (Optional but Recommended)
 
-PowerShell Core is required by specific features in the **Usage and Adoption** tab (such as extracting Data Security & Governance metrics, Sensitivity Labels, Retention Policies, Shared/Public mailbox statistics, detailed Calendar settings, and Connectors).
+[PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell?view=powershell-7.6) is a cross-platform command-line shell and scripting language designed for task automation. It is required by specific features in the **Usage and Adoption** tab (such as extracting Data Security & Governance metrics, Sensitivity Labels, Retention Policies, Shared/Public mailbox statistics, detailed Calendar settings, and Connectors).
 
 > **Note**: If you do not install PowerShell, the tool will still run perfectly fine for all other sections (like the Migration Planner modules and standard Graph API telemetry), but these specific PowerShell-dependent reports will be skipped and marked as unavailable.
 
-#### Windows
-While Windows PowerShell is pre-installed, it is recommended to install the modern **PowerShell Core (`pwsh`)**:
-*   Download it via the Microsoft Store, or run in Command Prompt:
-    ```cmd
-    winget install --id Microsoft.Powershell --source winget
-    ```
+Please follow the official Microsoft guides to install PowerShell Core on your platform:
 
-#### macOS
-*   Use Homebrew to install:
-    ```bash
-    brew install powershell
-    ```
-
-#### Linux (Ubuntu/Debian)
-*   Install via APT:
-    ```bash
-    sudo apt-get update
-    sudo apt-get install -y wget apt-transport-https software-properties-common
-    wget -q "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb"
-    sudo dpkg -i packages-microsoft-prod.deb
-    sudo apt-get update
-    sudo apt-get install -y powershell
-    ```
+*   **Windows**: Refer to the official [Windows Installation Guide](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell-on-windows?view=powershell-7.6).
+*   **macOS**: Refer to the official [macOS Installation Guide](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell-on-macos?view=powershell-7.6) or learn how to [Install on macOS using Homebrew](https://learn.microsoft.com/en-us/powershell/scripting/install/alternate-install-methods?view=powershell-7.6#install-on-macos-using-homebrew).
+*   **Linux**: Refer to the official [Linux Overview & Installation Guide](https://learn.microsoft.com/en-us/powershell/scripting/install/linux-overview?view=powershell-7.6).
 
 #### Install the Exchange Online Module
 Once `pwsh` is installed, open it and install the required Exchange module:
