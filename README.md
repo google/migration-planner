@@ -175,14 +175,25 @@ In your new app, go to **API permissions > Add a permission > Microsoft Graph**,
 The Usage and Adoption tab performs extensive tenant auditing. While the following permissions are recommended for a complete report, you may choose to grant only a subset. 
 **NOTE: Be aware that any missing permissions will simply cause the tool to gracefully skip those specific telemetry sections.**
 
-**Application permissions**:
+Application permissions:
 *   `Reports.Read.All`: Used to retrieve active user trends, mailbox/SharePoint usage reports, M365 Apps, and Email Client usage.
 *   `Directory.Read.All`: Used to read tenant organization configuration data, Domain, User, and Group summaries.
 *   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
 *   `DeviceManagementConfiguration.Read.All`: Required for Intune Policies.
+*   `DeviceManagementApps.Read.All`: Required to read all intune apps
+*   `DeviceManagementManagedDevices.Read.All`: Required to read all intune managed devices
 *   `Organization.Read.All`: Required to resolve tenant domains and Subscribed SKUs.
 *   `Place.Read.All`: Used to list meeting rooms and resource device counts.
 *   `Calendars.ReadBasic.All`: Used to audit organizational calendar permissions.
+*   `Sites.Read.All`: to search for pst files across onedrive and sharepoint
+
+Delegated permissions:
+* `eDiscovery.Read.All`: required to read ediscovery permissions on behalf of the ediscovery administrator
+* `offline_access`: required to maintain access to data you have given the app access to
+
+Data Governance Specific Permissions:
+*  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
+*  `Exchange.ManageAsAppV2`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 
 #### Exchange Planner Specific Permissions
 *   `Mail.Read`
