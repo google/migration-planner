@@ -163,7 +163,7 @@ class NetworkSecurityFrame(ctk.CTkFrame):
             except Exception as e:
                 usage_logger.error(f"Filtering fetch error: {e}", exc_info=True)
                 self.filtering_status = "error"
-                self.after(0, lambda: self._render_subsection_error("filtering", str(e)))
+                self.after(0, lambda err=str(e): self._render_subsection_error("filtering", err))
             finally:
                 if self.semaphore: self.semaphore.release()
                 self.after(0, self._check_subsections_done)
@@ -201,7 +201,7 @@ class NetworkSecurityFrame(ctk.CTkFrame):
             except Exception as e:
                 usage_logger.error(f"CA fetch error: {e}", exc_info=True)
                 self.ca_status = "error"
-                self.after(0, lambda: self._render_subsection_error("ca", str(e)))
+                self.after(0, lambda err=str(e): self._render_subsection_error("ca", err))
             finally:
                 if self.semaphore: self.semaphore.release()
                 self.after(0, self._check_subsections_done)
@@ -239,7 +239,7 @@ class NetworkSecurityFrame(ctk.CTkFrame):
             except Exception as e:
                 usage_logger.error(f"Firewall fetch error: {e}", exc_info=True)
                 self.fw_status = "error"
-                self.after(0, lambda: self._render_subsection_error("fw", str(e)))
+                self.after(0, lambda err=str(e): self._render_subsection_error("fw", err))
             finally:
                 if self.semaphore: self.semaphore.release()
                 self.after(0, self._check_subsections_done)
