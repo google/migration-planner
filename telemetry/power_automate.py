@@ -108,12 +108,12 @@ class PowerAutomateScanner:
                     data = res.json()
                 except Exception as e:
                     self.logger.error(f"[X] JSON Decode Error on {context_name} | HTTP {res.status_code}: {res.text[:100]}")
-                    break
+                    raise e
                 results.extend(data.get("value", []))
                 url = data.get("nextLink") or data.get("@odata.nextLink")
             else:
                 self.logger.error(f"[X] {context_name} Request Failed | HTTP {res.status_code}: {res.text}")
-                break
+                res.raise_for_status()
                 
         return results
 
@@ -131,9 +131,9 @@ class PowerAutomateScanner:
                     return res.json()
                 except Exception as e:
                     self.logger.error(f"[X] JSON Decode Error on {context_name} | HTTP {res.status_code}: {res.text[:100]}")
-                    return None
+                    raise e
             self.logger.error(f"[X] {context_name} Request Failed | HTTP {res.status_code}: {res.text}")
-            return None
+            res.raise_for_status()
 
     def scan_flows(self):
         """Scans Power Automate flows across all environments in the tenant."""
@@ -144,11 +144,11 @@ class PowerAutomateScanner:
             flow_token = self._get_access_token("https://service.flow.microsoft.com/.default")
         except Exception as e:
             self.logger.error(f"Auth Error: {e}")
-            return None
+            raise e
 
         if not bap_token or not flow_token:
             self.logger.error("Main Process Failure: Aborting scan due to missing access tokens.")
-            return None
+            raise Exception("Authentication failed: Missing access tokens.")
 
         bap_headers = {"Authorization": f"Bearer {bap_token}", "Accept": "application/json"}
         flow_headers = {"Authorization": f"Bearer {flow_token}", "Accept": "application/json"}
@@ -211,10 +211,14 @@ class PowerAutomateScanner:
                 is_active = (state == "Started")
                 
                 detail_url = f"https://api.flow.microsoft.com/providers/Microsoft.ProcessSimple/scopes/admin/environments/{env_name}/flows/{flow_id}?api-version=2016-11-01"
-                flow_detail = self.fetch_single_resource(detail_url, flow_headers, context_name=f"Get Flow Details ({flow_id})")
-                if not flow_detail:
+                try:
+                    flow_detail = self.fetch_single_resource(detail_url, flow_headers, context_name=f"Get Flow Details ({flow_id})")
+                    if not flow_detail:
+                        return None
+                    return (flow_summary, flow_detail, is_active)
+                except Exception as ex:
+                    self.logger.warning(f"Failed to fetch flow details for flow {flow_id}: {ex}")
                     return None
-                return (flow_summary, flow_detail, is_active)
             
             with ThreadPoolExecutor(max_workers=15) as executor:
                 futures = {executor.submit(fetch_and_process_flow_detail, f): f for f in cloud_flows}
