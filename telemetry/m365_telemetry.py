@@ -77,6 +77,51 @@ logging.getLogger("util").setLevel(logging.INFO)
 logging.getLogger("chat").setLevel(logging.INFO)
 logging.getLogger("PowerShellClient").setLevel(logging.INFO)
 
+# Global unhandled exception & sys.stderr logging redirection setup
+_stderr_logger = logging.getLogger("M365TelemetryAsyncLogger.sys.stderr")
+
+class LoggedStderr:
+    def __init__(self, logger):
+        self.logger = logger
+        self.line_buffer = ""
+        self.original_stderr = sys.__stderr__
+
+    def write(self, buf):
+        self.original_stderr.write(buf)
+        for line in buf.splitlines(keepends=True):
+            self.line_buffer += line
+            if self.line_buffer.endswith('\n'):
+                stripped = self.line_buffer.rstrip('\r\n')
+                if stripped:
+                    self.logger.error(stripped)
+                self.line_buffer = ""
+
+    def flush(self):
+        self.original_stderr.flush()
+        if self.line_buffer:
+            stripped = self.line_buffer.rstrip('\r\n')
+            if stripped:
+                self.logger.error(stripped)
+            self.line_buffer = ""
+
+sys.stderr = LoggedStderr(_stderr_logger)
+
+def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    _stderr_logger.critical("Unhandled system exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+sys.excepthook = handle_unhandled_exception
+
+def handle_thread_exception(args):
+    _stderr_logger.critical(
+        f"Unhandled thread exception in {args.thread.name if args.thread else 'unknown thread'}", 
+        exc_info=(args.exc_type, args.exc_value, args.exc_traceback)
+    )
+
+threading.excepthook = handle_thread_exception
+
 
 def update_log_directory(tenant_id: Optional[str] = None, client_id: Optional[str] = None) -> None:
     """Updates the log directory dynamically once tenant and client ID are known."""

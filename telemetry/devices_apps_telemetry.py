@@ -335,7 +335,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
                     if len(row) >= 2:
                         items.append((row[0], row[1]))
         except Exception as e:
-            usage_logger.error(f"Error reading CSV for AuthMethodsSubFrame: {e}")
+            usage_logger.error(f"Error reading CSV for AuthMethodsSubFrame: {e}", exc_info=True)
         return items
 
     @property
@@ -539,7 +539,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
                 end_idx = start_idx + self.ITEMS_PER_PAGE
                 items = all_rows[start_idx:end_idx]
         except Exception as e:
-            usage_logger.error(f"Error reading CSV for pagination: {e}")
+            usage_logger.error(f"Error reading CSV for pagination: {e}", exc_info=True)
         return items, total_count
 
     def _update_ui_paginated(self, data=None, is_partial=False):
@@ -670,7 +670,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
                     if len(row) >= 2:
                         items.append((row[0], row[1]))
         except Exception as e:
-            usage_logger.error(f"Error reading CSV for AppSigninsSubFrame: {e}")
+            usage_logger.error(f"Error reading CSV for AppSigninsSubFrame: {e}", exc_info=True)
         return items
 
     @property
@@ -887,7 +887,7 @@ class UserSigninsSubFrame(ctk.CTkFrame):
                         if row[1]: unique_os.add(row[1])
                         if row[2]: unique_browsers.add(row[2])
         except Exception as e:
-            usage_logger.error(f"Error reading CSV for User Sign-ins: {e}")
+            usage_logger.error(f"Error reading CSV for User Sign-ins: {e}", exc_info=True)
             
         return {
             "apps": sorted(list(unique_apps)),
@@ -1128,7 +1128,7 @@ def run_devices_apps_pipeline(
                 is_cancelled_callback=is_cancelled_callback
             )
         except Exception as thread_err:
-            usage_logger.error(f"Error in thread fetching app sign-ins: {thread_err}")
+            usage_logger.error(f"Error in thread fetching app sign-ins: {thread_err}", exc_info=True)
             errors.append(thread_err)
 
     def run_fetch_auth_methods(path):
@@ -1140,7 +1140,7 @@ def run_devices_apps_pipeline(
                 is_cancelled_callback=is_cancelled_callback
             )
         except Exception as thread_err:
-            usage_logger.error(f"Error in thread fetching auth methods: {thread_err}")
+            usage_logger.error(f"Error in thread fetching auth methods: {thread_err}", exc_info=True)
             errors.append(thread_err)
             
     def run_fetch_user_signins(path):
@@ -1152,7 +1152,7 @@ def run_devices_apps_pipeline(
                 is_cancelled_callback=is_cancelled_callback
             )
         except Exception as thread_err:
-            usage_logger.error(f"Error in thread fetching user sign-ins: {thread_err}")
+            usage_logger.error(f"Error in thread fetching user sign-ins: {thread_err}", exc_info=True)
             errors.append(thread_err)
             
     try:

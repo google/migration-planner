@@ -36,9 +36,11 @@ class PowerShellClient:
                 text=True,
                 check=True
             )
+            if result.stderr and result.stderr.strip():
+                logger.warning(f"PowerShell script '{script_path}' stderr diagnostics: {result.stderr.strip()}")
             return result.stdout
         except subprocess.CalledProcessError as e:
-            logger.error(f"PowerShell script failed: {e.stderr}")
+            logger.error(f"PowerShell script failed: {e.stderr}", exc_info=True)
             raise RuntimeError(f"PowerShell script execution failed: {e.stderr or e.stdout}")
         except FileNotFoundError:
             raise RuntimeError("PowerShell core ('pwsh') is not installed or not in PATH. Please install it (e.g. 'brew install powershell' on macOS).")

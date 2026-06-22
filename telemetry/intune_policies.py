@@ -79,7 +79,7 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
                 is_cancelled_callback=is_cancelled_callback
             )
         except Exception as thread_err:
-            usage_logger.error(f"Error in thread fetching Intune {endpoint}: {thread_err}")
+            usage_logger.error(f"Error in thread fetching Intune {endpoint}: {thread_err}", exc_info=True)
             errors.append(thread_err)
             
     def run_fetch_apps(path):
@@ -91,7 +91,7 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
                 is_cancelled_callback=is_cancelled_callback
             )
         except Exception as thread_err:
-            usage_logger.error(f"Error in thread fetching Intune apps: {thread_err}")
+            usage_logger.error(f"Error in thread fetching Intune apps: {thread_err}", exc_info=True)
             errors.append(thread_err)
 
     def run_fetch_detected(path):
@@ -99,7 +99,7 @@ def run_intune_policies_pipeline(client_id: str, client_secret: str, tenant_id: 
             # Enforce 10k maximum limit for query and export
             service.fetch_detected_apps(csv_path=path, max_rows=10000, is_cancelled_callback=is_cancelled_callback)
         except Exception as thread_err:
-            usage_logger.error(f"Error fetching detected apps: {thread_err}")
+            usage_logger.error(f"Error fetching detected apps: {thread_err}", exc_info=True)
             errors.append(thread_err)
             
     try:
@@ -375,6 +375,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             usage_logger.info("Successfully completed Intune Policies & Detected Apps fetch.")
             self.after(0, self._render_success, data)
         except Exception as e:
+            usage_logger.error("Exception caught in IntunePolicies worker.", exc_info=True)
             self.after(0, self._render_error, str(e))
         finally:
             if self.semaphore:

@@ -691,6 +691,7 @@ class TelemetryApp(ctk.CTk):
                 load_certificate(secret, tenant_id=tenant, client_id=client)
                 self.show_reports_page()
             except Exception as e:
+                logger.error(f"Certificate decryption/load failed: {e}", exc_info=True)
                 # Invoke the custom modal selection dialog
                 dialog = CertDecryptionErrorDialog(self, str(e))
                 self.wait_window(dialog)
@@ -704,6 +705,7 @@ class TelemetryApp(ctk.CTk):
                         pem_path, _ = generate_certificate(secret, tenant_id=tenant, client_id=client)
                         self.setup_cert_instructions_ui(pem_path)
                     except Exception as gen_err:
+                        logger.error(f"Certificate generation failed: {gen_err}", exc_info=True)
                         from tkinter import messagebox
                         messagebox.showerror(
                             "Certificate Generation Error",
@@ -720,6 +722,7 @@ class TelemetryApp(ctk.CTk):
                 # Setup instructions UI requesting the user to upload it to Entra
                 self.setup_cert_instructions_ui(pem_path)
             except Exception as e:
+                logger.error(f"Certificate generation failed: {e}", exc_info=True)
                 from tkinter import messagebox
                 messagebox.showerror(
                     "Certificate Generation Error",
@@ -859,6 +862,7 @@ class TelemetryApp(ctk.CTk):
             # Verify we can unlock/read the cert successfully
             load_certificate(self.stored_secret, tenant_id=self.stored_tenant, client_id=self.stored_client)
         except Exception as e:
+            logger.error(f"Certificate validation failed: {e}", exc_info=True)
             from tkinter import messagebox
             messagebox.showerror(
                 "Certificate Verification Error",
