@@ -186,6 +186,8 @@ Graph Application permissions:
 *   `Place.Read.All`: Used to list meeting rooms and resource device counts.
 *   `Calendars.ReadBasic.All`: Used to audit organizational calendar permissions.
 *   `Sites.Read.All`: to search for pst files across onedrive and sharepoint
+*   `AuditLog.Read.All`: to read audit log data
+*   `SensitivityLabels.Read.All`: to read all sensitivity labels
 
 Graph Delegated permissions:
 * `eDiscovery.Read.All`: required to read ediscovery permissions on behalf of the ediscovery administrator
