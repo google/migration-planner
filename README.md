@@ -179,6 +179,7 @@ Graph Application permissions:
 *   `Reports.Read.All`: Used to retrieve active user trends, mailbox/SharePoint usage reports, M365 Apps, and Email Client usage.
 *   `Directory.Read.All`: Used to read tenant organization configuration data, Domain, User, and Group summaries.
 *   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
+*   `NetworkAccess.Read.All`: Required for Entra Global Secure Access Filtering Policies (Network Security).
 *   `DeviceManagementConfiguration.Read.All`: Required for Intune Policies.
 *   `DeviceManagementApps.Read.All`: Required to read all Intune apps
 *   `DeviceManagementManagedDevices.Read.All`: Required to read all Intune managed devices

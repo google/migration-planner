@@ -118,6 +118,9 @@ class NetworkSecurityService:
                     if on_page_callback:
                         on_page_callback(value_list)
                     url = data.get("@odata.nextLink")
+                elif resp.status_code in [401, 403]:
+                    logger.error("Conditional Access endpoint permission error: %d %s", resp.status_code, resp.text)
+                    raise PermissionError("Policy.Read.All permission required for Conditional Access policies.")
                 else:
                     logger.error("Conditional Access endpoint failed: %d %s", resp.status_code, resp.text)
                     raise ConnectionError(f"API request failed with status {resp.status_code}")
@@ -180,6 +183,9 @@ class NetworkSecurityService:
                     if on_page_callback:
                         on_page_callback(value_list)
                     url = data.get("@odata.nextLink")
+                elif resp.status_code in [401, 403]:
+                    logger.error("DeviceConfigurations endpoint permission error: %d %s", resp.status_code, resp.text)
+                    raise PermissionError("DeviceManagementConfiguration.Read.All permission required for Intune Device Configurations.")
                 else:
                     logger.error("DeviceConfigurations endpoint failed: %d %s", resp.status_code, resp.text)
                     raise ConnectionError(f"API request failed with status {resp.status_code}")
