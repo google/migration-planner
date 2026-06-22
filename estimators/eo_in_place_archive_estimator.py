@@ -1,12 +1,13 @@
 from typing import Any, Callable, Dict, List, Optional
 
 from estimators.estimator import Estimator
-from util.connectors import UrlInvoker
+from util.connectors import UrlInvoker, TokenManager
 from util.utils import ScanConfig, group_responses_by_key, process_pagination_responses, get_relative_url, get_batch_responses_map, create_batches
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from util.thread_safe_ds import AtomicInt
 from util.enums import FailureType
+import re
 
 GRAPH_BETA_URL = "https://graph.microsoft.com/beta"
 
@@ -27,13 +28,39 @@ class EOInPlaceArchiveEstimator(Estimator):
         self.logger = logger
         self.stop_event = stop_event
         self.use_delta_api = use_delta_api
-        
+
+        self.aux_manager = TokenManager(
+            config.tenant_id,
+            config.client_ids,
+            config.client_secrets,
+            config.concurrency,
+            config.retries,
+            config.backoff,
+        )
+
+        try:
+          self.aux_manager.authenticate_all(logger, required_scopes=[
+            "User.Read.All", "MailboxFolder.Read.All"])
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Failed to authenticate aux manager. Please check if the client id and client secret are correct. Error: {e}")
+            self.stop_event.set()
+
+        self.aux_invoker = UrlInvoker(self.aux_manager, self.config.retries, self.config.backoff, 1, 0.5)
+        self.aux_executor = ThreadPoolExecutor(max_workers=self.config.hierarchial_crawl_batch_limit)
         self.archive_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
         if self.use_delta_api is False:
             self.tree_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
 
     def calculate_migration_eta(self, data: Dict[str, Any]) -> float:
         return super().calculate_migration_eta(data)
+
+    def _extract_mailbox_id(self, url: str) -> Optional[str]:
+        # Match /admin/exchange/(?:mailboxes/)?([^/]+)/folders/
+        match = re.search(r'/admin/exchange/(?:mailboxes/)?([^/]+)/folders/', url)
+        if match:
+            return match.group(1)
+        return None
 
     def get_resource_type(self):
         return "EO_IN_PLACE_ARCHIVE"
@@ -116,7 +143,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             user_to_count[user_id] = mail_box_to_count.get(mail_box_id, 0)
 
         failures.extend([{
-            "userId": mailbox_to_user[mailbox_failure["mailboxId"]],
+            "userId": mailbox_to_user.get(mailbox_failure["mailboxId"]),
             "isPartial": mailbox_failure["isPartial"],
             "folderId": mailbox_failure["folderId"] if "folderId" in mailbox_failure else None,
             "type": mailbox_failure["type"],
@@ -137,7 +164,7 @@ class EOInPlaceArchiveEstimator(Estimator):
         if self.use_delta_api is True:
             folder_api = "admin/exchange/mailboxes/{mailboxId}/folders/delta?$select=id,childFolderCount,totalItemCount"
         else:
-            folder_api = "admin/exchange/mailboxes/{mailboxId}/folders?$select=id,childFolderCount,totalItemCount&$top=999"
+            folder_api = "admin/exchange/mailboxes/{mailboxId}/folders?$select=id,parentMailboxUrl,displayName,childFolderCount,totalItemCount&$top=999"
 
         top_level_folders: Dict[str, List[Dict[str, Any]]] = {}      # Map of Mail box to top level folder list.
         mail_box_batches = create_batches(folder_api, mail_box_id_maps, self.config.parallel_batches, True)
@@ -271,7 +298,7 @@ class EOInPlaceArchiveEstimator(Estimator):
             failures: List[Dict[str, Any]]
     ) -> None:
         try:
-            child_folder_api = "admin/exchange/mailboxes/{mailboxId}/folders/{folderId}/childFolders?$select=id,childFolderCount,totalItemCount&$top=999"
+            child_folder_api = "admin/exchange/mailboxes/{mailboxId}/folders/{folderId}/childFolders?$select=id,parentMailboxUrl,displayName,childFolderCount,totalItemCount&$top=999"
 
             mail_box_id_to_folder_id: List[Dict[str, Any]] = []
             for mail_box_id, folder_list in folders.items():
@@ -398,10 +425,87 @@ class EOInPlaceArchiveEstimator(Estimator):
     def get_parseable_folders_and_update_counts(
         self,
         child_folders: Dict[str, List[Dict[str, Any]]],
-        archived_mail_count: List[AtomicInt],
+        archived_mail_count: Dict[str, AtomicInt],
         failures: List[Dict[str, Any]],
     ) -> Dict[str, List[Dict[str, Any]]]:
+
+        def _get_mail_box_id_from_response(folder: Dict[str, Any], default_mail_box_id: str) -> str:
+            if "parentMailboxUrl" in folder:
+                url = folder.get("parentMailboxUrl", "").strip()
+                match = re.search(r'/admin/exchange/mailboxes/(.*)$', url, re.IGNORECASE)
+                if match:
+                    return match.group(1).strip()
+                return url.split("/")[-1].strip()
+            return default_mail_box_id
+
+        
+        def _get_item_count_from_redirected_folder(
+            received_id: str,
+            curr_folder: Dict[str, Any],
+            orig_id: str
+        ):
+            # Although we have added the folder to get the childFolders for we still need the totalItemCount for the same. For that we'll simply invoke an API sequentially
+            token_data = None
+            try:
+                token_data = self.aux_invoker.token_manager.get_valid_token_slot(self.logger)
+                session = self.aux_invoker.token_manager.get_session()
+                req = {
+                    "id": 0,
+                    "method": "GET",
+                    "url": f"admin/exchange/mailboxes/{received_id}/folders/{curr_folder['id']}?$select=id,totalItemCount",
+                    "headers": {
+                        "mailboxId": received_id,
+                        "folderId": curr_folder["id"]
+                    }
+                }
+
+                batch_responses = self.aux_invoker.execute_batch_request(
+                    session=session,
+                    batch_url=f"{GRAPH_BETA_URL}/$batch",
+                    token_manager=self.aux_invoker.token_manager,
+                    token_data=token_data,
+                    requests_payload=[req],
+                    logger=self.logger,
+                    stop_event=self.stop_event,
+                    context="Auxiliary Archive Redirect check"
+                )
+
+                if 0 in batch_responses or "0" in batch_responses:
+                    resp = batch_responses.get(0) or batch_responses.get("0")
+                    if resp.get("status", 500) >= 200 and resp.get("status", 500) < 300:
+                        response = resp.get("body", {})
+                        new_count = int(response.get("totalItemCount", 0) or 0)
+                        archived_mail_count[orig_id].increment(new_count)
+                        if self.logger:
+                            self.logger(f"Received an aux mailbox {received_id} for folder {curr_folder.get('displayName')} and originally used mail box id: {orig_id}. Item Count received in new request: {new_count}")
+                    else:
+                        if self.logger:
+                            self.logger(f"Failed to receive item count for mailbox {self.get_display_name_from_id(orig_id)} and folder {curr_folder.get('id')}")
+                        failures.append({
+                            "mailboxId": orig_id,
+                            "isPartial": True,
+                            "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                            "statusCode": resp.get("status"),
+                            "message": f"Error while fetching totalItemCount for mailbox {self.get_display_name_from_id(orig_id)} and folder {curr_folder.get('id')}: {str(resp.get('error', 'Unknown Error'))}"
+                        })
+
+            except Exception as e:
+                if self.logger:
+                    self.logger(f"Error while fetching totalItemCount for mailbox {self.get_display_name_from_id(orig_id)} and folder {curr_folder.get('id')}: {str(e)}")
+                failures.append({
+                    "mailboxId": orig_id,
+                    "isPartial": True,
+                    "type": FailureType.OTHER_REASON,
+                    "message": f"Error while fetching totalItemCount for mailbox {self.get_display_name_from_id(orig_id)} and folder {curr_folder.get('id')}: {str(e)}"
+                })
+            finally:
+                if token_data is not None:
+                    self.aux_invoker.token_manager.return_token_slot(token_data)
+
         parseable_sub_folders: Dict[str, List[Dict[str, Any]]] = {}
+
+        futures = []
+
         for mail_box_id, sub_folders in child_folders.items():
             for sub_folder in sub_folders:
                 # 1. Safely handle totalItemCount
@@ -409,6 +513,18 @@ class EOInPlaceArchiveEstimator(Estimator):
                     try:
                         count = int(sub_folder["totalItemCount"])
                         archived_mail_count[mail_box_id].increment(count)
+                        mail_box_id_received_from_response = _get_mail_box_id_from_response(sub_folder, mail_box_id)
+
+                        if mail_box_id_received_from_response != mail_box_id:
+                            futures.append(
+                                self.aux_executor.submit(
+                                    _get_item_count_from_redirected_folder,
+                                    mail_box_id_received_from_response,
+                                    sub_folder,
+                                    mail_box_id
+                                )
+                            )
+                        
                     except (ValueError, TypeError):
                         if self.logger:
                             self.logger(f"Warning: Invalid totalItemCount '{sub_folder.get('totalItemCount')}' for mailbox {self.get_display_name_from_id(mail_box_id)}. Skipping count.")
@@ -440,6 +556,8 @@ class EOInPlaceArchiveEstimator(Estimator):
                     if mail_box_id not in parseable_sub_folders:
                         parseable_sub_folders[mail_box_id] = []
                     parseable_sub_folders[mail_box_id].append(sub_folder)
+
+        [f.result() for f in futures]
 
         return parseable_sub_folders
 
