@@ -55,17 +55,10 @@ from telemetry.styles import *
 # =================================================================================
 
 _current_dir = os.path.dirname(os.path.abspath(__file__))
-_log_dir = os.path.join(_current_dir, 'logs')
-os.makedirs(_log_dir, exist_ok=True)
-
 _log_queue = queue.Queue(-1)
-_log_file_path = os.path.join(_log_dir, 'telemetry_log.txt')
-_file_handler = logging.FileHandler(_log_file_path, mode='a', encoding='utf-8')
 _formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-_file_handler.setFormatter(_formatter)
-
-_queue_listener = QueueListener(_log_queue, _file_handler)
-_queue_listener.start()
+_file_handler = None
+_queue_listener = None
 
 # Configure the root logger to send all records to the log queue and clear other handlers (stdout/stderr)
 root_logger = logging.getLogger()
@@ -86,24 +79,25 @@ logging.getLogger("PowerShellClient").setLevel(logging.INFO)
 
 
 def update_log_directory(tenant_id: Optional[str] = None, client_id: Optional[str] = None) -> None:
-    """Updates the log directory dynamically once tenant and client ID are known, or reverts to default."""
+    """Updates the log directory dynamically once tenant and client ID are known."""
     global _file_handler, _queue_listener
 
     try:
-        _queue_listener.stop()
+        if _queue_listener:
+            _queue_listener.stop()
     except Exception:
         pass
         
     try:
-        _file_handler.close()
+        if _file_handler:
+            _file_handler.close()
     except Exception:
         pass
 
-    if tenant_id and client_id:
-        new_log_dir = os.path.join(_current_dir, 'logs', f"{tenant_id}_{client_id}")
-    else:
-        new_log_dir = os.path.join(_current_dir, 'logs')
+    if not tenant_id or not client_id:
+        return
 
+    new_log_dir = os.path.join(_current_dir, 'logs', f"{tenant_id}_{client_id}")
     os.makedirs(new_log_dir, exist_ok=True)
     new_log_file_path = os.path.join(new_log_dir, 'telemetry_log.txt')
 

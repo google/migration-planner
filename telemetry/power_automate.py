@@ -57,11 +57,6 @@ class PowerAutomateScanner:
         self.client_id = client_id
         self.client_secret = client_secret
         
-        self.log_dir = os.path.join("telemetry", "logs")
-        if not os.path.exists(self.log_dir):
-            os.makedirs(self.log_dir)
-            
-        self.log_file = os.path.join(self.log_dir, "power_automate_log.txt")
         self._setup_logger()
         self.access_token = None
 
