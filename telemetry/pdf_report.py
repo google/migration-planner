@@ -1179,9 +1179,13 @@ def generate_pdf_report(data: dict, filepath: str):
     if not auth_methods:
         story.append(Paragraph("No authentication methods logs were discovered or permission restricted.", ParagraphStyle('ErrTxtAuthMethods', parent=body_style, textColor=colors.HexColor("#DC2626"))))
     else:
+        auth_period = entra_data.get("auth_methods_period", "D7")
+        period_str = auth_period
+        if period_str.startswith("D"):
+            period_str = f"{period_str[1:]} days"
         auth_table_data = [[
             Paragraph("Authentication Method", table_cell_header),
-            Paragraph("Success Activity Count", table_cell_header)
+            Paragraph(f"Success Activity Count ({period_str})", table_cell_header)
         ]]
         
         for method, activity in auth_methods:
@@ -1596,7 +1600,7 @@ def generate_pdf_report(data: dict, filepath: str):
             sit_table_data.append([
                 Paragraph(sit.get("Name", "-"), table_cell_bold),
                 Paragraph(sit.get("Type", "-"), table_cell_style),
-                Paragraph(sit.get("RecommendedConfidence", "-"), table_cell_style)
+                Paragraph(str(sit.get("RecommendedConfidence", "-")), table_cell_style)
             ])
         sit_table = Table(sit_table_data, colWidths=[280, 100, 120])
         sit_table.setStyle(TableStyle([

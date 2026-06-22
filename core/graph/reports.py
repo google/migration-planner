@@ -292,7 +292,7 @@ class ReportsService:
         self.download_report("https://graph.microsoft.com/v1.0/reports/getEmailAppUsageAppsUserCounts(period='D180')", "EmailAppUsageAppsUserCounts(180d).csv", output_dir)
 
     def fetch_app_signin_summary(self, csv_path: str, max_rows: int = 5000, on_page_callback=None, is_cancelled_callback=None) -> None:
-        """Fetches Azure AD application sign-in summary for the last 30 days and dumps to a CSV file."""
+        """Fetches Azure AD application sign-in summary for the last 7 days and dumps to a CSV file."""
         token_slot = self.client.get_active_token()
         session = self.client.get_session()
         
@@ -301,7 +301,7 @@ class ReportsService:
             "Accept": "application/json"
         }
         
-        url = "https://graph.microsoft.com/beta/reports/getAzureADApplicationSignInSummary(period='D30')"
+        url = "https://graph.microsoft.com/beta/reports/getAzureADApplicationSignInSummary(period='D7')"
         
         try:
             logger.info("Fetching Azure AD Application Sign-in Summary...")
@@ -314,7 +314,7 @@ class ReportsService:
                     return
                     
                 try:
-                    resp = session.get(url, headers=headers, timeout=40.0)
+                    resp = session.get(url, headers=headers, timeout=120.0)
                     logger.info("App Sign-ins HTTP status: %d", resp.status_code)
                     if resp.status_code == 200:
                         data = resp.json()
@@ -332,7 +332,7 @@ class ReportsService:
                 if retries_left > 0:
                     time.sleep(2)
                     
-            if resp and resp.status_code == 200 and value_list:
+            if resp is not None and resp.status_code == 200 and value_list:
                 logger.info("App Sign-ins value collection length: %d", len(value_list))
                 logger.info("App Sign-ins first 200 chars: %s", str(resp.json())[:200])
                 
@@ -352,17 +352,17 @@ class ReportsService:
                     
                 logger.info("Successfully fetched %d app sign-in summary records", rows_written)
             else:
-                if resp and resp.status_code in [401, 403]:
+                if resp is not None and resp.status_code in [401, 403]:
                     logger.error("App Sign-ins Summary endpoint access denied: %d %s", resp.status_code, resp.text)
                     raise PermissionError("Reports.Read.All permission required.")
                 else:
-                    status_str = f"status {resp.status_code}" if resp else "connection/timeout error"
+                    status_str = f"status {resp.status_code}" if resp is not None else "connection/timeout error"
                     logger.warning("App Sign-ins Summary query failed (%s) or remained empty.", status_str)
         finally:
             self.client.release_token(token_slot)
 
-    def fetch_auth_methods_summary(self, csv_path: str, max_rows: int = 5000, on_page_callback=None, is_cancelled_callback=None) -> None:
-        """Fetches User Sign-in by Authentication Method Summary for the last 30 days and dumps to a CSV file."""
+    def fetch_auth_methods_summary(self, csv_path: str, period: str = "D7", max_rows: int = 5000, on_page_callback=None, is_cancelled_callback=None) -> None:
+        """Fetches User Sign-in by Authentication Method Summary for the specified period and dumps to a CSV file."""
         token_slot = self.client.get_active_token()
         session = self.client.get_session()
         
@@ -371,14 +371,14 @@ class ReportsService:
             "Accept": "application/json"
         }
         
-        url = "https://graph.microsoft.com/beta/reports/authenticationMethods/userSignInsByAuthMethodSummary(period='D30')"
+        url = f"https://graph.microsoft.com/beta/reports/authenticationMethods/userSignInsByAuthMethodSummary(period='{period}')"
         
         try:
             logger.info("Fetching User Sign-ins by Authentication Method Summary...")
             if is_cancelled_callback and is_cancelled_callback():
                 return
                 
-            resp = session.get(url, headers=headers, timeout=40.0)
+            resp = session.get(url, headers=headers, timeout=120.0)
             if resp.status_code == 200:
                 data = resp.json()
                 value_list = data.get("value", [])
@@ -401,7 +401,7 @@ class ReportsService:
             else:
                 if resp.status_code in [401, 403]:
                     logger.error("Auth Methods Summary endpoint access denied: %d %s", resp.status_code, resp.text)
-                    raise PermissionError("Reports.Read.All permission required.")
+                    raise PermissionError("AuditLog.Read.All permission required.")
                 else:
                     logger.warning("Auth Methods Summary query failed (HTTP %d).", resp.status_code)
         finally:
@@ -444,12 +444,12 @@ class ReportsService:
                         logger.warning("Query attempt failed with exception: %s. Displaying data obtained till now.", get_err)
                         break
                         
-                    if not resp or resp.status_code != 200:
-                        if resp and resp.status_code in [401, 403]:
+                    if resp is None or resp.status_code != 200:
+                        if resp is not None and resp.status_code in [401, 403]:
                             logger.error("User Sign-ins endpoint permission error: %d %s", resp.status_code, resp.text)
                             raise PermissionError("AuditLog.Read.All permission required.")
                         else:
-                            status_str = f"status {resp.status_code}" if resp else "connection/timeout error"
+                            status_str = f"status {resp.status_code}" if resp is not None else "connection/timeout error"
                             logger.warning("User Sign-ins query failed (%s). Displaying data obtained till now.", status_str)
                             break
                             

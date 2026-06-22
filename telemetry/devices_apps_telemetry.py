@@ -49,6 +49,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         self.current_page = 0
         self.ITEMS_PER_PAGE = 5
         self.csv_path = None
+        self.period = "D7"
 
         self.build_ui()
 
@@ -88,8 +89,8 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         for w in self.body_frame.winfo_children():
             w.destroy()
         display_msg = error_msg
-        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
-            display_msg = "Reports.Read.All application permission required.\nPlease grant 'Reports.Read.All' to your App Registration in Microsoft Entra ID."
+        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower() or "auditlog.read.all" in error_msg.lower():
+            display_msg = "AuditLog.Read.All application permission required.\nPlease grant 'AuditLog.Read.All' to your App Registration in Microsoft Entra ID."
         ctk.CTkLabel(self.body_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(10, 5))
         ctk.CTkButton(self.body_frame, text="Try Again", command=self.trigger_fetch_individual, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 10))
 
@@ -163,6 +164,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
 
             reports_service.fetch_auth_methods_summary(
                 csv_path=temp_csv_path,
+                period=self.period,
                 max_rows=5000,
                 on_page_callback=handle_page,
                 is_cancelled_callback=lambda: self.is_cancelled or request_id != self.current_request_id
@@ -232,7 +234,10 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         metrics_grid = ctk.CTkFrame(self.body_frame, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         metrics_grid.pack(fill="x", pady=(5, 10))
 
-        headers = ["Authentication Method", "Success Activity Count"]
+        period_str = self.period
+        if period_str.startswith("D"):
+            period_str = f"{period_str[1:]} days"
+        headers = ["Authentication Method", f"Success Activity Count ({period_str})"]
         for i in range(2):
             metrics_grid.grid_columnconfigure(i, weight=1)
 
@@ -398,7 +403,7 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         for w in self.body_frame.winfo_children():
             w.destroy()
         display_msg = error_msg
-        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
+        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower() or "reports.read.all" in error_msg.lower():
             display_msg = "Reports.Read.All application permission required.\nPlease grant 'Reports.Read.All' to your App Registration in Microsoft Entra ID."
         ctk.CTkLabel(self.body_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(10, 5))
         ctk.CTkButton(self.body_frame, text="Try Again", command=self.trigger_fetch_individual, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 10))
@@ -725,8 +730,8 @@ class UserSigninsSubFrame(ctk.CTkFrame):
         for w in self.body_frame.winfo_children():
             w.destroy()
         display_msg = error_msg
-        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower():
-            display_msg = "Reports.Read.All application permission required.\nPlease grant 'Reports.Read.All' or 'AuditLog.Read.All' to your App Registration in Microsoft Entra ID."
+        if "401" in error_msg or "403" in error_msg or "unauthorized" in error_msg.lower() or "forbidden" in error_msg.lower() or "auditlog.read.all" in error_msg.lower():
+            display_msg = "AuditLog.Read.All application permission required.\nPlease grant 'AuditLog.Read.All' to your App Registration in Microsoft Entra ID."
         ctk.CTkLabel(self.body_frame, text=f"✖ {display_msg}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center").pack(pady=(10, 5))
         ctk.CTkButton(self.body_frame, text="Try Again", command=self.trigger_fetch_individual, width=120, fg_color="transparent", border_width=1, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER).pack(pady=(0, 10))
 
@@ -1063,6 +1068,7 @@ class DevicesAppsTelemetryFrame(ctk.CTkFrame):
         return {
             "app_signins": self.app_signins_subframe.last_data,
             "auth_methods": self.auth_methods_subframe.last_data,
+            "auth_methods_period": getattr(self.auth_methods_subframe, "period", "D7"),
             "user_signins": self.user_signins_subframe.last_data
         }
 
