@@ -123,7 +123,17 @@ Please ensure you have **Python 3.10** or newer installed on your system.
 
 ### 3. PowerShell Core (pwsh) Installation (Optional but Recommended)
 
-[PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell?view=powershell-7.6) is a cross-platform command-line shell and scripting language designed for task automation. It is required by specific features in the **Usage and Adoption** tab (such as extracting Data Security & Governance metrics, Sensitivity Labels, Retention Policies, Shared/Public mailbox statistics, detailed Calendar settings, and Connectors).
+[PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell?view=powershell-7.6) is a cross-platform command-line shell and scripting language designed for task automation. It is required by specific features in the **Usage and Adoption** tab, such as extracting:
+
+- Sensitivity Labels
+- Retention Policies
+- Sensitive Information Types
+- Conditional Access Policies
+- Data Loss Prevention policies
+- Exchange Transport Rules
+- Shared/Public mailbox statistics
+- Detailed Calendar settings
+- Exchange Inbound and Outbound Connectors
 
 > **Note**: If you do not install PowerShell, the tool will still run perfectly fine for all other sections (like the Migration Planner modules and standard Graph API telemetry), but these specific PowerShell-dependent reports will be skipped and marked as unavailable.
 
@@ -134,10 +144,10 @@ Please follow the official Microsoft guides to install PowerShell Core on your p
 *   **Linux**: Refer to the official [Linux Overview & Installation Guide](https://learn.microsoft.com/en-us/powershell/scripting/install/linux-overview?view=powershell-7.6).
 
 #### Install the Exchange Online Module
-Once `pwsh` is installed, open it and install the required Exchange module:
-```powershell
-Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser
-```
+Please follow the [official Microsoft guide](https://learn.microsoft.com/en-us/powershell/exchange/exchange-online-powershell-v2?view=exchange-ps#windows-support-for-the-module) to install the required Exchange module:
+*   **Windows**: Refer to the official [Windows support for the module](https://learn.microsoft.com/en-us/powershell/exchange/exchange-online-powershell-v2?view=exchange-ps#windows-support-for-the-module).
+*   **macOS**: Refer to the official [macOS support for the module](https://learn.microsoft.com/en-us/powershell/exchange/exchange-online-powershell-v2?view=exchange-ps#macos-support-for-the-module).
+*   **Linux**: Refer to the official [Linux support for the module](https://learn.microsoft.com/en-us/powershell/exchange/exchange-online-powershell-v2?view=exchange-ps#linux-support-for-the-module).
 
 ---
 
@@ -162,7 +172,10 @@ In your new app, go to **API permissions > Add a permission > Microsoft Graph**,
 *   `Group.Read.All` (To get M365 group and team structures)
 
 #### Deal Assistant Telemetry Permissions (Usage and Adoption)
-The Usage and Adoption tab performs extensive tenant auditing. It requires the following specific **Application permissions**:
+The Usage and Adoption tab performs extensive tenant auditing. While the following permissions are recommended for a complete report, you may choose to grant only a subset. 
+**NOTE: Be aware that any missing permissions will simply cause the tool to gracefully skip those specific telemetry sections.**
+
+**Application permissions**:
 *   `Reports.Read.All`: Used to retrieve active user trends, mailbox/SharePoint usage reports, M365 Apps, and Email Client usage.
 *   `Directory.Read.All`: Used to read tenant organization configuration data, Domain, User, and Group summaries.
 *   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
@@ -197,7 +210,13 @@ The tool can also scan Power Automate flows (Tenant-Wide Cloud Flows and Desktop
 *   **Tenant-Wide Cloud Flows**: Assign the **Power Platform Administrator** role to your App Registration in the Entra ID Portal under *Roles and administrators*.
 *   **Desktop Flows (Dataverse)**: In the Power Platform Admin Center > Environments > [Select Environment] > Settings > Users + permissions > Application users, click **+ New app user**, add your App Registration, and assign it the **System Administrator** role.
 
-### 4. Get Credentials
+### 4. Data Governance and Security Permissions
+To allow the App Registration's Service Principal to read Compliance, Retention data, and Exchange settings via PowerShell, it must be assigned the following directory roles in Entra ID (**Roles and administrators**):
+*   **Global Reader** (Recommended, read-only) OR **Exchange Administrator**
+*   **Compliance Administrator**
+*   **Compliance Data Administrator**
+
+### 5. Get Credentials
 You will need three values for the tool:
 1.  **Tenant ID**: Found on the app's Overview page.
 2.  **Client ID**: Found on the app's Overview page.
@@ -223,12 +242,6 @@ A standard Client Secret cannot authorize PowerShell modules—a certificate is 
 2. If absent, the tool securely generates a self-signed certificate (`certificate.pem`) and an encrypted bundle (`passkey.pfx`) under the `certificate/{tenantId}_{clientId}` directory.
 3. You will be prompted to upload `certificate.pem` to your Azure App Registration (**Certificates & secrets > Certificates > Upload certificate**).
 4. **Optionality**: If you choose to skip this step, sections relying on certificate-based authentication will simply be skipped and marked as unavailable in the report.
-
-### 3. Entra ID Directory Roles
-To allow the App Registration's Service Principal to read Compliance, Retention data, and Exchange settings via PowerShell, it must be assigned the following directory roles in Entra ID (**Roles and administrators**):
-*   **Global Reader** (Recommended, read-only) OR **Exchange Administrator**
-*   **Compliance Administrator**
-*   **Compliance Data Administrator**
 
 ---
 
