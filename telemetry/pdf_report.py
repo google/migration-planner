@@ -1253,6 +1253,44 @@ def generate_pdf_report(data: dict, filepath: str):
         story.append(Spacer(1, 4))
         story.append(Paragraph("<font size=8 color='#6B7280'>* Based on sample data collected from Intune.</font>", body_style))
         
+    # Render Detected Apps Table (first 10 items)
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("<b>Detected Apps (Top 10 Discovered)</b>", body_style))
+    story.append(Spacer(1, 6))
+    
+    detected_apps = intune_data.get("detected_apps", [])
+    if not detected_apps:
+        story.append(Paragraph("No detected apps were discovered or permission restricted.", ParagraphStyle('ErrTxtDetApps', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        det_table_data = [[
+            Paragraph("App Name", table_cell_header),
+            Paragraph("Version", table_cell_header),
+            Paragraph("Publisher", table_cell_header),
+            Paragraph("Platform", table_cell_header)
+        ]]
+        
+        for app in detected_apps[:10]:
+            det_table_data.append([
+                Paragraph(app.get("displayName", "N/A"), table_cell_bold),
+                Paragraph(app.get("version", "N/A"), table_cell_style),
+                Paragraph(app.get("publisher", "N/A"), table_cell_style),
+                Paragraph(app.get("platform", "unknown"), table_cell_style)
+            ])
+            
+        det_table = Table(det_table_data, colWidths=[150, 100, 150, 104])
+        det_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(det_table)
+        story.append(Spacer(1, 4))
+        story.append(Paragraph("<font size=8 color='#6B7280'>* Showing top 10 detected apps. The full inventory list of up to 10,000 apps is available in the exported CSV report.</font>", body_style))
+        
     story.append(Spacer(1, 15))
 
     # =========================================================================
