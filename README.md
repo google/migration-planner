@@ -1,28 +1,15 @@
-# Migration Planner Tool
+# Deal Assistant & Migration Planner
 
 **Doc version: v2.1.0**
 
 ## What's new
 
-- **Microsoft Teams & Chat Migration Planning**: Full support for scanning and projecting migration timelines for Microsoft Teams, Channels, and Private Chats alongside Exchange Online.
-- **Files in OneDrive / SharePoint Planning**: Support added for metrics related to OneDrive / SharePoint sites.
-- **Process-Level Decoupling Architecture**: Architectural refactoring that decouples the launcher (`migration_planner.py`) and individual workload planners into isolated OS subprocesses to prevent runtime contention, memory corruption, or GIL clashes during highly concurrent MS Graph API scanning.
-- **Bidirectional Navigation**: Addition of a top navigation bar featuring a `← Back to Selector` button for seamless transitions between workload planners.
-
-#### UX change to support new features
-- The startup screen would now show a selector that enables user to select if they want to run Exchange online estimations, Files estimations or Chat Estimations.
-- The progress screen would have three progress bars for Files estimation:
-  - **Site Discovery**: This progress bar will report the progress while scanning all the sites/subsites in the tenant under the root site, along with some other metadata like List count, Drives/DLs count, License units count, etc..
-  - **Drive Discovery**: This progress bar will report the progress while scanning all the folders in the drives found in the site scan.
-  - **Metrics Calculation**: This will show the progress of the metrics (like max depth, folder count, files count, etc.) for the drives.
-- The report screen would display:
-  - **Summary Metrics**: This will display the summary metrics for the entire tenant.
-  - **File Size Distribution**: This will display the distribution of files based on their sizes as per the bucket ranges provided in the input screen.
-
-#### System behaviour changes
-- **Site Discovery** and **Drive Discovery** phases in the progress screen would show indeterminate progress as the total number of sites/folders/files are not known during those phases.
-- However the **Metrics Calculation** phase would be determinate and show proper progress.
-- The logs and CSV report would only be available through the export option and not under the outputs/ directory to minimize report creation latency for huge reports.
+- **Unified Interface**: "Deal Assistant" merges the traditional "Migration Planner" with a powerful "Usage and Adoption" telemetry dashboard into a single, unified application (`deal_assistant.py`).
+- **Unified Login Screen**: A centralized connection interface for entering Tenant ID, Client ID, and Client Secret.
+- **Optional Delegated Authentication**: Support for delegated auth flows required by eDiscovery modules. 
+- **Certificate-Based Authentication**: Automated generation and handling of Certificates to access Data Security & Governance metrics via Exchange Online PowerShell.
+- **Usage and Adoption Telemetry**: Comprehensive tenant insights including Subscribed SKUs, Directory Summaries, M365 App Usage, Power Automate, and Intune Policies, exportable as a high-fidelity PDF report.
+- **Process-Level Decoupling Architecture**: Architectural refactoring that decouples the launcher and individual workload planners into isolated OS subprocesses to prevent runtime contention during highly concurrent MS Graph API scanning.
 
 ## DISCLAIMER
 
@@ -48,40 +35,41 @@
 
 - [Introduction](#introduction)
 - [Prerequisites & Installation](#prerequisites--installation)
-  - [1. Python Version](#1-python-version)
-  - [2. Installation Steps](#2-installation-steps)
-    - [Windows](#windows)
-    - [macOS](#macos)
-    - [Linux (Ubuntu/Debian)](#linux-ubuntudebian)
-  - [3. Setting up a Virtual Environment (Optional / Corp Policy)](#3-setting-up-a-virtual-environment-optional--corp-policy)
 - [Setting up Microsoft Azure](#setting-up-microsoft-azure)
   - [1. Register the App](#1-register-the-app)
-  - [2. Grant Permissions](#2-grant-permissions)
-  - [3. Get Credentials](#3-get-credentials)
-- [Setting up & Using the Deal Assistant](#setting-up--using-the-deal-assistant)
-  - [1. Required Graph API Permissions](#1-required-graph-api-permissions)
-  - [2. Uploading the Generated Certificate](#2-uploading-the-generated-certificate)
-  - [3. Assigning Compliance Administrator Roles](#3-assigning-compliance-administrator-roles)
-- [Running the Tool & Process Decoupling](#running-the-tool--process-decoupling)
-- [Tool Configuration & Scanning](#tool-configuration--scanning)
-  - [Workflow A: Exchange Online Planner](#workflow-a-exchange-online-planner)
-  - [Workflow B: Microsoft Files (OneDrive + SharePoint) Planner](#workflow-b-microsoft-onedrive--sharepoint)
-  - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-microsoft-teams--chat-planner)
-- [Understanding the Results](#understanding-the-results)
-  - [Workflow A: Exchange Online Planner](#workflow-a-results-exchange-online-planner)
-  - [Workflow B: Microsoft Files (OneDrive + SharePoint) Planner](#workflow-b-results-microsoft-onedrive--sharepoint)
-  - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-results-microsoft-teams--chat-planner)
-- [Outputs & Artifacts](#outputs--artifacts)
-  - [Workflow A: Exchange Online Planner](#workflow-a-outputs-exchange-online-planner)
-  - [Workflow B: Microsoft Files (OneDrive + SharePoint) Planner](#workflow-b-outputs-microsoft-onedrive--sharepoint)
-  - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-outputs-microsoft-teams--chat-planner)
+  - [2. Graph API Permissions](#2-graph-api-permissions)
+  - [3. Power Platform & Dataverse Permissions](#3-power-platform--dataverse-permissions)
+  - [4. Get Credentials](#4-get-credentials)
+- [Advanced Authentication & Setup (Deal Assistant)](#advanced-authentication--setup-deal-assistant)
+  - [1. Delegated Authentication Flow](#1-delegated-authentication-flow)
+  - [2. PowerShell & Certificate-Based Authentication](#2-powershell--certificate-based-authentication)
+  - [3. Entra ID Directory Roles](#3-entra-id-directory-roles)
+- [Running the Tool](#running-the-tool)
+- [Unified Interface Navigation](#unified-interface-navigation)
+- [Tab 1: Usage and Adoption](#tab-1-usage-and-adoption)
+  - [Tab 1 Outputs: Usage and Adoption](#tab-1-outputs-usage-and-adoption)
+- [Tab 2: Migration Planner](#tab-2-migration-planner)
+  - [Tool Configuration & Scanning](#tool-configuration--scanning)
+    - [Workflow A: Exchange Online Planner](#workflow-a-exchange-online-planner)
+    - [Workflow B: Microsoft Files (OneDrive + SharePoint)](#workflow-b-microsoft-files-onedrive--sharepoint)
+    - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-microsoft-teams--chat-planner)
+  - [Understanding the Results](#understanding-the-results)
+    - [Workflow A: Exchange Online Planner](#workflow-a-exchange-online-planner-1)
+    - [Workflow B: Microsoft Files (OneDrive + SharePoint)](#workflow-b-microsoft-files-onedrive--sharepoint-1)
+    - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-microsoft-teams--chat-planner-1)
+  - [Outputs & Artifacts](#outputs--artifacts)
+    - [Workflow A: Exchange Online Planner](#workflow-a-exchange-online-planner-2)
+    - [Workflow B: Microsoft Files (OneDrive + SharePoint)](#workflow-b-microsoft-files-onedrive--sharepoint-2)
+    - [Workflow C: Microsoft Teams & Chat Planner](#workflow-c-microsoft-teams--chat-planner-2)
 - [Terms & Disclaimer](#terms--disclaimer)
 
 ---
 
 ## Introduction
 
-The Migration Planner is a desktop application designed to help deployment partners and IT administrators assess a Microsoft 365 tenant before migration. Through its process-decoupled architecture, administrators can independently assess Exchange Online (Emails, Contacts, Calendars, In-Place Archives, Group Mails), Files in OneDrive / SharePoint or Microsoft Teams (Channels, Private Chats) to provide volume metrics and generate optimized Migration Batch Plans with estimated completion times (ETAs) (not applicable for files estimation).
+The **Deal Assistant** is a comprehensive desktop application designed to help deployment partners and IT administrators assess a Microsoft 365 tenant before migration. It is split into two primary modules:
+1. **Usage and Adoption**: A deep telemetry and discovery module providing insights into a tenant's directory, license usage, security governance, and endpoint management.
+2. **Migration Planner**: Independently assess Exchange Online (Emails, Contacts, Calendars), Files in OneDrive / SharePoint, or Microsoft Teams to provide volume metrics and generate optimized Migration Batch Plans with estimated completion times.
 
 ---
 
@@ -95,9 +83,9 @@ Please ensure you have **Python 3.10** or newer installed on your system.
 
 #### Windows
 1.  **Download Python**: Visit [python.org/downloads](https://www.python.org/downloads/) and download the latest installer.
-    *   **Important**: Ensure the checkbox **"tcl/tk and IDLE"** is selected during installation (it is usually selected by default). This installs the necessary GUI components.
-    *   **Important**: Check the box **"Add Python to PATH"** during installation.
-2.  **Verify Installation**: Open Command Prompt (cmd) or PowerShell and make sure the following commands run successfully and return you the version ids of python and pip:
+    *   **Important**: Ensure the checkbox **"tcl/tk and IDLE"** is selected during installation.
+    *   **Important**: Check the box **"Add Python to PATH"**.
+2.  **Verify Installation**: Open Command Prompt (cmd) or PowerShell:
     ```cmd
     python --version
     pip --version
@@ -108,17 +96,12 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 
 #### macOS
-1.  **Download Python**: Visit [python.org/downloads](https://www.python.org/downloads/) and download the macOS installer. Alternatively, use Homebrew from the terminal (`brew install python`).
-2.  **Install Tkinter**: If you are using Homebrew or encounter GUI errors, you may need to explicitly install the Tkinter library:
+1.  **Download Python**: Visit [python.org/downloads](https://www.python.org/downloads/) or use Homebrew (`brew install python`).
+2.  **Install Tkinter**: If you are using Homebrew or encounter GUI errors:
     ```bash
     brew install python-tk
     ```
-3.  **Verify Installation**: Open Command Prompt (cmd) or PowerShell and make sure the following commands run successfully and return you the version ids of python and pip:
-    ```bash
-    python3 --version
-    pip3 --version
-    ```
-4.  **Install Dependencies**:
+3.  **Install Dependencies**:
     ```bash
     pip3 install -r requirements.txt
     ```
@@ -138,22 +121,41 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     pip3 install -r requirements.txt
     ```
 
-### 3. Setting up a Virtual Environment (Optional / Corp Policy)
+### 3. PowerShell Core (pwsh) Installation (Optional but Recommended)
 
-If your organization restricts installing packages globally, use a virtual environment:
+PowerShell Core is required by specific features in the **Usage and Adoption** tab (such as extracting Data Security & Governance metrics, Sensitivity Labels, Retention Policies, Shared/Public mailbox statistics, detailed Calendar settings, and Connectors).
 
-1.  **Create the environment**:
-    ```bash
-    # Windows
-    python -m venv venv
+> **Note**: If you do not install PowerShell, the tool will still run perfectly fine for all other sections (like the Migration Planner modules and standard Graph API telemetry), but these specific PowerShell-dependent reports will be skipped and marked as unavailable.
 
-    # Mac/Linux
-    python3 -m venv venv
+#### Windows
+While Windows PowerShell is pre-installed, it is recommended to install the modern **PowerShell Core (`pwsh`)**:
+*   Download it via the Microsoft Store, or run in Command Prompt:
+    ```cmd
+    winget install --id Microsoft.Powershell --source winget
     ```
-2.  **Activate the environment**:
-    *   Windows: `.\venv\Scripts\activate`
-    *   Mac/Linux: `source venv/bin/activate`
-3.  **Install packages** as shown above inside this environment.
+
+#### macOS
+*   Use Homebrew to install:
+    ```bash
+    brew install powershell
+    ```
+
+#### Linux (Ubuntu/Debian)
+*   Install via APT:
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y wget apt-transport-https software-properties-common
+    wget -q "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb"
+    sudo dpkg -i packages-microsoft-prod.deb
+    sudo apt-get update
+    sudo apt-get install -y powershell
+    ```
+
+#### Install the Exchange Online Module
+Once `pwsh` is installed, open it and install the required Exchange module:
+```powershell
+Install-Module -Name ExchangeOnlineManagement -Scope CurrentUser
+```
 
 ---
 
@@ -164,118 +166,138 @@ To scan your tenant, you need to register an app in the Microsoft Entra ID (form
 ### 1. Register the App
 1.  Go to [portal.azure.com](https://portal.azure.com/).
 2.  Navigate to **Microsoft Entra ID > App registrations > New registration**.
-3.  Name the app (e.g., "Migration Planner Tool").
+3.  Name the app (e.g., "Deal Assistant Tool").
 4.  Select **"Accounts in this organizational directory only"** (Single Tenant).
 5.  Click **Register**.
 6.  **(Required for Delegated Auth & eDiscovery)**: Go to **Authentication**. Under **Platform configurations**, click **Add a platform** -> **Mobile and desktop applications**. Add `http://localhost` as the redirect URI.
 7.  **(Required for Delegated Auth & eDiscovery)**: Scroll down to **Advanced settings** and set **Allow public client flows** to **Yes**. Click **Save**.
 
-### 2. Grant Permissions
-In your new app, go to **API permissions > Add a permission > Microsoft Graph**, and assign permissions based on the workloads you plan to scan.
+### 2. Graph API Permissions
+In your new app, go to **API permissions > Add a permission > Microsoft Graph**, and assign Application permissions based on the workloads you plan to scan. *Don't forget to click **"Grant admin consent"** after adding these permissions.*
 
-> **⚠️ IMPORTANT WARNING**: eDiscovery features require **Delegated permissions**, while other features require **Application permissions**. If you plan to use Delegated Authentication, ensure you have enabled "Allow public client flows" and configured the redirect URI as described in step 1, otherwise the interactive login popup will fail!
-
-#### Shared Permissions (Required for Both Workloads)
-*   `User.Read.All` (To list users and enumerate rosters)
+#### Shared Core Permissions
+*   `User.Read.All` (To list users)
 *   `Group.Read.All` (To get M365 group and team structures)
 
+#### Deal Assistant Telemetry Permissions (Usage and Adoption)
+The Usage and Adoption tab performs extensive tenant auditing. It requires the following specific **Application permissions**:
+*   `Reports.Read.All`: Used to retrieve active user trends, mailbox/SharePoint usage reports, M365 Apps, and Email Client usage.
+*   `Directory.Read.All`: Used to read tenant organization configuration data, Domain, User, and Group summaries.
+*   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
+*   `DeviceManagementConfiguration.Read.All`: Required for Intune Policies.
+*   `Organization.Read.All`: Required to resolve tenant domains and Subscribed SKUs.
+*   `Place.Read.All`: Used to list meeting rooms and resource device counts.
+*   `Calendars.ReadBasic.All`: Used to audit organizational calendar permissions.
+
 #### Exchange Planner Specific Permissions
-*   `Mail.Read` (To count emails)
-*   `Contacts.Read` (To count contacts)
-*   `Calendars.Read` (To count calendar events)
-*   `MailboxFolder.Read.All` (To count emails in in-place archives)
-*   `MailboxSettings.Read` (To distinguish user and shared mailboxes)
+*   `Mail.Read`
+*   `Contacts.Read`
+*   `Calendars.Read`
+*   `MailboxFolder.Read.All`
+*   `MailboxSettings.Read`
 
 #### Chat & Teams Planner Specific Permissions
-*   `Reports.Read.All` (To fetch automated M365 activity reports for heuristics estimation)
-*   `Chat.Read.All` (To scan private chats and chat memberships)
-*   `ChannelMessage.Read.All` (To estimate channel messages across teams)
-*   `ChannelSettings.Read.All` (To list channels)
-*   `TeamsActivity.Read.All` (To read Teams activity analytics)
-*   `TeamMember.Read.All` (To read team memberships)
-*   `Group.Read.All` (To list teams)
+*   `Reports.Read.All`
+*   `Chat.Read.All`
+*   `ChannelMessage.Read.All`
+*   `ChannelSettings.Read.All`
+*   `TeamsActivity.Read.All`
+*   `TeamMember.Read.All`
+*   `Group.Read.All`
 
-### Files Planner Specific Permissions
-*   `Sites.Read.All` (To list sites)
-*   `Files.Read.All` (To count files)
-*   `LicenseAssignment.Read.All` (To check license information)
+#### Files Planner Specific Permissions
+*   `Sites.Read.All`
+*   `Files.Read.All`
+*   `LicenseAssignment.Read.All`
 
-5.  Click **Add permissions**.
-6.  **Crucial Step**: Click **"Grant admin consent for [Your Organization]"** and confirm "Yes". All status icons should turn green.
+### 3. Power Platform & Dataverse Permissions
+The tool can also scan Power Automate flows (Tenant-Wide Cloud Flows and Desktop Flows).
+*   **Tenant-Wide Cloud Flows**: Assign the **Power Platform Administrator** role to your App Registration in the Entra ID Portal under *Roles and administrators*.
+*   **Desktop Flows (Dataverse)**: In the Power Platform Admin Center > Environments > [Select Environment] > Settings > Users + permissions > Application users, click **+ New app user**, add your App Registration, and assign it the **System Administrator** role.
 
-### 3. Get Credentials
+### 4. Get Credentials
 You will need three values for the tool:
-1.  **Tenant ID**: Found on the app's Overview page ("Directory (tenant) ID").
-2.  **Client ID**: Found on the app's Overview page ("Application (client) ID").
+1.  **Tenant ID**: Found on the app's Overview page.
+2.  **Client ID**: Found on the app's Overview page.
 3.  **Client Secret**:
     *   Go to **Certificates & secrets > New client secret**.
     *   Add a description and click **Add**.
-    *   Copy the **"Value"** immediately (you won't see it again).
+    *   Copy the **"Value"** immediately.
 
 ---
 
-## Setting up & Using the Deal Assistant
+## Advanced Authentication & Setup (Deal Assistant)
 
-The Deal Assistant is a comprehensive telemetry and discovery module that provides deep insights into a Microsoft 365 tenant's directory, usage, security governance, and endpoint management. It requires specific setup steps beyond the standard Migration Planner workloads.
+### 1. Delegated Authentication Flow
+Certain features like **eDiscovery** require **Delegated Authentication**. On the login screen, you can check the box to enable Delegated Authentication. 
+> **⚠️ IMPORTANT WARNING**: If you enable this, your Entra App Registration MUST have "Allow public client flows" enabled and `http://localhost` registered as a redirect URI. Otherwise, the interactive browser login popup will fail!
 
-### 1. Required Graph API Permissions
-To run the Deal Assistant, your Microsoft Entra App Registration requires the following **Application permissions** (not Delegated) under Microsoft Graph:
-*   `Reports.Read.All` (Required for Active Users, M365 Apps, and Email Client usage)
-*   `Directory.Read.All` (Required for Domain, User, and Group summaries)
-*   `Policy.Read.All` (Required for Conditional Access & Authentication mechanics)
-*   `DeviceManagementConfiguration.Read.All` (Required for Intune Policies)
-*   `Organization.Read.All` (Required to resolve tenant domains)
+### 2. PowerShell & Certificate-Based Authentication
+The Deal Assistant uses **Microsoft Exchange Online PowerShell** to fetch Data Security & Governance metrics (like Sensitivity Labels, Retention Policies, Shared/Public mailbox statistics, detailed Calendar settings, and Connectors). Ensure you have installed PowerShell Core (`pwsh`) as detailed in the Prerequisites section.
 
-*Don't forget to click **"Grant admin consent"** after adding these permissions.*
+**Certificate Authentication**:
+A standard Client Secret cannot authorize PowerShell modules—a certificate is required.
+1. When you connect, the tool checks if a valid certificate is configured for your tenant/client pair.
+2. If absent, the tool securely generates a self-signed certificate (`certificate.pem`) and an encrypted bundle (`passkey.pfx`) under the `certificate/{tenantId}_{clientId}` directory.
+3. You will be prompted to upload `certificate.pem` to your Azure App Registration (**Certificates & secrets > Certificates > Upload certificate**).
+4. **Optionality**: If you choose to skip this step, sections relying on certificate-based authentication will simply be skipped and marked as unavailable in the report.
 
-### 2. Uploading the Generated Certificate
-The Deal Assistant utilizes Microsoft Exchange Online PowerShell (via Certificate-Based Authentication) to fetch Data Security & Governance metrics like Sensitivity Labels and Retention Policies. You cannot use a standard Client Secret for these PowerShell modules; you must use a certificate.
-
-If the tool generated a certificate for you (or if you created your own self-signed certificate):
-1.  Navigate to your App Registration in the [Microsoft Entra admin center](https://entra.microsoft.com/).
-2.  Go to **Certificates & secrets** from the left menu.
-3.  Select the **Certificates** tab.
-4.  Click **Upload certificate**.
-5.  Select the public key file (e.g., `.crt`, `.cer`, or `.pem`) generated by the tool.
-6.  Click **Add**.
-
-### 3. Assigning Compliance Administrator Roles
-In addition to Graph API permissions, the App Registration's Service Principal must be assigned administrative roles in Entra ID to read Compliance and Retention data via PowerShell.
-
-1.  Go to the [Microsoft Entra ID Roles and administrators page](https://entra.microsoft.com/#view/Microsoft_AAD_IAM/).
-2.  Search for **"Compliance Administrator"** in the roles list and click on it.
-3.  Click **Add assignments**.
-4.  In the search bar, type the exact name of your App Registration (e.g., "Migration Planner Tool").
-5.  Select your application and click **Add**.
-6.  Return to the Roles list and search for **"Compliance Data Administrator"**.
-7.  Repeat steps 3-5 to assign this role to your application as well.
+### 3. Entra ID Directory Roles
+To allow the App Registration's Service Principal to read Compliance, Retention data, and Exchange settings via PowerShell, it must be assigned the following directory roles in Entra ID (**Roles and administrators**):
+*   **Global Reader** (Recommended, read-only) OR **Exchange Administrator**
+*   **Compliance Administrator**
+*   **Compliance Data Administrator**
 
 ---
 
-## Running the Tool & Process Decoupling
+## Running the Tool
 
 1.  Open your terminal or command prompt.
 2.  Navigate to the folder containing the script:
     ```bash
-    cd path/to/migration_planner
+    cd path/to/splash_one
     ```
-3.  Run the script:
-    *   Windows: `python migration_planner.py`
-    *   Mac/Linux: `python3 migration_planner.py`
+3.  Run the Deal Assistant:
+    *   Windows: `python deal_assistant.py`
+    *   Mac/Linux: `python3 deal_assistant.py`
 
     *(Ensure you are in your virtual environment if you created one).*
 
-### Process Decoupling Mechanics
-The launcher window (`migration_planner.py`) acts as a lightweight CustomTkinter `SelectorApp`, which can be used to select which estimations need to be run (Exchange Online, Chats or Files).
-All workload planners feature a top navigation bar with a `← Back to Selector` button. Clicking this cleanly terminates the active planner process and respawns a fresh `migration_planner.py` selector session.
+---
+
+## Unified Interface Navigation
+
+Upon launching, you are greeted with the **Unified Login Screen**:
+*   Enter your **Tenant ID**, **Client ID**, and **Client Secret**.
+*   Select if you wish to use **Delegated Authentication**.
+*   Click **Connect & Continue**. Follow any certificate upload instructions if prompted.
+
+Once authenticated, the tool provides a left-hand navigation sidebar with two main tabs:
+
+## Tab 1: Usage and Adoption
+This tab loads the M365 Telemetry dashboard.
+*   **Fetch Report**: Queries Microsoft Graph APIs and Reports in parallel to audit Subscribed SKUs, Directory Groups, M365 Apps, Exchange Online Usage, Files, Intune Policies, Security Governance, and Power Automate.
+*   **Download PDF**: Once telemetry fetching is complete, you can click this to export a high-fidelity, comprehensive PDF usage report covering the entire tenant's footprint.
+
+### Tab 1 Outputs: Usage and Adoption
+*   **PDF Report**: Accessible via the "Download PDF" button in the UI. Upon clicking, you can choose a save location on your system. The PDF is a comprehensive document (`m365_usage_report_<timestamp>.pdf`) containing detailed charts, graphs, data tables, and metrics for all successfully audited modules, providing a unified holistic view of the tenant.
+*   **Logs**: Execution and debug logs are stored securely in the local `telemetry/logs/<tenant_id>_<client_id>` directory (specifically `telemetry_log.txt`).
 
 ---
 
-## Tool Configuration & Scanning
+## Tab 2: Migration Planner
+This tab brings you to the workload selector, mirroring the standalone Migration Planner functionality.
+*   Select between **Exchange Online**, **Chat (Teams)**, or **Files (SharePoint/OneDrive)**.
+*   Configure workload-specific sources (e.g. Scan all, or Upload CSV), advanced settings (parallel threads, batches, heuristics vs. deep scan).
+*   **Process Decoupling**: Each workload planner runs isolated to prevent API throttling and memory clashes. A `← Back to Selector` button lets you easily switch workloads.
 
-### Workflow A: Exchange Online Planner
+---
 
-#### 1. Connect & Source Selection (Exchange)
+### Tool Configuration & Scanning
+
+#### Workflow A: Exchange Online Planner
+
+##### 1. Connect & Source Selection (Exchange)
 *   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret.
 *   **User Source**:
     *   **Scan All Users**: Automatically fetches every user in your tenant.
@@ -283,7 +305,7 @@ All workload planners feature a top navigation bar with a `← Back to Selector`
     *   **CSV Format**: Must contain a header **Email Id** (e.g., `user@domain.com`). Also if Group Mailbox estimation is required then a column called `"Type"` is needed to segregate group mailbox IDs from user mailbox IDs. The correct values for Type column are `"User"`, `"Group Mailbox"`.
     *   **Smart Delta Scan**: If your CSV already contains columns like `Email Count`, `Contact Count`, `Calendar Count`, `Calendar Event Count`, `In-Place Archive Count` or `Group Mail Count`, `Group Thread Count`, the tool will skip scanning those specific items and use your provided numbers, speeding up the process significantly.
 
-#### 2. Advanced Settings (Exchange)
+##### 2. Advanced Settings (Exchange)
 Click **"Show Advanced Settings"** to tune the performance:
 *   **Sources**: Check/Uncheck Emails, Contacts, Calendars, In-Place Archives and Group Mails to define what you want to scan.
 *   **Concurrency**: Controls how many parallel threads the tool runs.
@@ -292,9 +314,9 @@ Click **"Show Advanced Settings"** to tune the performance:
 
 ---
 
-### Workflow B: Microsoft OneDrive / SharePoint
+#### Workflow B: Microsoft OneDrive / SharePoint
 
-#### 1. Connect & Source Selection
+##### 1. Connect & Source Selection
 *   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret.
 *   **User Source**:
     *   **Scan All Sites**: Scans all the Sites in the tenant.
@@ -318,19 +340,19 @@ Click **"Show Advanced Settings"** to tune the performance:
 
     DISCLAIMER: If using the "Upload CSV" feature to re-calculate ETA, the final output would be missing some metadata like "Large Resources", "File Size Distribution", etc.. So the original corpus report should be used as the source of truth and the generated report without scan should be used only for batch planning.
 
-#### 2. Advanced Settings
+##### 2. Advanced Settings
 Click **"Show Advanced Settings"** to tune the performance and select your estimation mode:
 *   **Site Types to Scan**:
     *   **Personal Sites (OneDrive)**: Scans all the Personal / OneDrive sites in the tenant.
     *   **SharePoint Sites**: Scans all the SharePoint sites in the tenant.
 *   **Concurrency**: Controls how many parallel threads the tool runs. Note that this number is not the exact number of threads spawned but is a guidance on the thread count.
 
-#### 3. Starting the Scan
+##### 3. Starting the Scan
 Click **"Get Migration Estimates"**.
 *   A disclaimer will appear noting that results are estimates. Click **OK** to proceed.
 *   The tool will verify your credentials and permissions before starting.
 
-#### 4. The Scan Page
+##### 4. The Scan Page
 Once started, you will see a real-time progress screen:
 *   **Spinners**: Indicate active scanning phases.
 *   **Progress Bars**: Show percentage completion for Site and Drive Discovery along with Metrics Calculations.
@@ -338,9 +360,9 @@ Once started, you will see a real-time progress screen:
 
 ---
 
-### Workflow C: Microsoft Teams & Chat Planner
+#### Workflow C: Microsoft Teams & Chat Planner
 
-#### 1. Connect & Source Selection (Chat)
+##### 1. Connect & Source Selection (Chat)
 *   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret.
 *   **User Source**:
     *   **Scan all teams and users**: Automatically fetches every team and user in your tenant.
@@ -354,7 +376,7 @@ Once started, you will see a real-time progress screen:
             ```
         *   **User/Team Resolution**: If a CSV of users is supplied without teams, the tool automatically resolves all Teams these users are members of using the `/users/{id}/joinedTeams` MS Graph API endpoint in batch requests and performs the scan on these teams only. Note that this covers all private and shared channels hosted within those resolved Teams. Shared channels hosted in external teams the user does not belong to are not resolved, as MS Graph does not support querying external shared channel memberships directly.
 
-#### 2. Advanced Settings & Estimation Modes (Chat)
+##### 2. Advanced Settings & Estimation Modes (Chat)
 Click **"Show Advanced Settings"** to tune the performance and select your estimation mode:
 *   **Estimation Modes**:
     *   **Last 6 Months (Heuristics)**: Leverages automated M365 activity reports (`Reports.Read.All`) for instant, high-level tenant estimations without deep scanning. *Note: Sizing projections are computed using statistical multipliers based on standard enterprise averages. For precise customer-specific densities, use Deep Scan mode.*
@@ -362,12 +384,12 @@ Click **"Show Advanced Settings"** to tune the performance and select your estim
 *   **Scan Options**: Check or uncheck Private Chats to control scan boundaries.
 *   **Concurrency**: Sets async thread limits for channel message extrapolation.
 
-#### 3. Starting the Scan (Chat)
+##### 3. Starting the Scan (Chat)
 Click **"Get Migration Estimates"**.
 *   A disclaimer will appear noting that results are estimates. Click **OK** to proceed.
 *   The tool will verify your credentials and permissions before starting.
 
-#### 4. The Scan Page (Chat)
+##### 4. The Scan Page (Chat)
 Once started, you will see a real-time progress screen:
 *   **Spinners**: Indicate active scanning phases.
 *   **Progress Bars**: Show percentage completion for Private Chats and Channels.
@@ -375,18 +397,18 @@ Once started, you will see a real-time progress screen:
 
 ---
 
-## Understanding the Results
+### Understanding the Results
 
-### Workflow A Results: Microsoft Exchange Online
+#### Workflow A Results: Microsoft Exchange Online
 
-#### 1. Top Level Metrics
+##### 1. Top Level Metrics
 The top cards display the total scope of the migration:
 *   **Users**: Total distinct users identified/scanned.
 *   **Emails / Events / Contacts / In-Place Archives / Group Mailboxes**: The aggregate sum of items across all users.
 
 The CSV report would include additional details at the more granular site level.
 
-### 2. Timeline Estimates & Parallel Batches
+#### 2. Timeline Estimates & Parallel Batches
 The tool calculates an Estimated Completion Time (ETA) based on the email corpus using a heuristic based logic:
 *   **User Ordering**: Users are sorted in Ascending Order (Lightest users -> Heaviest users). The lightest users are packed into Batch 1, while the heaviest users usually end up in the final batches.
 *   Max(Emails , (Calendar Events + Contacts), In-Place Archives, Group Mails) determines the sorting logic.
@@ -397,9 +419,9 @@ The tool calculates an Estimated Completion Time (ETA) based on the email corpus
 
 ---
 
-### Workflow B Results: Microsoft OneDrive / SharePoint
+#### Workflow B Results: Microsoft OneDrive / SharePoint
 
-#### 1. Top Level Metrics
+##### 1. Top Level Metrics
 For OneDrive we show the following metrics in the UI report.
 *   **Total Corpus Size**: Total size of the files discovered in the scan.
 *   **Site Collection Count**: Number of sites discovered in the scan.
@@ -416,23 +438,23 @@ The CSV report would include the above mentioned details along with the granular
 
 ---
 
-### Workflow C Results: Microsoft Teams & Chat Planner
+#### Workflow C Results: Microsoft Teams & Chat Planner
 
-#### 1. Top Level Metrics (Chat & Teams)
+##### 1. Top Level Metrics (Chat & Teams)
 The top cards display the total scope of the Chat/Teams migration:
 *   **Users & Private Chats**: Total distinct Users, Private Chats, and Private Chat Messages.
 *   **Teams & Channels**: Total distinct Teams, Channels, and Channel Messages.
 
-#### 2. Timeline Estimates & Pagination Controls (Chat & Teams)
+##### 2. Timeline Estimates & Pagination Controls (Chat & Teams)
 *   **User & Team Ordering**: Entities are sorted in Ascending Order (Lightest entities -> Heaviest entities) to optimize packing.
 *   **Pagination Controls**: The results Gantt chart and batch tables include interactive pagination dropdowns supporting 50, 100, 200, or All items per view.
 *   **Total ETA** = The duration of the single longest bucket (lane).
 
 ---
 
-## Outputs & Artifacts
+### Outputs & Artifacts
 
-### Workflow A Outputs: Exchange Online Planner
+#### Workflow A Outputs: Exchange Online Planner
 
 Once the scan completes, the tool creates a folder in the `/outputs` directory named with the current timestamp (e.g., `/outputs/20240520_143000/`).
 
@@ -445,7 +467,7 @@ You can also download just the log file via the **"Export logs"** button or the 
 
 ---
 
-### Workflow B Outputs: Microsoft OneDrive / SharePoint
+#### Workflow B Outputs: Microsoft OneDrive / SharePoint
 
 Once the scan completes, the artifacts (CSV report and logs) can be downloaded via the "Export logs" and "Export full report" buttons in the UI.
 
@@ -455,7 +477,7 @@ The artifacts include:
 
 ---
 
-### Workflow C Outputs: Microsoft Teams & Chat Planner
+#### Workflow C Outputs: Microsoft Teams & Chat Planner
 
 Once the scan completes, the tool creates a folder in the `/outputs` directory named with the current timestamp.
 
@@ -475,3 +497,4 @@ You can also download just the log file via the **"Export logs"** button or the 
 *   **Local Database & Storage**: To enable scan progress persistence and delta tracking, the tool creates and maintains local SQLite databases in the `data/` directory (`data/chat_migration_v2.db` and `data/scan_progress.db`). These databases store metadata, estimated item counts, and progress checkpoints entirely locally. No actual chat message contents or emails are stored. The `data/` directory can be safely deleted or purged at any time after your estimations are completed to reclaim local disk space.
 *   **License & Additional Terms**: Use of this tool is governed by the Apache 2.0 license.
 *   This is not an officially supported Google product. This project is not eligible for the [Google Open Source Software Vulnerability Rewards Program](https://bughunters.google.com/open-source-security).
+
