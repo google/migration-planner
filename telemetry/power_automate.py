@@ -28,6 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tkinter import filedialog, messagebox
 from typing import Any, Dict, List
 import customtkinter as ctk
+import webbrowser
 
 # Safely import matplotlib to embed plots in Tkinter
 try:
@@ -425,6 +426,17 @@ class PowerAutomateUsageFrame(ctk.CTkFrame):
         self.header = ctk.CTkFrame(self.pa_header, fg_color="transparent")
         self.header.pack(fill="x", pady=(0, 10))
         ctk.CTkLabel(self.header, text="Power Automate", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        self.admin_center_link = ctk.CTkLabel(
+            self.header,
+            text="Open Power Platform Admin Center ↗",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_PRIMARY,
+            cursor="hand2"
+        )
+        self.admin_center_link.pack(side="left", padx=(15, 0))
+        self.admin_center_link.bind("<Button-1>", lambda e: webbrowser.open("https://admin.powerplatform.microsoft.com"))
+        self.admin_center_link.bind("<Enter>", lambda e: self.admin_center_link.configure(text_color=COLOR_PRIMARY_HOVER))
+        self.admin_center_link.bind("<Leave>", lambda e: self.admin_center_link.configure(text_color=COLOR_PRIMARY))
         self.reload_btn = ctk.CTkButton(
             self.header, 
             state="disabled", text="↻ Reload", 
