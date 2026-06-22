@@ -272,6 +272,104 @@ class MigrationPlannerView(ctk.CTkFrame):
 logger = logging.getLogger("M365TelemetryAsyncLogger.TelemetryOrchestrator")
 
 
+class CertDecryptionErrorDialog(ctk.CTkToplevel):
+    """Custom Modal Dialog giving the user choices when local certificate decryption fails."""
+    
+    def __init__(self, parent, error_message):
+        super().__init__(parent)
+        self.title("Certificate Decryption Error")
+        self.geometry("500x260")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+        
+        # Center relative to parent window
+        parent_x = parent.winfo_rootx()
+        parent_y = parent.winfo_rooty()
+        parent_w = parent.winfo_width()
+        parent_h = parent.winfo_height()
+        x = parent_x + (parent_w - 500) // 2
+        y = parent_y + (parent_h - 260) // 2
+        self.geometry(f"+{x}+{y}")
+        
+        self.result = None  # "retry", "generate", or None
+
+        self.configure(fg_color=COLOR_SURFACE)
+        
+        pad_frame = ctk.CTkFrame(self, fg_color="transparent")
+        pad_frame.pack(fill="both", expand=True, padx=24, pady=24)
+        
+        lbl_msg = ctk.CTkLabel(
+            pad_frame,
+            text="Unable to decrypt existing certificate passkey using the provided Client Secret. How would you like to proceed?",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            wraplength=450,
+            justify="left",
+            anchor="w"
+        )
+        lbl_msg.pack(anchor="w", pady=(0, 10))
+        
+        lbl_detail = ctk.CTkLabel(
+            pad_frame,
+            text=f"Error details: {error_message}",
+            font=FONT_BODY_SMALL,
+            text_color=COLOR_ERROR,
+            wraplength=450,
+            justify="left",
+            anchor="w"
+        )
+        lbl_detail.pack(anchor="w", pady=(0, 24))
+        
+        btn_frame = ctk.CTkFrame(pad_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", side="bottom")
+        
+        self.btn_retry = ctk.CTkButton(
+            btn_frame,
+            text="Retry with existing secret",
+            font=FONT_BODY_BOLD,
+            width=180,
+            height=36,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER,
+            command=self._on_retry
+        )
+        self.btn_retry.pack(side="left")
+        
+        self.btn_generate = ctk.CTkButton(
+            btn_frame,
+            text="Generate new certificate",
+            font=FONT_BODY_BOLD,
+            width=200,
+            height=36,
+            fg_color=COLOR_PRIMARY,
+            text_color="white",
+            hover_color=COLOR_PRIMARY_HOVER,
+            command=self._on_generate
+        )
+        self.btn_generate.pack(side="right")
+        
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        
+    def _on_retry(self):
+        self.result = "retry"
+        self.grab_release()
+        self.destroy()
+        
+    def _on_generate(self):
+        self.result = "generate"
+        self.grab_release()
+        self.destroy()
+        
+    def _on_close(self):
+        self.result = None
+        self.grab_release()
+        self.destroy()
+
+
 
 class TelemetryApp(ctk.CTk):
     """Standalone application for the License Usage and Telemetry view."""
@@ -577,15 +675,30 @@ class TelemetryApp(ctk.CTk):
             try:
                 # Decrypt the PFX certificate using the client secret
                 load_certificate(secret, tenant_id=tenant, client_id=client)
+                self.show_reports_page()
             except Exception as e:
-                from tkinter import messagebox
-                messagebox.showerror(
-                    "Certificate Decryption Error",
-                    f"Unable to unlock certificate with Client Secret. Proceeding with standard Client Secret authentication fallback.\n\nError: {e}",
-                    parent=self
-                )
-            # Proceed to reports page in either case
-            self.show_reports_page()
+                # Invoke the custom modal selection dialog
+                dialog = CertDecryptionErrorDialog(self, str(e))
+                self.wait_window(dialog)
+                
+                if dialog.result == "retry":
+                    logger.info("Option 1 chosen: Retry connection with correct client secret.")
+                    return
+                elif dialog.result == "generate":
+                    logger.info("Option 2 chosen: Overwrite and generate a new certificate.")
+                    try:
+                        pem_path, _ = generate_certificate(secret, tenant_id=tenant, client_id=client)
+                        self.setup_cert_instructions_ui(pem_path)
+                    except Exception as gen_err:
+                        from tkinter import messagebox
+                        messagebox.showerror(
+                            "Certificate Generation Error",
+                            f"Unable to generate certificate: {gen_err}",
+                            parent=self
+                        )
+                else:
+                    logger.info("Decryption modal closed without option selection.")
+                    return
         else:
             try:
                 # Generate new certificate and pfx encrypted with the client secret
