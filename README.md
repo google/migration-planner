@@ -175,7 +175,7 @@ In your new app, go to **API permissions > Add a permission > Microsoft Graph**,
 The Usage and Adoption tab performs extensive tenant auditing. While the following permissions are recommended for a complete report, you may choose to grant only a subset. 
 **NOTE: Be aware that any missing permissions will simply cause the tool to gracefully skip those specific telemetry sections.**
 
-Application permissions:
+Graph Application permissions:
 *   `Reports.Read.All`: Used to retrieve active user trends, mailbox/SharePoint usage reports, M365 Apps, and Email Client usage.
 *   `Directory.Read.All`: Used to read tenant organization configuration data, Domain, User, and Group summaries.
 *   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
@@ -187,11 +187,11 @@ Application permissions:
 *   `Calendars.ReadBasic.All`: Used to audit organizational calendar permissions.
 *   `Sites.Read.All`: to search for pst files across onedrive and sharepoint
 
-Delegated permissions:
+Graph Delegated permissions:
 * `eDiscovery.Read.All`: required to read ediscovery permissions on behalf of the ediscovery administrator
 * `offline_access`: required to maintain access to data you have given the app access to
 
-Data Governance Specific Permissions:
+Office 365 Exchange Online Permissions:
 *  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 *  `Exchange.ManageAsAppV2`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 
@@ -222,8 +222,7 @@ The tool can also scan Power Automate flows (Tenant-Wide Cloud Flows and Desktop
 *   **Desktop Flows (Dataverse)**: In the Power Platform Admin Center > Environments > [Select Environment] > Settings > Users + permissions > Application users, click **+ New app user**, add your App Registration, and assign it the **System Administrator** role.
 
 ### 4. Data Governance and Security Permissions
-To allow the App Registration's Service Principal to read Compliance, Retention data, and Exchange settings via PowerShell, it must be assigned the following directory roles in Entra ID (**Roles and administrators**):
-*   **Global Reader** (Recommended, read-only) OR **Exchange Administrator**
+To allow the App Registration's Service Principal to read Compliance, Retention data, and Exchange settings via PowerShell, it must be assigned the following directory roles in the [Entra portal](https://entra.microsoft.com/) 
 *   **Compliance Administrator**
 *   **Compliance Data Administrator**
 
