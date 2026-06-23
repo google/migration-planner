@@ -35,6 +35,10 @@
 
 - [Introduction](#introduction)
 - [Prerequisites & Installation](#prerequisites--installation)
+  - [1. Python Version](#1-python-version)
+  - [2. Installation Steps](#2-installation-steps)
+  - [3. Setting up a Virtual Environment (Optional / Corp Policy)](#3-setting-up-a-virtual-environment-optional--corp-policy)
+  - [4. PowerShell Core (pwsh) Installation (Optional but Recommended)](#4-powershell-core-pwsh-installation-optional-but-recommended)
 - [Setting up Microsoft Azure](#setting-up-microsoft-azure)
   - [1. Register the App](#1-register-the-app)
   - [2. Graph API Permissions](#2-graph-api-permissions)
@@ -121,7 +125,24 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     pip3 install -r requirements.txt
     ```
 
-### 3. PowerShell Core (pwsh) Installation (Optional but Recommended)
+### 3. Setting up a Virtual Environment (Optional / Corp Policy)
+
+If your organization restricts installing packages globally, use a virtual environment:
+
+1.  **Create the environment**:
+    ```bash
+    # Windows
+    python -m venv venv
+
+    # Mac/Linux
+    python3 -m venv venv
+    ```
+2.  **Activate the environment**:
+    *   Windows: `.\venv\Scripts\activate`
+    *   Mac/Linux: `source venv/bin/activate`
+3.  **Install packages** as shown above inside this environment.
+
+### 4. PowerShell Core (pwsh) Installation (Optional but Recommended)
 
 [PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell?view=powershell-7.6) is a cross-platform command-line shell and scripting language designed for task automation. It is required by specific features in the **Usage and Adoption** tab, such as extracting:
 
