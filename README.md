@@ -302,12 +302,13 @@ A standard Client Secret cannot authorize PowerShell modules—a certificate is 
 
 ## Running the Tool
 
-1.  Open your terminal or command prompt.
-2.  Navigate to the folder containing the script:
+1.  **Download the Code**: Click the green **Code** button at the top of this GitHub repository page, select **Download ZIP**, and extract the contents to a directory of your choice on your system.
+2.  Open your terminal or command prompt.
+3.  **Navigate to the Folder**: Change directory (`cd`) to the folder where you extracted the files:
     ```bash
-    cd path/to/splash_one
+    cd path/to/extracted/folder
     ```
-3.  Run the Deal Assistant:
+4.  **Run the Deal Assistant**:
     *   Windows: `python deal_assistant.py`
     *   Mac/Linux: `python3 deal_assistant.py`
 
