@@ -105,7 +105,12 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```bash
     brew install python-tk
     ```
-3.  **Install Dependencies**:
+3.  **Verify Installation**: Open terminal and make sure the following commands run successfully and return you the version IDs of python and pip:
+    ```bash
+    python3 --version
+    pip3 --version
+    ```
+4.  **Install Dependencies**:
     ```bash
     pip3 install -r requirements.txt
     ```
