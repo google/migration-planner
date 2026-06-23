@@ -2648,6 +2648,7 @@ class MigrationEstimatorTool(ctk.CTk):
             "user_limit": ETA_EMAIL_USER_LIMIT,
             "batch_size": ETA_EMAIL_BATCH_SIZE,
             "batch_time": ETA_EMAIL_BATCH_TIME,
+            "multiplier": IPA_ETA_MULTIPLIER
           }
         )
       eta_shared_mail_box = 0.0
