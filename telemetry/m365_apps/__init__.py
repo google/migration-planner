@@ -12,16 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Uber container section wrapping Active Users Usage, Active Users Trend, and M365 App Usage frames under a single M365 Apps card."""
+"""Consolidated M365 Apps Telemetry Container."""
 
+import logging
 import customtkinter as ctk
+
+from telemetry.m365_apps.active_users import ActiveUsersUsageFrame
+from telemetry.m365_apps.active_users_trend import ActiveUsersTrendFrame
+from telemetry.m365_apps.app_usage import M365AppUsageFrame
 from telemetry.styles import *
-from telemetry.active_users_usage import ActiveUsersUsageFrame, ActiveUsersTrendFrame, M365AppUsageFrame
+
+usage_logger = logging.getLogger("M365TelemetryAsyncLogger.M365AppsUI")
 
 class M365AppsTelemetryFrame(ctk.CTkFrame):
-    def update_loading_text(self, text_msg):
-        if hasattr(self, 'loading_label') and self.loading_label.winfo_exists():
-            self.loading_label.configure(text=f"⏳ {text_msg}")
     """Uber section container hosting Active Users Usage, Trend, and M365 App Usage frames vertically stacked."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
@@ -35,7 +38,7 @@ class M365AppsTelemetryFrame(ctk.CTkFrame):
         self.build_ui()
 
     def build_ui(self):
-        """Instantiates and stacks existing usage sub-frames."""
+        """Instantiates and stacks modular usage sub-frames."""
         self.pack(fill="x", expand=True, pady=10)
 
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
@@ -60,7 +63,9 @@ class M365AppsTelemetryFrame(ctk.CTkFrame):
         self.active_users_view.configure(fg_color="transparent", border_width=0)
         self.active_users_view.pack(fill="x", expand=True, pady=(0, 5))
 
-
+        # Divider 1
+        self.divider1 = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
+        self.divider1.pack(fill="x", pady=10)
 
         # Active Users Trend Sub-frame
         self.active_users_trend_view = ActiveUsersTrendFrame(
@@ -73,7 +78,9 @@ class M365AppsTelemetryFrame(ctk.CTkFrame):
         self.active_users_trend_view.configure(fg_color="transparent", border_width=0)
         self.active_users_trend_view.pack(fill="x", expand=True, pady=(0, 5))
 
-
+        # Divider 2
+        self.divider2 = ctk.CTkFrame(self.inner_pad, height=1, fg_color=COLOR_OUTLINE_LIGHT)
+        self.divider2.pack(fill="x", pady=10)
 
         # M365 App Usage Sub-frame
         self.m365_apps_view = M365AppUsageFrame(
@@ -91,8 +98,8 @@ class M365AppsTelemetryFrame(ctk.CTkFrame):
     def reset_view(self):
         """Resets all sub-views and hides container."""
         self.pack_forget()
+        self.status = None
         self.active_users_view.reset_view()
-        self.active_users_trend_view.reset_view()
         self.active_users_trend_view.reset_view()
         self.m365_apps_view.reset_view()
 

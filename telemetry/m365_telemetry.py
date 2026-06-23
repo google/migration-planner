@@ -34,17 +34,17 @@ from logging.handlers import QueueHandler, QueueListener
 # Import modular view frames from their consolidated code/view modules
 from telemetry.subscribed_skus import SubscribedSKUsFrame
 from telemetry.directory import DirectoryFrame
-from telemetry.m365_apps_telemetry import M365AppsTelemetryFrame
+from telemetry.m365_apps import M365AppsTelemetryFrame
 from telemetry.power_automate import PowerAutomateUsageFrame
 
 
 # Import existing modular views
-from telemetry.files_telemetry import FilesTelemetryFrame
+from telemetry.files import FilesTelemetryFrame
 from telemetry.devices_apps_telemetry import DevicesAppsTelemetryFrame
 from telemetry.email_client_support import EmailClientSupportFrame
-from telemetry.exchange_online import ExchangeOnlineFrame
+from telemetry.exchange import ExchangeOnlineFrame
 from telemetry.data_security_governance import DataSecurityGovernanceFrame
-from telemetry.intune_policies import IntunePoliciesFrame
+from telemetry.intune import IntunePoliciesFrame
 
 
 from telemetry.styles import *
@@ -530,7 +530,11 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.devices_apps_view.auth_methods_subframe,
             self.devices_apps_view.app_signins_subframe,
             self.devices_apps_view.user_signins_subframe,
-            self.directory_view,
+            self.directory_view.organization_frame,
+            self.directory_view.domains_frame,
+            self.directory_view.user_logs_frame,
+            self.directory_view.provisioning_logs_frame,
+            self.directory_view.users_groups_frame,
             self.m365_apps_view.active_users_view,
             self.m365_apps_view.active_users_trend_view,
             self.m365_apps_view.m365_apps_view,
@@ -538,12 +542,25 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.exchange_online_view.calendar_view,
             self.exchange_online_view.apps_view,
             self.exchange_online_view.mail_security_view,
+            self.exchange_online_view.transport_rules_view,
             self.exchange_online_view.connectors_view,
             self.exchange_online_view.email_clients_view,
+            self.exchange_online_view.pst_files_view,
             self.files_view.sharepoint_view,
             self.files_view.onedrive_view,
-            self.security_gov_view,
-            self.intune_policies_view,
+            self.network_security_view.filtering_view,
+            self.network_security_view.ca_view,
+            self.network_security_view.fw_view,
+            self.security_gov_view.sensitivity_frame,
+            self.security_gov_view.retention_frame,
+            self.security_gov_view.dlp_frame,
+            self.security_gov_view.sit_frame,
+            self.security_gov_view.auth_frame,
+            self.security_gov_view.sso_frame,
+            self.security_gov_view.ediscovery_ui_view,
+            self.intune_policies_view.mobile_apps_view,
+            self.intune_policies_view.detected_apps_view,
+            self.intune_policies_view.device_configs_view,
             self.power_automate_view
         ]
 
@@ -552,20 +569,38 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         known_titles = {
             "SubscribedSKUsFrame": "Subscribed SKUs",
             "DirectoryFrame": "Directory Summary",
+            "DirectoryOrganizationFrame": "Organization",
+            "DirectoryDomainsFrame": "Domains",
+            "DirectoryUserLogsFrame": "User Creation/Deletion logs",
+            "DirectoryProvisioningLogsFrame": "Provisioning Logs",
+            "DirectoryUsersGroupsFrame": "Groups & Users",
             "ActiveUsersUsageFrame": "Active Users Usage",
             "ActiveUsersTrendFrame": "Active Users Trend",
             "M365AppUsageFrame": "M365 App Usage",
-            "MailboxUsageFrame": "Mailbox Usage Summary",
-            "CalendarTelemetryFrame": "Calendar & Room Resource Telemetry",
-            "ExchangeAppsFrame": "Exchange Integrated Apps",
+            "MailboxUsageFrame": "Exchange Online Mailbox Usage",
+            "CalendarTelemetryFrame": "Exchange Online Calendar Environment",
+            "ExchangeAppsFrame": "Integrated Apps",
             "ExchangeConnectorsFrame": "Exchange Connectors (Inbound & Outbound Routing)",
             "MailSecurityFrame": "Mail Security",
+            "TransportRulesFrame": "Exchange Transport Rules",
             "EmailClientSupportFrame": "Email Client Classification",
+            "PstFilesFrame": "PST Files",
             "SharePointUsageFrame": "SharePoint Online Sites & Files Summary",
             "OneDriveUsageFrame": "OneDrive for Business Personal Accounts Summary",
+            "FilteringPoliciesSubFrame": "1. Filtering Policies",
+            "ConditionalAccessSubFrame": "2. Conditional Access Policies",
+            "FirewallSubFrame": "3. Firewall and Proxy Configurations",
             "DevicesAppsTelemetryFrame": "Devices & Apps Summary (Sign-in Telemetry)",
-            "DataSecurityGovernanceFrame": "Data Security & Governance",
-            "IntunePoliciesFrame": "Intune Policies (Device Configurations)",
+            "SensitivityLabelsSubFrame": "Sensitivity Labels",
+            "RetentionPoliciesSubFrame": "Retention Compliance Policies",
+            "DLPPoliciesSubFrame": "Data Loss Prevention (DLP) Policies",
+            "SensitiveInfoTypesSubFrame": "Sensitive Information Types (SIT)",
+            "AuthenticationSubFrame": "Authentication Mechanics (Conditional Access)",
+            "ServicePrincipalsSsoSubFrame": "Service Principals Single Sign-On (SSO) Modes",
+            "EDiscoveryFrame": "Microsoft Purview eDiscovery Cases",
+            "MobileAppsSubFrame": "Managed Mobile Apps",
+            "DetectedAppsSubFrame": "2. Detected Apps",
+            "DeviceConfigsSubFrame": "3. Device Configurations",
             "PowerAutomateUsageFrame": "Power Automate (Workflows & Flows)"
         }
         
