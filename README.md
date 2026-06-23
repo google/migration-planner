@@ -149,7 +149,7 @@ If your organization restricts installing packages globally, use a virtual envir
 
 ### 4. PowerShell Core (pwsh) Installation (Optional but Recommended)
 
-[PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell?view=powershell-7.6) is a cross-platform command-line shell and scripting language designed for task automation. It is required by specific features in the **Usage and Adoption** tab, such as extracting:
+[PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell?view=powershell-7.6) is a cross-platform command-line shell and scripting language designed for task automation. It is required by specific features in the [Usage and Adoption](#tab-1-usage-and-adoption) tab, such as extracting:
 
 - Sensitivity Labels
 - Retention Policies
