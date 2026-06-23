@@ -18,12 +18,14 @@ import os
 import csv
 import logging
 import threading
+import asyncio
 import webbrowser
 from typing import Optional
 import customtkinter as ctk
 
 from core.graph.client import GraphClient
 from core.graph.directory.domains import DomainsService
+from core.graph.db import import_csv_to_sqlite, query_page_sync
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.DirectoryDomainsUI")
@@ -185,6 +187,9 @@ class DirectoryDomainsFrame(ctk.CTkFrame):
                 writer.writerow(headers)
                 writer.writerows(rows)
 
+            db_path = os.path.join(reports_dir, "telemetry_cache.db")
+            asyncio.run(import_csv_to_sqlite(self.csv_path, db_path, "directory_domains"))
+
             self.after(0, self._render_success, domains_list, request_id)
         except Exception as e:
             usage_logger.error(f"Error fetching Domains list: {e}", exc_info=True)
@@ -213,36 +218,34 @@ class DirectoryDomainsFrame(ctk.CTkFrame):
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
 
-    def _load_page_from_csv(self, page):
-        if not self.csv_path or not os.path.exists(self.csv_path):
+    def _load_page_from_sqlite(self, page):
+        if not self.csv_path:
+            return [], 0
+            
+        reports_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
+        if not os.path.exists(db_path):
             return [], 0
 
-        domains = []
         try:
-            with open(self.csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)  # skip header
-                for row in reader:
-                    if row:
-                        domains.append({
-                            "id": row[0],
-                            "authenticationType": row[1],
-                            "isAdminManaged": row[2] == "Yes",
-                            "isDefault": row[3] == "Yes",
-                            "isVerified": row[4] == "Yes",
-                            "supportedServices": [s.strip() for s in row[5].split(",")] if row[5] != "-" else [],
-                            "federationDisplayName": row[6] if len(row) > 6 else "-",
-                            "federationIssuerUri": row[7] if len(row) > 7 else "-"
-                        })
+            rows, total_count = query_page_sync(db_path, "directory_domains", page, self.ITEMS_PER_PAGE)
+            domains = []
+            for row in rows:
+                services_str = row.get("Supported_Services", "")
+                domains.append({
+                    "id": row.get("Domain_ID", "-"),
+                    "authenticationType": row.get("Authentication_Type", "-"),
+                    "isAdminManaged": row.get("Admin_Managed") == "Yes",
+                    "isDefault": row.get("Default") == "Yes",
+                    "isVerified": row.get("Verified") == "Yes",
+                    "supportedServices": [s.strip() for s in services_str.split(",")] if services_str and services_str != "-" else [],
+                    "federationDisplayName": row.get("Federation_Display_Name", "-"),
+                    "federationIssuerUri": row.get("Federation_Issuer_URI", "-")
+                })
+            return domains, total_count
         except Exception as e:
-            usage_logger.error(f"Error reading CSV for Domains pagination: {e}")
-            
-        total_count = len(domains)
-        start_idx = page * self.ITEMS_PER_PAGE
-        end_idx = start_idx + self.ITEMS_PER_PAGE
-        page_data = domains[start_idx:end_idx]
-        
-        return page_data, total_count
+            usage_logger.error(f"Error reading SQLite for Domains pagination: {e}")
+            return [], 0
 
     def _update_domains_ui_paginated(self):
         for w in self.body_frame.winfo_children():
@@ -260,7 +263,7 @@ class DirectoryDomainsFrame(ctk.CTkFrame):
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
-        page_data, total_count = self._load_page_from_csv(self.current_page)
+        page_data, total_count = self._load_page_from_sqlite(self.current_page)
 
         if not page_data:
             empty_cell = ctk.CTkFrame(domains_grid, fg_color="transparent")
@@ -394,6 +397,6 @@ class DirectoryDomainsFrame(ctk.CTkFrame):
     def last_data(self):
         if hasattr(self, "_cached_domains") and self._cached_domains:
             return self._cached_domains
-        # Fallback load from CSV
-        page_data, _ = self._load_page_from_csv(0)
+        # Fallback load from SQLite
+        page_data, _ = self._load_page_from_sqlite(0)
         return page_data

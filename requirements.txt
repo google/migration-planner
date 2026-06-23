@@ -9,3 +9,4 @@ scikit-learn
 aiohttp
 sortedcontainers
 msal
+aiosqlite

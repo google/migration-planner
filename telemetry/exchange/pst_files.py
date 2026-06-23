@@ -18,10 +18,13 @@ import os
 import csv
 import logging
 import threading
+import asyncio
+import sqlite3
 import customtkinter as ctk
 
 from core.graph.exchange.pst_files import run_pst_discovery_pipeline
 from core.graph.exchange.mailbox import format_bytes
+from core.graph.db import import_csv_to_sqlite, query_page_sync
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.PstFilesUI")
@@ -122,6 +125,9 @@ class PstFilesFrame(ctk.CTkFrame):
                     writer.writerow(["Location", "Discovered File Count", "Total Size (Bytes)"])
                     writer.writerow(["Cloud (SharePoint & OneDrive)", cloud_count, cloud_bytes])
 
+                db_path = os.path.join(reports_dir, "telemetry_cache.db")
+                asyncio.run(import_csv_to_sqlite(csv_path, db_path, "pst_files"))
+
             self.after(0, self._render_pst_success, data)
         except Exception as e:
             self.after(0, self._render_pst_error, str(e))
@@ -214,17 +220,20 @@ class PstFilesFrame(ctk.CTkFrame):
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         if os.path.basename(script_dir) == "exchange":
             script_dir = os.path.dirname(script_dir)
-        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "pst_discovery.csv")
+        db_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "telemetry_cache.db")
         
-        if not os.path.exists(csv_path):
+        if not os.path.exists(db_path):
             return {}
             
         try:
-            with open(csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)  # skip header
-                row = next(reader, None)
-                if row and len(row) >= 3:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM pst_files")
+            rows = cursor.fetchall()
+            conn.close()
+            if rows:
+                row = rows[0]
+                if len(row) >= 3:
                     count, size = int(row[1]), int(row[2])
                     return {
                         "pst_cloud_data": {
@@ -249,7 +258,7 @@ class PstFilesFrame(ctk.CTkFrame):
                     }
             return {}
         except Exception as e:
-            usage_logger.error(f"Error loading PST data from CSV: {e}")
+            usage_logger.error(f"Error loading PST data from DB: {e}")
             return {"pst_error": str(e)}
 
     @property

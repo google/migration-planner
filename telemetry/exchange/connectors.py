@@ -19,9 +19,12 @@ import csv
 import logging
 import threading
 import webbrowser
+import asyncio
+import sqlite3
 import customtkinter as ctk
 
 from core.graph.exchange.connectors import fetch_exchange_connectors_data
+from core.graph.db import import_csv_to_sqlite, query_page_sync
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.ExchangeConnectorsUI")
@@ -185,6 +188,10 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
                     for c in outbound:
                         writer.writerow([c.get("Name"), c.get("Enabled"), c.get("RecipientDomains"), c.get("SmartHosts"), c.get("UseMxRecord")])
                         
+                db_path = os.path.join(reports_dir, "telemetry_cache.db")
+                asyncio.run(import_csv_to_sqlite(inbound_path, db_path, "inbound_connectors"))
+                asyncio.run(import_csv_to_sqlite(outbound_path, db_path, "outbound_connectors"))
+                
                 usage_logger.info("Successfully streamed inbound and outbound connectors to CSV.")
                 
             self.after(0, self._handle_result, res)
@@ -256,48 +263,47 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
         if os.path.basename(script_dir) == "exchange":
             script_dir = os.path.dirname(script_dir)
         reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}")
-        inbound_path = os.path.join(reports_dir, "exchange_inbound_connectors.csv")
-        outbound_path = os.path.join(reports_dir, "exchange_outbound_connectors.csv")
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
         
         unified_data = []
-        
-        # Load inbound
-        if os.path.exists(inbound_path):
+        if os.path.exists(db_path):
             try:
-                with open(inbound_path, 'r', encoding='utf-8') as f:
-                    reader = csv.reader(f)
-                    next(reader, None)  # skip header
-                    for row in reader:
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                
+                # Check if inbound_connectors table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='inbound_connectors'")
+                if cursor.fetchone():
+                    cursor.execute("SELECT * FROM inbound_connectors")
+                    for row in cursor.fetchall():
                         if len(row) >= 5:
-                            enabled = row[1]
+                            enabled = str(row[1])
                             unified_data.append({
                                 "Direction": "📥 Inbound",
                                 "Name": row[0] or "N/A",
-                                "Status": "🟢 Enabled" if enabled == "True" or enabled == "1" else "🔴 Disabled",
+                                "Status": "🟢 Enabled" if enabled in ("True", "1") else "🔴 Disabled",
                                 "Domains": row[2] or "N/A",
-                                "Routing": f"Type: {row[3]}\nRequire TLS: {'Yes' if row[4] == 'True' or row[4] == '1' else 'No'}"
+                                "Routing": f"Type: {row[3]}\nRequire TLS: {'Yes' if str(row[4]) in ('True', '1') else 'No'}"
                             })
-            except Exception as e:
-                usage_logger.error(f"Error loading inbound connectors from CSV: {e}")
-                
-        # Load outbound
-        if os.path.exists(outbound_path):
-            try:
-                with open(outbound_path, 'r', encoding='utf-8') as f:
-                    reader = csv.reader(f)
-                    next(reader, None)  # skip header
-                    for row in reader:
+                            
+                # Check if outbound_connectors table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='outbound_connectors'")
+                if cursor.fetchone():
+                    cursor.execute("SELECT * FROM outbound_connectors")
+                    for row in cursor.fetchall():
                         if len(row) >= 5:
-                            enabled = row[1]
+                            enabled = str(row[1])
                             unified_data.append({
                                 "Direction": "📤 Outbound",
                                 "Name": row[0] or "N/A",
-                                "Status": "🟢 Enabled" if enabled == "True" or enabled == "1" else "🔴 Disabled",
+                                "Status": "🟢 Enabled" if enabled in ("True", "1") else "🔴 Disabled",
                                 "Domains": row[2] or "N/A",
-                                "Routing": f"SmartHosts: {row[3]}\nUse MX: {'Yes' if row[4] == 'True' or row[4] == '1' else 'No'}"
+                                "Routing": f"SmartHosts: {row[3]}\nUse MX: {'Yes' if str(row[4]) in ('True', '1') else 'No'}"
                             })
+                
+                conn.close()
             except Exception as e:
-                usage_logger.error(f"Error loading outbound connectors from CSV: {e}")
+                usage_logger.error(f"Error loading connectors from DB: {e}")
                 
         return unified_data
 

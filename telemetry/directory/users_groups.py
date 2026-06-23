@@ -18,11 +18,14 @@ import os
 import csv
 import logging
 import threading
+import asyncio
+import sqlite3
 from typing import Optional
 import customtkinter as ctk
 
 from core.graph.client import GraphClient
 from core.graph.directory.users_groups import UsersGroupsService
+from core.graph.db import import_csv_to_sqlite
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.DirectoryUsersGroupsUI")
@@ -175,6 +178,9 @@ class DirectoryUsersGroupsFrame(ctk.CTkFrame):
                 for cat, count in rows:
                     writer.writerow([cat, count])
 
+            db_path = os.path.join(reports_dir, "telemetry_cache.db")
+            asyncio.run(import_csv_to_sqlite(self.csv_path, db_path, "directory_users_groups"))
+
             self.after(0, self._render_success, user_c, group_c, request_id)
         except Exception as e:
             usage_logger.error(f"Error fetching Users & Groups: {e}", exc_info=True)
@@ -270,36 +276,45 @@ class DirectoryUsersGroupsFrame(ctk.CTkFrame):
     @property
     def last_data(self):
         # We can reconstruct group_counts and user_counts from self.last_group_counts / self.last_user_counts,
-        # or load from CSV if empty
+        # or load from SQLite if empty
         if self.last_group_counts or self.last_user_counts:
             return {"group_counts": self.last_group_counts, "user_counts": self.last_user_counts}
         
-        # Load from CSV fallback
-        if not self.csv_path or not os.path.exists(self.csv_path):
+        # Load from SQLite fallback
+        if not self.csv_path:
+            return {"group_counts": {}, "user_counts": {}}
+            
+        reports_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
+        if not os.path.exists(db_path):
             return {"group_counts": {}, "user_counts": {}}
             
         group_c = {}
         user_c = {}
         
         try:
-            with open(self.csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)
-                for row in reader:
-                    if len(row) >= 2:
-                        cat, val_str = row[0], row[1]
-                        val = int(val_str)
-                        if cat == "Total Users": user_c["total"] = val
-                        elif cat == "Enabled Users": user_c["enabled"] = val
-                        elif cat == "Disabled Users": user_c["disabled"] = val
-                        elif cat == "Member Users": user_c["member"] = val
-                        elif cat == "Guest Users": user_c["guest"] = val
-                        elif cat == "Total Groups": group_c["total"] = val
-                        elif cat == "Microsoft 365 Groups (Unified)": group_c["m365"] = val
-                        elif cat == "Security Groups (Static, non-mail-enabled)": group_c["security"] = val
-                        elif cat == "Mail-enabled Security Groups": group_c["mail_enabled_security"] = val
-                        elif cat == "Distribution Groups": group_c["distribution"] = val
-                        elif cat == "Dynamic Groups (Dynamic Membership)": group_c["dynamic"] = val
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT Category, Count FROM directory_users_groups")
+            for row in cursor.fetchall():
+                cat = row["Category"]
+                try:
+                    val = int(row["Count"])
+                except ValueError:
+                    continue
+                if cat == "Total Users": user_c["total"] = val
+                elif cat == "Enabled Users": user_c["enabled"] = val
+                elif cat == "Disabled Users": user_c["disabled"] = val
+                elif cat == "Member Users": user_c["member"] = val
+                elif cat == "Guest Users": user_c["guest"] = val
+                elif cat == "Total Groups": group_c["total"] = val
+                elif cat == "Microsoft 365 Groups (Unified)": group_c["m365"] = val
+                elif cat == "Security Groups (Static, non-mail-enabled)": group_c["security"] = val
+                elif cat == "Mail-enabled Security Groups": group_c["mail_enabled_security"] = val
+                elif cat == "Distribution Groups": group_c["distribution"] = val
+                elif cat == "Dynamic Groups (Dynamic Membership)": group_c["dynamic"] = val
+            conn.close()
         except Exception:
             pass
             

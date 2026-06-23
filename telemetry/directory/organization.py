@@ -18,12 +18,15 @@ import os
 import csv
 import logging
 import threading
+import asyncio
+import sqlite3
 import webbrowser
 from typing import Optional
 import customtkinter as ctk
 
 from core.graph.client import GraphClient
 from core.graph.directory.organization import OrganizationService
+from core.graph.db import import_csv_to_sqlite
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.DirectoryOrganizationUI")
@@ -197,6 +200,9 @@ class DirectoryOrganizationFrame(ctk.CTkFrame):
                 writer.writerow(org_headers)
                 writer.writerows(org_rows)
 
+            db_path = os.path.join(reports_dir, "telemetry_cache.db")
+            asyncio.run(import_csv_to_sqlite(self.csv_path, db_path, "directory_organization"))
+
             self.after(0, self._render_success, org_list, request_id)
         except Exception as e:
             usage_logger.error(f"Error fetching Organization info: {e}", exc_info=True)
@@ -304,24 +310,43 @@ class DirectoryOrganizationFrame(ctk.CTkFrame):
     def last_data(self):
         if hasattr(self, "_cached_org_data") and self._cached_org_data:
             return self._cached_org_data
-        # Fallback load from CSV
-        if not self.csv_path or not os.path.exists(self.csv_path):
+        # Fallback load from SQLite
+        if not self.csv_path:
             return []
+            
+        reports_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
+        if not os.path.exists(db_path):
+            return []
+            
         items = []
         try:
-            with open(self.csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)
-                for row in reader:
-                    if row:
-                        items.append({
-                            "displayName": row[0],
-                            "isMultipleDataLocationsForServicesEnabled": row[1] if row[1] != "null" else None,
-                            "onPremisesSyncEnabled": row[2] if row[2] != "null" else None,
-                            "onPremisesLastSyncDateTime": row[3] if row[3] != "null" else None,
-                            "partnerTenantType": row[4] if row[4] != "null" else None,
-                            "tenantType": row[5] if row[5] != "null" else None
-                        })
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM directory_organization")
+            
+            org_map = {}
+            for row in cursor.fetchall():
+                disp_name = row["displayName"]
+                if disp_name not in org_map:
+                    org_map[disp_name] = {
+                        "displayName": disp_name,
+                        "isMultipleDataLocationsForServicesEnabled": row["isMultipleDataLocationsForServicesEnabled"] if row["isMultipleDataLocationsForServicesEnabled"] != "null" else None,
+                        "onPremisesSyncEnabled": row["onPremisesSyncEnabled"] if row["onPremisesSyncEnabled"] != "null" else None,
+                        "onPremisesLastSyncDateTime": row["onPremisesLastSyncDateTime"] if row["onPremisesLastSyncDateTime"] != "null" else None,
+                        "partnerTenantType": row["partnerTenantType"] if row["partnerTenantType"] != "null" else None,
+                        "tenantType": row["tenantType"] if row["tenantType"] != "null" else None,
+                        "provisionedPlans": []
+                    }
+                if row["provisionedPlans_service"] != "null":
+                    org_map[disp_name]["provisionedPlans"].append({
+                        "service": row["provisionedPlans_service"],
+                        "capabilityStatus": row["provisionedPlans_capabilityStatus"],
+                        "provisioningStatus": row["provisionedPlans_provisioningStatus"]
+                    })
+            items = list(org_map.values())
+            conn.close()
         except Exception:
             pass
         return items

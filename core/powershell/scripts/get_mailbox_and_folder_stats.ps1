@@ -33,9 +33,9 @@ try {
     $sharedCount = $null
     $sharedTotalBytes = $null
     try {
-        $sharedMailboxes = Get-Mailbox -RecipientTypeDetails SharedMailbox -ResultSize Unlimited -ErrorAction Stop
+        $sharedMailboxes = Get-EXOMailbox -RecipientTypeDetails SharedMailbox -ResultSize Unlimited -ErrorAction Stop
         if ($sharedMailboxes) {
-            $sharedStats = @($sharedMailboxes | Get-MailboxStatistics -ErrorAction Stop)
+            $sharedStats = @($sharedMailboxes | Get-EXOMailboxStatistics -ErrorAction Stop)
             $sharedCount = @($sharedMailboxes).Count
             $sharedTotalBytes = [long]0
             foreach ($stat in $sharedStats) {

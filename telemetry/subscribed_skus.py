@@ -24,10 +24,12 @@ from datetime import datetime
 from tkinter import filedialog, messagebox
 from typing import Any, Dict, List, Optional
 import customtkinter as ctk
+import asyncio
 
 # Import unified core service layer
 from core.graph.client import GraphClient
 from core.graph.directory import DirectoryService
+from core.graph.db import import_csv_to_sqlite, query_page_sync
 
 # Bind to the async logger initialized in m365_telemetry.py
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger")
@@ -248,6 +250,9 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
                 writer.writerows(rows)
                 
             usage_logger.info(f"Successfully wrote SKU data to {csv_path}")
+
+            db_path = os.path.join(reports_dir, "telemetry_cache.db")
+            asyncio.run(import_csv_to_sqlite(csv_path, db_path, "subscribed_skus"))
             
             self.after(0, self._render_success, sku_data)
         except Exception as e:
@@ -272,23 +277,44 @@ class SubscribedSKUsFrame(ctk.CTkFrame):
         if not self.csv_path or not os.path.exists(self.csv_path):
             return [], 0
 
-        skus = []
-        try:
-            with open(self.csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)  # skip header
-                for row in reader:
-                    if row and row[0].strip():
-                        skus.append((row[0], row[1], row[2]))
-        except Exception as e:
-            usage_logger.error(f"Error reading CSV for SKU pagination: {e}")
-            
-        total_count = len(skus)
-        start_idx = page * self.ITEMS_PER_PAGE
-        end_idx = start_idx + self.ITEMS_PER_PAGE
-        page_data = skus[start_idx:end_idx]
+        reports_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
         
-        return page_data, total_count
+        if not os.path.exists(db_path):
+            return [], 0
+
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Count only unique SKUs
+            cursor.execute("SELECT COUNT(*) FROM subscribed_skus WHERE [SKU_Part_Number] IS NOT NULL AND [SKU_Part_Number] != ''")
+            row = cursor.fetchone()
+            total_count = row[0] if row else 0
+
+            # Get page of unique SKUs
+            offset = page * self.ITEMS_PER_PAGE
+            cursor.execute(
+                "SELECT [SKU_Part_Number], [Units], [Consumed_Units] FROM subscribed_skus WHERE [SKU_Part_Number] IS NOT NULL AND [SKU_Part_Number] != '' LIMIT ? OFFSET ?",
+                (self.ITEMS_PER_PAGE, offset)
+            )
+            rows = cursor.fetchall()
+            
+            page_data = []
+            for r in rows:
+                page_data.append((
+                    r["SKU_Part_Number"] or "",
+                    r["Units"] or "",
+                    r["Consumed_Units"] or ""
+                ))
+            return page_data, total_count
+        except Exception as e:
+            usage_logger.error(f"Error loading SKU page from SQLite: {e}")
+            return [], 0
+        finally:
+            conn.close()
 
     def _update_ui_paginated(self, data=None):
         self.state_frame.pack_forget()

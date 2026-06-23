@@ -21,6 +21,7 @@ import threading
 import customtkinter as ctk
 
 from core.graph.entra.user_signins import run_user_signins_pipeline
+from core.graph.db import import_csv_to_sqlite
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.UserSigninsUI")
@@ -177,6 +178,13 @@ class UserSigninsSubFrame(ctk.CTkFrame):
                     if os.path.exists(self.csv_path):
                         os.remove(self.csv_path)
                     os.rename(temp_csv_path, self.csv_path)
+                import asyncio
+                db_dir = os.path.dirname(self.csv_path)
+                db_path = os.path.join(db_dir, "telemetry_cache.db")
+                asyncio.run(import_csv_to_sqlite(self.csv_path, db_path, "user_signins", "appDisplayName"))
+                
+                if self.is_cancelled or request_id != self.current_request_id:
+                    return
                 self.after(0, self._render_success, final_data, request_id)
         except Exception as e:
             usage_logger.error(f"Error fetching user sign-ins: {e}", exc_info=True)
@@ -225,23 +233,35 @@ class UserSigninsSubFrame(ctk.CTkFrame):
             else:
                 return {"apps": [], "os": [], "browsers": []}
                 
-        if not os.path.exists(self.csv_path):
+        db_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(db_dir, "telemetry_cache.db")
+        if not os.path.exists(db_path):
             return {"apps": [], "os": [], "browsers": []}
             
         unique_apps = set()
         unique_os = set()
         unique_browsers = set()
+        
+        import sqlite3
         try:
-            with open(self.csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)  # skip header
-                for row in reader:
-                    if len(row) >= 3:
-                        if row[0]: unique_apps.add(row[0])
-                        if row[1]: unique_os.add(row[1])
-                        if row[2]: unique_browsers.add(row[2])
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT DISTINCT appDisplayName FROM user_signins WHERE appDisplayName IS NOT NULL AND appDisplayName != ''")
+            for r in cursor.fetchall():
+                unique_apps.add(r[0])
+                
+            cursor.execute("SELECT DISTINCT operatingSystem FROM user_signins WHERE operatingSystem IS NOT NULL AND operatingSystem != ''")
+            for r in cursor.fetchall():
+                unique_os.add(r[0])
+                
+            cursor.execute("SELECT DISTINCT browser FROM user_signins WHERE browser IS NOT NULL AND browser != ''")
+            for r in cursor.fetchall():
+                unique_browsers.add(r[0])
+                
+            conn.close()
         except Exception as e:
-            usage_logger.error(f"Error reading CSV for User Sign-ins: {e}", exc_info=True)
+            usage_logger.error(f"Error reading SQLite cache for User Sign-ins: {e}", exc_info=True)
             
         return {
             "apps": sorted(list(unique_apps)),

@@ -16,6 +16,8 @@
 
 # Re-export pipeline from core backend
 from core.graph.intune import run_intune_policies_pipeline
+from core.graph.client import GraphClient
+from core.graph.intune import IntuneService
 
 # Re-export UI container from telemetry package
 from telemetry.intune import IntunePoliciesFrame

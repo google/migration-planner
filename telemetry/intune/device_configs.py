@@ -22,7 +22,11 @@ import threading
 from collections import defaultdict
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
+import asyncio
+import sqlite3
+import pandas as pd
 
+from core.graph.db import import_csv_to_sqlite
 from core.graph.intune.device_configs import run_device_configs_pipeline
 from telemetry.styles import *
 
@@ -181,6 +185,14 @@ class DeviceConfigsSubFrame(ctk.CTkFrame):
                 if os.path.exists(temp_path_policies):
                     if os.path.exists(self.csv_path_policies): os.remove(self.csv_path_policies)
                     os.rename(temp_path_policies, self.csv_path_policies)
+                
+                reports_dir = os.path.dirname(self.csv_path_configs)
+                db_path = os.path.join(reports_dir, "telemetry_cache.db")
+                if os.path.exists(self.csv_path_configs):
+                    asyncio.run(import_csv_to_sqlite(self.csv_path_configs, db_path, "device_configs"))
+                if os.path.exists(self.csv_path_policies):
+                    asyncio.run(import_csv_to_sqlite(self.csv_path_policies, db_path, "device_policies"))
+
                 self.status = "success"
                 self.after(0, self._render_success)
         except Exception as e:
@@ -228,29 +240,36 @@ class DeviceConfigsSubFrame(ctk.CTkFrame):
         total_dc = 0
         total_cp = 0
         
+        reports_dir = os.path.dirname(self.csv_path_configs)
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
+        if not os.path.exists(db_path): return [], 0, 0, 0
+        
         try:
-            with open(self.csv_path_configs, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)
-                for row in reader:
-                    if len(row) >= 3:
-                        plat, p_type = row[1], row[2]
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT platform, policyType FROM device_configs")
+            for row in cursor.fetchall():
+                if len(row) >= 2:
+                    plat, p_type = row[0], row[1]
+                    if plat and p_type:
+                        counts[(plat, p_type)] += 1
+                        total_dc += 1
+                        
+            try:
+                cursor.execute("SELECT platform, policyType FROM device_policies")
+                for row in cursor.fetchall():
+                    if len(row) >= 2:
+                        plat, p_type = row[0], row[1]
                         if plat and p_type:
                             counts[(plat, p_type)] += 1
-                            total_dc += 1
-                            
-            if self.csv_path_policies and os.path.exists(self.csv_path_policies):
-                with open(self.csv_path_policies, 'r', encoding='utf-8') as f:
-                    reader = csv.reader(f)
-                    next(reader, None)
-                    for row in reader:
-                        if len(row) >= 3:
-                            plat, p_type = row[1], row[2]
-                            if plat and p_type:
-                                counts[(plat, p_type)] += 1
-                                total_cp += 1
+                            total_cp += 1
+            except sqlite3.OperationalError:
+                pass
+                
+            conn.close()
         except Exception as e:
-            usage_logger.error(f"Error loading device configurations CSV: {e}")
+            usage_logger.error(f"Error loading device configurations DB: {e}")
             
         rows_data = []
         for (platform, p_type), count in sorted(counts.items()):

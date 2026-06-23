@@ -21,6 +21,7 @@ import threading
 import customtkinter as ctk
 
 from core.graph.entra.app_signins import run_app_signins_pipeline
+from core.graph.db import import_csv_to_sqlite, query_page_sync
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.AppSigninsUI")
@@ -164,6 +165,13 @@ class AppSigninsSubFrame(ctk.CTkFrame):
                     if os.path.exists(self.csv_path):
                         os.remove(self.csv_path)
                     os.rename(temp_csv_path, self.csv_path)
+                import asyncio
+                db_dir = os.path.dirname(self.csv_path)
+                db_path = os.path.join(db_dir, "telemetry_cache.db")
+                asyncio.run(import_csv_to_sqlite(self.csv_path, db_path, "app_signins", "appDisplayName"))
+                
+                if self.is_cancelled or request_id != self.current_request_id:
+                    return
                 self.after(0, self._render_success, app_signins, request_id)
         except Exception as e:
             usage_logger.error(f"Error fetching app sign-ins: {e}", exc_info=True)
@@ -206,20 +214,20 @@ class AppSigninsSubFrame(ctk.CTkFrame):
         if not self.csv_path or not os.path.exists(self.csv_path):
             return [], 0
 
-        items = []
-        total_count = 0
+        db_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(db_dir, "telemetry_cache.db")
         try:
-            with open(self.csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)  # skip header
-                all_rows = list(reader)
-                total_count = len(all_rows)
-                start_idx = page * self.ITEMS_PER_PAGE
-                end_idx = start_idx + self.ITEMS_PER_PAGE
-                items = all_rows[start_idx:end_idx]
+            page_data, total_count = query_page_sync(db_path, "app_signins", page, self.ITEMS_PER_PAGE)
+            mapped_data = []
+            for r in page_data:
+                mapped_data.append((
+                    r.get("appDisplayName", ""),
+                    r.get("successSignInCount", "")
+                ))
+            return mapped_data, total_count
         except Exception as e:
-            usage_logger.error(f"Error reading CSV for pagination: {e}", exc_info=True)
-        return items, total_count
+            usage_logger.error(f"Error loading page from SQLite cache: {e}")
+            return [], 0
 
     def _update_ui_paginated(self, data=None, is_partial=False):
         for w in self.body_frame.winfo_children():
@@ -337,19 +345,22 @@ class AppSigninsSubFrame(ctk.CTkFrame):
             else:
                 return []
                 
-        if not os.path.exists(self.csv_path):
+        db_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(db_dir, "telemetry_cache.db")
+        if not os.path.exists(db_path):
             return []
             
+        import sqlite3
         items = []
         try:
-            with open(self.csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)  # skip header
-                for row in reader:
-                    if len(row) >= 2:
-                        items.append((row[0], row[1]))
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT appDisplayName, successSignInCount FROM app_signins")
+            for r in cursor.fetchall():
+                items.append((r[0], r[1]))
+            conn.close()
         except Exception as e:
-            usage_logger.error(f"Error reading CSV for AppSigninsSubFrame: {e}", exc_info=True)
+            usage_logger.error(f"Error reading SQLite cache for AppSigninsSubFrame: {e}", exc_info=True)
         return items
 
     @property

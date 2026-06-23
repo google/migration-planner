@@ -16,6 +16,7 @@ certificate/
 certificates/
 telemetry/reports/
 telemetry/logs/
+telemetry/*/reports/
 
 # macOS Finder metadata
 .DS_Store

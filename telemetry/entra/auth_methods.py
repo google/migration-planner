@@ -18,9 +18,12 @@ import os
 import csv
 import logging
 import threading
+import asyncio
+import sqlite3
 import customtkinter as ctk
 
 from core.graph.entra.auth_methods import run_auth_methods_pipeline
+from core.graph.db import import_csv_to_sqlite
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.AuthMethodsUI")
@@ -163,6 +166,10 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
                     if os.path.exists(self.csv_path):
                         os.remove(self.csv_path)
                     os.rename(temp_csv_path, self.csv_path)
+                    
+                db_path = os.path.join(reports_dir, "telemetry_cache.db")
+                asyncio.run(import_csv_to_sqlite(self.csv_path, db_path, "entra_auth_methods"))
+                
                 self.after(0, self._render_success, auth_methods, request_id)
         except Exception as e:
             usage_logger.error(f"Error fetching auth methods: {e}", exc_info=True)
@@ -216,7 +223,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
             ).pack(padx=10, pady=2, anchor="w")
 
         if data is None:
-            data = self._load_data_from_csv()
+            data = self._load_data_from_sqlite()
 
         metrics_grid = ctk.CTkFrame(self.body_frame, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         metrics_grid.pack(fill="x", pady=(5, 10))
@@ -299,7 +306,7 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
         if hasattr(self, "btn_refresh") and self.btn_refresh.winfo_exists():
             self.btn_refresh.configure(state="normal")
 
-    def _load_data_from_csv(self):
+    def _load_data_from_sqlite(self):
         if not self.csv_path or not os.path.exists(self.csv_path):
             tenant, clients, secrets = self.get_credentials()
             if tenant and clients:
@@ -310,23 +317,26 @@ class AuthMethodsSubFrame(ctk.CTkFrame):
             else:
                 return []
                 
-        if not os.path.exists(self.csv_path):
+        reports_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
+        if not os.path.exists(db_path):
             return []
             
         items = []
         try:
-            with open(self.csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)  # skip header
-                for row in reader:
-                    if len(row) >= 2:
-                        items.append((row[0], row[1]))
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT authenticationMethod, successActivityCount FROM entra_auth_methods")
+            for row in cursor.fetchall():
+                items.append((row["authenticationMethod"], str(row["successActivityCount"])))
+            conn.close()
         except Exception as e:
-            usage_logger.error(f"Error reading CSV for AuthMethodsSubFrame: {e}", exc_info=True)
+            usage_logger.error(f"Error reading SQLite for AuthMethodsSubFrame: {e}", exc_info=True)
         return items
 
     @property
     def last_data(self):
         if hasattr(self, "_cached_auth_methods") and self._cached_auth_methods:
             return self._cached_auth_methods
-        return self._load_data_from_csv()
+        return self._load_data_from_sqlite()

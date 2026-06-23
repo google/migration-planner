@@ -18,9 +18,12 @@ import os
 import csv
 import logging
 import threading
+import asyncio
+import sqlite3
 import customtkinter as ctk
 
 from core.graph.exchange.email_clients import run_email_client_usage_pipeline
+from core.graph.db import import_csv_to_sqlite, query_page_sync
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.EmailClientSupportUI")
@@ -115,6 +118,9 @@ class EmailClientSupportFrame(ctk.CTkFrame):
                     writer.writerow(["IMAP Users", adop.get("imap_users", 0)])
                     writer.writerow(["POP Users", adop.get("pop_users", 0)])
                     writer.writerow(["SMTP Users", adop.get("smtp_users", 0)])
+
+                db_path = os.path.join(reports_dir, "telemetry_cache.db")
+                asyncio.run(import_csv_to_sqlite(csv_path, db_path, "email_clients"))
 
             self.after(0, self._render_client_success, data)
         except Exception as e:
@@ -213,31 +219,33 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         if os.path.basename(script_dir) == "exchange":
             script_dir = os.path.dirname(script_dir)
-        csv_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "email_client_support_metrics.csv")
+        db_path = os.path.join(script_dir, "reports", f"{tenant}_{clients[0]}", "telemetry_cache.db")
         
-        if not os.path.exists(csv_path):
+        if not os.path.exists(db_path):
             return {}
             
         adop = {}
         try:
-            with open(csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)  # skip header
-                for row in reader:
-                    if len(row) >= 2:
-                        name, val = row[0], int(row[1])
-                        if "Browser Users" in name: adop["browser_users"] = val
-                        elif "Desktop Windows" in name: adop["desktop_win"] = val
-                        elif "Desktop Mac (Outlook)" in name: adop["desktop_mac"] = val
-                        elif "Desktop Mac (Mail)" in name: adop["desktop_mail_mac"] = val
-                        elif "Mobile Outlook" in name: adop["mobile_outlook"] = val
-                        elif "Mobile Native" in name: adop["mobile_other"] = val
-                        elif "IMAP" in name: adop["protocol_imap4"] = val
-                        elif "POP" in name: adop["protocol_pop3"] = val
-                        elif "SMTP" in name: adop["protocol_smtp"] = val
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM email_clients")
+            rows = cursor.fetchall()
+            conn.close()
+            for row in rows:
+                if len(row) >= 2:
+                    name, val = row[0], int(row[1])
+                    if "Browser Users" in name: adop["browser_users"] = val
+                    elif "Desktop Windows" in name: adop["desktop_win"] = val
+                    elif "Desktop Mac (Outlook)" in name: adop["desktop_mac"] = val
+                    elif "Desktop Mac (Mail)" in name: adop["desktop_mail_mac"] = val
+                    elif "Mobile Outlook" in name: adop["mobile_outlook"] = val
+                    elif "Mobile Native" in name: adop["mobile_other"] = val
+                    elif "IMAP" in name: adop["protocol_imap4"] = val
+                    elif "POP" in name: adop["protocol_pop3"] = val
+                    elif "SMTP" in name: adop["protocol_smtp"] = val
             return {"client_adoption": adop, "client_error": None}
         except Exception as e:
-            usage_logger.error(f"Error loading client data from CSV: {e}")
+            usage_logger.error(f"Error loading client data from DB: {e}")
             return {"client_error": str(e)}
 
     @property

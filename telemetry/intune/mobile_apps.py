@@ -19,7 +19,10 @@ import csv
 import logging
 import threading
 import customtkinter as ctk
+import asyncio
+import sqlite3
 
+from core.graph.db import import_csv_to_sqlite
 from core.graph.intune.mobile_apps import run_mobile_apps_pipeline
 from telemetry.styles import *
 
@@ -124,6 +127,11 @@ class MobileAppsSubFrame(ctk.CTkFrame):
                 if os.path.exists(temp_csv_path):
                     if os.path.exists(self.csv_path): os.remove(self.csv_path)
                     os.rename(temp_csv_path, self.csv_path)
+                
+                db_path = os.path.join(reports_dir, "telemetry_cache.db")
+                if os.path.exists(self.csv_path):
+                    asyncio.run(import_csv_to_sqlite(self.csv_path, db_path, "mobile_apps"))
+
                 self.status = "success"
                 self.after(0, self._render_success)
         except Exception as e:
@@ -149,14 +157,19 @@ class MobileAppsSubFrame(ctk.CTkFrame):
     def _load_data_from_csv(self):
         if not self.csv_path or not os.path.exists(self.csv_path): return []
         items = []
+        reports_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
+        if not os.path.exists(db_path): return []
         try:
-            with open(self.csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)
-                for row in reader:
-                    if row and row[0]: items.append(row[0])
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT displayName FROM mobile_apps")
+            rows = cursor.fetchall()
+            for row in rows:
+                if row and row[0]: items.append(row[0])
+            conn.close()
         except Exception as e:
-            usage_logger.error(f"Error reading mobile apps CSV: {e}")
+            usage_logger.error(f"Error reading mobile apps DB: {e}")
         return sorted(items)
 
     @property

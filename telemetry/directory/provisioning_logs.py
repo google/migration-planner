@@ -24,6 +24,7 @@ import customtkinter as ctk
 
 from core.graph.client import GraphClient
 from core.graph.directory.provisioning_logs import ProvisioningLogsService
+from core.graph.db import import_csv_to_sqlite, query_page_sync
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.DirectoryProvisioningLogsUI")
@@ -170,6 +171,14 @@ class DirectoryProvisioningLogsFrame(ctk.CTkFrame):
             if self.is_cancelled or request_id != self.current_request_id:
                 return
 
+            import asyncio
+            db_dir = os.path.dirname(self.csv_path)
+            db_path = os.path.join(db_dir, "telemetry_cache.db")
+            asyncio.run(import_csv_to_sqlite(self.csv_path, db_path, "provisioning_logs", "initiatedBy"))
+
+            if self.is_cancelled or request_id != self.current_request_id:
+                return
+
             self.after(0, self._render_success, provisioning_logs, request_id)
         except Exception as e:
             usage_logger.error(f"Error fetching Provisioning logs: {e}", exc_info=True)
@@ -201,33 +210,29 @@ class DirectoryProvisioningLogsFrame(ctk.CTkFrame):
     def _load_provisioning_page_from_csv(self, page):
         if not self.csv_path or not os.path.exists(self.csv_path):
             return [], 0
-
-        logs = []
-        try:
-            with open(self.csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader, None)  # skip header
-                for row in reader:
-                    if row:
-                        logs.append({
-                            "initiatedBy": row[0],
-                            "provisioningAction": row[1],
-                            "provisioningSteps": row[2],
-                            "servicePrincipal": row[3],
-                            "sourceSystem": row[4],
-                            "targetSystem": row[5],
-                            "tenantId": row[6],
-                            "provisioningStatusInfo": row[7]
-                        })
-        except Exception as e:
-            usage_logger.error(f"Error reading CSV for Provisioning logs pagination: {e}")
             
-        total_count = len(logs)
-        start_idx = page * self.ITEMS_PER_PAGE
-        end_idx = start_idx + self.ITEMS_PER_PAGE
-        page_data = logs[start_idx:end_idx]
+        db_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(db_dir, "telemetry_cache.db")
         
-        return page_data, total_count
+        try:
+            page_data, total_count = query_page_sync(db_path, "provisioning_logs", page, self.ITEMS_PER_PAGE)
+            # Map keys to match expected dictionary format of UI rendering
+            mapped_data = []
+            for row in page_data:
+                mapped_data.append({
+                    "initiatedBy": row.get("initiatedBy", ""),
+                    "provisioningAction": row.get("provisioningAction", ""),
+                    "provisioningSteps": row.get("provisioningSteps", ""),
+                    "servicePrincipal": row.get("servicePrincipal", ""),
+                    "sourceSystem": row.get("sourceSystem", ""),
+                    "targetSystem": row.get("targetSystem", ""),
+                    "tenantId": row.get("tenantId", ""),
+                    "provisioningStatusInfo": row.get("provisioningStatusInfo", "")
+                })
+            return mapped_data, total_count
+        except Exception as e:
+            usage_logger.error(f"Error loading provisioning page from SQLite cache: {e}")
+            return [], 0
 
     def _update_provisioning_ui_paginated(self):
         for w in self.body_frame.winfo_children():

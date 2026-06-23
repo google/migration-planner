@@ -30,7 +30,7 @@ try {
     $roomsNaming = $null
     $roomsError = $null
     try {
-        $rooms = @(Get-Mailbox -RecipientTypeDetails RoomMailbox -ResultSize Unlimited)
+        $rooms = @(Get-EXOMailbox -RecipientTypeDetails RoomMailbox -ResultSize Unlimited)
         $roomsCount = $rooms.Count
         $roomsNaming = if ($rooms) { (($rooms | Select-Object -First 5 -ExpandProperty Name) -join ", ") } else { $null }
     } catch {
@@ -40,7 +40,7 @@ try {
     $equipmentCount = 0
     $equipmentError = $null
     try {
-        $equipment = @(Get-Mailbox -RecipientTypeDetails EquipmentMailbox -ResultSize Unlimited)
+        $equipment = @(Get-EXOMailbox -RecipientTypeDetails EquipmentMailbox -ResultSize Unlimited)
         $equipmentCount = $equipment.Count
     } catch {
         $equipmentError = $_.Exception.Message

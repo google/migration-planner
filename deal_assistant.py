@@ -1167,6 +1167,7 @@ class ReportsPage(ctk.CTkFrame):
         """Prompts the user to save the M365 usage report as a detailed PDF file."""
         from tkinter import filedialog, messagebox
         import datetime
+        import threading
         from telemetry.pdf_report import generate_pdf_report
         
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1180,13 +1181,19 @@ class ReportsPage(ctk.CTkFrame):
             return
             
         data = self.m365_telemetry_view.get_all_telemetry_data()
+        self.pdf_btn.configure(state="disabled", text="Generating...")
         
-        try:
-            generate_pdf_report(data, f)
-            messagebox.showinfo("Export Successful", f"PDF report successfully saved to:\n{f}", parent=self)
-        except Exception as e:
-            logger.error("Failed to generate PDF report", exc_info=True)
-            messagebox.showerror("Export Failed", f"Failed to generate PDF report: {e}", parent=self)
+        def _generate_pdf_worker():
+            try:
+                generate_pdf_report(data, f)
+                self.after(0, lambda: messagebox.showinfo("Export Successful", f"PDF report successfully saved to:\n{f}", parent=self))
+            except Exception as e:
+                logger.error("Failed to generate PDF report", exc_info=True)
+                self.after(0, lambda err=e: messagebox.showerror("Export Failed", f"Failed to generate PDF report: {err}", parent=self))
+            finally:
+                self.after(0, lambda: self.pdf_btn.configure(state="normal", text="Download PDF"))
+                
+        threading.Thread(target=_generate_pdf_worker, daemon=True).start()
 
 
 

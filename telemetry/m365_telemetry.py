@@ -643,6 +643,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         view.is_cancelled = False
         view.fetch_time_lbl = None
         view.fetch_start_time = 0.0
+        view.sub_section_start_times = {}
+        view.sub_section_timer_labels = {}
         
         orig_trigger = view.trigger_fetch
         orig_reset = view.reset_view

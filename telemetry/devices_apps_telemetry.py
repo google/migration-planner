@@ -16,6 +16,8 @@
 
 # Re-export pipeline from core backend
 from core.graph.entra import run_devices_apps_pipeline
+from core.graph.client import GraphClient
+from core.graph.reports import ReportsService
 
 # Re-export UI subframes and main container from telemetry package
 from telemetry.entra.auth_methods import AuthMethodsSubFrame
