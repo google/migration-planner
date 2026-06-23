@@ -327,8 +327,82 @@ Once authenticated, the tool provides a left-hand navigation sidebar with two ma
 
 ## Tab 1: Usage and Adoption
 This tab loads the M365 Telemetry dashboard.
-*   **Fetch Report**: Queries Microsoft Graph APIs and Reports in parallel to audit Subscribed SKUs, Directory Groups, M365 Apps, Exchange Online Usage, Files, Intune Policies, Security Governance, and Power Automate.
-*   **Download PDF**: Once telemetry fetching is complete, you can click this to export a high-fidelity, comprehensive PDF usage report covering the entire tenant's footprint.
+*   **Fetch Report**: Queries Microsoft Graph APIs and PowerShell in parallel across 10 telemetry modules to audit licenses, usage trends, security policies, and mobile endpoints.
+*   **Download PDF**: Once telemetry fetching is complete, exports a high-fidelity, comprehensive PDF usage report (`m365_usage_report_<timestamp>.pdf`) detailing the entire tenant's footprint with inline tables and charts.
+
+### Telemetry Modules & Business Functionalities
+
+The Usage and Adoption tab scans the following 10 functional modules of a Microsoft 365 tenant:
+
+1.  **Subscribed SKUs**:
+    *   **Scope**: License Inventory.
+    *   **Functionality**: Retrieves purchased subscriptions (SKUs), listing prepaid unit allocations (Enabled, Warning, Suspended) against active consumed units.
+    *   **Business Value**: Identifies shelf-ware (unused licenses) and optimizes licensing budgets.
+2.  **Directory (Entra ID Core)**:
+    *   **Scope**: Domains, Organizations, Users, and Groups.
+    *   **Sub-sections**:
+        *   **Domains**: Lists verified domains, their authentication types (Managed vs. Federated), and active service allocations.
+        *   **Organization**: Displays global tenant properties, plan provisions, and Hybrid Sync status (on-premises AD sync).
+        *   **Groups & Users**: Aggregates counts for users (active, disabled, guest) and groups (M365 Unified, security, distribution, dynamic).
+        *   **User Creation Logs**: Extracts recent user creation/deletion audits.
+        *   **Provisioning Logs**: Tracks automated inbound user provisioning events.
+    *   **Business Value**: Evaluates directories' growth rates, guest accounts risk, and hybrid synchronization health.
+3.  **M365 Apps Adoption**:
+    *   **Scope**: Office Apps Adoption.
+    *   **Sub-sections**:
+        *   **Active Users Usage**: Aggregates usage counts for core services (Exchange, SharePoint, Teams, OneDrive) over 30/90/180 days.
+        *   **Active Users Trend**: Graphs user engagement and growth curves for collaboration tools.
+        *   **M365 App Usage**: Details active counts segmented by desktop Office applications (Word, Excel, PowerPoint, Outlook, OneNote).
+    *   **Business Value**: Measures software adoption and tracks how users utilize Office productivity suites.
+4.  **Exchange Online**:
+    *   **Scope**: Email, Calendars, Connectors, and Add-ins.
+    *   **Sub-sections**:
+        *   **Mailbox Usage**: Aggregates mailbox counts, item counts, size/storage, and lists shared mailboxes and public folders.
+        *   **Calendar Telemetry**: Audits tenant-wide scheduling constraints, room resource counts, and delegation settings.
+        *   **Email Clients Adoption**: Reports active user counts segmented by client software (Web/OWA, Outlook Desktop, Mobile, Apple Mail, or legacy IMAP/POP).
+        *   **Exchange Connectors**: Scans inbound/outbound mail routing connectors, smart hosts, MX rules, and TLS requirements.
+        *   **Exchange Apps**: Discovers installed Outlook add-ins and organization apps.
+        *   **PST Discovery**: Scans SharePoint and OneDrive document libraries to locate stored legacy PST files.
+    *   **Business Value**: Identifies data security loopholes (legacy IMAP/POP protocols, unencrypted connectors), compliance violations (stored PSTs), and mail client compliance.
+5.  **Files (SharePoint & OneDrive)**:
+    *   **Scope**: Document Storage and Activity.
+    *   **Sub-sections**:
+        *   **SharePoint Site Usage**: Lists total sites, total storage consumed, file count, and active file metrics.
+        *   **OneDrive Usage**: Displays personal OneDrive storage limits, active accounts, and file sync activity.
+    *   **Business Value**: Identifies storage bottlenecks, data growth trends, and document synchronization health.
+6.  **Entra ID Authentication & Sign-ins**:
+    *   **Scope**: User Logins and MFA compliance.
+    *   **Sub-sections**:
+        *   **Auth Methods**: Tracks authentication methods used for log-ins (MFA, SMS, Passkey, etc.) to assess passwordless adoption.
+        *   **App Sign-ins**: Breaks down sign-in attempts by integrated target applications.
+        *   **User Sign-ins**: Detailed logs of user login telemetry (device OS, browser, interactive vs. non-interactive, success/failure).
+    *   **Business Value**: Audits MFA security compliance and detects anomalous user/application sign-in trends.
+7.  **Intune (Endpoint Management)**:
+    *   **Scope**: Managed Mobile Apps and Devices.
+    *   **Sub-sections**:
+        *   **Mobile Apps**: Lists managed application packages maintained and pushed via Intune.
+        *   **Device Configurations**: Audits endpoint configuration profiles and platform policies compliance.
+        *   **Detected Apps**: Audits all software packages installed on tenant-enrolled devices.
+    *   **Business Value**: Ensures client devices adhere to tenant security standards, and audits unauthorized endpoint software.
+8.  **Network Security**:
+    *   **Scope**: Zero-trust Network Egress and Policies.
+    *   **Sub-sections**:
+        *   **Secure Access Filtering**: Checks Entra Global Secure Access filtering configs.
+        *   **Conditional Access**: Audits network-based CA policy rules.
+        *   **Firewall/Proxy**: Evaluates firewall and proxy settings.
+    *   **Business Value**: Validates network-level access rules and zero-trust perimeter health.
+9.  **Information Protection & Security (Microsoft Purview)**:
+    *   **Scope**: Data Governance and Protection.
+    *   **Sub-sections**:
+        *   **Sensitivity Labels**: Lists MIP sensitivity labels and priority ordering.
+        *   **Retention Policies**: Reviews records management retention rules.
+        *   **DLP Policies**: Lists active Data Loss Prevention policies.
+        *   **Sensitive Info Types (SIT)**: Identifies custom and built-in SIT templates (e.g. Credit Card, SSN patterns).
+    *   **Business Value**: Reviews data classification enforcement, retention boundaries, and alerts on potential data leakage risks.
+10. **Power Automate Scans**:
+    *   **Scope**: Environment Workflow Automation.
+    *   **Functionality**: Scans all tenant environments for Cloud Flows and Desktop Flows. Identifies active flows, categorizes their triggers, and flags complex connectors/premium triggers.
+    *   **Business Value**: Identifies shadow IT integrations, flow failures, and potential API/connector leakage paths.
 
 ### Tab 1 Outputs: Usage and Adoption
 *   **PDF Report**: Accessible via the "Download PDF" button in the UI. Upon clicking, you can choose a save location on your system. The PDF is a comprehensive document (`m365_usage_report_<timestamp>.pdf`) containing detailed charts, graphs, data tables, and metrics for all successfully audited modules, providing a unified holistic view of the tenant.
