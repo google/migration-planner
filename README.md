@@ -330,79 +330,73 @@ This tab loads the M365 Telemetry dashboard.
 *   **Fetch Report**: Queries Microsoft Graph APIs and PowerShell in parallel across 10 telemetry modules to audit licenses, usage trends, security policies, and mobile endpoints.
 *   **Download PDF**: Once telemetry fetching is complete, exports a high-fidelity, comprehensive PDF usage report (`m365_usage_report_<timestamp>.pdf`) detailing the entire tenant's footprint with inline tables and charts.
 
-### Telemetry Modules & Business Functionalities
+### Telemetry Modules & Technical Mechanisms
 
 The Usage and Adoption tab scans the following 10 functional modules of a Microsoft 365 tenant:
 
 1.  **Subscribed SKUs**:
-    *   **Scope**: License Inventory.
-    *   **Functionality**: Retrieves purchased subscriptions (SKUs), listing prepaid unit allocations (Enabled, Warning, Suspended) against active consumed units.
-    *   **Business Value**: Identifies shelf-ware (unused licenses) and optimizes licensing budgets.
+    *   **Mechanism**: Microsoft Graph REST API.
+    *   **Endpoints**: `GET /subscribedSkus`
+    *   **Data Stored**: `subscribed_skus.csv` -> imported to `subscribed_skus` table in `telemetry_cache.db`.
 2.  **Directory (Entra ID Core)**:
-    *   **Scope**: Domains, Organizations, Users, and Groups.
-    *   **Sub-sections**:
-        *   **Domains**: Lists verified domains, their authentication types (Managed vs. Federated), and active service allocations.
-        *   **Organization**: Displays global tenant properties, plan provisions, and Hybrid Sync status (on-premises AD sync).
-        *   **Groups & Users**: Aggregates counts for users (active, disabled, guest) and groups (M365 Unified, security, distribution, dynamic).
-        *   **User Creation Logs**: Extracts recent user creation/deletion audits.
-        *   **Provisioning Logs**: Tracks automated inbound user provisioning events.
-    *   **Business Value**: Evaluates directories' growth rates, guest accounts risk, and hybrid synchronization health.
+    *   **Mechanism**: Microsoft Graph REST API and Graph Audit Logs.
+    *   **Endpoints**:
+        *   **Domains**: `GET /domains` (imported to `directory_domains` table).
+        *   **Organization**: `GET /organization` (imported to `directory_organization` table).
+        *   **Groups & Users**: `POST /$batch` (batch query user count and group count endpoints; imported to `directory_users_groups` table).
+        *   **User Creation Logs**: `GET /auditLogs/directoryAudits` (filters on `Add user` and `Delete user` activities; imported to `user_logs` table).
+        *   **Provisioning Logs**: `GET /auditLogs/provisioning` (imported to `provisioning_logs` table).
 3.  **M365 Apps Adoption**:
-    *   **Scope**: Office Apps Adoption.
-    *   **Sub-sections**:
-        *   **Active Users Usage**: Aggregates usage counts for core services (Exchange, SharePoint, Teams, OneDrive) over 30/90/180 days.
-        *   **Active Users Trend**: Graphs user engagement and growth curves for collaboration tools.
-        *   **M365 App Usage**: Details active counts segmented by desktop Office applications (Word, Excel, PowerPoint, Outlook, OneNote).
-    *   **Business Value**: Measures software adoption and tracks how users utilize Office productivity suites.
+    *   **Mechanism**: Microsoft Graph Reports API (direct streaming downloads of redirect report streams).
+    *   **Endpoints**:
+        *   **Active Users Usage**: `GET /reports/getOffice365ActiveUserDetail(period='D180')`
+        *   **Active Users Trend**: `GET /reports/getOffice365ActiveUserCounts(period='D30')`
+        *   **M365 App Usage**: `GET /reports/getM365AppUserDetail(period='D180')` and `GET /reports/getM365AppUserCounts(period='D180')`
 4.  **Exchange Online**:
-    *   **Scope**: Email, Calendars, Connectors, and Add-ins.
-    *   **Sub-sections**:
-        *   **Mailbox Usage**: Aggregates mailbox counts, item counts, size/storage, and lists shared mailboxes and public folders.
-        *   **Calendar Telemetry**: Audits tenant-wide scheduling constraints, room resource counts, and delegation settings.
-        *   **Email Clients Adoption**: Reports active user counts segmented by client software (Web/OWA, Outlook Desktop, Mobile, Apple Mail, or legacy IMAP/POP).
-        *   **Exchange Connectors**: Scans inbound/outbound mail routing connectors, smart hosts, MX rules, and TLS requirements.
-        *   **Exchange Apps**: Discovers installed Outlook add-ins and organization apps.
-        *   **PST Discovery**: Scans SharePoint and OneDrive document libraries to locate stored legacy PST files.
-    *   **Business Value**: Identifies data security loopholes (legacy IMAP/POP protocols, unencrypted connectors), compliance violations (stored PSTs), and mail client compliance.
+    *   **Mechanism**: Hybrid fetch utilizing Microsoft Graph Reports API, Graph Search API, and Exchange Online PowerShell Core (certificate authentication).
+    *   **Endpoints & PowerShell Scripts**:
+        *   **Mailbox Usage**: `GET /reports/getMailboxUsageDetail(period='D180')` (Graph) and `get_mailbox_and_folder_stats.ps1` (PowerShell: uses `Get-EXOMailbox` and `Get-EXOMailboxStatistics` to fetch shared mailboxes and public folder sizes).
+        *   **Calendar Telemetry**: `exchange_calendar_metadata.ps1` (PowerShell: uses `Get-CalendarNotification`, `Get-MailboxCalendarConfiguration`, `Get-CalendarProcessing` to audit sharing and resource settings).
+        *   **Email Clients Adoption**: `GET /reports/getEmailAppUsageUserDetail(period='D180')` (Graph).
+        *   **Exchange Connectors**: `exchange_connectors.ps1` (PowerShell: runs `Get-InboundConnector` and `Get-OutboundConnector` to audit mail routes).
+        *   **Exchange Apps**: `exchange_organization_apps.ps1` (PowerShell: runs `Get-App` to list organization add-ins).
+        *   **PST Discovery**: `POST /search/query` (Graph Search: filters on `.pst` extension searches across all user OneDrive drives and SharePoint sites).
 5.  **Files (SharePoint & OneDrive)**:
-    *   **Scope**: Document Storage and Activity.
-    *   **Sub-sections**:
-        *   **SharePoint Site Usage**: Lists total sites, total storage consumed, file count, and active file metrics.
-        *   **OneDrive Usage**: Displays personal OneDrive storage limits, active accounts, and file sync activity.
-    *   **Business Value**: Identifies storage bottlenecks, data growth trends, and document synchronization health.
+    *   **Mechanism**: Microsoft Graph Reports API.
+    *   **Endpoints**:
+        *   **SharePoint Site Usage**: `GET /reports/getSharePointSiteUsageDetail(period='D180')`
+        *   **OneDrive Usage**: `GET /reports/getOneDriveUsageAccountDetail(period='D180')` and `GET /reports/getOneDriveActivityUserDetail(period='D180')`
 6.  **Entra ID Authentication & Sign-ins**:
-    *   **Scope**: User Logins and MFA compliance.
-    *   **Sub-sections**:
-        *   **Auth Methods**: Tracks authentication methods used for log-ins (MFA, SMS, Passkey, etc.) to assess passwordless adoption.
-        *   **App Sign-ins**: Breaks down sign-in attempts by integrated target applications.
-        *   **User Sign-ins**: Detailed logs of user login telemetry (device OS, browser, interactive vs. non-interactive, success/failure).
-    *   **Business Value**: Audits MFA security compliance and detects anomalous user/application sign-in trends.
+    *   **Mechanism**: Microsoft Graph Reports and Audit Logs APIs.
+    *   **Endpoints**:
+        *   **Auth Methods**: `GET /reports/authenticationMethods/usersRegisteredByMethod` (imported to `entra_auth_methods` table).
+        *   **App Sign-ins**: `GET /reports/credentialUserActivity`
+        *   **User Sign-ins**: `GET /auditLogs/signIns` (queries interactive, non-interactive logins, browser/device OS; imported to `user_signins` table).
 7.  **Intune (Endpoint Management)**:
-    *   **Scope**: Managed Mobile Apps and Devices.
-    *   **Sub-sections**:
-        *   **Mobile Apps**: Lists managed application packages maintained and pushed via Intune.
-        *   **Device Configurations**: Audits endpoint configuration profiles and platform policies compliance.
-        *   **Detected Apps**: Audits all software packages installed on tenant-enrolled devices.
-    *   **Business Value**: Ensures client devices adhere to tenant security standards, and audits unauthorized endpoint software.
+    *   **Mechanism**: Microsoft Graph Intune / Device Management endpoints.
+    *   **Endpoints**:
+        *   **Mobile Apps**: `GET /deviceAppManagement/mobileApps` (imported to `mobile_apps` table).
+        *   **Device Configurations**: `GET /deviceManagement/deviceConfigurations` and `GET /deviceManagement/configurationPolicies` (imported to `device_configs` and `device_policies` tables).
+        *   **Detected Apps**: `GET /deviceManagement/detectedApps`
 8.  **Network Security**:
-    *   **Scope**: Zero-trust Network Egress and Policies.
-    *   **Sub-sections**:
-        *   **Secure Access Filtering**: Checks Entra Global Secure Access filtering configs.
-        *   **Conditional Access**: Audits network-based CA policy rules.
-        *   **Firewall/Proxy**: Evaluates firewall and proxy settings.
-    *   **Business Value**: Validates network-level access rules and zero-trust perimeter health.
+    *   **Mechanism**: Microsoft Graph Global Secure Access and Identity endpoints.
+    *   **Endpoints**:
+        *   **Secure Access Filtering**: `GET /networkAccess/filteringPolicies`
+        *   **Conditional Access**: `GET /identity/conditionalAccess/policies` (specifically parsing CA rules mapped to network locations).
+        *   **Firewall/Proxy**: `GET /deviceManagement/deviceConfigurations` (filtering on network proxy and firewall configurations).
 9.  **Information Protection & Security (Microsoft Purview)**:
-    *   **Scope**: Data Governance and Protection.
-    *   **Sub-sections**:
-        *   **Sensitivity Labels**: Lists MIP sensitivity labels and priority ordering.
-        *   **Retention Policies**: Reviews records management retention rules.
-        *   **DLP Policies**: Lists active Data Loss Prevention policies.
-        *   **Sensitive Info Types (SIT)**: Identifies custom and built-in SIT templates (e.g. Credit Card, SSN patterns).
-    *   **Business Value**: Reviews data classification enforcement, retention boundaries, and alerts on potential data leakage risks.
+    *   **Mechanism**: PowerShell Core running in compliance session context (requires `Compliance Administrator` role).
+    *   **PowerShell Scripts**:
+        *   **Sensitivity Labels**: `fetch_sensitivity_labels.ps1` (runs `Get-Label` and `Get-LabelPolicy` to extract classification headers).
+        *   **Retention Policies**: `fetch_retention_policies.ps1` (runs `Get-RetentionCompliancePolicy` and `Get-RetentionComplianceRule`).
+        *   **DLP Policies**: `fetch_dlp_policies.ps1` (runs `Get-DlpCompliancePolicy` and `Get-DlpComplianceRule`).
+        *   **Sensitive Info Types (SIT)**: `fetch_sensitive_info_types.ps1` (runs `Get-ClassificationRuleCollection` to export templates).
 10. **Power Automate Scans**:
-    *   **Scope**: Environment Workflow Automation.
-    *   **Functionality**: Scans all tenant environments for Cloud Flows and Desktop Flows. Identifies active flows, categorizes their triggers, and flags complex connectors/premium triggers.
-    *   **Business Value**: Identifies shadow IT integrations, flow failures, and potential API/connector leakage paths.
+    *   **Mechanism**: Power Platform Admin / CRM Dataverse API requests (direct HTTP JSON client).
+    *   **Endpoints**:
+        *   **Environments**: `GET https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments`
+        *   **Cloud Flows**: `GET https://service.flow.microsoft.com/providers/Microsoft.ProcessSimple/environments/{env}/flows`
+        *   **Desktop Flows**: CRM Dataverse endpoints `GET /api/data/v9.0/workflows` (specifically filtering workflow Category 6 for desktop processes).
 
 ### Tab 1 Outputs: Usage and Adoption
 *   **PDF Report**: Accessible via the "Download PDF" button in the UI. Upon clicking, you can choose a save location on your system. The PDF is a comprehensive document (`m365_usage_report_<timestamp>.pdf`) containing detailed charts, graphs, data tables, and metrics for all successfully audited modules, providing a unified holistic view of the tenant.
