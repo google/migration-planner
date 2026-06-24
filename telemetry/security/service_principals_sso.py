@@ -39,8 +39,6 @@ class ServicePrincipalsSsoSubFrame(ctk.CTkFrame):
         self.on_status_change = status_change_callback
         self.semaphore = semaphore
         self.status = None
-        self.start_time = 0
-        self.lbl_timer = None
         self.csv_path = None
         self.is_cancelled = False
 
@@ -98,9 +96,6 @@ class ServicePrincipalsSsoSubFrame(ctk.CTkFrame):
         self.csv_path = None
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
-        if self.lbl_timer and self.lbl_timer.winfo_exists():
-            self.lbl_timer.destroy()
-            self.lbl_timer = None
         self.btn_export.configure(state="disabled")
         for w in self.state_frame.winfo_children(): w.destroy()
         for w in self.grid_frame.winfo_children():
@@ -123,7 +118,6 @@ class ServicePrincipalsSsoSubFrame(ctk.CTkFrame):
     def trigger_fetch(self, tenant, client_id, client_secret):
         self.status = "loading"
         self.is_cancelled = False
-        self.start_time = time.time()
         self.btn_reload.configure(state="disabled")
         self.btn_export.configure(state="disabled")
         self.grid_frame.pack_forget()
@@ -142,10 +136,6 @@ class ServicePrincipalsSsoSubFrame(ctk.CTkFrame):
 
         self._set_loading_state("Scanning Service Principals SSO modes...")
         self.on_status_change()
-        
-        if self.lbl_timer and self.lbl_timer.winfo_exists():
-            self.lbl_timer.destroy()
-            self.lbl_timer = None
             
         threading.Thread(target=self._execute_worker, args=(tenant, client_id, client_secret), daemon=True).start()
 
@@ -175,12 +165,6 @@ class ServicePrincipalsSsoSubFrame(ctk.CTkFrame):
         self.state_frame.pack_forget()
         self.grid_frame.pack(fill="x")
         
-        if self.start_time > 0:
-            elapsed = time.time() - self.start_time
-            if self.lbl_timer and self.lbl_timer.winfo_exists(): self.lbl_timer.destroy()
-            self.lbl_timer = ctk.CTkLabel(self, text=f"⏱ {elapsed:.2f}s", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"), text_color=COLOR_PRIMARY)
-            self.lbl_timer.pack(in_=self.header_frame, side="right", padx=(0, 15))
-
         self._update_grid()
 
     def _render_error(self, err_msg):
