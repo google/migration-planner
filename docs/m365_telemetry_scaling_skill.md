@@ -58,14 +58,16 @@ graph TD
      cols_def = ", ".join(f"[{h}] TEXT" for h in sanitized_headers)
      await db.execute(f"CREATE TABLE {table_name} ({cols_def})")
      ```
-5. **Header Key Matching**: When reading database query results, ensure column name strings are sanitized exactly matching the DB schema (e.g., spaces replaced by underscores, case preserved):
-   ```python
-   # Correct Sanitized Key (Original Header: "SKU Part Number")
-   sku_name = row["SKU_Part_Number"]
-   
-   # Incorrect Key (will raise KeyError or return None)
-   sku_name = row["sku_part_number"] 
-   ```
+5. **Case-Insensitive Database Lookups**: 
+   - The database wrapper (`core/graph/db.py`) automatically intercepts all database rows and connections to implement case, spacing, and punctuation insensitivity.
+   - When retrieving values from database rows or query results, you can use any casing (camelCase, snake_case, PascalCase, or with spaces) to query fields. For example, all of these are valid and return the same value:
+     ```python
+     sku_name = row.get("skuPartNumber")
+     sku_name = row.get("sku_part_number")
+     sku_name = row.get("SKU Part Number")
+     sku_name = row.get("SKU_Part_Number")
+     ```
+   - This eliminates coding discrepancies between API payload casing, database schema casing, and frontend layout property lookups.
 
 ---
 
@@ -274,3 +276,32 @@ class FeatureTelemetryFrame(ctk.CTkFrame):
         # Populate CustomTkinter cells and draw page labels/buttons...
         pass
 ```
+
+---
+
+## 7. PDF Report Integration Guidelines
+
+When adding a new telemetry section or sub-section, you must ensure it is integrated correctly with the PDF generation feature (`telemetry/pdf_report.py`). The main integration point is the `get_all_telemetry_data()` method inside `telemetry/m365_telemetry.py`.
+
+Follow these rules to prevent missing data in the exported PDF:
+
+1. **Verify State Properties**:
+   - Do not assume UI property names. Check the target frame class to find the exact property where it stores its parsed data (usually `last_data`). For example, check whether it uses `o365_data` or `last_data` and map it appropriately.
+   - When retrieving data via sub-elements, use `getattr(self.some_view.sub_view, "last_data", [])`.
+
+2. **Query Subframe Components Directly**:
+   - If a feature is hosted within a container frame (e.g., `DataSecurityGovernanceFrame`), do not call batch methods like `load_all_from_csv` on the container unless it specifically implements them. 
+   - Instead, access the sub-elements' properties directly:
+     ```python
+     "security_labels": getattr(self.security_gov_view.sensitivity_frame, "last_data", [])
+     ```
+
+3. **Fallback to Direct CSV Loading**:
+   - If a subframe component cleans up its memory footprint (e.g., setting `self.last_data = []` to save space, like `EDiscoveryFrame`), load the data directly from the local CSV reports directory using the internal `load_csv("filename.csv")` helper:
+     ```python
+     "ediscovery_cases": load_csv("ediscovery_cases.csv")
+     ```
+
+4. **Coordinate Data Schemas**:
+   - Ensure the structure of data retrieved (e.g., list of dictionaries, flat rows, or tuples) matches exactly what the PDF builder (`telemetry/pdf_report.py`) expects.
+   - If `pdf_report.py` expects nested objects (e.g. `closedBy` containing `user`), ensure the data returned by `.last_data` or `load_csv()` matches this format or parse it accordingly.

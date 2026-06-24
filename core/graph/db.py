@@ -17,10 +17,94 @@
 import os
 import csv
 import logging
+import sqlite3
 import aiosqlite
 from typing import List, Dict, Any, Tuple, Optional
 
 logger = logging.getLogger(__name__)
+
+# --- Centralized Case-Insensitive SQLite Row Factory & Connection Patch ---
+
+class CaseInsensitiveRow(sqlite3.Row):
+    """SQLite Row factory enabling case-insensitive, space-insensitive, and punctuation-insensitive key retrieval."""
+    
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            norm_key = key.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+            for real_key in self.keys():
+                norm_real = real_key.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+                if norm_real == norm_key:
+                    return super().__getitem__(real_key)
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+class CaseInsensitiveConnection(sqlite3.Connection):
+    """Custom SQLite Connection that intercepts and forces the CaseInsensitiveRow factory."""
+    
+    def __setattr__(self, name, value):
+        if name == "row_factory":
+            super().__setattr__(name, CaseInsensitiveRow)
+        else:
+            super().__setattr__(name, value)
+
+# Patch sqlite3.connect to automatically inject our CaseInsensitiveConnection factory
+_original_connect = sqlite3.connect
+
+def _case_insensitive_connect(*args, **kwargs):
+    kwargs["factory"] = CaseInsensitiveConnection
+    conn = _original_connect(*args, **kwargs)
+    conn.row_factory = CaseInsensitiveRow
+    return conn
+
+sqlite3.connect = _case_insensitive_connect
+
+class CaseInsensitiveDict(dict):
+    """Case-insensitive dictionary wrapper supporting spacing, case, and underscore insensitivity."""
+    def __init__(self, data=None, **kwargs):
+        super().__init__()
+        if data:
+            for k, v in data.items():
+                self[k] = v
+        for k, v in kwargs.items():
+            self[k] = v
+
+    def _normalize(self, key):
+        return str(key).lower().replace(" ", "").replace("_", "").replace("-", "") if isinstance(key, str) else key
+
+    def __getitem__(self, key):
+        norm_key = self._normalize(key)
+        for k in self.keys():
+            if self._normalize(k) == norm_key:
+                return super().__getitem__(k)
+        raise KeyError(key)
+
+    def __setitem__(self, key, value):
+        norm_key = self._normalize(key)
+        for k in list(self.keys()):
+            if self._normalize(k) == norm_key:
+                super().__delitem__(k)
+        super().__setitem__(key, value)
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key):
+        norm_key = self._normalize(key)
+        for k in self.keys():
+            if self._normalize(k) == norm_key:
+                return True
+        return False
+
+# ------------------------------------------------------------------------
+
 
 def _sanitize_col(name: str) -> str:
     return name.strip().replace(" ", "_").replace("(", "").replace(")", "").replace("/", "_").replace("-", "_")
@@ -118,7 +202,7 @@ async def query_page_async(
         
         async with db.execute(query_sql, query_params) as cursor:
             rows = await cursor.fetchall()
-            items = [dict(r) for r in rows]
+            items = [CaseInsensitiveDict(dict(r)) for r in rows]
             
         return items, total_count
 
@@ -161,7 +245,7 @@ def query_page_sync(
         
         cursor.execute(query_sql, query_params)
         rows = cursor.fetchall()
-        items = [dict(r) for r in rows]
+        items = [CaseInsensitiveDict(dict(r)) for r in rows]
         
         return items, total_count
     finally:
