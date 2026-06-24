@@ -305,3 +305,22 @@ Follow these rules to prevent missing data in the exported PDF:
 4. **Coordinate Data Schemas**:
    - Ensure the structure of data retrieved (e.g., list of dictionaries, flat rows, or tuples) matches exactly what the PDF builder (`telemetry/pdf_report.py`) expects.
    - If `pdf_report.py` expects nested objects (e.g. `closedBy` containing `user`), ensure the data returned by `.last_data` or `load_csv()` matches this format or parse it accordingly.
+
+---
+
+## 8. Documentation Update Guidelines
+
+Whenever a new telemetry section or sub-section is added, you must update the project [README.md](file:///usr/local/google/home/projjalkundu/.gemini/jetski/scratch/splash_one/README.md) to keep it in sync with the codebase:
+
+1. **Telemetry Modules & Technical Mechanisms Section**:
+   - Add the new module or sub-section to the functional list.
+   - Explicitly document its **Functional Scope** (what metrics/configurations it audits).
+   - Document its **Mechanism & Endpoints** (what Graph API URLs it hits, what PowerShell scripts/cmdlets it calls, and what CSV/SQLite database table caches it creates).
+
+2. **Deal Assistant Telemetry Permissions Section**:
+   - Verify if the new API endpoints or PowerShell commands require new Microsoft Graph permissions (Application or Delegated) or directory roles (e.g. Compliance Administrator).
+   - List any new permissions in the bulleted scopes in `README.md` with a brief description of what they are used for.
+   - Clearly state if the permission is optional (i.e. skipped gracefully if missing) or mandatory.
+
+3. **Tab 1 Outputs Section**:
+   - If the new section writes to a custom log file or introduces a new CSV report pattern that users might want to audit directly, document its exact file path template and purpose under the "Usage and Adoption" outputs.

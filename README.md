@@ -215,10 +215,9 @@ Graph Application permissions:
 *   `Sites.Read.All`: to search for pst files across onedrive and sharepoint
 *   `AuditLog.Read.All`: to read audit log data
 *   `SensitivityLabels.Read.All`: to read all sensitivity labels
-*   `Application.Read.All`: Required to retrieve App Registrations directory details.
-
+*   `Application.Read.All`: Required to retrieve App Registrations directory details and Service Principal SSO configurations.
 Graph Delegated permissions:
-* `eDiscovery.Read.All`: required to read ediscovery permissions on behalf of the ediscovery administrator
+* `eDiscovery.Read.All`: Required to retrieve active/closed Microsoft Purview eDiscovery cases on behalf of the user.
 * `offline_access`: required to maintain access to data you have given the app access to
 
 Office 365 Exchange Online Permissions:
@@ -411,17 +410,23 @@ The Usage and Adoption tab scans the following 10 functional modules of a Micros
         *   Secure Access Filtering: `GET /networkAccess/filteringPolicies`
         *   Conditional Access: `GET /identity/conditionalAccess/policies` (specifically filtering rules mapped to network locations).
         *   Firewall/Proxy: `GET /deviceManagement/deviceConfigurations` (specifically proxy/firewall profiles).
-9.  **Information Protection & Security (Microsoft Purview)**:
+9.  **Data Security & Governance (Microsoft Purview & Entra Security)**:
     *   **Functional Scope**:
         *   **Sensitivity Labels**: Sensitivity labels and active label policies.
         *   **Retention Policies**: Retention and records compliance policies.
         *   **DLP Policies**: Active Data Loss Prevention policies.
         *   **Sensitive Info Types (SIT)**: Custom and built-in SIT templates (e.g. credit card, SSN patterns).
-    *   **Mechanism & Endpoints**: PowerShell Core running in compliance session context (requires `Compliance Administrator` role):
-        *   Sensitivity Labels: `fetch_sensitivity_labels.ps1` (`Get-Label` / `Get-LabelPolicy`)
-        *   Retention Policies: `fetch_retention_policies.ps1` (`Get-RetentionCompliancePolicy` / `Get-RetentionComplianceRule`)
-        *   DLP Policies: `fetch_dlp_policies.ps1` (`Get-DlpCompliancePolicy` / `Get-DlpComplianceRule`)
-        *   Sensitive Info Types (SIT): `fetch_sensitive_info_types.ps1` (`Get-ClassificationRuleCollection`)
+        *   **Authentication Mechanics**: General Entra ID Conditional Access security policies.
+        *   **Service Principal SSO Modes**: SSO modes (SAML, OIDC, Password, None) configured on Enterprise Applications.
+        *   **eDiscovery Cases**: Active and closed Microsoft Purview eDiscovery cases.
+    *   **Mechanism & Endpoints**: Hybrid fetch running Graph APIs and PowerShell compliance context:
+        *   Sensitivity Labels: PowerShell `fetch_sensitivity_labels.ps1` (`Get-Label` / `Get-LabelPolicy`).
+        *   Retention Policies: PowerShell `fetch_retention_policies.ps1` (`Get-RetentionCompliancePolicy` / `Get-RetentionComplianceRule`).
+        *   DLP Policies: PowerShell `fetch_dlp_policies.ps1` (`Get-DlpCompliancePolicy` / `Get-DlpComplianceRule`).
+        *   Sensitive Info Types (SIT): PowerShell `fetch_sensitive_info_types.ps1` (`Get-ClassificationRuleCollection`).
+        *   Authentication Mechanics: `GET /identity/conditionalAccess/policies` (imported to `auth_policies` table).
+        *   Service Principal SSO Modes: `GET /servicePrincipals` (imported to `service_principals_sso` table).
+        *   eDiscovery Cases: `GET /security/cases/ediscoveryCases` (Delegated Graph API; imported to `ediscovery_cases` table).
 10. **Power Automate Scans**:
     *   **Functional Scope**: Cloud Flows and Desktop Flows configurations, listing active/inactive flows and checking for complex connectors or premium triggers.
     *   **Mechanism & Endpoints**: Power Platform Admin / CRM Dataverse API requests (direct HTTP JSON client):
@@ -429,8 +434,9 @@ The Usage and Adoption tab scans the following 10 functional modules of a Micros
         *   Cloud Flows: `GET https://service.flow.microsoft.com/providers/Microsoft.ProcessSimple/environments/{env}/flows`
         *   Desktop Flows: CRM Dataverse endpoints `GET /api/data/v9.0/workflows` (specifically Category 6 for desktop processes).
 
-### Tab 1 Outputs: Usage and Adoptionoption
+### Tab 1 Outputs: Usage and Adoption
 *   **PDF Report**: Accessible via the "Download PDF" button in the UI. Upon clicking, you can choose a save location on your system. The PDF is a comprehensive document (`m365_usage_report_<timestamp>.pdf`) containing detailed charts, graphs, data tables, and metrics for all successfully audited modules, providing a unified holistic view of the tenant.
+*   **Raw Data (CSVs & SQLite Database)**: All raw telemetry data fetched directly from Microsoft Graph APIs and PowerShell scripts is dumped into the local `telemetry/reports/<tenant_id>_<client_id>/` directory as CSV files (e.g., `sensitivity_labels.csv`, `ediscovery_cases.csv`). These files serve as the application's source of truth and are preserved for direct human audit if required. Additionally, an SQLite cache database (`telemetry_cache.db`) is automatically built inside this folder to optimize UI rendering performance during paginated lookups.
 *   **Logs**: Execution and debug logs are stored securely in the local `telemetry/logs/<tenant_id>_<client_id>` directory (specifically `telemetry_log.txt`).
 
 ---
