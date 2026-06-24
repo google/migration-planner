@@ -123,7 +123,6 @@ class TransportRulesFrame(ctk.CTkFrame):
         self.render_ui_state()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
-        self.pack(fill="x", expand=True, pady=(0, 5))
         self.status = "loading"
         self.loading = True
         self.render_ui_state()
@@ -160,7 +159,6 @@ class TransportRulesFrame(ctk.CTkFrame):
         self.on_status_change()
 
     def reset_view(self):
-        self.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
         self.pagination_frame.pack_forget()

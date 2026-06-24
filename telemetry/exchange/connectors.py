@@ -99,7 +99,6 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
         self.reset_view()
 
     def reset_view(self):
-        self.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
         self._cached_connectors_data = []
@@ -145,7 +144,6 @@ class ExchangeConnectorsFrame(ctk.CTkFrame):
         self.status = "loading"
         self.on_status_change()
         
-        self.pack(fill="x", expand=True, pady=10)
         self.grid_frame.pack_forget()
         
         self._set_state_loading("Retrieving Exchange Connectors routing configurations...")

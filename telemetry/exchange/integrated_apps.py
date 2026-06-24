@@ -71,7 +71,6 @@ class ExchangeAppsFrame(ctk.CTkFrame):
 
     def reset_view(self):
         """Resets and hides grids."""
-        self.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
         self.last_apps = []
@@ -114,7 +113,6 @@ class ExchangeAppsFrame(ctk.CTkFrame):
         self.status = "loading"
         self.on_status_change()
 
-        self.pack(fill="x", expand=True, pady=10)
         self.grid_frame.pack_forget()
         self.warning_label.pack_forget()
 

@@ -70,7 +70,6 @@ class MailboxUsageFrame(ctk.CTkFrame):
 
     def reset_view(self):
         """Resets and hides grids."""
-        self.pack_forget()
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
         self.last_data = {}
@@ -116,7 +115,6 @@ class MailboxUsageFrame(ctk.CTkFrame):
         self.status = "loading"
         self.on_status_change()
         
-        self.pack(fill="x", expand=True, pady=10)
         self.grid_frame.pack_forget()
         
         self._set_state_loading("Downloading and parsing Mailbox Usage reports...")

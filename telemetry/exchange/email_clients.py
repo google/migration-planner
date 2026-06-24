@@ -67,7 +67,6 @@ class EmailClientSupportFrame(ctk.CTkFrame):
         self.reset_view()
 
     def reset_view(self):
-        self.pack_forget()
         self.status = None
         self._cached_client_data = {}
         for w in self.client_grid_frame.winfo_children(): w.destroy()
@@ -79,7 +78,6 @@ class EmailClientSupportFrame(ctk.CTkFrame):
             self.trigger_fetch(tenant, clients[0], secrets[0])
 
     def trigger_fetch(self, tenant, client_id, client_secret):
-        self.pack(fill="x", expand=True, pady=10)
         self.status = "loading"
         self.on_status_change()
         
