@@ -979,7 +979,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 "group_counts": getattr(self.directory_view, "last_group_counts", {}),
                 "user_counts": getattr(self.directory_view, "last_user_counts", {})
             },
-            "o365_usage": getattr(self.m365_apps_view.active_users_view, "o365_data", []),
+            "o365_usage": getattr(self.m365_apps_view.active_users_view, "last_data", []),
             "o365_trend": getattr(self.m365_apps_view.active_users_trend_view, "trend_data", {}),
             "m365_apps": getattr(self.m365_apps_view.m365_apps_view, "last_data", []),
             "mailbox": getattr(self.exchange_online_view.mailbox_view, "last_data", {}),
@@ -1000,18 +1000,18 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                 "conditional_access": load_csv("network_conditional_access.csv"),
                 "firewall_policies": load_csv("network_firewall_policies.csv")
             },
-            "security_labels": self.security_gov_view.load_all_from_csv("sensitivity_labels.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
-            "retention_policies": self.security_gov_view.load_all_from_csv("retention_policies.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
-            "dlp_policies": self.security_gov_view.load_all_from_csv("dlp_policies.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
-            "sensitive_info_types": self.security_gov_view.load_all_from_csv("sensitive_info_types.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
-            "service_principals_sso": self.security_gov_view.load_all_from_csv("service_principals_sso.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
-            "conditional_access": self.security_gov_view.load_all_from_csv("auth_policies.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
-            "ediscovery_cases": self.security_gov_view.load_all_from_csv("ediscovery_cases.csv") if hasattr(self.security_gov_view, "load_all_from_csv") else [],
+            "security_labels": getattr(self.security_gov_view.sensitivity_frame, "last_data", []),
+            "retention_policies": getattr(self.security_gov_view.retention_frame, "last_data", []),
+            "dlp_policies": getattr(self.security_gov_view.dlp_frame, "last_data", []),
+            "sensitive_info_types": getattr(self.security_gov_view.sit_frame, "last_data", []),
+            "service_principals_sso": getattr(self.security_gov_view.sso_frame, "last_data", []),
+            "conditional_access": getattr(self.security_gov_view.auth_frame, "last_data", []),
+            "ediscovery_cases": load_csv("ediscovery_cases.csv"),
             "power_automate": getattr(self.power_automate_view, "last_results", {})
         }
 
     def _get_email_clients_pdf_mapped(self) -> dict:
-        raw = getattr(self.exchange_online_view.email_clients_view, "last_client_data", {})
+        raw = getattr(self.exchange_online_view.email_clients_view, "last_data", {})
         if not raw:
             return {}
         if raw.get("client_error"):
