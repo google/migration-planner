@@ -25,6 +25,7 @@ from core.graph.reports import ReportsService
 from core.graph.entra.auth_methods import run_auth_methods_pipeline
 from core.graph.entra.app_signins import run_app_signins_pipeline
 from core.graph.entra.user_signins import run_user_signins_pipeline
+from core.graph.entra.app_registrations import run_app_registrations_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +36,10 @@ def run_devices_apps_pipeline(
     on_app_signins_page_callback=None,
     on_auth_methods_page_callback=None,
     on_user_signins_page_callback=None,
+    on_app_registrations_page_callback=None,
     is_cancelled_callback=None
 ) -> dict:
-    """Pipeline to fetch app sign-in summaries, auth methods, and user signins in parallel."""
+    """Pipeline to fetch app sign-in summaries, auth methods, user signins, and app registrations in parallel."""
     logger.info("Starting Microsoft Entra Data Telemetry Pipeline in parallel...")
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
@@ -48,6 +50,7 @@ def run_devices_apps_pipeline(
     csv_path_app_signins = os.path.join(reports_dir, "entra_app_signins.csv")
     csv_path_auth_methods = os.path.join(reports_dir, "entra_auth_methods.csv")
     csv_path_user_signins = os.path.join(reports_dir, "entra_user_signins.csv")
+    csv_path_app_registrations = os.path.join(reports_dir, "entra_app_registrations.csv")
     
     with open(csv_path_app_signins, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f)
@@ -60,12 +63,16 @@ def run_devices_apps_pipeline(
     with open(csv_path_user_signins, 'w', encoding='utf-8', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(["appDisplayName", "operatingSystem", "browser", "isInteractive"])
+
+    with open(csv_path_app_registrations, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["displayName", "appId", "createdDateTime", "signInAudience", "credentials"])
             
     client = GraphClient(
         tenant_id=tenant_id,
         client_ids=client_id,
         client_secrets=client_secret,
-        concurrency=3,
+        concurrency=4,
         retries=5,
         backoff=2
     )
@@ -109,25 +116,41 @@ def run_devices_apps_pipeline(
         except Exception as thread_err:
             logger.error(f"Error in thread fetching user sign-ins: {thread_err}", exc_info=True)
             errors.append(thread_err)
+
+    def run_fetch_app_registrations(path):
+        try:
+            reports_service.fetch_app_registrations(
+                csv_path=path,
+                max_rows=5000,
+                on_page_callback=on_app_registrations_page_callback,
+                is_cancelled_callback=is_cancelled_callback
+            )
+        except Exception as thread_err:
+            logger.error(f"Error in thread fetching app registrations: {thread_err}", exc_info=True)
+            errors.append(thread_err)
             
     try:
         t3 = threading.Thread(target=run_fetch_app_signins, args=(csv_path_app_signins,), daemon=True)
         t4 = threading.Thread(target=run_fetch_auth_methods, args=(csv_path_auth_methods,), daemon=True)
         t5 = threading.Thread(target=run_fetch_user_signins, args=(csv_path_user_signins,), daemon=True)
+        t6 = threading.Thread(target=run_fetch_app_registrations, args=(csv_path_app_registrations,), daemon=True)
         
         t3.start()
         t4.start()
         t5.start()
+        t6.start()
         
         t3.join()
         t4.join()
         t5.join()
+        t6.join()
         
-        if len(errors) == 3:
+        if len(errors) == 4:
             raise errors[0]
             
         app_signins = []
         auth_methods = []
+        app_registrations = []
         unique_apps = set()
         unique_os = set()
         unique_browsers = set()
@@ -147,6 +170,14 @@ def run_devices_apps_pipeline(
                 for row in reader:
                     if len(row) >= 2:
                         auth_methods.append((row[0], row[1]))
+
+        if os.path.exists(csv_path_app_registrations):
+            with open(csv_path_app_registrations, 'r', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                next(reader, None)
+                for row in reader:
+                    if len(row) >= 5:
+                        app_registrations.append((row[0], row[1], row[2], row[3], row[4]))
                         
         if os.path.exists(csv_path_user_signins):
             with open(csv_path_user_signins, 'r', encoding='utf-8') as f:
@@ -161,6 +192,7 @@ def run_devices_apps_pipeline(
         return {
             "app_signins": app_signins,
             "auth_methods": auth_methods,
+            "app_registrations": app_registrations,
             "user_signins": {
                 "apps": sorted(list(unique_apps)),
                 "os": sorted(list(unique_os)),

@@ -493,5 +493,82 @@ class ReportsService:
         finally:
             self.client.release_token(token_slot)
 
+    def fetch_app_registrations(self, csv_path: str, max_rows: int = 5000, on_page_callback=None, is_cancelled_callback=None) -> None:
+        """Fetches Microsoft Entra app registrations (applications) and dumps to CSV."""
+        token_slot = self.client.get_active_token()
+        session = self.client.get_session()
+        
+        headers = {
+            "Authorization": f"Bearer {token_slot['token']}",
+            "Accept": "application/json"
+        }
+        
+        next_url = "https://graph.microsoft.com/v1.0/applications?$select=displayName,appId,createdDateTime,signInAudience,passwordCredentials,keyCredentials"
+        rows_written = 0
+        page_number = 1
+        import csv
+        
+        try:
+            logger.info("Starting App Registrations fetch...")
+            with open(csv_path, 'a', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                
+                while next_url and rows_written < max_rows:
+                    if is_cancelled_callback and is_cancelled_callback():
+                        logger.info("App Registrations fetch cancelled in-flight.")
+                        break
+                    
+                    logger.info("Querying MSFT Graph applications (Page: %d, rows so far: %d)...", 
+                                page_number, rows_written)
+                    try:
+                        resp = session.get(next_url, headers=headers, timeout=60.0)
+                    except Exception as get_err:
+                        logger.warning("Query attempt failed with exception: %s.", get_err)
+                        break
+                        
+                    if resp is None or resp.status_code != 200:
+                        if resp is not None and resp.status_code in [401, 403]:
+                            logger.error("Applications endpoint permission error: %d %s", resp.status_code, resp.text)
+                            raise PermissionError("Application.Read.All permission required.")
+                        else:
+                            status_str = f"status {resp.status_code}" if resp is not None else "connection/timeout error"
+                            logger.warning("Applications query failed (%s).", status_str)
+                            break
+                            
+                    page_number += 1
+                    data = resp.json()
+                    value_list = data.get("value", [])
+                    
+                    for app in value_list:
+                        display_name = app.get("displayName") or ""
+                        app_id = app.get("appId") or ""
+                        created_dt = app.get("createdDateTime") or ""
+                        audience = app.get("signInAudience") or ""
+                        
+                        secrets_cnt = len(app.get("passwordCredentials", []))
+                        certs_cnt = len(app.get("keyCredentials", []))
+                        credentials_str = f"{secrets_cnt} Secrets, {certs_cnt} Certs"
+                        
+                        writer.writerow([display_name, app_id, created_dt, audience, credentials_str])
+                        rows_written += 1
+                        
+                        if rows_written >= max_rows:
+                            break
+                            
+                    if on_page_callback:
+                        try:
+                            on_page_callback(value_list)
+                        except Exception as cb_err:
+                            logger.warning("Error in App Registrations page callback: %s", cb_err)
+                            
+                    if rows_written >= max_rows:
+                        break
+                        
+                    next_url = data.get("@odata.nextLink")
+                    
+            logger.info("Successfully fetched and appended %d app registrations.", rows_written)
+        finally:
+            self.client.release_token(token_slot)
+
 
 

@@ -23,4 +23,5 @@ from core.graph.reports import ReportsService
 from telemetry.entra.auth_methods import AuthMethodsSubFrame
 from telemetry.entra.app_signins import AppSigninsSubFrame
 from telemetry.entra.user_signins import UserSigninsSubFrame
+from telemetry.entra.app_registrations import AppRegistrationsSubFrame
 from telemetry.entra import DevicesAppsTelemetryFrame

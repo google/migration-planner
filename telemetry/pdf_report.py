@@ -1141,7 +1141,47 @@ def generate_pdf_report(data: dict, filepath: str):
         
     story.append(Spacer(1, 15))
     
-    # 3.3.3 User Sign-Ins
+    # 3.3.3 App Registrations
+    story.append(Paragraph("<b>App Registrations</b>", body_style))
+    story.append(Spacer(1, 4))
+    
+    app_registrations = entra_data.get("app_registrations", [])
+    if not app_registrations:
+        story.append(Paragraph("No Azure AD app registrations were discovered or permission restricted.", ParagraphStyle('ErrTxtAppRegs', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        app_regs_table_data = [[
+            Paragraph("App Name", table_cell_header),
+            Paragraph("Application ID", table_cell_header),
+            Paragraph("Created Date", table_cell_header),
+            Paragraph("Sign In Audience", table_cell_header),
+            Paragraph("Credentials", table_cell_header)
+        ]]
+        
+        for name, app_id, created, audience, creds in app_registrations:
+            formatted_created = created[:10] if created else ""
+            app_regs_table_data.append([
+                Paragraph(name, table_cell_bold),
+                Paragraph(app_id, table_cell_style),
+                Paragraph(formatted_created, table_cell_style),
+                Paragraph(audience, table_cell_style),
+                Paragraph(creds, table_cell_style)
+            ])
+            
+        app_regs_table = Table(app_regs_table_data, colWidths=[120, 110, 70, 110, 94])
+        app_regs_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(app_regs_table)
+        
+    story.append(Spacer(1, 15))
+    
+    # 3.3.4 User Sign-Ins
     story.append(Paragraph("<b>User Sign-Ins</b>", body_style))
     story.append(Spacer(1, 4))
     
@@ -1171,7 +1211,7 @@ def generate_pdf_report(data: dict, filepath: str):
         
     story.append(Spacer(1, 15))
     
-    # 3.3.4 Authentication Methods
+    # 3.3.5 Authentication Methods
     story.append(Paragraph("<b>Authentication Methods</b>", body_style))
     story.append(Spacer(1, 4))
     

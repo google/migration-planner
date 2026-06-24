@@ -528,6 +528,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
         return [
             self.subscribed_skus_view,
             self.devices_apps_view.auth_methods_subframe,
+            self.devices_apps_view.app_registrations_subframe,
             self.devices_apps_view.app_signins_subframe,
             self.devices_apps_view.user_signins_subframe,
             self.directory_view.organization_frame,
@@ -591,6 +592,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "ConditionalAccessSubFrame": "2. Conditional Access Policies",
             "FirewallSubFrame": "3. Firewall and Proxy Configurations",
             "DevicesAppsTelemetryFrame": "Devices & Apps Summary (Sign-in Telemetry)",
+            "AppRegistrationsSubFrame": "App Registrations",
             "SensitivityLabelsSubFrame": "Sensitivity Labels",
             "RetentionPoliciesSubFrame": "Retention Compliance Policies",
             "DLPPoliciesSubFrame": "Data Loss Prevention (DLP) Policies",

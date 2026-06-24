@@ -215,6 +215,7 @@ Graph Application permissions:
 *   `Sites.Read.All`: to search for pst files across onedrive and sharepoint
 *   `AuditLog.Read.All`: to read audit log data
 *   `SensitivityLabels.Read.All`: to read all sensitivity labels
+*   `Application.Read.All`: Required to retrieve App Registrations directory details.
 
 Graph Delegated permissions:
 * `eDiscovery.Read.All`: required to read ediscovery permissions on behalf of the ediscovery administrator
@@ -384,10 +385,12 @@ The Usage and Adoption tab scans the following 10 functional modules of a Micros
 6.  **Entra ID Authentication & Sign-ins**:
     *   **Functional Scope**:
         *   **Auth Methods**: MFA, SMS, Passkey, etc. registration and adoption counts.
+        *   **App Registrations**: Directory application detail entries, Client IDs, registration timestamps, and secrets/certificates credentials.
         *   **App Sign-ins**: Login volumes segmented by integrated target applications.
         *   **User Sign-ins**: Interactive vs. non-interactive login logs, devices, and browser types.
-    *   **Mechanism & Endpoints**: Microsoft Graph Reports and Audit Logs APIs:
+    *   **Mechanism & Endpoints**: Microsoft Graph Reports, Audit Logs, and Directory APIs:
         *   Auth Methods: `GET /reports/authenticationMethods/usersRegisteredByMethod`
+        *   App Registrations: `GET /applications` (imported to `app_registrations` cache table).
         *   App Sign-ins: `GET /reports/credentialUserActivity`
         *   User Sign-ins: `GET /auditLogs/signIns`
 7.  **Intune (Endpoint Management)**:
