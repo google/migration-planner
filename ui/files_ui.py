@@ -362,7 +362,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "Shortcut Count",
         "Folder Count > Depth Limit 100",
         "File Count > Depth Limit 100",
-        "Folder with > 500k item count",
+        "Entities with > 500k item count",
         "Corpus Size",
     }
     id_col = "Site URL/Name" if "Site URL/Name" in df.columns else ("Site Id" if "Site Id" in df.columns else ("Entity" if "Entity" in df.columns else None))
@@ -408,7 +408,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           "shortcutCount": shortcut_cnt,
           "folderCountExceedingDepthLimit": int(pd.to_numeric(row.get("Folder Count > Depth Limit 100", 0), errors="coerce") or 0),
           "fileCountExceedingDepthLimit": int(pd.to_numeric(row.get("File Count > Depth Limit 100", 0), errors="coerce") or 0),
-          "largeResourceCount": int(pd.to_numeric(row.get("Folder with > 500k item count", 0), errors="coerce") or 0),
+          "largeResourceCount": int(pd.to_numeric(row.get("Entities with > 500k item count", 0), errors="coerce") or 0),
           "totalSize": _parse_size_str(row.get("Corpus Size", 0)),
           "resourceCount": res_cnt,
       }
@@ -430,7 +430,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "listCount": int(pd.to_numeric(df.get("List Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "folderCountExceedingDepthLimit": int(pd.to_numeric(df.get("Folder Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "fileCountExceedingDepthLimit": int(pd.to_numeric(df.get("File Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
-        "tenantLevelLargeResourceCount": int(pd.to_numeric(df.get("Folder with > 500k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "tenantLevelLargeResourceCount": int(pd.to_numeric(df.get("Entities with > 500k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "siteClassification": {site_id: "personal" for site_id in site_metrics.keys()},
         "licenseMetrics": {},
         "tenantLevelFileSizeDistribution": {},
@@ -553,7 +553,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             "Shortcut Count": s_data.get("shortcutCount", 0),
             "Folder Count > Depth Limit 100": s_data.get("folderCountExceedingDepthLimit", 0),
             "File Count > Depth Limit 100": s_data.get("fileCountExceedingDepthLimit", 0),
-            "Folder with > 500k item count": s_data.get("largeResourceCount", 0),
+            "Entities with > 500k item count": s_data.get("largeResourceCount", 0),
             "Corpus Size": s_data.get("totalSize", 0),
             "Resource Count": s_data.get("resourceCount", 0)
         })
@@ -959,7 +959,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
       self.create_stat_card(card_frame, "Folder count beyond depth limit 100", f"{data.get('folderCountExceedingDepthLimit', 0):,}", "📁")
       self.create_stat_card(card_frame, "File count beyond depth limit 100", f"{data.get('fileCountExceedingDepthLimit', 0):,}", "📄")
-      self.create_stat_card(card_frame, "Large Resource Count (Folders with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Large Resource Count (Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
 
       if self.show_eta:
         # Timeline
@@ -1177,7 +1177,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "Shortcut Count",
         "Folder Count > Depth Limit 100",
         "File Count > Depth Limit 100",
-        "Folder with > 500k item count",
+        "Entities with > 500k item count",
         "Corpus Size",
     }
     is_report_csv = "Entity" in df.columns and report_cols.issubset(df.columns)
@@ -1263,7 +1263,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ("Shortcut Count", data.get("shortcutCount", 0)),
           ("Folder count beyond depth limit 100", data.get("folderCountExceedingDepthLimit", 0)),
           ("File count beyond depth limit 100", data.get("fileCountExceedingDepthLimit", 0)),
-          ("Large Resource Count (Folders with >500k items)", data.get("tenantLevelLargeResourceCount", 0))
+          ("Large Resource Count (Entities with >500k items)", data.get("tenantLevelLargeResourceCount", 0))
       ]
       
       for label, val in summary_rows:
@@ -1292,15 +1292,20 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Section 4: Large Resources
       if len(data.get("tenantLevelLargeResources", [])) > 0:
-        writer.writerow(["Large Resources", ""])
-        writer.writerow(["Type", "ID", "SubTreeCount", "Drive"])
-        large_resources = data.get("tenantLevelLargeResources", [])
-        for res in large_resources:
+        weights = {
+          "SITE COLLECTION": 1,
+          "SUBSITE": 2,
+          "DOCUMENT LIBRARY": 3,
+          "FOLDER": 4
+        }
+        sorted_large_resources = sorted(data.get("tenantLevelLargeResources", []), key=lambda x: weights.get(x.get("Type", x.get("type", "")), 0), reverse=False)
+        writer.writerow(["Large Resources (Entities with >500k items)", ""])
+        writer.writerow(["Type", "URL", "Entity Count"])
+        for res in sorted_large_resources:
           writer.writerow([
             res.get("Type", res.get("type", "")),
-            res.get("Id", res.get("id", "")),
-            res.get("subTreeCount", 0),
-            self._get_display_name(res.get("drive", ""))
+            self._get_display_name(res.get("Id", res.get("id", ""))),
+            res.get("subTreeCount", 0)
         ])
         
         writer.writerow([]) # Blank line separator
@@ -1309,9 +1314,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         # Section 5: Site Details
         writer.writerow(["Site Details", ""])
         if "siteIdToMail" not in data:
-          row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
+          row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Corpus Size"]
         else:
-          row = ["Site Collection", "Email Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
+          row = ["Site Collection", "Email Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Corpus Size"]
 
         if self.show_eta:
           row.append("Suggested Batch")

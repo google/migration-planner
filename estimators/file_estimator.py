@@ -358,8 +358,7 @@ class FileEstimator(Estimator):
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
             top_level_site = subsite_to_top_level_site.get(subsite_id, subsite_id)
 
-            if self.id_to_display.get(subsite_id, "") == "https://smh3v.sharepoint.com/subsiteofrootsite":
-                print(f"FOUND the URL: {subsite_to_top_level_site.get(subsite_id, "")}")
+            subsite_item_count = 0          # Used to track if this subsite is a Large Resource
 
             if top_level_site != subsite_id:
                 metrics["siteMetrics"][top_level_site]["subsiteCount"] = metrics["siteMetrics"][top_level_site].get("subsiteCount", 0) + 1
@@ -368,7 +367,20 @@ class FileEstimator(Estimator):
                 if drive_id in metrics["driveMetrics"]:
                     drive_metric = metrics["driveMetrics"][drive_id]
                     
+                    subsite_item_count += drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0)
                     metrics["siteMetrics"][top_level_site]["largeResourceCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("largeResourceCount", 0) + len(drive_metric.get("largeResources", []))
+                    if drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0) > self.config.large_resource_count_limit:
+                        metrics["siteMetrics"][top_level_site]["largeResourceCount"] += 1    
+                        metrics["tenantLevelLargeResources"].append(
+                            {
+                                "type": ResourceType.DL.value,
+                                "id": drive_id,
+                                "subTreeCount": drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0),
+                                "parent": subsite_id,   # Explicitly showing subsite id here as users can use it to determine site collection easily (webUrl will be displayed in final report).
+                                "Limit": self.config.large_resource_count_limit
+                            }
+                        )
+                    
                     metrics["siteMetrics"][top_level_site]["folderCount"] =  metrics["siteMetrics"].get(top_level_site, {}).get("folderCount", 0) + drive_metric.get("folderCount", 0)
                     metrics["siteMetrics"][top_level_site]["fileCount"] =  metrics["siteMetrics"].get(top_level_site, {}).get("fileCount", 0) + drive_metric.get("fileCount", 0)
                     metrics["siteMetrics"][top_level_site]["shortcutCount"] =  metrics["siteMetrics"].get(top_level_site, {}).get("shortcutCount", 0) + drive_metric.get("shortcutCount", 0)
@@ -376,7 +388,19 @@ class FileEstimator(Estimator):
                     metrics["siteMetrics"][top_level_site]["folderCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("folderCountExceedingDepthLimit", 0) + drive_metric.get("folderCountExceedingDepthLimit", 0)
                     metrics["siteMetrics"][top_level_site]["fileCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("fileCountExceedingDepthLimit", 0) + drive_metric.get("fileCountExceedingDepthLimit", 0)
                 
-            
+            # Check if this subsite is a Large Resource
+            if subsite_item_count > self.config.large_resource_count_limit and subsite_id != top_level_site:
+                metrics["siteMetrics"][top_level_site]["largeResourceCount"] = metrics["siteMetrics"][top_level_site].get("largeResourceCount", 0) + 1
+                metrics["tenantLevelLargeResources"].append(
+                    {
+                        "type": ResourceType.SUBSITE.value,
+                        "id": subsite_id,
+                        "subTreeCount": subsite_item_count,
+                        "parent": top_level_site,
+                        "Limit": self.config.large_resource_count_limit
+                    }
+                )            
+
             metrics["siteMetrics"][top_level_site]["dlCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("dlCount", 0) + len(drive_ids)
             
             if self._is_subsite_personal(subsite_id):
@@ -386,6 +410,18 @@ class FileEstimator(Estimator):
             
             if top_level_site != subsite_id:
                 metrics["subsiteCount"] += 1
+
+        for site_id, metric in metrics["siteMetrics"].items():
+            if metric.get("folderCount", 0) + metric.get("fileCount", 0) > self.config.large_resource_count_limit:
+                metrics["tenantLevelLargeResources"].append(
+                    {
+                        "type": ResourceType.SITE.value,
+                        "id": site_id,
+                        "subTreeCount": metric.get("fileCount", 0) + metric.get("folderCount", 0),
+                        "parent": "N/A (Top level site)",
+                        "Limit": self.config.large_resource_count_limit
+                    }
+                )
                     
         for siteId in subsite_to_drives.keys():
             top_level_site = subsite_to_top_level_site.get(siteId, siteId)
@@ -419,7 +455,7 @@ class FileEstimator(Estimator):
         for drive_id, metric in metrics["driveMetrics"].items():
             for large_resource in metric["largeResources"]:
                 curr_dict = large_resource
-                curr_dict["drive"] = drive_id
+                curr_dict["parent"] = drive_id
                 metrics["tenantLevelLargeResources"].append(curr_dict)
         
         metrics["tenantLevelLargeResourceCount"] = len(metrics["tenantLevelLargeResources"])
@@ -441,7 +477,7 @@ class FileEstimator(Estimator):
         level: int = 1
     ):
         try:
-            site_url = "/sites/{siteId}/sites?$select=id,weburl,isPersonalSite&$top=999"
+            site_url = "/sites/{siteId}/sites?$select=id,webUrl,isPersonalSite&$top=999"
             batches = create_batches(site_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -542,6 +578,7 @@ class FileEstimator(Estimator):
                         self.site_to_metadata[site["id"]] = {
                             "isPersonalSite": site.get("isPersonalSite", False)
                         }
+                        self.id_to_display[site["id"]] = site.get("webUrl", site["id"])
 
             if new_sub_site_ids:
                 self._get_subsites_in_site(new_sub_site_ids, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, level + 1)
@@ -1030,7 +1067,7 @@ class FileEstimator(Estimator):
             parent_references[drive_id] = {}
         try:
             # use delta api to fetch the folders
-            delta_api = "/drives/{driveId}/root/delta?$select=id,parentReference,name,folder,file,remoteItem,size"
+            delta_api = "/drives/{driveId}/root/delta?$select=id,parentReference,name,webUrl,folder,file,remoteItem,size"
             batches = create_batches(delta_api, [{"driveId": drive_id} for drive_id in drive_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
@@ -1146,7 +1183,7 @@ class FileEstimator(Estimator):
                 if "body" in resp and "value" in resp["body"]:
                     for file in resp["body"]["value"]:
                         resource_id_to_details[file["id"]] = file
-                        
+                        self.id_to_display[file["id"]] = file.get("webUrl", file["name"])
                         if "parentReference" in file and "id" in file["parentReference"]:
                             parent_references[drive_id][file["id"]] = file["parentReference"]["id"]
                             
@@ -1430,7 +1467,7 @@ class FileEstimator(Estimator):
             if resource_metric["subTreeCount"] >= self.config.large_resource_count_limit:
                 drive_metric["largeResources"].append({
                     "type": ResourceType.FOLDER.value if "folder" in resource else ResourceType.FILE.value,
-                    "id": resource["name"],
+                    "id": resource["id"],
                     "subTreeCount": resource_metric["subTreeCount"],
                     "Limit": self.config.large_resource_count_limit
                 })
