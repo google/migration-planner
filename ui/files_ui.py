@@ -1300,7 +1300,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         }
         sorted_large_resources = sorted(data.get("tenantLevelLargeResources", []), key=lambda x: weights.get(x.get("Type", x.get("type", "")), 0), reverse=False)
         writer.writerow(["Large Resources (Entities with >500k items)", ""])
-        writer.writerow(["Type", "URL", "Entity Count"])
+        writer.writerow(["Type", "URL", "Item Count"])
         for res in sorted_large_resources:
           writer.writerow([
             res.get("Type", res.get("type", "")),
