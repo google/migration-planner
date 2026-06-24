@@ -334,18 +334,72 @@ This tab loads the M365 Telemetry dashboard.
 
 The Usage and Adoption tab scans the following 10 functional modules of a Microsoft 365 tenant:
 
-| Module | Functional Scope | Mechanism & Endpoints |
-| :--- | :--- | :--- |
-| **1. Subscribed SKUs** | Retrieves purchased subscriptions (SKUs), listing prepaid unit allocations (Enabled, Warning, Suspended) against active consumed units. | Graph REST API: `GET /subscribedSkus`<br>(Cache: `subscribed_skus` table in `telemetry_cache.db`) |
-| **2. Directory (Entra ID Core)** | • **Domains**: Verified tenant domains, auth types (Managed/Federated), and services.<br>• **Organization**: Global org config details, provisioned plans, and Hybrid Sync status.<br>• **Groups & Users**: Aggregate counts for active/disabled users, members/guests, and static/dynamic groups.<br>• **User Creation Logs**: Directory audits of added/deleted users.<br>• **Provisioning Logs**: Inbound sync logs from HR databases. | • Domains: `GET /domains` (`directory_domains` table)<br>• Organization: `GET /organization` (`directory_organization` table)<br>• Groups & Users: `POST /$batch` (`directory_users_groups` table)<br>• User Creation: `GET /auditLogs/directoryAudits` (`user_logs` table)<br>• Provisioning: `GET /auditLogs/provisioning` (`provisioning_logs` table) |
-| **3. M365 Apps Adoption** | • **Active Users**: Daily active user counts across Exchange, SharePoint, Teams, and OneDrive (30/90/180 days).<br>• **Trends**: Adoption curves and growth trends.<br>• **App Usage**: Active user counts segmented by desktop Office applications (Word, Excel, PowerPoint, Outlook, OneNote). | Graph Reports API (streaming download):<br>• Active Users: `GET /reports/getOffice365ActiveUserDetail(period='D180')`<br>• Trends: `GET /reports/getOffice365ActiveUserCounts(period='D30')`<br>• App Usage: `GET /reports/getM365AppUserDetail` and `getM365AppUserCounts` |
-| **4. Exchange Online** | • **Mailbox Usage**: Total mailbox counts, sizes, items, and shared mailbox/public folder statistics.<br>• **Calendar Telemetry**: Tenant-wide scheduling rules, room resources, and calendar processing.<br>• **Email Clients**: Email clients usage (OWA Web, Outlook Desktop/Mobile, Apple Mail, legacy IMAP/POP).<br>• **Exchange Connectors**: Inbound/outbound connectors, smart hosts, and TLS requirements.<br>• **Exchange Apps**: Installed Outlook add-ins and organization apps.<br>• **PST Discovery**: Search for `.pst` file archives stored inside OneDrive/SharePoint libraries. | Hybrid fetch using Graph Reports, Graph Search, and PowerShell (Connect-ExchangeOnline):<br>• Mailbox Usage: `GET /reports/getMailboxUsageDetail` and `get_mailbox_and_folder_stats.ps1`<br>• Calendar: `exchange_calendar_metadata.ps1`<br>• Email Clients: `GET /reports/getEmailAppUsageUserDetail(period='D180')`<br>• Connectors: `exchange_connectors.ps1`<br>• Exchange Apps: `exchange_organization_apps.ps1`<br>• PST Discovery: `POST /search/query` (Graph Search) |
-| **5. Files (SharePoint & OneDrive)** | • **SharePoint Site Usage**: Total sites, total storage consumed, file count, and active file metrics.<br>• **OneDrive Usage**: Personal OneDrive storage sizes, active accounts, and file sync activity. | Graph Reports API:<br>• SharePoint Site: `GET /reports/getSharePointSiteUsageDetail(period='D180')`<br>• OneDrive: `GET /reports/getOneDriveUsageAccountDetail` and `getOneDriveActivityUserDetail` |
-| **6. Entra ID Auth & Sign-ins** | • **Auth Methods**: MFA, SMS, Passkey, etc. registration and adoption counts.<br>• **App Registrations**: Application detail entries, Client IDs, registration timestamps, and secrets/certificates.<br>• **App Sign-ins**: Login volumes segmented by integrated target applications.<br>• **User Sign-ins**: Interactive vs. non-interactive login logs, devices, and browser types. | Graph Reports, Audit Logs, and Directory APIs:<br>• Auth Methods: `GET /reports/authenticationMethods/usersRegisteredByMethod`<br>• App Registrations: `GET /applications` (`app_registrations` table)<br>• App Sign-ins: `GET /reports/credentialUserActivity`<br>• User Sign-ins: `GET /auditLogs/signIns` |
-| **7. Intune (Endpoint Management)** | • **Mobile Apps**: Managed application packages pushed and maintained via Intune.<br>• **Device Configurations**: Device configuration profiles, platform policies, and compliance rates.<br>• **Detected Apps**: Software packages detected on managed devices. | Graph Intune / Device Management endpoints:<br>• Mobile Apps: `GET /deviceAppManagement/mobileApps`<br>• Device Configurations: `GET /deviceManagement/deviceConfigurations` and `/configurationPolicies`<br>• Detected Apps: `GET /deviceManagement/detectedApps` |
-| **8. Network Security** | • **Secure Access Filtering**: Global Secure Access filtering policies.<br>• **Conditional Access**: Network-based Conditional Access security policies.<br>• **Firewall/Proxy**: Firewall and proxy configuration profiles. | Graph Global Secure Access and Identity endpoints:<br>• Secure Access Filtering: `GET /networkAccess/filteringPolicies`<br>• Conditional Access: `GET /identity/conditionalAccess/policies` (network locations filtering)<br>• Firewall/Proxy: `GET /deviceManagement/deviceConfigurations` (proxy/firewall profiles) |
-| **9. Data Security & Governance** | • **Sensitivity Labels**: Sensitivity labels and active label policies.<br>• **Retention Policies**: Retention and records compliance policies.<br>• **DLP Policies**: Active Data Loss Prevention policies.<br>• **Sensitive Info Types (SIT)**: Custom and built-in SIT templates.<br>• **Authentication Mechanics**: General Entra ID Conditional Access security policies.<br>• **Service Principal SSO**: SSO modes (SAML, OIDC, Password, None) configured on Enterprise Applications.<br>• **eDiscovery Cases**: Active and closed Microsoft Purview eDiscovery cases. | Hybrid fetch running Graph APIs and PowerShell compliance context:<br>• Sensitivity Labels: `fetch_sensitivity_labels.ps1` (`Get-Label` / `Get-LabelPolicy`) (PowerShell)<br>• Retention Policies: `fetch_retention_policies.ps1` (`Get-RetentionCompliancePolicy` / `Get-RetentionComplianceRule`) (PowerShell)<br>• DLP Policies: `fetch_dlp_policies.ps1` (`Get-DlpCompliancePolicy` / `Get-DlpComplianceRule`) (PowerShell)<br>• SIT: `fetch_sensitive_info_types.ps1` (`Get-ClassificationRuleCollection`) (PowerShell)<br>• Authentication Mechanics: `GET /identity/conditionalAccess/policies` (`auth_policies` table)<br>• Service Principal SSO Modes: `GET /servicePrincipals` (`service_principals_sso` table)<br>• eDiscovery Cases: `GET /security/cases/ediscoveryCases` (Delegated Graph; `ediscovery_cases` table) |
-| **10. Power Automate Scans** | Cloud Flows and Desktop Flows configurations, listing active/inactive flows and checking for complex connectors or premium triggers. | Power Platform Admin / CRM Dataverse API requests:<br>• Environments: `GET https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments`<br>• Cloud Flows: `GET https://service.flow.microsoft.com/providers/Microsoft.ProcessSimple/environments/{env}/flows`<br>• Desktop Flows: CRM Dataverse `GET /api/data/v9.0/workflows` (Category 6) |
+<table width="100%">
+  <colgroup>
+    <col style="width: 20%;">
+    <col style="width: 50%;">
+    <col style="width: 30%;">
+  </colgroup>
+  <thead>
+    <tr>
+      <th align="left">Module</th>
+      <th align="left">Functional Scope</th>
+      <th align="left">Mechanism & Endpoints</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>1. Subscribed SKUs</b></td>
+      <td>Retrieves purchased subscriptions (SKUs), listing prepaid unit allocations (Enabled, Warning, Suspended) against active consumed units.</td>
+      <td>Graph REST API: <code>GET /subscribedSkus</code><br>(Cache: <code>subscribed_skus</code> table in <code>telemetry_cache.db</code>)</td>
+    </tr>
+    <tr>
+      <td><b>2. Directory (Entra ID Core)</b></td>
+      <td>• <b>Domains</b>: Verified tenant domains, auth types (Managed/Federated), and services.<br>• <b>Organization</b>: Global org config details, provisioned plans, and Hybrid Sync status.<br>• <b>Groups & Users</b>: Aggregate counts for active/disabled users, members/guests, and static/dynamic groups.<br>• <b>User Creation Logs</b>: Directory audits of added/deleted users.<br>• <b>Provisioning Logs</b>: Inbound sync logs from HR databases.</td>
+      <td>• Domains: <code>GET /domains</code> (<code>directory_domains</code> table)<br>• Organization: <code>GET /organization</code> (<code>directory_organization</code> table)<br>• Groups & Users: <code>POST /$batch</code> (<code>directory_users_groups</code> table)<br>• User Creation: <code>GET /auditLogs/directoryAudits</code> (<code>user_logs</code> table)<br>• Provisioning: <code>GET /auditLogs/provisioning</code> (<code>provisioning_logs</code> table)</td>
+    </tr>
+    <tr>
+      <td><b>3. M365 Apps Adoption</b></td>
+      <td>• <b>Active Users</b>: Daily active user counts across Exchange, SharePoint, Teams, and OneDrive (30/90/180 days).<br>• <b>Trends</b>: Adoption curves and growth trends.<br>• <b>App Usage</b>: Active user counts segmented by desktop Office applications (Word, Excel, PowerPoint, Outlook, OneNote).</td>
+      <td>Graph Reports API (streaming download):<br>• Active Users: <code>GET /reports/getOffice365ActiveUserDetail(period='D180')</code><br>• Trends: <code>GET /reports/getOffice365ActiveUserCounts(period='D30')</code><br>• App Usage: <code>GET /reports/getM365AppUserDetail</code> and <code>getM365AppUserCounts</code></td>
+    </tr>
+    <tr>
+      <td><b>4. Exchange Online</b></td>
+      <td>• <b>Mailbox Usage</b>: Total mailbox counts, sizes, items, and shared mailbox/public folder statistics.<br>• <b>Calendar Telemetry</b>: Tenant-wide scheduling rules, room resources, and calendar processing.<br>• <b>Email Clients</b>: Email clients usage (OWA Web, Outlook Desktop/Mobile, Apple Mail, legacy IMAP/POP).<br>• <b>Exchange Connectors</b>: Inbound/outbound connectors, smart hosts, and TLS requirements.<br>• <b>Exchange Apps</b>: Installed Outlook add-ins and organization apps.<br>• <b>PST Discovery</b>: Search for <code>.pst</code> file archives stored inside OneDrive/SharePoint libraries.</td>
+      <td>Hybrid fetch using Graph Reports, Graph Search, and PowerShell (Connect-ExchangeOnline):<br>• Mailbox Usage: <code>GET /reports/getMailboxUsageDetail</code> and <code>get_mailbox_and_folder_stats.ps1</code><br>• Calendar: <code>exchange_calendar_metadata.ps1</code><br>• Email Clients: <code>GET /reports/getEmailAppUsageUserDetail(period='D180')</code><br>• Connectors: <code>exchange_connectors.ps1</code><br>• Exchange Apps: <code>exchange_organization_apps.ps1</code><br>• PST Discovery: <code>POST /search/query</code> (Graph Search)</td>
+    </tr>
+    <tr>
+      <td><b>5. Files (SharePoint & OneDrive)</b></td>
+      <td>• <b>SharePoint Site Usage</b>: Total sites, total storage consumed, file count, and active file metrics.<br>• <b>OneDrive Usage</b>: Personal OneDrive storage sizes, active accounts, and file sync activity.</td>
+      <td>Graph Reports API:<br>• SharePoint Site: <code>GET /reports/getSharePointSiteUsageDetail(period='D180')</code><br>• OneDrive: <code>GET /reports/getOneDriveUsageAccountDetail</code> and <code>getOneDriveActivityUserDetail</code></td>
+    </tr>
+    <tr>
+      <td><b>6. Entra ID Auth & Sign-ins</b></td>
+      <td>• <b>Auth Methods</b>: MFA, SMS, Passkey, etc. registration and adoption counts.<br>• <b>App Registrations</b>: Application detail entries, Client IDs, registration timestamps, and secrets/certificates.<br>• <b>App Sign-ins</b>: Login volumes segmented by integrated target applications.<br>• <b>User Sign-ins</b>: Interactive vs. non-interactive login logs, devices, and browser types.</td>
+      <td>Graph Reports, Audit Logs, and Directory APIs:<br>• Auth Methods: <code>GET /reports/authenticationMethods/usersRegisteredByMethod</code><br>• App Registrations: <code>GET /applications</code> (<code>app_registrations</code> table)<br>• App Sign-ins: <code>GET /reports/credentialUserActivity</code><br>• User Sign-ins: <code>GET /auditLogs/signIns</code></td>
+    </tr>
+    <tr>
+      <td><b>7. Intune (Endpoint Management)</b></td>
+      <td>• <b>Mobile Apps</b>: Managed application packages pushed and maintained via Intune.<br>• <b>Device Configurations</b>: Device configuration profiles, platform policies, and compliance rates.<br>• <b>Detected Apps</b>: Software packages detected on managed devices.</td>
+      <td>Graph Intune / Device Management endpoints:<br>• Mobile Apps: <code>GET /deviceAppManagement/mobileApps</code><br>• Device Configurations: <code>GET /deviceManagement/deviceConfigurations</code> and <code>/configurationPolicies</code><br>• Detected Apps: <code>GET /deviceManagement/detectedApps</code></td>
+    </tr>
+    <tr>
+      <td><b>8. Network Security</b></td>
+      <td>• <b>Secure Access Filtering</b>: Global Secure Access filtering policies.<br>• <b>Conditional Access</b>: Network-based Conditional Access security policies.<br>• <b>Firewall/Proxy</b>: Firewall and proxy configuration profiles.</td>
+      <td>Graph Global Secure Access and Identity endpoints:<br>• Secure Access Filtering: <code>GET /networkAccess/filteringPolicies</code><br>• Conditional Access: <code>GET /identity/conditionalAccess/policies</code> (network locations filtering)<br>• Firewall/Proxy: <code>GET /deviceManagement/deviceConfigurations` (proxy/firewall profiles)</code></td>
+    </tr>
+    <tr>
+      <td><b>9. Data Security & Governance</b></td>
+      <td>• <b>Sensitivity Labels</b>: Sensitivity labels and active label policies.<br>• <b>Retention Policies</b>: Retention and records compliance policies.<br>• <b>DLP Policies</b>: Active Data Loss Prevention policies.<br>• <b>Sensitive Info Types (SIT)</b>: Custom and built-in SIT templates.<br>• <b>Authentication Mechanics</b>: General Entra ID Conditional Access security policies.<br>• <b>Service Principal SSO</b>: SSO modes (SAML, OIDC, Password, None) configured on Enterprise Applications.<br>• <b>eDiscovery Cases</b>: Active and closed Microsoft Purview eDiscovery cases.</td>
+      <td>Hybrid fetch running Graph APIs and PowerShell compliance context:<br>• Sensitivity Labels: <code>fetch_sensitivity_labels.ps1</code> (<code>Get-Label</code> / <code>Get-LabelPolicy</code>) (PowerShell)<br>• Retention Policies: <code>fetch_retention_policies.ps1</code> (<code>Get-RetentionCompliancePolicy</code> / <code>Get-RetentionComplianceRule</code>) (PowerShell)<br>• DLP Policies: <code>fetch_dlp_policies.ps1</code> (<code>Get-DlpCompliancePolicy</code> / <code>Get-DlpComplianceRule</code>) (PowerShell)<br>• SIT: <code>fetch_sensitive_info_types.ps1</code> (<code>Get-ClassificationRuleCollection</code>) (PowerShell)<br>• Authentication Mechanics: <code>GET /identity/conditionalAccess/policies</code> (<code>auth_policies</code> table)<br>• Service Principal SSO Modes: <code>GET /servicePrincipals</code> (<code>service_principals_sso</code> table)<br>• eDiscovery Cases: <code>GET /security/cases/ediscoveryCases</code> (Delegated Graph; <code>ediscovery_cases</code> table)</td>
+    </tr>
+    <tr>
+      <td><b>10. Power Automate Scans</b></td>
+      <td>Cloud Flows and Desktop Flows configurations, listing active/inactive flows and checking for complex connectors or premium triggers.</td>
+      <td>Power Platform Admin / CRM Dataverse API requests:<br>• Environments: <code>GET https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments</code><br>• Cloud Flows: <code>GET https://service.flow.microsoft.com/providers/Microsoft.ProcessSimple/environments/{env}/flows</code><br>• Desktop Flows: CRM Dataverse <code>GET /api/data/v9.0/workflows</code> (Category 6)</td>
+    </tr>
+  </tbody>
+</table>
 
 ### Tab 1 Outputs: Usage and Adoption
 *   **PDF Report**: Accessible via the "Download PDF" button in the UI. Upon clicking, you can choose a save location on your system. The PDF is a comprehensive document (`m365_usage_report_<timestamp>.pdf`) containing detailed charts, graphs, data tables, and metrics for all successfully audited modules, providing a unified holistic view of the tenant.
