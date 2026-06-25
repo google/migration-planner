@@ -201,7 +201,7 @@ In your new app, go to **API permissions > Add a permission > Microsoft Graph**,
 The Usage and Adoption tab performs extensive tenant auditing. While the following permissions are recommended for a complete report, you may choose to grant only a subset. 
 **NOTE: Be aware that any missing permissions will simply cause the tool to gracefully skip those specific telemetry sections.**
 
-**Graph Application permissions:**
+**Graph API Application permissions:**
 *   `Reports.Read.All`: Used to retrieve active user trends, mailbox/SharePoint usage reports, M365 Apps, and Email Client usage.
 *   `Directory.Read.All`: Used to read tenant organization configuration data, Domain, User, and Group summaries.
 *   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
@@ -246,8 +246,12 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 *   `Files.Read.All`
 *   `LicenseAssignment.Read.All`
 
-### 3. Power Platform & Dataverse Permissions
-The tool can also scan Power Automate flows (Tenant-Wide Cloud Flows and Desktop Flows). To enable this scan, the App Registration must have the following configuration:
+### 3. Power Platform & Dataverse Permissions (Optional)
+The tool can scan Power Automate flows (Tenant-Wide Cloud Flows and Desktop Flows). These configurations are optional; however, if they are not completed, the Power Platform & Automate Flows Analytics section will fail to load and will be skipped.
+
+> **Note**: If you choose not to register the Management App or configure Dataverse permissions, the Power Platform & Automate Flows Analytics report will be skipped and marked as unavailable. All other sections of the tool will continue to function normally.
+
+To enable this scan, the App Registration must have the following configuration:
 
 1. **Register as a Power Platform Management App (Via PowerShell)**:
    The App Registration must be registered as an administrative management application with the Power Platform backend. Log in using a Global Administrator or Power Platform Administrator account and run the following PowerShell commands:
@@ -267,10 +271,13 @@ The tool can also scan Power Automate flows (Tenant-Wide Cloud Flows and Desktop
    * Go to the **Power Platform Admin Center** > **Environments** > [Select Environment] > **Settings** > **Users + permissions** > **Application users**.
    * Click **+ New app user**, select your App Registration, choose the default business unit, and assign the **System Administrator** security role.
 
-### 4. Data Governance and Security Permissions
-To allow the App Registration's Service Principal to read Compliance, Retention data, and Exchange settings via PowerShell, it must be assigned the following directory roles in the [Entra portal](https://entra.microsoft.com/) 
+### 4. Data Governance and Security Permissions (Optional)
+To allow the App Registration's Service Principal to read Compliance, Retention data, and Exchange settings via PowerShell, it must be assigned the following directory roles in the [Entra portal](https://entra.microsoft.com/). These roles are optional; however, if they are not assigned, those respective security reports will fail to load and will be skipped.
+
 *   **Compliance Administrator**
 *   **Compliance Data Administrator**
+
+> **Note**: If these directory roles are not assigned to the App Registration's Service Principal, the Compliance, Retention Policies, and Data Security & Governance telemetry sections will be skipped and marked as unavailable. Other parts of the tool will continue to function normally.
 
 ### 5. Get Credentials
 You will need three values for the tool:
