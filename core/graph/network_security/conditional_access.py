@@ -62,18 +62,19 @@ def run_conditional_access_pipeline(
                     p["name"] = p.get("displayName") or p.get("name") or "N/A"
                     p["state"] = p.get("state") or "N/A"
                     
-                    conds = p.get("conditions", {})
-                    users_cond = conds.get("users", {})
-                    apps_cond = conds.get("applications", {})
+                    conds = p.get("conditions") or {}
+                    users_cond = conds.get("users") or {}
+                    apps_cond = conds.get("applications") or {}
                     
-                    inc_users = users_cond.get("includeUsers", [])
-                    inc_groups = users_cond.get("includeGroups", [])
+                    inc_users = users_cond.get("includeUsers") or []
+                    inc_groups = users_cond.get("includeGroups") or []
                     p["target_users"] = "All Users" if "All" in inc_users else f"Specific ({len(inc_users)} users, {len(inc_groups)} groups)"
                     
-                    inc_apps = apps_cond.get("includeApplications", [])
+                    inc_apps = apps_cond.get("includeApplications") or []
                     p["target_apps"] = "All Apps" if "All" in inc_apps else f"Specific ({len(inc_apps)} apps)"
                     
-                    controls = p.get("grantControls", {}).get("builtInControls", [])
+                    grant_controls = p.get("grantControls") or {}
+                    controls = grant_controls.get("builtInControls") or []
                     p["controls"] = ", ".join(controls) if controls else "Block/None"
                     rows.append(p)
                     
