@@ -159,6 +159,8 @@ class FileEstimator(Estimator):
                         url_to_site_id = self._get_sites_from_urls(data["siteUrls"], site_discovery_progress_metrics, failures)
                         for url, site_id in url_to_site_id.items():
                             top_level_sites.append(site_id)
+                            self.site_to_metadata[site_id] = {"isPersonalSite": False}
+                            metrics["teamSiteCount"] += 1
                         
                         site_id_to_url = {site_id: url for url, site_id in url_to_site_id.items()}
                         
@@ -166,7 +168,7 @@ class FileEstimator(Estimator):
                     
                 metrics["siteCount"] = len(top_level_sites)
                 all_sites = [{"siteId": site_id, "siteLevel": 0} for site_id in top_level_sites]
-                self._get_subsites_in_site(top_level_sites, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, 1)
+                self._get_subsites_in_site(top_level_sites, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, metrics, 1)
                 
                 if not has_emails and not has_urls:
                     metrics["personalSiteCount"] = site_discovery_progress_metrics.get("personalSiteCount", 0)
@@ -474,6 +476,7 @@ class FileEstimator(Estimator):
         subsite_to_top_level_site: Dict[str, str],
         site_discovery_progress_metrics: Dict[str, Any],
         failures: List[Dict[str, str]],
+        tenant_metrics: Dict[str, Any],
         level: int = 1
     ):
         try:
@@ -580,8 +583,13 @@ class FileEstimator(Estimator):
                         }
                         self.id_to_display[site["id"]] = site.get("webUrl", site["id"])
 
+                        if site.get("isPersonalSite", False):
+                            tenant_metrics["personalSiteCount"] += 1
+                        else:
+                            tenant_metrics["teamSiteCount"] += 1
+
             if new_sub_site_ids:
-                self._get_subsites_in_site(new_sub_site_ids, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, level + 1)
+                self._get_subsites_in_site(new_sub_site_ids, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, tenant_metrics, level + 1)
 
         except Exception as e:
             self._log_and_fail("Error in _get_subsites_in_site", e, failures)
