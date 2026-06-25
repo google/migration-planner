@@ -588,9 +588,9 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "PstFilesFrame": "PST Files",
             "SharePointUsageFrame": "SharePoint Online Sites & Files Summary",
             "OneDriveUsageFrame": "OneDrive for Business Personal Accounts Summary",
-            "FilteringPoliciesSubFrame": "1. Filtering Policies",
-            "ConditionalAccessSubFrame": "2. Conditional Access Policies",
-            "FirewallSubFrame": "3. Firewall and Proxy Configurations",
+            "FilteringPoliciesSubFrame": "Filtering Policies",
+            "ConditionalAccessSubFrame": "Conditional Access Policies",
+            "FirewallSubFrame": "Firewall and Proxy Configurations",
             "DevicesAppsTelemetryFrame": "Devices & Apps Summary (Sign-in Telemetry)",
             "AppRegistrationsSubFrame": "App Registrations",
             "SensitivityLabelsSubFrame": "Sensitivity Labels",
@@ -601,8 +601,9 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "ServicePrincipalsSsoSubFrame": "Service Principals Single Sign-On (SSO) Modes",
             "EDiscoveryFrame": "Microsoft Purview eDiscovery Cases",
             "MobileAppsSubFrame": "Managed Mobile Apps",
-            "DetectedAppsSubFrame": "2. Detected Apps",
-            "DeviceConfigsSubFrame": "3. Device Configurations",
+            "DetectedAppsSubFrame": "Detected Apps",
+            "ManagedDevicesSubFrame": "Managed Devices",
+            "DeviceConfigsSubFrame": "Device Configurations",
             "PowerAutomateUsageFrame": "Power Automate (Workflows & Flows)"
         }
         
@@ -968,6 +969,35 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             except Exception:
                 return []
 
+        from collections import defaultdict
+        intune_data = getattr(self.intune_policies_view, "last_data", {})
+        if not isinstance(intune_data, dict):
+            intune_data = {}
+        else:
+            # Create a copy so we don't accidentally mutate state properties in-place
+            intune_data = dict(intune_data)
+
+        if not intune_data.get("mobile_apps"):
+            intune_data["mobile_apps"] = [r.get("displayName") for r in load_csv("intune_apps.csv") if r.get("displayName")]
+        if not intune_data.get("detected_apps"):
+            intune_data["detected_apps"] = load_csv("intune_detected_apps.csv")
+        if not intune_data.get("managed_devices"):
+            intune_data["managed_devices"] = load_csv("intune_managed_devices.csv")
+        if not intune_data.get("table_rows"):
+            configs = load_csv("intune_device_configs.csv")
+            policies = load_csv("intune_config_policies.csv")
+            counts = defaultdict(int)
+            for r in configs:
+                plat, p_type = r.get("platform"), r.get("policyType")
+                if plat and p_type: counts[(plat, p_type)] += 1
+            for r in policies:
+                plat, p_type = r.get("platform"), r.get("policyType")
+                if plat and p_type: counts[(plat, p_type)] += 1
+            rows = []
+            for (platform, p_type), count in sorted(counts.items()):
+                rows.append((platform, p_type, str(count)))
+            intune_data["table_rows"] = rows
+
         return {
             "tenant_id": tenant,
             "skus": getattr(self.subscribed_skus_view, "last_licenses_items", []),
@@ -994,7 +1024,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "sharepoint": getattr(self.files_view.sharepoint_view, "last_data", {}),
             "onedrive": getattr(self.files_view.onedrive_view, "last_data", {}),
             "devices_apps": getattr(self.devices_apps_view, "last_data", {}),
-            "intune": getattr(self.intune_policies_view, "last_data", {}),
+            "intune": intune_data,
             "network_security": {
                 "filtering_policies": load_csv("network_filtering_policies.csv"),
                 "conditional_access": load_csv("network_conditional_access.csv"),

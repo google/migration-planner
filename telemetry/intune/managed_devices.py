@@ -12,23 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""UI component for Detected Apps telemetry."""
+"""UI component for Managed Devices telemetry."""
 
 import os
-import time
+import csv
 import logging
 import threading
 import pandas as pd
 import customtkinter as ctk
+import sqlite3
+import asyncio
 from tkinter import filedialog, messagebox
 
-from core.graph.intune.detected_apps import run_detected_apps_pipeline
+from core.graph.db import import_csv_to_sqlite
+from core.graph.intune.managed_devices import run_managed_devices_pipeline
 from telemetry.styles import *
 
-usage_logger = logging.getLogger("M365TelemetryAsyncLogger.DetectedAppsUI")
+usage_logger = logging.getLogger("M365TelemetryAsyncLogger.ManagedDevicesUI")
 
-class DetectedAppsSubFrame(ctk.CTkFrame):
-    """Sub-frame for Detected Apps."""
+class ManagedDevicesSubFrame(ctk.CTkFrame):
+    """Sub-frame for Managed Devices."""
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, semaphore=None, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
@@ -48,7 +51,7 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.header_frame.pack(fill="x", pady=(0, 5))
         
-        ctk.CTkLabel(self.header_frame, text="Detected Apps", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        ctk.CTkLabel(self.header_frame, text="Managed Devices", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(side="left")
         
         self.btn_reload = ctk.CTkButton(
             self.header_frame, text="↻ Reload", width=80, height=24,
@@ -60,7 +63,7 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
         self.btn_reload.pack(side="right", padx=(10, 0))
         
         self.btn_export = ctk.CTkButton(
-            self.header_frame, text="Export Detected Apps", width=180, height=32, corner_radius=16,
+            self.header_frame, text="Export Managed Devices", width=180, height=32, corner_radius=16,
             font=FONT_BODY_BOLD, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE,
             text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER,
             command=self._export
@@ -69,16 +72,19 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
 
         self.state_frame = ctk.CTkFrame(self, fg_color="transparent")
         
+        self.summary_lbl = ctk.CTkLabel(self, text="Total Extracted: 0 Managed Devices", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB)
+        
         self.grid_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
-        headers = ["App Name", "Version", "Publisher", "Platform"]
-        for i in range(4):
-            self.grid_frame.grid_columnconfigure(i, weight=2 if i == 0 else 1)
-            
+        headers = ["User ID", "Device Name", "Operating System", "Management Agent", "Registration State", "Model", "Manufacturer"]
         for col_idx, head_text in enumerate(headers):
+            self.grid_frame.grid_columnconfigure(col_idx, weight=1 if col_idx != 0 else 2) # userId gets slightly more weight
             cell = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=1, pady=1)
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        # Pagination controls frame (stays fixed/centered)
+        self.pagination_frame = ctk.CTkFrame(self, fg_color="transparent")
 
         self.reset_view()
 
@@ -88,11 +94,14 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
         self.csv_path = None
         self.page = 0
         self.state_frame.pack_forget()
+        self.summary_lbl.pack_forget()
         self.grid_frame.pack_forget()
+        self.pagination_frame.pack_forget()
         for w in self.state_frame.winfo_children(): w.destroy()
         for w in self.grid_frame.winfo_children():
             info = w.grid_info()
             if "row" in info and int(info["row"]) > 0: w.destroy()
+        for w in self.pagination_frame.winfo_children(): w.destroy()
 
     def _set_loading_state(self, msg):
         for w in self.state_frame.winfo_children(): w.destroy()
@@ -114,14 +123,15 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
         self.btn_reload.configure(state="disabled")
         self.btn_export.configure(state="disabled")
         self.grid_frame.pack_forget()
+        self.pagination_frame.pack_forget()
         
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         if os.path.basename(script_dir) == "intune":
             script_dir = os.path.dirname(script_dir)
         reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{client_id}")
-        self.csv_path = os.path.join(reports_dir, "intune_detected_apps.csv")
+        self.csv_path = os.path.join(reports_dir, "intune_managed_devices.csv")
 
-        self._set_loading_state("Scanning Detected Apps (v1.0)...")
+        self._set_loading_state("Scanning Managed Devices...")
         self.on_status_change()
             
         threading.Thread(target=self._execute_worker, args=(tenant, client_id, client_secret), daemon=True).start()
@@ -129,18 +139,24 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
     def _execute_worker(self, tenant, client_id, client_secret):
         if self.semaphore: self.semaphore.acquire()
         try:
-            run_detected_apps_pipeline(
+            run_managed_devices_pipeline(
                 client_id=client_id,
                 client_secret=client_secret,
                 tenant_id=tenant,
                 csv_path=self.csv_path,
-                max_rows=10000,
                 is_cancelled_callback=lambda: self.is_cancelled
             )
-            self.status = "success"
-            self.after(0, self._render_success)
+            
+            if not self.is_cancelled:
+                reports_dir = os.path.dirname(self.csv_path)
+                db_path = os.path.join(reports_dir, "telemetry_cache.db")
+                if os.path.exists(self.csv_path):
+                    asyncio.run(import_csv_to_sqlite(self.csv_path, db_path, "managed_devices"))
+                    
+                self.status = "success"
+                self.after(0, self._render_success)
         except Exception as e:
-            usage_logger.error(f"Detected apps fetch error: {e}", exc_info=True)
+            usage_logger.error(f"Managed devices fetch error: {e}", exc_info=True)
             self.status = "error"
             self.after(0, self._render_error, str(e))
         finally:
@@ -151,13 +167,17 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
         self.btn_reload.configure(state="normal")
         self.btn_export.configure(state="normal")
         self.state_frame.pack_forget()
+        self.summary_lbl.pack(anchor="w", padx=10, pady=5)
         self.grid_frame.pack(fill="x")
+        self.pagination_frame.pack(fill="x", pady=(5, 10))
         
         self._update_grid()
 
     def _render_error(self, err):
         self.btn_reload.configure(state="normal")
         self.grid_frame.pack_forget()
+        self.pagination_frame.pack_forget()
+        self.summary_lbl.pack_forget()
         for w in self.state_frame.winfo_children(): w.destroy()
         self.state_frame.pack(fill="x", expand=True)
         ctk.CTkLabel(self.state_frame, text=f"✖ {err}", text_color=COLOR_ERROR, font=FONT_BODY_MEDIUM, justify="center", wraplength=700).pack(pady=(15, 5))
@@ -165,14 +185,27 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
 
     def _load_page(self):
         if not self.csv_path or not os.path.exists(self.csv_path): return [], 0
+        
+        reports_dir = os.path.dirname(self.csv_path)
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
+        if not os.path.exists(db_path): return [], 0
+        
         try:
-            df = pd.read_csv(self.csv_path).fillna("N/A")
-            total = len(df)
-            start = self.page * self.ITEMS_PER_PAGE
-            end = start + self.ITEMS_PER_PAGE
-            return df.iloc[start:end].to_dict('records'), total
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT COUNT(*) FROM managed_devices")
+            total = cursor.fetchone()[0]
+            
+            offset = self.page * self.ITEMS_PER_PAGE
+            cursor.execute("SELECT * FROM managed_devices LIMIT ? OFFSET ?", (self.ITEMS_PER_PAGE, offset))
+            rows = cursor.fetchall()
+            
+            conn.close()
+            return rows, total
         except Exception as e:
-            usage_logger.error(f"Error reading CSV {self.csv_path}: {e}")
+            usage_logger.error(f"Error reading SQLite managed_devices: {e}")
             return [], 0
 
     def _update_grid(self):
@@ -183,26 +216,31 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
         page_data, total_count = self._load_page()
         total_pages = (total_count - 1) // self.ITEMS_PER_PAGE + 1 if total_count > 0 else 1
 
+        self.summary_lbl.configure(text=f"Total Extracted: {total_count} Managed Devices")
+
         for row_idx, item in enumerate(page_data, start=1):
             bg_style = COLOR_SURFACE if row_idx % 2 == 0 else COLOR_SURFACE_VARIANT
+            # Field keys from DB (case-insensitive because db.py intercepts dictionary queries)
             vals = [
-                item.get("displayName", "N/A"),
-                item.get("version", "N/A"),
-                item.get("publisher", "N/A"),
-                item.get("platform", "unknown")
+                item.get("userId") or "N/A",
+                item.get("deviceName") or "N/A",
+                item.get("operatingSystem") or "N/A",
+                item.get("managementAgent") or "unknown",
+                item.get("deviceRegistrationState") or "unknown",
+                item.get("model") or "N/A",
+                item.get("manufacturer") or "N/A"
             ]
             for col_idx, val in enumerate(vals):
                 cell = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
                 cell.grid(row=row_idx, column=col_idx, sticky="nsew", padx=1, pady=1)
-                lbl = ctk.CTkLabel(cell, text=str(val), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, wraplength=200, justify="left", anchor="w")
+                lbl = ctk.CTkLabel(cell, text=str(val), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, wraplength=250, justify="left", anchor="w")
                 lbl.pack(padx=10, pady=8, fill="x")
 
-        # Pagination controls row
-        control_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
-        control_frame.grid(row=self.ITEMS_PER_PAGE + 1, column=0, columnspan=4, pady=0, sticky="ew")
-
-        center_container = ctk.CTkFrame(control_frame, fg_color="transparent")
-        center_container.pack(pady=(5, 10))
+        # Re-build pagination controls
+        for w in self.pagination_frame.winfo_children(): w.destroy()
+        
+        center_container = ctk.CTkFrame(self.pagination_frame, fg_color="transparent")
+        center_container.pack(pady=5)
 
         prev_state = "normal" if self.page > 0 else "disabled"
         ctk.CTkButton(
@@ -234,8 +272,8 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
         dest_path = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            title="Export Detected Apps CSV",
-            initialfile="M365_Intune_Detected_Apps.csv",
+            title="Export Managed Devices CSV",
+            initialfile="M365_Intune_Managed_Devices.csv",
             parent=self
         )
         if not dest_path: return
@@ -243,7 +281,7 @@ class DetectedAppsSubFrame(ctk.CTkFrame):
         try:
             df = pd.read_csv(self.csv_path)
             df.fillna("N/A").to_csv(dest_path, index=False, encoding="utf-8-sig")
-            messagebox.showinfo("Export Successful", f"Detected Apps successfully exported to:\n{dest_path}")
+            messagebox.showinfo("Export Successful", f"Managed Devices successfully exported to:\n{dest_path}")
         except Exception as e:
             messagebox.showerror("Export Failed", f"Failed to save CSV file: {e}")
 

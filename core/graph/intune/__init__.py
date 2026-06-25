@@ -25,6 +25,7 @@ from core.graph.client import GraphClient
 from core.graph.intune.mobile_apps import run_mobile_apps_pipeline
 from core.graph.intune.detected_apps import run_detected_apps_pipeline
 from core.graph.intune.device_configs import run_device_configs_pipeline
+from core.graph.intune.managed_devices import run_managed_devices_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +49,13 @@ def run_intune_policies_pipeline(
     csv_path_config_policies = os.path.join(reports_dir, "intune_config_policies.csv")
     csv_path_apps = os.path.join(reports_dir, "intune_apps.csv")
     csv_path_detected_apps = os.path.join(reports_dir, "intune_detected_apps.csv")
+    csv_path_managed_devices = os.path.join(reports_dir, "intune_managed_devices.csv")
     
     temp_path_device_configs = csv_path_device_configs + ".tmp"
     temp_path_config_policies = csv_path_config_policies + ".tmp"
     temp_path_apps = csv_path_apps + ".tmp"
     temp_path_detected_apps = csv_path_detected_apps + ".tmp"
+    temp_path_managed_devices = csv_path_managed_devices + ".tmp"
 
     for path in [temp_path_device_configs, temp_path_config_policies]:
         with open(path, 'w', encoding='utf-8', newline='') as f:
@@ -117,30 +120,46 @@ def run_intune_policies_pipeline(
             )
         except Exception as e:
             errors.append(e)
+
+    def fetch_managed_devices():
+        try:
+            run_managed_devices_pipeline(
+                client_id=client_id,
+                client_secret=client_secret,
+                tenant_id=tenant_id,
+                csv_path=temp_path_managed_devices,
+                is_cancelled_callback=is_cancelled_callback
+            )
+        except Exception as e:
+            errors.append(e)
             
     t1 = threading.Thread(target=fetch_device_configs, daemon=True)
     t2 = threading.Thread(target=fetch_config_policies, daemon=True)
     t3 = threading.Thread(target=fetch_mobile_apps, daemon=True)
     t4 = threading.Thread(target=fetch_detected_apps, daemon=True)
+    t5 = threading.Thread(target=fetch_managed_devices, daemon=True)
     
     t1.start()
     t2.start()
     t3.start()
     t4.start()
+    t5.start()
     
     t1.join()
     t2.join()
     t3.join()
     t4.join()
+    t5.join()
     
-    if len(errors) == 4:
+    if len(errors) == 5:
         raise errors[0]
 
     for temp, final in [
         (temp_path_device_configs, csv_path_device_configs),
         (temp_path_config_policies, csv_path_config_policies),
         (temp_path_apps, csv_path_apps),
-        (temp_path_detected_apps, csv_path_detected_apps)
+        (temp_path_detected_apps, csv_path_detected_apps),
+        (temp_path_managed_devices, csv_path_managed_devices)
     ]:
         if os.path.exists(temp):
             if os.path.exists(final):
@@ -194,12 +213,19 @@ def run_intune_policies_pipeline(
         df_slice = df_detected.head(200).fillna("N/A")
         detected_rows_for_ui = df_slice.to_dict('records')
         
+    managed_devices_rows_for_ui = []
+    if os.path.exists(csv_path_managed_devices):
+        df_managed = pd.read_csv(csv_path_managed_devices)
+        df_slice = df_managed.head(200).fillna("N/A")
+        managed_devices_rows_for_ui = df_slice.to_dict('records')
+
     return {
         "total_device_configs": total_dc,
         "total_config_policies": total_cp,
         "table_rows": rows,
         "mobile_apps": sorted(list(unique_apps)),
-        "detected_apps": detected_rows_for_ui
+        "detected_apps": detected_rows_for_ui,
+        "managed_devices": managed_devices_rows_for_ui
     }
 
 
@@ -233,6 +259,16 @@ class IntuneService:
 
     def fetch_detected_apps(self, csv_path: str = None, max_rows: int = 10000, is_cancelled_callback=None) -> list:
         return run_detected_apps_pipeline(
+            client_id=self.client.client_ids[0] if isinstance(self.client.client_ids, list) else self.client.client_ids,
+            client_secret=self.client.client_secrets[0] if isinstance(self.client.client_secrets, list) else self.client.client_secrets,
+            tenant_id=self.client.tenant_id,
+            csv_path=csv_path,
+            max_rows=max_rows,
+            is_cancelled_callback=is_cancelled_callback
+        )
+
+    def fetch_managed_devices(self, csv_path: str = None, max_rows: int = 10000, is_cancelled_callback=None) -> list:
+        return run_managed_devices_pipeline(
             client_id=self.client.client_ids[0] if isinstance(self.client.client_ids, list) else self.client.client_ids,
             client_secret=self.client.client_secrets[0] if isinstance(self.client.client_secrets, list) else self.client.client_secrets,
             tenant_id=self.client.tenant_id,

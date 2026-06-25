@@ -48,7 +48,7 @@ class FilteringPoliciesSubFrame(ctk.CTkFrame):
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.header_frame.pack(fill="x", pady=(0, 10))
         
-        ctk.CTkLabel(self.header_frame, text="1. Filtering Policies", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        ctk.CTkLabel(self.header_frame, text="Filtering Policies", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         
         self.btn_reload = ctk.CTkButton(
             self.header_frame, text="↻ Reload", width=80, height=24,

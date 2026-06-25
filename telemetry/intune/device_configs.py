@@ -54,7 +54,7 @@ class DeviceConfigsSubFrame(ctk.CTkFrame):
         self.header_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.header_frame.pack(fill="x", pady=(0, 5))
         
-        ctk.CTkLabel(self.header_frame, text="3. Device Configurations", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        ctk.CTkLabel(self.header_frame, text="Device Configurations", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(side="left")
         
         self.btn_reload = ctk.CTkButton(
             self.header_frame, text="↻ Reload", width=80, height=24,

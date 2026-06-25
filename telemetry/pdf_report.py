@@ -1263,6 +1263,48 @@ def generate_pdf_report(data: dict, filepath: str):
     story.append(Paragraph(apps_text, body_style))
     story.append(Spacer(1, 10))
     
+    # Render Managed Devices Table (Top 10)
+    story.append(Paragraph("<b>Managed Devices (Top 10)</b>", body_style))
+    story.append(Spacer(1, 6))
+    
+    managed_devices = intune_data.get("managed_devices", [])
+    if not managed_devices:
+        story.append(Paragraph("No managed devices were discovered or permission restricted.", ParagraphStyle('ErrTxtMngDev', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        dev_table_data = [[
+            Paragraph("User ID", table_cell_header),
+            Paragraph("Device Name", table_cell_header),
+            Paragraph("OS", table_cell_header),
+            Paragraph("Agent", table_cell_header),
+            Paragraph("State", table_cell_header),
+            Paragraph("Model", table_cell_header),
+            Paragraph("Manufacturer", table_cell_header)
+        ]]
+        
+        for dev in managed_devices[:10]:
+            dev_table_data.append([
+                Paragraph(dev.get("userId", "N/A"), table_cell_bold),
+                Paragraph(dev.get("deviceName", "N/A"), table_cell_style),
+                Paragraph(dev.get("operatingSystem", "N/A"), table_cell_style),
+                Paragraph(dev.get("managementAgent", "unknown"), table_cell_style),
+                Paragraph(dev.get("deviceRegistrationState", "unknown"), table_cell_style),
+                Paragraph(dev.get("model", "N/A"), table_cell_style),
+                Paragraph(dev.get("manufacturer", "N/A"), table_cell_style)
+            ])
+            
+        dev_table = Table(dev_table_data, colWidths=[90, 80, 60, 70, 70, 64, 70])
+        dev_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(dev_table)
+        story.append(Spacer(1, 10))
+
     # Render Device Configurations Table
     story.append(Paragraph("<b>Device Configurations</b>", body_style))
     story.append(Spacer(1, 6))
