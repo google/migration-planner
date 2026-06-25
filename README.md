@@ -201,7 +201,7 @@ In your new app, go to **API permissions > Add a permission > Microsoft Graph**,
 The Usage and Adoption tab performs extensive tenant auditing. While the following permissions are recommended for a complete report, you may choose to grant only a subset. 
 **NOTE: Be aware that any missing permissions will simply cause the tool to gracefully skip those specific telemetry sections.**
 
-Graph Application permissions:
+**Graph Application permissions:**
 *   `Reports.Read.All`: Used to retrieve active user trends, mailbox/SharePoint usage reports, M365 Apps, and Email Client usage.
 *   `Directory.Read.All`: Used to read tenant organization configuration data, Domain, User, and Group summaries.
 *   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
@@ -217,11 +217,11 @@ Graph Application permissions:
 *   `SensitivityLabels.Read.All`: to read all sensitivity labels
 *   `Application.Read.All`: Required to retrieve App Registrations directory details and Service Principal SSO configurations.
 
-Graph Delegated permissions:
+**Graph Delegated permissions:**
 * `eDiscovery.Read.All`: Required to retrieve active/closed Microsoft Purview eDiscovery cases on behalf of the user.
 * `offline_access`: required to maintain access to data you have given the app access to
 
-Office 365 Exchange Online Permissions:
+**Office 365 Exchange Online Permissions:**
 *  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 *  `Exchange.ManageAsAppV2`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 
