@@ -216,6 +216,7 @@ Graph Application permissions:
 *   `AuditLog.Read.All`: to read audit log data
 *   `SensitivityLabels.Read.All`: to read all sensitivity labels
 *   `Application.Read.All`: Required to retrieve App Registrations directory details and Service Principal SSO configurations.
+
 Graph Delegated permissions:
 * `eDiscovery.Read.All`: Required to retrieve active/closed Microsoft Purview eDiscovery cases on behalf of the user.
 * `offline_access`: required to maintain access to data you have given the app access to
