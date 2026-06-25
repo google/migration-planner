@@ -211,7 +211,7 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 *   `Organization.Read.All`: Required to resolve tenant domains and Subscribed SKUs.
 *   `Place.Read.All`: Used to list meeting rooms and resource device counts.
 *   `Calendars.ReadBasic.All`: Used to audit organizational calendar permissions.
-*   `Sites.Read.All`: to search for pst files across onedrive and sharepoint
+*   `Sites.Read.All`: Used to search for pst files across OneDrive and SharePoint, and to query aggregate counts of Document Libraries, Web Pages, and Lists via the Search Query API.
 *   `AuditLog.Read.All`: to read audit log data
 *   `SensitivityLabels.Read.All`: to read all sensitivity labels
 *   `Application.Read.All`: Required to retrieve App Registrations directory details and Service Principal SSO configurations.
@@ -385,8 +385,8 @@ The Usage and Adoption tab scans the following 10 functional modules of a Micros
     </tr>
     <tr>
       <td><b>5. Files (SharePoint & OneDrive)</b></td>
-      <td>• <b>SharePoint Site Usage</b>: Total sites, total storage consumed, file count, and active file metrics.<br>• <b>OneDrive Usage</b>: Personal OneDrive storage sizes, active accounts, and file sync activity.</td>
-      <td>Graph Reports API:<br>• SharePoint Site: <code>GET /reports/getSharePointSiteUsageDetail(period='D180')</code><br>• OneDrive: <code>GET /reports/getOneDriveUsageAccountDetail</code> and <code>getOneDriveActivityUserDetail</code></td>
+      <td>• <b>SharePoint Site Usage</b>: Total sites, total storage consumed, file count, and active file metrics.<br>• <b>SharePoint Data Types</b>: Aggregate hit counts for Document Libraries, Lists, and Web Pages across the entire tenant.<br>• <b>OneDrive Usage</b>: Personal OneDrive storage sizes, active accounts, and file sync activity.</td>
+      <td>Graph API:<br>• SharePoint Site Usage: <code>GET /reports/getSharePointSiteUsageDetail(period='D180')</code><br>• SharePoint Data Types: <code>POST /search/query</code> (for contentclass STS_List, STS_List_DocumentLibrary, STS_ListItem_WebPageLibrary)<br>• OneDrive: <code>GET /reports/getOneDriveUsageAccountDetail</code> and <code>getOneDriveActivityUserDetail</code></td>
     </tr>
     <tr>
       <td><b>6. Entra ID Auth & Sign-ins</b></td>

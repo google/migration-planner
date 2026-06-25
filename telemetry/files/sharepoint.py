@@ -19,6 +19,8 @@ import threading
 import customtkinter as ctk
 
 from core.graph.files.sharepoint import run_sharepoint_pipeline
+from core.graph.files.sharepoint_data_types import run_sharepoint_data_types_pipeline
+import concurrent.futures
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.SharePointUsageUI")
@@ -46,7 +48,7 @@ class SharePointUsageFrame(ctk.CTkFrame):
         
         self.header = ctk.CTkFrame(self.inner_pad, fg_color="transparent")
         self.header.pack(fill="x", pady=(0, 10))
-        ctk.CTkLabel(self.header, text="SharePoint Site Usage (180 Days)", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        ctk.CTkLabel(self.header, text="SharePoint Overview", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
         self.reload_btn = ctk.CTkButton(
             self.header, 
             state="disabled", text="↻ Reload", 
@@ -116,7 +118,7 @@ class SharePointUsageFrame(ctk.CTkFrame):
         self.pack(fill="x", expand=True, pady=(20, 5))
         self.grid_frame.pack_forget()
         
-        self._set_state_loading("Downloading and parsing SharePoint Site Usage reports...")
+        self._set_state_loading("Downloading and parsing SharePoint Site Usage and Data Types...")
         
         threading.Thread(
             target=self._execute_worker,
@@ -128,9 +130,16 @@ class SharePointUsageFrame(ctk.CTkFrame):
         if self.semaphore:
             self.semaphore.acquire()
         try:
-            data = run_sharepoint_pipeline(client_id, client_secret, tenant)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                usage_future = executor.submit(run_sharepoint_pipeline, client_id, client_secret, tenant)
+                datatypes_future = executor.submit(run_sharepoint_data_types_pipeline, client_id, client_secret, tenant)
+                
+                usage_data = usage_future.result()
+                datatypes_data = datatypes_future.result()
+            
+            combined_data = {**usage_data, **datatypes_data}
             usage_logger.info("Successfully completed SharePoint telemetry data fetch.")
-            self.after(0, self._render_success, data)
+            self.after(0, self._render_success, combined_data)
         except Exception as e:
             usage_logger.error("Exception caught in SharePoint worker.", exc_info=True)
             self.after(0, self._render_error, str(e))
@@ -162,7 +171,10 @@ class SharePointUsageFrame(ctk.CTkFrame):
             ("Total Sites Count", f"{data.get('total_sites', 0):,} Sites"),
             ("Total Storage Used", data.get("total_storage_formatted", "0.00 Bytes")),
             ("Total Files Stored", f"{data.get('total_files', 0):,} Files"),
-            ("Active Files Count", f"{data.get('active_files', 0):,} Files ({data.get('active_files_pct', 0.0):.1f}%)")
+            ("Active Files Count (180 days)", f"{data.get('active_files', 0):,} Files ({data.get('active_files_pct', 0.0):.1f}%)"),
+            ("Document Libraries", f"{data.get('Document Libraries', 0):,}"),
+            ("Lists", f"{data.get('Lists', 0):,}"),
+            ("Web Pages", f"{data.get('Web Pages', 0):,}")
         ]
 
         for r_idx, (metric_name, val) in enumerate(rows_data, start=1):
