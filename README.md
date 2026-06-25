@@ -187,8 +187,7 @@ To scan your tenant, you need to register an app in the Microsoft Entra ID (form
 3.  Name the app (e.g., "Deal Assistant Tool").
 4.  Select **"Accounts in this organizational directory only"** (Single Tenant).
 5.  Click **Register**.
-6.  **(Required for Delegated Auth & eDiscovery)**: Go to **Authentication**. Under **Redirect URI configuration**, click **Add Redirect URI** -> **Mobile and desktop applications**. Add `http://localhost` as the redirect URI.
-7.  **(Required for Delegated Auth & eDiscovery)**: Move to **Settings** and set **Allow public client flows** to **Yes**. Click **Save**.
+6.  **(Required for Delegated Auth & eDiscovery)**: Go to **Authentication**. Under **Redirect URI configuration**, click **Add Redirect URI** -> **Web**. Add `http://localhost` as the redirect URI.
 
 ### 2. API Permissions
 In your new app, go to **API permissions > Add a permission**, and assign permissions based on the workloads you plan to scan. *Don't forget to click **"Grant admin consent"** after adding these permissions.*
@@ -216,6 +215,8 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 **2.1.2. Microsoft Graph API Delegated permissions:**
 * `eDiscovery.Read.All`: Required to retrieve active/closed Microsoft Purview eDiscovery cases on behalf of the user.
 * `offline_access`: required to maintain access to data you have given the app access to
+
+> **Note** : The user who logs in must be an eDiscovery administrator.
 
 **2.1.3. Office 365 Exchange Online Application Permissions (under `APIs my organization uses`):**
 *  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
@@ -270,11 +271,11 @@ To enable this scan, the App Registration must have the following configuration:
 
 2. **Dataverse Environment Permissions (Desktop Flows)**:
    The App Registration must be added as an application user and assigned the **System Administrator** role in every Dataverse environment where you want to scan desktop flows:
-   * Go to the **Power Platform Admin Center** > **Environments** > [Select Environment] > **Settings** > **Users + permissions** > **Application users**.
+   * Go to the [**Power Platform Admin Center**](https://admin.powerplatform.microsoft.com/manage/environments) > **Environments** > [Select Environment] > **Settings** > **Users + permissions** > **Application users**.
    * Click **+ New app user**, select your App Registration, choose the default business unit, and assign the **System Administrator** security role.
 
 ### 4. Data Governance and Security Permissions (Optional)
-To allow the App Registration's Service Principal to read Compliance, Retention data, and Exchange settings via PowerShell, it must be assigned the following directory roles in the [Entra portal](https://entra.microsoft.com/). These roles are optional; however, if they are not assigned, those respective security reports will fail to load and will be skipped.
+To allow the App Registration's Service Principal to read Compliance, Retention data, and Exchange settings via PowerShell, it must be assigned the following directory roles in the **[Entra portal](https://entra.microsoft.com/)** > **Roles & admins** > [Select Role and Click] > **Active Assignments** > **Add assignments**. These roles are optional; however, if they are not assigned, those respective security reports will fail to load and will be skipped.
 
 *   **Compliance Administrator**
 *   **Compliance Data Administrator**
@@ -296,7 +297,7 @@ You will need three values for the tool:
 
 ### 1. Delegated Authentication Flow
 Certain features like **eDiscovery** require **Delegated Authentication** by a **Super Admin**. On the login screen, you can check the box to enable Delegated Authentication. 
-> **⚠️ IMPORTANT WARNING**: If you enable this, your Entra App Registration MUST have "Allow public client flows" enabled and `http://localhost` registered as a redirect URI. Otherwise, the interactive browser login popup will fail!
+> **⚠️ IMPORTANT WARNING**: If you enable this, your Entra App Registration MUST have `http://localhost` registered as a redirect URI. Otherwise, the interactive browser login popup will fail!
 
 ### 2. PowerShell & Certificate-Based Authentication
 The Deal Assistant uses **Microsoft Exchange Online PowerShell** to fetch Data Security & Governance metrics (like Sensitivity Labels, Retention Policies, Shared/Public mailbox statistics, detailed Calendar settings, and Connectors). Ensure you have installed PowerShell Core (`pwsh`) as detailed in the Prerequisites section.
