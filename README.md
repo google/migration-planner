@@ -175,6 +175,10 @@ Please follow the [official Microsoft guide](https://learn.microsoft.com/en-us/p
 *   **macOS**: Refer to the official [macOS support for the module](https://learn.microsoft.com/en-us/powershell/exchange/exchange-online-powershell-v2?view=exchange-ps#macos-support-for-the-module).
 *   **Linux**: Refer to the official [Linux support for the module](https://learn.microsoft.com/en-us/powershell/exchange/exchange-online-powershell-v2?view=exchange-ps#linux-support-for-the-module).
 
+#### Common Errors and Troubleshooting Steps with Powershell
+*   **{script} cannot be loaded because running scripts is disabled on this system**: This error arises if the current execution policy is set to `Restricted`. This can be checked by running the command `Get-ExecutionPolicy`. Before running deal assistant, this must be changed to `RemoteSigned` or a more lenient permission level. To change the permission level of the local machine on which deal assistant is running, run the command `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`. Verify that the permission level has changed by again running `Get-ExecutionPolicy`.
+*   **{script} is not digitally signed. You cannot run this script on the current system.**: For each script present in **core/powershell/scripts**, right click on it and go to Properties > General and check the **Unblock** checkbox. Click on Apply/Ok.
+
 ---
 
 ## Setting up Microsoft Azure
