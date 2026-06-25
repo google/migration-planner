@@ -191,17 +191,13 @@ To scan your tenant, you need to register an app in the Microsoft Entra ID (form
 7.  **(Required for Delegated Auth & eDiscovery)**: Move to **Settings** and set **Allow public client flows** to **Yes**. Click **Save**.
 
 ### 2. API Permissions
-In your new app, go to **API permissions > Add a permission**, and assign Application permissions based on the workloads you plan to scan. *Don't forget to click **"Grant admin consent"** after adding these permissions.*
+In your new app, go to **API permissions > Add a permission**, and assign permissions based on the workloads you plan to scan. *Don't forget to click **"Grant admin consent"** after adding these permissions.*
 
-#### Shared Core Permissions (Microsoft Graph)
-*   `User.Read.All` (To list users)
-*   `Group.Read.All` (To get M365 group and team structures)
-
-#### Deal Assistant Telemetry Permissions (Usage and Adoption)
+#### 2.1. Deal Assistant Telemetry Permissions (Usage and Adoption)
 The Usage and Adoption tab performs extensive tenant auditing. While the following permissions are recommended for a complete report, you may choose to grant only a subset. 
 **NOTE: Be aware that any missing permissions will simply cause the tool to gracefully skip those specific telemetry sections.**
 
-**Microsoft Graph API Application permissions:**
+**2.1.1. Microsoft Graph API Application permissions:**
 *   `Reports.Read.All`: Used to retrieve active user trends, mailbox/SharePoint usage reports, M365 Apps, and Email Client usage.
 *   `Directory.Read.All`: Used to read tenant organization configuration data, Domain, User, and Group summaries.
 *   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
@@ -217,26 +213,28 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 *   `SensitivityLabels.Read.All`: to read all sensitivity labels
 *   `Application.Read.All`: Required to retrieve App Registrations directory details and Service Principal SSO configurations.
 
-**Microsoft Graph API Delegated permissions:**
+**2.1.2. Microsoft Graph API Delegated permissions:**
 * `eDiscovery.Read.All`: Required to retrieve active/closed Microsoft Purview eDiscovery cases on behalf of the user.
 * `offline_access`: required to maintain access to data you have given the app access to
 
-**Office 365 Exchange Online Application Permissions (under `APIs my organization uses`):**
+**2.1.3. Office 365 Exchange Online Application Permissions (under `APIs my organization uses`):**
 *  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 *  `Exchange.ManageAsAppV2`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 
-#### Exchange Planner Specific Permissions
+#### 2.2. Migration Planner Permissions (Microsoft Graph Application Permissions)
 
-**Microsoft Graph Application permissions:**
+**2.2.1. Shared Core Permissions**
+*   `User.Read.All` (To list users)
+*   `Group.Read.All` (To get M365 group and team structures)
+
+**2.2.2. Exchange Planner Specific Permissions**
 *   `Mail.Read`
 *   `Contacts.Read`
 *   `Calendars.Read`
 *   `MailboxFolder.Read.All`
 *   `MailboxSettings.Read`
 
-#### Chat & Teams Planner Specific Permissions
-
-**Microsoft Graph Application permissions:**
+**2.2.3. Chat & Teams Planner Specific Permissions**
 *   `Reports.Read.All`
 *   `Chat.Read.All`
 *   `ChannelMessage.Read.All`
@@ -245,9 +243,7 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 *   `TeamMember.Read.All`
 *   `Group.Read.All`
 
-#### Files Planner Specific Permissions
-
-**Microsoft Graph Application permissions:**
+**2.2.4. Files Planner Specific Permissions**
 *   `Sites.Read.All`
 *   `Files.Read.All`
 *   `LicenseAssignment.Read.All`
