@@ -4,8 +4,6 @@ requests
 reportlab
 matplotlib
 psutil
-google-genai
-scikit-learn
 aiohttp
 sortedcontainers
 msal
