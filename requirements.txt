@@ -8,3 +8,6 @@ aiohttp
 sortedcontainers
 msal
 aiosqlite
+Pillow
+urllib3
+certifi
