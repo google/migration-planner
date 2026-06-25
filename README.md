@@ -217,11 +217,11 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 *   `SensitivityLabels.Read.All`: to read all sensitivity labels
 *   `Application.Read.All`: Required to retrieve App Registrations directory details and Service Principal SSO configurations.
 
-**Graph Delegated permissions:**
+**Graph API Delegated permissions:**
 * `eDiscovery.Read.All`: Required to retrieve active/closed Microsoft Purview eDiscovery cases on behalf of the user.
 * `offline_access`: required to maintain access to data you have given the app access to
 
-**Office 365 Exchange Online Permissions:**
+**Office 365 Exchange Online Application Permissions (under `APIs my organization uses`):**
 *  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 *  `Exchange.ManageAsAppV2`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 
