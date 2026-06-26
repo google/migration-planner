@@ -209,6 +209,7 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 *   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
 *   `NetworkAccess.Read.All`: Required for Entra Global Secure Access Filtering Policies (Network Security).
 *   `DeviceManagementConfiguration.Read.All`: Required for Intune Policies.
+*   `DeviceManagementServiceConfig.Read.All`: Required for Mobile BYOD Configurations.
 *   `DeviceManagementApps.Read.All`: Required to read all Intune apps
 *   `DeviceManagementManagedDevices.Read.All`: Required to read all Intune managed devices
 *   `Organization.Read.All`: Required to resolve tenant domains and Subscribed SKUs.
@@ -399,8 +400,8 @@ The Usage and Adoption tab scans the following 10 functional modules of a Micros
     </tr>
     <tr>
       <td><b>7. Intune (Endpoint Management)</b></td>
-      <td>• <b>Mobile Apps</b>: Managed application packages pushed and maintained via Intune.<br>• <b>Detected Apps</b>: Software packages detected on managed devices.<br>• <b>Managed Devices</b>: Details of devices managed or pre-enrolled through Intune.<br>• <b>Device Configurations</b>: Device configuration profiles, platform policies, and compliance rates.<br>• <b>Device Compliance Policies</b>: Compliance policies configured to monitor device health and status.<br>• <b>Mobile Device Management Policies</b>: Mobile Device Management (MDM) policies configured for automatic enrollment and settings.</td>
-      <td>Graph Intune / Device Management endpoints:<br>• Mobile Apps: <code>GET /deviceAppManagement/mobileApps</code><br>• Detected Apps: <code>GET /deviceManagement/detectedApps</code><br>• Managed Devices: <code>GET /deviceManagement/managedDevices</code><br>• Device Configurations: <code>GET /deviceManagement/deviceConfigurations</code> and <code>/configurationPolicies</code><br>• Device Compliance Policies: <code>GET /deviceManagement/deviceCompliancePolicies</code><br>• MDM Policies: <code>GET /beta/policies/mobileDeviceManagementPolicies</code></td>
+      <td>• <b>Mobile Apps</b>: Managed application packages pushed and maintained via Intune.<br>• <b>Detected Apps</b>: Software packages detected on managed devices.<br>• <b>Managed Devices</b>: Details of devices managed or pre-enrolled through Intune.<br>• <b>Device Configurations</b>: Device configuration profiles, platform policies, and compliance rates.<br>• <b>Device Compliance Policies</b>: Compliance policies configured to monitor device health and status.<br>• <b>Mobile Device Management Policies</b>: Mobile Device Management (MDM) policies configured for automatic enrollment and settings.<br>• <b>Mobile BYOD Configurations</b>: Device enrollment configurations restricting platform compliance (iOS, Windows Mobile, Android).</td>
+      <td>Graph Intune / Device Management endpoints:<br>• Mobile Apps: <code>GET /deviceAppManagement/mobileApps</code><br>• Detected Apps: <code>GET /deviceManagement/detectedApps</code><br>• Managed Devices: <code>GET /deviceManagement/managedDevices</code><br>• Device Configurations: <code>GET /deviceManagement/deviceConfigurations</code> and <code>/configurationPolicies</code><br>• Device Compliance Policies: <code>GET /deviceManagement/deviceCompliancePolicies</code><br>• MDM Policies: <code>GET /beta/policies/mobileDeviceManagementPolicies</code><br>• BYOD Configs: <code>GET /deviceManagement/deviceEnrollmentConfigurations</code></td>
     </tr>
     <tr>
       <td><b>8. Network Security</b></td>

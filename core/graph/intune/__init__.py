@@ -28,6 +28,7 @@ from core.graph.intune.device_configs import run_device_configs_pipeline
 from core.graph.intune.managed_devices import run_managed_devices_pipeline
 from core.graph.intune.device_compliance import run_device_compliance_pipeline
 from core.graph.intune.mdm_policies import run_mdm_policies_pipeline
+from core.graph.intune.byod_configs import run_byod_configs_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ def run_intune_policies_pipeline(
     csv_path_android_compliance = os.path.join(reports_dir, "intune_android_compliance.csv")
     csv_path_ios_compliance = os.path.join(reports_dir, "intune_ios_compliance.csv")
     csv_path_mdm_policies = os.path.join(reports_dir, "intune_mdm_policies.csv")
+    csv_path_byod_configs = os.path.join(reports_dir, "intune_byod_configs.csv")
     
     temp_path_device_configs = csv_path_device_configs + ".tmp"
     temp_path_config_policies = csv_path_config_policies + ".tmp"
@@ -67,6 +69,7 @@ def run_intune_policies_pipeline(
     temp_path_android_compliance = csv_path_android_compliance + ".tmp"
     temp_path_ios_compliance = csv_path_ios_compliance + ".tmp"
     temp_path_mdm_policies = csv_path_mdm_policies + ".tmp"
+    temp_path_byod_configs = csv_path_byod_configs + ".tmp"
 
     for path in [temp_path_device_configs, temp_path_config_policies]:
         with open(path, 'w', encoding='utf-8', newline='') as f:
@@ -182,6 +185,18 @@ def run_intune_policies_pipeline(
             )
         except Exception as e:
             errors.append(e)
+
+    def fetch_byod_configs():
+        try:
+            run_byod_configs_pipeline(
+                client_id=client_id,
+                client_secret=client_secret,
+                tenant_id=tenant_id,
+                csv_path=temp_path_byod_configs,
+                is_cancelled_callback=is_cancelled_callback
+            )
+        except Exception as e:
+            errors.append(e)
             
     t1 = threading.Thread(target=fetch_device_configs, daemon=True)
     t2 = threading.Thread(target=fetch_config_policies, daemon=True)
@@ -191,6 +206,7 @@ def run_intune_policies_pipeline(
     t6 = threading.Thread(target=fetch_android_compliance, daemon=True)
     t7 = threading.Thread(target=fetch_ios_compliance, daemon=True)
     t8 = threading.Thread(target=fetch_mdm_policies, daemon=True)
+    t9 = threading.Thread(target=fetch_byod_configs, daemon=True)
     
     t1.start()
     t2.start()
@@ -200,6 +216,7 @@ def run_intune_policies_pipeline(
     t6.start()
     t7.start()
     t8.start()
+    t9.start()
     
     t1.join()
     t2.join()
@@ -209,8 +226,9 @@ def run_intune_policies_pipeline(
     t6.join()
     t7.join()
     t8.join()
+    t9.join()
     
-    if len(errors) == 8:
+    if len(errors) == 9:
         raise errors[0]
 
     for temp, final in [
@@ -222,7 +240,8 @@ def run_intune_policies_pipeline(
         (temp_path_device_compliance, csv_path_device_compliance),
         (temp_path_android_compliance, csv_path_android_compliance),
         (temp_path_ios_compliance, csv_path_ios_compliance),
-        (temp_path_mdm_policies, csv_path_mdm_policies)
+        (temp_path_mdm_policies, csv_path_mdm_policies),
+        (temp_path_byod_configs, csv_path_byod_configs)
     ]:
         if os.path.exists(temp):
             if os.path.exists(final):
@@ -300,6 +319,12 @@ def run_intune_policies_pipeline(
         df_slice = df_mdm.head(200).fillna("N/A")
         mdm_policies_rows_for_ui = df_slice.to_dict('records')
 
+    byod_configs_rows_for_ui = []
+    if os.path.exists(csv_path_byod_configs):
+        df_byod = pd.read_csv(csv_path_byod_configs)
+        df_slice = df_byod.head(200).fillna("N/A")
+        byod_configs_rows_for_ui = df_slice.to_dict('records')
+
     return {
         "total_device_configs": total_dc,
         "total_config_policies": total_cp,
@@ -309,7 +334,8 @@ def run_intune_policies_pipeline(
         "managed_devices": managed_devices_rows_for_ui,
         "android_compliance": android_compliance_rows_for_ui,
         "ios_compliance": ios_compliance_rows_for_ui,
-        "mdm_policies": mdm_policies_rows_for_ui
+        "mdm_policies": mdm_policies_rows_for_ui,
+        "byod_configs": byod_configs_rows_for_ui
     }
 
 
@@ -390,6 +416,16 @@ class IntuneService:
             tenant_id=self.client.tenant_id,
             csv_path=csv_path,
             delegated_token=delegated_token,
+            max_rows=max_rows,
+            is_cancelled_callback=is_cancelled_callback
+        )
+
+    def fetch_byod_configs(self, csv_path: str = None, max_rows: int = 1000, is_cancelled_callback=None) -> list:
+        return run_byod_configs_pipeline(
+            client_id=self.client.client_ids[0] if isinstance(self.client.client_ids, list) else self.client.client_ids,
+            client_secret=self.client.client_secrets[0] if isinstance(self.client.client_secrets, list) else self.client.client_secrets,
+            tenant_id=self.client.tenant_id,
+            csv_path=csv_path,
             max_rows=max_rows,
             is_cancelled_callback=is_cancelled_callback
         )

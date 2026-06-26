@@ -26,6 +26,7 @@ from telemetry.intune.vc_devices import VCDevicesSubFrame
 from telemetry.intune.device_configs import DeviceConfigsSubFrame
 from telemetry.intune.device_compliance import DeviceComplianceSubFrame
 from telemetry.intune.mdm_policies import MdmPoliciesSubFrame
+from telemetry.intune.byod_configs import ByodConfigsSubFrame
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.IntuneUI")
 
@@ -180,6 +181,20 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         )
         self.ios_compliance_view.pack(fill="x", pady=(0, 15))
 
+        # Divider BYOD
+        self.divider_byod = ctk.CTkFrame(self.body_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1)
+        self.divider_byod.pack(fill="x", pady=15)
+
+        # 7.5 Mobile BYOD Configurations SubFrame
+        self.byod_configs_view = ByodConfigsSubFrame(
+            self.body_frame,
+            log_callback=self.log_msg,
+            credentials_callback=self.get_credentials,
+            status_change_callback=self._subframe_status_changed,
+            semaphore=self.semaphore
+        )
+        self.byod_configs_view.pack(fill="x", pady=(0, 15))
+
         # Divider 6
         self.divider6 = ctk.CTkFrame(self.body_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1)
         self.divider6.pack(fill="x", pady=15)
@@ -206,6 +221,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             self.device_configs_view.status,
             self.android_compliance_view.status,
             self.ios_compliance_view.status,
+            self.byod_configs_view.status,
             self.mdm_policies_view.status
         ]
         if "loading" in statuses:
@@ -228,6 +244,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.device_configs_view.reset_view()
         self.android_compliance_view.reset_view()
         self.ios_compliance_view.reset_view()
+        self.byod_configs_view.reset_view()
         self.mdm_policies_view.reset_view()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
@@ -242,6 +259,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.device_configs_view.trigger_fetch(tenant, client_id, client_secret)
         self.android_compliance_view.trigger_fetch(tenant, client_id, client_secret)
         self.ios_compliance_view.trigger_fetch(tenant, client_id, client_secret)
+        self.byod_configs_view.trigger_fetch(tenant, client_id, client_secret)
         self.mdm_policies_view.trigger_fetch(tenant, client_id, client_secret, use_delegated_auth=use_delegated)
 
     def cancel(self):
@@ -253,6 +271,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.device_configs_view.cancel()
         self.android_compliance_view.cancel()
         self.ios_compliance_view.cancel()
+        self.byod_configs_view.cancel()
         self.mdm_policies_view.cancel()
 
     @property
@@ -267,5 +286,6 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             "vc_devices": self.vc_devices_view.last_data,
             "android_compliance": self.android_compliance_view.last_data,
             "ios_compliance": self.ios_compliance_view.last_data,
+            "byod_configs": self.byod_configs_view.last_data,
             "mdm_policies": self.mdm_policies_view.last_data
         }

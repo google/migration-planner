@@ -1529,6 +1529,45 @@ def generate_pdf_report(data: dict, filepath: str):
         story.append(compliance_table)
     story.append(Spacer(1, 10))
 
+    # Render Mobile BYOD Configurations (Top 10)
+    story.append(Paragraph("<i>Mobile BYOD Configurations (Top 10)</i>", body_style))
+    story.append(Spacer(1, 4))
+    byod_configs = intune_data.get("byod_configs", [])
+    if not byod_configs:
+        story.append(Paragraph("No Mobile BYOD configurations were discovered or permission restricted.", ParagraphStyle('ErrTxtByod', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        byod_table_data = [[
+            Paragraph("Display Name", table_cell_header),
+            Paragraph("Description", table_cell_header),
+            Paragraph("Priority", table_cell_header),
+            Paragraph("Last Modified", table_cell_header),
+            Paragraph("iOS Restrictions", table_cell_header),
+            Paragraph("Windows Mobile", table_cell_header),
+            Paragraph("Android Restrictions", table_cell_header)
+        ]]
+        for config in byod_configs[:10]:
+            byod_table_data.append([
+                Paragraph(config.get("displayName", "N/A"), table_cell_bold),
+                Paragraph(config.get("description", "N/A"), table_cell_style),
+                Paragraph(str(config.get("priority", 0)), table_cell_style),
+                Paragraph(config.get("lastModifiedDateTime", "N/A"), table_cell_style),
+                Paragraph(config.get("iosRestrictions", "N/A"), table_cell_style),
+                Paragraph(config.get("windowsMobileRestrictions", "N/A"), table_cell_style),
+                Paragraph(config.get("androidRestrictions", "N/A"), table_cell_style)
+            ])
+        byod_table = Table(byod_table_data, colWidths=[70, 75, 34, 65, 90, 90, 90])
+        byod_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(byod_table)
+    story.append(Spacer(1, 10))
+
     # Render Mobile Device Management Policies (Top 10)
     story.append(Paragraph("<b>Mobile Device Management Policies (Top 10)</b>", body_style))
     story.append(Spacer(1, 6))

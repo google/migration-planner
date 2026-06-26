@@ -93,17 +93,17 @@ $AppName = if ([string]::IsNullOrWhiteSpace($InputName)) { "Workspace Migration 
 # --- CONFIGURATION ---
 $GraphAppRoles = @(
     "Reports.Read.All", "Directory.Read.All", "Policy.Read.All", "NetworkAccess.Read.All",
-    "DeviceManagementConfiguration.Read.All", "DeviceManagementApps.Read.All",
-    "DeviceManagementManagedDevices.Read.All", "Organization.Read.All", "Place.Read.All",
-    "Calendars.ReadBasic.All", "Sites.Read.All", "AuditLog.Read.All", "SensitivityLabels.Read.All",
-    "Application.Read.All", "User.Read.All", "Group.Read.All", "Mail.Read", "Contacts.Read",
-    "Calendars.Read", "MailboxFolder.Read.All", "MailboxSettings.Read", "Chat.Read.All",
-    "ChannelMessage.Read.All", "ChannelSettings.Read.All", "TeamsActivity.Read.All",
-    "TeamMember.Read.All", "Files.Read.All", "LicenseAssignment.Read.All"
+    "DeviceManagementConfiguration.Read.All", "DeviceManagementServiceConfig.Read.All",
+    "DeviceManagementApps.Read.All", "DeviceManagementManagedDevices.Read.All",
+    "Organization.Read.All", "Place.Read.All", "Calendars.ReadBasic.All", "Sites.Read.All",
+    "AuditLog.Read.All", "SensitivityLabels.Read.All", "Application.Read.All", "User.Read.All",
+    "Group.Read.All", "Mail.Read", "Contacts.Read", "Calendars.Read", "MailboxFolder.Read.All",
+    "MailboxSettings.Read", "Chat.Read.All", "ChannelMessage.Read.All", "ChannelSettings.Read.All",
+    "TeamsActivity.Read.All", "TeamMember.Read.All", "Files.Read.All", "LicenseAssignment.Read.All"
 )
 
 $GraphDelegatedScopes = @(
-    "eDiscovery.Read.All", "offline_access"
+    "eDiscovery.Read.All", "Policy.Read.All", "offline_access"
 )
 
 $ExchangeAppRoles = @(

@@ -599,6 +599,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "ManagedDevicesSubFrame": "Managed Devices",
             "DeviceConfigsSubFrame": "Device Configurations",
             "MdmPoliciesSubFrame": "Mobile Device Management Policies",
+            "ByodConfigsSubFrame": "Mobile BYOD Configurations",
             "PowerAutomateUsageFrame": "Power Automate (Workflows & Flows)"
         }
         
@@ -986,6 +987,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             intune_data["ios_compliance"] = load_csv("intune_ios_compliance.csv")
         if not intune_data.get("mdm_policies"):
             intune_data["mdm_policies"] = load_csv("intune_mdm_policies.csv")
+        if not intune_data.get("byod_configs"):
+            intune_data["byod_configs"] = load_csv("intune_byod_configs.csv")
         if not intune_data.get("table_rows"):
             configs = load_csv("intune_device_configs.csv")
             policies = load_csv("intune_config_policies.csv")
