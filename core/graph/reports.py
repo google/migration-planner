@@ -55,7 +55,7 @@ class ReportsService:
 
         try:
             logger.info("Calling Graph report endpoint for %s...", output_filename)
-            resp = session.get(api_url, headers=headers, allow_redirects=False, stream=True)
+            resp = session.get(api_url, headers=headers, allow_redirects=False, stream=True, timeout=60.0)
             
             # Graph APIs return status code 302 redirect to a pre-authenticated S3/Azure Blob URL
             if resp.status_code == 302:
@@ -72,7 +72,7 @@ class ReportsService:
                 for attempt in range(1, max_retries + 1):
                     try:
                         logger.info("[Attempt %d/%d] Downloading report stream to %s...", attempt, max_retries, output_filename)
-                        with requests.get(location_url, stream=True) as csv_response:
+                        with requests.get(location_url, stream=True, timeout=120.0) as csv_response:
                             csv_response.raise_for_status()
                             with open(output_path, "wb") as f:
                                 for chunk in csv_response.iter_content(chunk_size=8192):

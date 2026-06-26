@@ -1101,6 +1101,38 @@ def generate_pdf_report(data: dict, filepath: str):
     story.append(files_table)
     story.append(Spacer(1, 15))
 
+    sp_data_types = data.get("sharepoint_data_types", {})
+    if sp_data_types:
+        story.append(Paragraph("SharePoint Data Types (Tenant Wide)", h2_style))
+        story.append(Paragraph("A global count of major SharePoint components across the tenant.", body_style))
+        story.append(Spacer(1, 8))
+        
+        sp_dt_table_data = [[
+            Paragraph("Data Type", table_cell_header),
+            Paragraph("Count", table_cell_header)
+        ]]
+        
+        for k, v in [("Document Libraries", sp_data_types.get("Document Libraries", 0)),
+                     ("Lists", sp_data_types.get("Lists", 0)),
+                     ("Web Pages", sp_data_types.get("Web Pages", 0))]:
+            sp_dt_table_data.append([
+                Paragraph(k, table_cell_bold),
+                Paragraph(f"{v:,}", table_cell_style)
+            ])
+            
+        sp_dt_table = Table(sp_dt_table_data, colWidths=[250, 250])
+        sp_dt_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(sp_dt_table)
+        story.append(Spacer(1, 15))
+
     # 3.3 Microsoft Entra Data
     story.append(Paragraph("Microsoft Entra Data", h2_style))
     story.append(Paragraph("This section outlines application sign-in metrics and authentication methods configuration summaries.", body_style))

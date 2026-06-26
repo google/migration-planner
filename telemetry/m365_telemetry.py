@@ -587,6 +587,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "EmailClientSupportFrame": "Email Client Classification",
             "PstFilesFrame": "PST Files",
             "SharePointUsageFrame": "SharePoint Online Sites & Files Summary",
+            "SharePointDataTypesFrame": "SharePoint Data Types (Tenant Wide)",
             "OneDriveUsageFrame": "OneDrive for Business Personal Accounts Summary",
             "FilteringPoliciesSubFrame": "Filtering Policies",
             "ConditionalAccessSubFrame": "Conditional Access Policies",
@@ -667,7 +668,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
                     thread_req_id = getattr(cur_thread, "request_id", None)
                     if thread_req_id is not None and thread_req_id < view.current_request_id:
                         self._sem.release()
-                        raise InterruptedError("Thread execution cancelled (stale request).")
+                        raise InterruptedError(f"Thread execution cancelled (stale request: {thread_req_id} < {view.current_request_id}).")
                     self._acquired_threads.add(cur_thread.ident)
                     sub_sec = getattr(cur_thread, "sub_section", None)
                     if sub_sec:
