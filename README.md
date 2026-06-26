@@ -185,6 +185,9 @@ Please follow the [official Microsoft guide](https://learn.microsoft.com/en-us/p
 
 To scan your tenant, you need to register an app in the Microsoft Entra ID (formerly Azure AD) portal.
 
+> **💡 AUTOMATED SETUP AVAILABLE:** You can completely automate Steps 1-3 below (App Creation, API Permissions, Admin Consent, and Secret Generation) by running the provided PowerShell script. Simply execute `.\scripts\app_creation_script.ps1` from your PowerShell terminal and follow the prompts. Note that this requires the Microsoft Graph PowerShell module. If you prefer manual setup, follow the steps below.
+In order to execute the script right click and select "Run with Powershell" 
+
 ### 1. Register the App
 1.  Go to [portal.azure.com](https://portal.azure.com/).
 2.  Navigate to **Microsoft Entra ID > App registrations > New registration**.
