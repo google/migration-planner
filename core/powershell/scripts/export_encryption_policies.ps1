@@ -1,7 +1,8 @@
 param (
     [Parameter(Mandatory=$true)][string]$TenantId,
     [Parameter(Mandatory=$true)][string]$AppId,
-    [Parameter(Mandatory=$true)][string]$CertificateThumbprint
+    [Parameter(Mandatory=$true)][string]$CertificateFilePath,
+    [Parameter(Mandatory=$true)][string]$CertificatePassword
 )
 
 # Force TLS 1.2
@@ -10,8 +11,10 @@ param (
 $ErrorActionPreference = "Stop"
 
 try {
+    # Convert password to SecureString for macOS/Linux compatibility
+    $secPass = ConvertTo-SecureString $CertificatePassword -AsPlainText -Force
     # Connect using Certificate-based App-Only Authentication
-    Connect-ExchangeOnline -AppID $AppId -Organization $TenantId -CertificateThumbprint $CertificateThumbprint -ShowBanner:$false -ErrorAction Stop
+    Connect-ExchangeOnline -AppID $AppId -Organization $TenantId -CertificateFilePath $CertificateFilePath -CertificatePassword $secPass -ShowBanner:$false -ErrorAction Stop
 
     $result = @{
         "m365_policies" = @()

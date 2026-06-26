@@ -12,17 +12,13 @@ def get_encryption_policies(client: PowerShellClient) -> dict:
     """
     logger.info("Starting M365 Data Encryption Policy fetch via PowerShell...")
     try:
-        # Load the thumbprint using the existing cert_auth module
-        _, thumbprint = load_certificate(
-            client_secret=client.cert_password,
-            tenant_id=client.cert_tenant_id,
-            client_id=client.client_id
-        )
+        cert_path = client.locate_certificate()
 
         args = [
             "-TenantId", client.tenant_id,
             "-AppId", client.client_id,
-            "-CertificateThumbprint", thumbprint
+            "-CertificateFilePath", cert_path,
+            "-CertificatePassword", client.cert_password
         ]
 
         stdout = client.execute_script("scripts/export_encryption_policies.ps1", args)
