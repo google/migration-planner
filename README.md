@@ -398,8 +398,8 @@ The Usage and Adoption tab scans the following 10 functional modules of a Micros
     </tr>
     <tr>
       <td><b>7. Intune (Endpoint Management)</b></td>
-      <td>• <b>Mobile Apps</b>: Managed application packages pushed and maintained via Intune.<br>• <b>Detected Apps</b>: Software packages detected on managed devices.<br>• <b>Managed Devices</b>: Details of devices managed or pre-enrolled through Intune.<br>• <b>Device Configurations</b>: Device configuration profiles, platform policies, and compliance rates.</td>
-      <td>Graph Intune / Device Management endpoints:<br>• Mobile Apps: <code>GET /deviceAppManagement/mobileApps</code><br>• Detected Apps: <code>GET /deviceManagement/detectedApps</code><br>• Managed Devices: <code>GET /deviceManagement/managedDevices</code><br>• Device Configurations: <code>GET /deviceManagement/deviceConfigurations</code> and <code>/configurationPolicies</code></td>
+      <td>• <b>Mobile Apps</b>: Managed application packages pushed and maintained via Intune.<br>• <b>Detected Apps</b>: Software packages detected on managed devices.<br>• <b>Managed Devices</b>: Details of devices managed or pre-enrolled through Intune.<br>• <b>Device Configurations</b>: Device configuration profiles, platform policies, and compliance rates.<br>• <b>Device Compliance Policies</b>: Compliance policies configured to monitor device health and status.</td>
+      <td>Graph Intune / Device Management endpoints:<br>• Mobile Apps: <code>GET /deviceAppManagement/mobileApps</code><br>• Detected Apps: <code>GET /deviceManagement/detectedApps</code><br>• Managed Devices: <code>GET /deviceManagement/managedDevices</code><br>• Device Configurations: <code>GET /deviceManagement/deviceConfigurations</code> and <code>/configurationPolicies</code><br>• Device Compliance Policies: <code>GET /deviceManagement/deviceCompliancePolicies</code></td>
     </tr>
     <tr>
       <td><b>8. Network Security</b></td>

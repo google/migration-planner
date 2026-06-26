@@ -23,6 +23,7 @@ from telemetry.intune.mobile_apps import MobileAppsSubFrame
 from telemetry.intune.detected_apps import DetectedAppsSubFrame
 from telemetry.intune.managed_devices import ManagedDevicesSubFrame
 from telemetry.intune.device_configs import DeviceConfigsSubFrame
+from telemetry.intune.device_compliance import DeviceComplianceSubFrame
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.IntuneUI")
 
@@ -123,6 +124,45 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         )
         self.device_configs_view.pack(fill="x", pady=(0, 15))
 
+        # Divider 4
+        self.divider4 = ctk.CTkFrame(self.body_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1)
+        self.divider4.pack(fill="x", pady=15)
+
+        # Section Header: Mobile Device Compliance Policies
+        self.compliance_header = ctk.CTkLabel(
+            self.body_frame,
+            text="Mobile Device Compliance Policies",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.compliance_header.pack(anchor="w", pady=(0, 15))
+
+        # 5. Android Devices Compliance SubFrame
+        self.android_compliance_view = DeviceComplianceSubFrame(
+            self.body_frame,
+            log_callback=self.log_msg,
+            credentials_callback=self.get_credentials,
+            status_change_callback=self._subframe_status_changed,
+            semaphore=self.semaphore,
+            device_type="Android"
+        )
+        self.android_compliance_view.pack(fill="x", pady=(0, 15))
+
+        # Divider 5
+        self.divider5 = ctk.CTkFrame(self.body_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1)
+        self.divider5.pack(fill="x", pady=15)
+
+        # 6. iOS Devices Compliance SubFrame
+        self.ios_compliance_view = DeviceComplianceSubFrame(
+            self.body_frame,
+            log_callback=self.log_msg,
+            credentials_callback=self.get_credentials,
+            status_change_callback=self._subframe_status_changed,
+            semaphore=self.semaphore,
+            device_type="iOS"
+        )
+        self.ios_compliance_view.pack(fill="x", pady=(0, 15))
+
         self.reset_view()
 
     def _subframe_status_changed(self):
@@ -130,7 +170,9 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             self.mobile_apps_view.status,
             self.detected_apps_view.status,
             self.managed_devices_view.status,
-            self.device_configs_view.status
+            self.device_configs_view.status,
+            self.android_compliance_view.status,
+            self.ios_compliance_view.status
         ]
         if "loading" in statuses:
             self.status = "loading"
@@ -149,6 +191,8 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.detected_apps_view.reset_view()
         self.managed_devices_view.reset_view()
         self.device_configs_view.reset_view()
+        self.android_compliance_view.reset_view()
+        self.ios_compliance_view.reset_view()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         usage_logger.info("Intune trigger_fetch called.")
@@ -157,6 +201,8 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.detected_apps_view.trigger_fetch(tenant, client_id, client_secret)
         self.managed_devices_view.trigger_fetch(tenant, client_id, client_secret)
         self.device_configs_view.trigger_fetch(tenant, client_id, client_secret)
+        self.android_compliance_view.trigger_fetch(tenant, client_id, client_secret)
+        self.ios_compliance_view.trigger_fetch(tenant, client_id, client_secret)
 
     def cancel(self):
         usage_logger.info("Intune cancel called.")
@@ -164,6 +210,8 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.detected_apps_view.cancel()
         self.managed_devices_view.cancel()
         self.device_configs_view.cancel()
+        self.android_compliance_view.cancel()
+        self.ios_compliance_view.cancel()
 
     @property
     def last_data(self):
@@ -173,5 +221,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             "table_rows": self.device_configs_view.last_data,
             "mobile_apps": self.mobile_apps_view.last_data,
             "detected_apps": self.detected_apps_view.last_data,
-            "managed_devices": self.managed_devices_view.last_data
+            "managed_devices": self.managed_devices_view.last_data,
+            "android_compliance": self.android_compliance_view.last_data,
+            "ios_compliance": self.ios_compliance_view.last_data
         }

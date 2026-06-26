@@ -1411,6 +1411,81 @@ def generate_pdf_report(data: dict, filepath: str):
         story.append(intune_table)
         story.append(Spacer(1, 4))
         story.append(Paragraph("<font size=8 color='#6B7280'>* Based on sample data collected from Intune.</font>", body_style))
+        story.append(Spacer(1, 10))
+        
+    # Render Mobile Device Compliance Policies Section
+    story.append(Paragraph("<b>Mobile Device Compliance Policies</b>", body_style))
+    story.append(Spacer(1, 6))
+    
+    # 1. Android Devices Table
+    story.append(Paragraph("<i>Android Devices (Top 10)</i>", body_style))
+    story.append(Spacer(1, 4))
+    android_compliance = intune_data.get("android_compliance", [])
+    if not android_compliance:
+        story.append(Paragraph("No Android device compliance policies were discovered or permission restricted.", ParagraphStyle('ErrTxtAndCompliance', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        compliance_table_data = [[
+            Paragraph("Display Name", table_cell_header),
+            Paragraph("Description", table_cell_header),
+            Paragraph("Created Time", table_cell_header),
+            Paragraph("Last Modified", table_cell_header),
+            Paragraph("Version", table_cell_header)
+        ]]
+        for policy in android_compliance[:10]:
+            compliance_table_data.append([
+                Paragraph(policy.get("displayName", "N/A"), table_cell_bold),
+                Paragraph(policy.get("description", "N/A"), table_cell_style),
+                Paragraph(policy.get("createdDateTime", "N/A"), table_cell_style),
+                Paragraph(policy.get("lastModifiedDateTime", "N/A"), table_cell_style),
+                Paragraph(str(policy.get("version", 0)), table_cell_style)
+            ])
+        compliance_table = Table(compliance_table_data, colWidths=[120, 150, 100, 100, 34])
+        compliance_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(compliance_table)
+    story.append(Spacer(1, 10))
+
+    # 2. iOS Devices Table
+    story.append(Paragraph("<i>iOS Devices (Top 10)</i>", body_style))
+    story.append(Spacer(1, 4))
+    ios_compliance = intune_data.get("ios_compliance", [])
+    if not ios_compliance:
+        story.append(Paragraph("No iOS device compliance policies were discovered or permission restricted.", ParagraphStyle('ErrTxtIosCompliance', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        compliance_table_data = [[
+            Paragraph("Display Name", table_cell_header),
+            Paragraph("Description", table_cell_header),
+            Paragraph("Created Time", table_cell_header),
+            Paragraph("Last Modified", table_cell_header),
+            Paragraph("Version", table_cell_header)
+        ]]
+        for policy in ios_compliance[:10]:
+            compliance_table_data.append([
+                Paragraph(policy.get("displayName", "N/A"), table_cell_bold),
+                Paragraph(policy.get("description", "N/A"), table_cell_style),
+                Paragraph(policy.get("createdDateTime", "N/A"), table_cell_style),
+                Paragraph(policy.get("lastModifiedDateTime", "N/A"), table_cell_style),
+                Paragraph(str(policy.get("version", 0)), table_cell_style)
+            ])
+        compliance_table = Table(compliance_table_data, colWidths=[120, 150, 100, 100, 34])
+        compliance_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(compliance_table)
+    story.append(Spacer(1, 10))
         
     # Render Detected Apps Table (first 10 items)
     story.append(Spacer(1, 10))
