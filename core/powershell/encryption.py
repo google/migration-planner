@@ -15,7 +15,7 @@ def get_encryption_policies(client: PowerShellClient) -> dict:
         cert_path = client.locate_certificate()
 
         args = [
-            "-TenantId", client.tenant_id,
+            "-Organization", client.tenant_id,
             "-AppId", client.client_id,
             "-CertificateFilePath", cert_path,
             "-CertificatePassword", client.cert_password

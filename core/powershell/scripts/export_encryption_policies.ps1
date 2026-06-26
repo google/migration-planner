@@ -1,5 +1,5 @@
 param (
-    [Parameter(Mandatory=$true)][string]$TenantId,
+    [Parameter(Mandatory=$true)][string]$Organization,
     [Parameter(Mandatory=$true)][string]$AppId,
     [Parameter(Mandatory=$true)][string]$CertificateFilePath,
     [Parameter(Mandatory=$true)][string]$CertificatePassword
@@ -10,11 +10,17 @@ param (
 
 $ErrorActionPreference = "Stop"
 
+if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+    throw "ExchangeOnlineManagement PowerShell module is not installed."
+}
+
+Import-Module ExchangeOnlineManagement
+
 try {
     # Convert password to SecureString for macOS/Linux compatibility
     $secPass = ConvertTo-SecureString $CertificatePassword -AsPlainText -Force
     # Connect using Certificate-based App-Only Authentication
-    Connect-ExchangeOnline -AppID $AppId -Organization $TenantId -CertificateFilePath $CertificateFilePath -CertificatePassword $secPass -ShowBanner:$false -ErrorAction Stop
+    Connect-ExchangeOnline -AppID $AppId -Organization $Organization -CertificateFilePath $CertificateFilePath -CertificatePassword $secPass -ShowBanner:$false -ErrorAction Stop
 
     $result = @{
         "m365_policies" = @()

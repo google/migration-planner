@@ -98,7 +98,35 @@ class MailSecurityFrame(ctk.CTkFrame):
                 # Fetch encryption policies
                 def fetch_encryption():
                     try:
-                        ps_client = PowerShellClient(tenant, c_id, c_secret)
+                        from core.graph.client import GraphClient
+                        from core.graph.directory import DirectoryService
+                        
+                        tenant_domain = tenant
+                        client = None
+                        try:
+                            client = GraphClient(
+                                tenant_id=tenant,
+                                client_ids=c_id,
+                                client_secrets=c_secret,
+                                concurrency=1,
+                                retries=3,
+                                backoff=2
+                            )
+                            client.authenticate()
+                            dir_svc = DirectoryService(client)
+                            tenant_domain = dir_svc.get_tenant_primary_domain()
+                        except Exception as e:
+                            usage_logger.warning(f"Could not retrieve tenant domain via Graph. Falling back to Tenant ID Guid: {e}")
+                        finally:
+                            if client:
+                                client.close()
+
+                        ps_client = PowerShellClient(
+                            tenant_id=tenant_domain,
+                            client_id=c_id,
+                            client_secret=c_secret,
+                            cert_tenant_id=tenant
+                        )
                         return get_encryption_policies(ps_client)
                     except Exception as e:
                         usage_logger.warning(f"Failed to fetch encryption policies: {e}")
