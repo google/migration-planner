@@ -254,12 +254,12 @@ class MailSecurityFrame(ctk.CTkFrame):
                     ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
                     
         # --- ENCRYPTION UI ---
-        ctk.CTkLabel(self.grid_frame, text="Data at Rest Encryption", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(fill="x", padx=15, pady=(20, 5))
+        ctk.CTkLabel(self.grid_frame, text="Encryption Key Management", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(fill="x", padx=15, pady=(20, 5))
         
         enc_grid = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
         enc_grid.pack(fill="x", padx=10, pady=(0, 10))
         
-        enc_headers = ["Encryption Posture", "Tenant-Level Policies (M365)", "Mailbox Policies (Exchange DEPs)"]
+        enc_headers = ["Key Management Model", "M365DataAtRestEncryptionPolicy", "DataEncryptionPolicy"]
         for i in range(3):
             enc_grid.grid_columnconfigure(i, weight=1)
             
