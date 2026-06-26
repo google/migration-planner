@@ -280,8 +280,8 @@ class MailSecurityFrame(ctk.CTkFrame):
             
             posture = "Customer Key (Customer-Managed)" if (m365_pols or exc_deps) else "Microsoft-Managed Keys (Default)"
             
-            m365_text = "\n".join([p["Name"] for p in m365_pols]) if m365_pols else "None detected"
-            exc_text = "\n".join([p["Name"] for p in exc_deps]) if exc_deps else "None detected"
+            m365_text = str(len(m365_pols)) if m365_pols else "None detected"
+            exc_text = str(len(exc_deps)) if exc_deps else "None detected"
             
             bg_style = COLOR_SURFACE
             vals = [posture, m365_text, exc_text]
