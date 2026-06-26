@@ -523,7 +523,7 @@ class TelemetryApp(ctk.CTk):
         self.use_delegated_var = ctk.BooleanVar(value=False)
         self.delegated_checkbox = ctk.CTkCheckBox(
             self.form_container,
-            text="Enable Delegated Authentication (Required for eDiscovery)",
+            text="Enable Delegated Authentication (Required for eDiscovery & MDM Policies)",
             variable=self.use_delegated_var,
             font=FONT_BODY_MEDIUM,
             text_color=COLOR_TEXT_MAIN,

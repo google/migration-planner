@@ -25,6 +25,7 @@ from telemetry.intune.managed_devices import ManagedDevicesSubFrame
 from telemetry.intune.vc_devices import VCDevicesSubFrame
 from telemetry.intune.device_configs import DeviceConfigsSubFrame
 from telemetry.intune.device_compliance import DeviceComplianceSubFrame
+from telemetry.intune.mdm_policies import MdmPoliciesSubFrame
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.IntuneUI")
 
@@ -33,6 +34,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
 
     def __init__(self, master, log_callback, credentials_callback, status_change_callback, **kwargs):
         self.semaphore = kwargs.pop("concurrency_semaphore", None)
+        self.get_delegated_auth = kwargs.pop("delegated_auth_callback", None)
         super().__init__(master, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=12, **kwargs)
         self.log_msg = log_callback
         self.get_credentials = credentials_callback
@@ -178,6 +180,21 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         )
         self.ios_compliance_view.pack(fill="x", pady=(0, 15))
 
+        # Divider 6
+        self.divider6 = ctk.CTkFrame(self.body_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1)
+        self.divider6.pack(fill="x", pady=15)
+
+        # 8. Mobile Device Management Policies SubFrame
+        self.mdm_policies_view = MdmPoliciesSubFrame(
+            self.body_frame,
+            log_callback=self.log_msg,
+            credentials_callback=self.get_credentials,
+            status_change_callback=self._subframe_status_changed,
+            semaphore=self.semaphore,
+            delegated_auth_callback=self.get_delegated_auth
+        )
+        self.mdm_policies_view.pack(fill="x", pady=(0, 15))
+
         self.reset_view()
 
     def _subframe_status_changed(self):
@@ -188,7 +205,8 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             self.vc_devices_view.status,
             self.device_configs_view.status,
             self.android_compliance_view.status,
-            self.ios_compliance_view.status
+            self.ios_compliance_view.status,
+            self.mdm_policies_view.status
         ]
         if "loading" in statuses:
             self.status = "loading"
@@ -210,22 +228,21 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.device_configs_view.reset_view()
         self.android_compliance_view.reset_view()
         self.ios_compliance_view.reset_view()
+        self.mdm_policies_view.reset_view()
 
     def trigger_fetch(self, tenant, client_id, client_secret):
         usage_logger.info("Intune trigger_fetch called.")
         self.pack(fill="x", expand=True, pady=10)
+        use_delegated = self.get_delegated_auth() if self.get_delegated_auth else False
+        
         self.mobile_apps_view.trigger_fetch(tenant, client_id, client_secret)
         self.detected_apps_view.trigger_fetch(tenant, client_id, client_secret)
         self.managed_devices_view.trigger_fetch(tenant, client_id, client_secret)
-        
-        # We start the VC Devices filter fetch. It will read local CSV files.
-        # To avoid racing on raw managed devices or room mailboxes files, we wait or let it run.
-        # Since it runs in a thread, we can trigger it directly.
         self.vc_devices_view.trigger_fetch(tenant, client_id, client_secret)
-        
         self.device_configs_view.trigger_fetch(tenant, client_id, client_secret)
         self.android_compliance_view.trigger_fetch(tenant, client_id, client_secret)
         self.ios_compliance_view.trigger_fetch(tenant, client_id, client_secret)
+        self.mdm_policies_view.trigger_fetch(tenant, client_id, client_secret, use_delegated_auth=use_delegated)
 
     def cancel(self):
         usage_logger.info("Intune cancel called.")
@@ -236,6 +253,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.device_configs_view.cancel()
         self.android_compliance_view.cancel()
         self.ios_compliance_view.cancel()
+        self.mdm_policies_view.cancel()
 
     @property
     def last_data(self):
@@ -248,5 +266,6 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             "managed_devices": self.managed_devices_view.last_data,
             "vc_devices": self.vc_devices_view.last_data,
             "android_compliance": self.android_compliance_view.last_data,
-            "ios_compliance": self.ios_compliance_view.last_data
+            "ios_compliance": self.ios_compliance_view.last_data,
+            "mdm_policies": self.mdm_policies_view.last_data
         }

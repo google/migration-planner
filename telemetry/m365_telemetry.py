@@ -345,7 +345,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
-            concurrency_semaphore=self.telemetry_semaphore
+            concurrency_semaphore=self.telemetry_semaphore,
+            delegated_auth_callback=self._get_delegated_auth_state
         )
 
 
@@ -597,6 +598,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "DetectedAppsSubFrame": "Detected Apps",
             "ManagedDevicesSubFrame": "Managed Devices",
             "DeviceConfigsSubFrame": "Device Configurations",
+            "MdmPoliciesSubFrame": "Mobile Device Management Policies",
             "PowerAutomateUsageFrame": "Power Automate (Workflows & Flows)"
         }
         
@@ -982,6 +984,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             intune_data["android_compliance"] = load_csv("intune_android_compliance.csv")
         if not intune_data.get("ios_compliance"):
             intune_data["ios_compliance"] = load_csv("intune_ios_compliance.csv")
+        if not intune_data.get("mdm_policies"):
+            intune_data["mdm_policies"] = load_csv("intune_mdm_policies.csv")
         if not intune_data.get("table_rows"):
             configs = load_csv("intune_device_configs.csv")
             policies = load_csv("intune_config_policies.csv")

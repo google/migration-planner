@@ -1528,6 +1528,44 @@ def generate_pdf_report(data: dict, filepath: str):
         ]))
         story.append(compliance_table)
     story.append(Spacer(1, 10))
+
+    # Render Mobile Device Management Policies (Top 10)
+    story.append(Paragraph("<b>Mobile Device Management Policies (Top 10)</b>", body_style))
+    story.append(Spacer(1, 6))
+    
+    mdm_policies = intune_data.get("mdm_policies", [])
+    if not mdm_policies:
+        story.append(Paragraph("No Mobile Device Management (MDM) policies were discovered or permission restricted.", ParagraphStyle('ErrTxtMdmPolicies', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+    else:
+        mdm_table_data = [[
+            Paragraph("Display Name", table_cell_header),
+            Paragraph("Description", table_cell_header),
+            Paragraph("Applies To", table_cell_header),
+            Paragraph("Discovery URL", table_cell_header),
+            Paragraph("Terms of Use", table_cell_header),
+            Paragraph("Compliance", table_cell_header)
+        ]]
+        for policy in mdm_policies[:10]:
+            mdm_table_data.append([
+                Paragraph(policy.get("displayName", "N/A"), table_cell_bold),
+                Paragraph(policy.get("description", "N/A"), table_cell_style),
+                Paragraph(policy.get("appliesTo", "None"), table_cell_style),
+                Paragraph(policy.get("discoveryUrl", "N/A"), table_cell_style),
+                Paragraph(policy.get("termsOfUseUrl", "N/A"), table_cell_style),
+                Paragraph(policy.get("complianceUrl", "N/A"), table_cell_style)
+            ])
+        mdm_table = Table(mdm_table_data, colWidths=[90, 100, 64, 86, 86, 86])
+        mdm_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(mdm_table)
+    story.append(Spacer(1, 10))
         
     # Render Detected Apps Table (first 10 items)
     story.append(Spacer(1, 10))

@@ -27,6 +27,7 @@ from core.graph.intune.detected_apps import run_detected_apps_pipeline
 from core.graph.intune.device_configs import run_device_configs_pipeline
 from core.graph.intune.managed_devices import run_managed_devices_pipeline
 from core.graph.intune.device_compliance import run_device_compliance_pipeline
+from core.graph.intune.mdm_policies import run_mdm_policies_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ def run_intune_policies_pipeline(
     tenant_id: str, 
     on_page_callback=None, 
     on_apps_page_callback=None, 
-    is_cancelled_callback=None
+    is_cancelled_callback=None,
+    delegated_token: str = None
 ) -> dict:
     """Consolidated pipeline to fetch Intune configuration policies, mobile apps, and detected apps in parallel (for backward compatibility)."""
     logger.info("Starting Intune Policies Pipeline in parallel...")
@@ -54,6 +56,7 @@ def run_intune_policies_pipeline(
     csv_path_device_compliance = os.path.join(reports_dir, "intune_device_compliance.csv")
     csv_path_android_compliance = os.path.join(reports_dir, "intune_android_compliance.csv")
     csv_path_ios_compliance = os.path.join(reports_dir, "intune_ios_compliance.csv")
+    csv_path_mdm_policies = os.path.join(reports_dir, "intune_mdm_policies.csv")
     
     temp_path_device_configs = csv_path_device_configs + ".tmp"
     temp_path_config_policies = csv_path_config_policies + ".tmp"
@@ -63,6 +66,7 @@ def run_intune_policies_pipeline(
     temp_path_device_compliance = csv_path_device_compliance + ".tmp"
     temp_path_android_compliance = csv_path_android_compliance + ".tmp"
     temp_path_ios_compliance = csv_path_ios_compliance + ".tmp"
+    temp_path_mdm_policies = csv_path_mdm_policies + ".tmp"
 
     for path in [temp_path_device_configs, temp_path_config_policies]:
         with open(path, 'w', encoding='utf-8', newline='') as f:
@@ -166,6 +170,19 @@ def run_intune_policies_pipeline(
         except Exception as e:
             errors.append(e)
             
+    def fetch_mdm_policies():
+        try:
+            run_mdm_policies_pipeline(
+                client_id=client_id,
+                client_secret=client_secret,
+                tenant_id=tenant_id,
+                csv_path=temp_path_mdm_policies,
+                delegated_token=delegated_token,
+                is_cancelled_callback=is_cancelled_callback
+            )
+        except Exception as e:
+            errors.append(e)
+            
     t1 = threading.Thread(target=fetch_device_configs, daemon=True)
     t2 = threading.Thread(target=fetch_config_policies, daemon=True)
     t3 = threading.Thread(target=fetch_mobile_apps, daemon=True)
@@ -173,6 +190,7 @@ def run_intune_policies_pipeline(
     t5 = threading.Thread(target=fetch_managed_devices, daemon=True)
     t6 = threading.Thread(target=fetch_android_compliance, daemon=True)
     t7 = threading.Thread(target=fetch_ios_compliance, daemon=True)
+    t8 = threading.Thread(target=fetch_mdm_policies, daemon=True)
     
     t1.start()
     t2.start()
@@ -181,6 +199,7 @@ def run_intune_policies_pipeline(
     t5.start()
     t6.start()
     t7.start()
+    t8.start()
     
     t1.join()
     t2.join()
@@ -189,8 +208,9 @@ def run_intune_policies_pipeline(
     t5.join()
     t6.join()
     t7.join()
+    t8.join()
     
-    if len(errors) == 7:
+    if len(errors) == 8:
         raise errors[0]
 
     for temp, final in [
@@ -201,7 +221,8 @@ def run_intune_policies_pipeline(
         (temp_path_managed_devices, csv_path_managed_devices),
         (temp_path_device_compliance, csv_path_device_compliance),
         (temp_path_android_compliance, csv_path_android_compliance),
-        (temp_path_ios_compliance, csv_path_ios_compliance)
+        (temp_path_ios_compliance, csv_path_ios_compliance),
+        (temp_path_mdm_policies, csv_path_mdm_policies)
     ]:
         if os.path.exists(temp):
             if os.path.exists(final):
@@ -273,6 +294,12 @@ def run_intune_policies_pipeline(
         df_slice = df_ios.head(200).fillna("N/A")
         ios_compliance_rows_for_ui = df_slice.to_dict('records')
 
+    mdm_policies_rows_for_ui = []
+    if os.path.exists(csv_path_mdm_policies):
+        df_mdm = pd.read_csv(csv_path_mdm_policies)
+        df_slice = df_mdm.head(200).fillna("N/A")
+        mdm_policies_rows_for_ui = df_slice.to_dict('records')
+
     return {
         "total_device_configs": total_dc,
         "total_config_policies": total_cp,
@@ -281,7 +308,8 @@ def run_intune_policies_pipeline(
         "detected_apps": detected_rows_for_ui,
         "managed_devices": managed_devices_rows_for_ui,
         "android_compliance": android_compliance_rows_for_ui,
-        "ios_compliance": ios_compliance_rows_for_ui
+        "ios_compliance": ios_compliance_rows_for_ui,
+        "mdm_policies": mdm_policies_rows_for_ui
     }
 
 
@@ -351,6 +379,17 @@ class IntuneService:
             tenant_id=self.client.tenant_id,
             csv_path=csv_path,
             filter_type='microsoft.graph.iosCompliancePolicy',
+            max_rows=max_rows,
+            is_cancelled_callback=is_cancelled_callback
+        )
+
+    def fetch_mdm_policies(self, csv_path: str = None, delegated_token: str = None, max_rows: int = 1000, is_cancelled_callback=None) -> list:
+        return run_mdm_policies_pipeline(
+            client_id=self.client.client_ids[0] if isinstance(self.client.client_ids, list) else self.client.client_ids,
+            client_secret=self.client.client_secrets[0] if isinstance(self.client.client_secrets, list) else self.client.client_secrets,
+            tenant_id=self.client.tenant_id,
+            csv_path=csv_path,
+            delegated_token=delegated_token,
             max_rows=max_rows,
             is_cancelled_callback=is_cancelled_callback
         )
