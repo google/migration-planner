@@ -18,9 +18,12 @@ import os
 import csv
 import logging
 import threading
+import concurrent.futures
 import customtkinter as ctk
 
 from core.graph.exchange.mail_security import run_mail_security_pipeline
+from core.powershell.client import PowerShellClient
+from core.powershell.encryption import get_encryption_policies
 from telemetry.styles import *
 
 usage_logger = logging.getLogger("M365TelemetryAsyncLogger.MailSecurityUI")
@@ -49,6 +52,7 @@ class MailSecurityFrame(ctk.CTkFrame):
         self.total_defender_users = 0
         self.defender_skus = []
         
+        self.encryption_data = {"m365_policies": [], "exchange_deps": [], "error": None}
         self.last_data = {}
         
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
@@ -88,7 +92,50 @@ class MailSecurityFrame(ctk.CTkFrame):
         if self.semaphore:
             self.semaphore.acquire()
         try:
-            result_data = run_mail_security_pipeline(c_id, c_secret, tenant)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                skus_future = executor.submit(run_mail_security_pipeline, c_id, c_secret, tenant)
+                
+                # Fetch encryption policies
+                def fetch_encryption():
+                    try:
+                        from core.graph.client import GraphClient
+                        from core.graph.directory import DirectoryService
+                        
+                        tenant_domain = tenant
+                        client = None
+                        try:
+                            client = GraphClient(
+                                tenant_id=tenant,
+                                client_ids=c_id,
+                                client_secrets=c_secret,
+                                concurrency=1,
+                                retries=3,
+                                backoff=2
+                            )
+                            client.authenticate()
+                            dir_svc = DirectoryService(client)
+                            tenant_domain = dir_svc.get_tenant_primary_domain()
+                        except Exception as e:
+                            usage_logger.warning(f"Could not retrieve tenant domain via Graph. Falling back to Tenant ID Guid: {e}")
+                        finally:
+                            if client:
+                                client.close()
+
+                        ps_client = PowerShellClient(
+                            tenant_id=tenant_domain,
+                            client_id=c_id,
+                            client_secret=c_secret,
+                            cert_tenant_id=tenant
+                        )
+                        return get_encryption_policies(ps_client)
+                    except Exception as e:
+                        usage_logger.warning(f"Failed to fetch encryption policies: {e}")
+                        return {"m365_policies": [], "exchange_deps": [], "error": str(e)}
+                
+                enc_future = executor.submit(fetch_encryption)
+                
+                result_data = skus_future.result()
+                self.encryption_data = enc_future.result()
             
             self.defender_skus = result_data["defender"]["skus"]
             self.total_defender_users = result_data["defender"]["users"]
@@ -206,5 +253,43 @@ class MailSecurityFrame(ctk.CTkFrame):
                     c.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
                     ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
                     
+        # --- ENCRYPTION UI ---
+        ctk.CTkLabel(self.grid_frame, text="Encryption Key Management", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(fill="x", padx=15, pady=(20, 5))
+        
+        enc_grid = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
+        enc_grid.pack(fill="x", padx=10, pady=(0, 10))
+        
+        enc_headers = ["Key Management Model", "M365DataAtRestEncryptionPolicy", "DataEncryptionPolicy"]
+        for i in range(3):
+            enc_grid.grid_columnconfigure(i, weight=1)
+            
+        for col_idx, head_text in enumerate(enc_headers):
+            cell = ctk.CTkFrame(enc_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        if self.encryption_data.get("error"):
+            # Error fetching policies (e.g., missing permissions or script error)
+            c = ctk.CTkFrame(enc_grid, fg_color=COLOR_SURFACE, corner_radius=0)
+            c.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=0, pady=(0, 1))
+            err_lbl = f"Failed to fetch encryption policies: {self.encryption_data['error']}\nNote: Requires Exchange Online PowerShell certificate auth."
+            ctk.CTkLabel(c, text=err_lbl, font=FONT_BODY_MEDIUM, text_color=COLOR_ERROR, justify="center").pack(padx=10, pady=12)
+        else:
+            m365_pols = self.encryption_data.get("m365_policies", [])
+            exc_deps = self.encryption_data.get("exchange_deps", [])
+            
+            posture = "Customer Key (Customer-Managed)" if (m365_pols or exc_deps) else "Microsoft-Managed Keys (Default)"
+            
+            m365_text = str(len(m365_pols)) if m365_pols else "None detected"
+            exc_text = str(len(exc_deps)) if exc_deps else "None detected"
+            
+            bg_style = COLOR_SURFACE
+            vals = [posture, m365_text, exc_text]
+            for c_idx, val in enumerate(vals):
+                c = ctk.CTkFrame(enc_grid, fg_color=bg_style, corner_radius=0)
+                c.grid(row=1, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(c, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
+
+        # --- DISCLAIMER ---
         disclaimer = ctk.CTkLabel(self.grid_frame, text="Note: Users can track inbound connectors displayed below to identify 3rd-party security apps.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, anchor="w")
         disclaimer.pack(fill="x", padx=15, pady=(5, 15))
