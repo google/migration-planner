@@ -22,6 +22,7 @@ from telemetry.styles import *
 from telemetry.intune.mobile_apps import MobileAppsSubFrame
 from telemetry.intune.detected_apps import DetectedAppsSubFrame
 from telemetry.intune.managed_devices import ManagedDevicesSubFrame
+from telemetry.intune.vc_devices import VCDevicesSubFrame
 from telemetry.intune.device_configs import DeviceConfigsSubFrame
 from telemetry.intune.device_compliance import DeviceComplianceSubFrame
 
@@ -114,7 +115,21 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.divider3 = ctk.CTkFrame(self.body_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1)
         self.divider3.pack(fill="x", pady=15)
 
-        # 4. Device Configurations
+        # 4. VC Devices (Filtered meeting devices)
+        self.vc_devices_view = VCDevicesSubFrame(
+            self.body_frame,
+            log_callback=self.log_msg,
+            credentials_callback=self.get_credentials,
+            status_change_callback=self._subframe_status_changed,
+            semaphore=self.semaphore
+        )
+        self.vc_devices_view.pack(fill="x", pady=(0, 15))
+
+        # Divider VC
+        self.divider_vc = ctk.CTkFrame(self.body_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1)
+        self.divider_vc.pack(fill="x", pady=15)
+
+        # 5. Device Configurations
         self.device_configs_view = DeviceConfigsSubFrame(
             self.body_frame,
             log_callback=self.log_msg,
@@ -137,7 +152,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         )
         self.compliance_header.pack(anchor="w", pady=(0, 15))
 
-        # 5. Android Devices Compliance SubFrame
+        # 6. Android Devices Compliance SubFrame
         self.android_compliance_view = DeviceComplianceSubFrame(
             self.body_frame,
             log_callback=self.log_msg,
@@ -152,7 +167,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.divider5 = ctk.CTkFrame(self.body_frame, fg_color=COLOR_OUTLINE_LIGHT, height=1)
         self.divider5.pack(fill="x", pady=15)
 
-        # 6. iOS Devices Compliance SubFrame
+        # 7. iOS Devices Compliance SubFrame
         self.ios_compliance_view = DeviceComplianceSubFrame(
             self.body_frame,
             log_callback=self.log_msg,
@@ -170,6 +185,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             self.mobile_apps_view.status,
             self.detected_apps_view.status,
             self.managed_devices_view.status,
+            self.vc_devices_view.status,
             self.device_configs_view.status,
             self.android_compliance_view.status,
             self.ios_compliance_view.status
@@ -190,6 +206,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.mobile_apps_view.reset_view()
         self.detected_apps_view.reset_view()
         self.managed_devices_view.reset_view()
+        self.vc_devices_view.reset_view()
         self.device_configs_view.reset_view()
         self.android_compliance_view.reset_view()
         self.ios_compliance_view.reset_view()
@@ -200,6 +217,12 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.mobile_apps_view.trigger_fetch(tenant, client_id, client_secret)
         self.detected_apps_view.trigger_fetch(tenant, client_id, client_secret)
         self.managed_devices_view.trigger_fetch(tenant, client_id, client_secret)
+        
+        # We start the VC Devices filter fetch. It will read local CSV files.
+        # To avoid racing on raw managed devices or room mailboxes files, we wait or let it run.
+        # Since it runs in a thread, we can trigger it directly.
+        self.vc_devices_view.trigger_fetch(tenant, client_id, client_secret)
+        
         self.device_configs_view.trigger_fetch(tenant, client_id, client_secret)
         self.android_compliance_view.trigger_fetch(tenant, client_id, client_secret)
         self.ios_compliance_view.trigger_fetch(tenant, client_id, client_secret)
@@ -209,6 +232,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
         self.mobile_apps_view.cancel()
         self.detected_apps_view.cancel()
         self.managed_devices_view.cancel()
+        self.vc_devices_view.cancel()
         self.device_configs_view.cancel()
         self.android_compliance_view.cancel()
         self.ios_compliance_view.cancel()
@@ -222,6 +246,7 @@ class IntunePoliciesFrame(ctk.CTkFrame):
             "mobile_apps": self.mobile_apps_view.last_data,
             "detected_apps": self.detected_apps_view.last_data,
             "managed_devices": self.managed_devices_view.last_data,
+            "vc_devices": self.vc_devices_view.last_data,
             "android_compliance": self.android_compliance_view.last_data,
             "ios_compliance": self.ios_compliance_view.last_data
         }

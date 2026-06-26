@@ -117,5 +117,6 @@ def run_calendar_telemetry_pipeline(client_id: str, client_secret: str, tenant_i
         "AppsError": apps_error,
         "NamingConvention": rooms_error if rooms_error else (rooms_naming if rooms_naming else "None found"),
         "CanShareAttachments": owa_policy_error if owa_policy_error else can_share_attachments,
+        "RoomsList": metadata.get("RoomsList", []) if not rooms_error else [],
         "powershell_error": powershell_error
     }

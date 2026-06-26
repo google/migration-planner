@@ -75,10 +75,16 @@ try {
         $appsError = $_.Exception.Message
     }
     
+    $roomsList = @()
+    if ($rooms) {
+        $roomsList = @($rooms | Select-Object -ExpandProperty PrimarySmtpAddress)
+    }
+    
     $result = [PSCustomObject]@{
         RoomsCount             = $roomsCount
         RoomsError             = $roomsError
         RoomsNaming            = $roomsNaming
+        RoomsList              = $roomsList
         EquipmentCount         = $equipmentCount
         EquipmentError         = $equipmentError
         CanShareAttachments    = $canShareAttachments

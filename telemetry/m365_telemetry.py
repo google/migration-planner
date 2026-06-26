@@ -976,6 +976,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             intune_data["detected_apps"] = load_csv("intune_detected_apps.csv")
         if not intune_data.get("managed_devices"):
             intune_data["managed_devices"] = load_csv("intune_managed_devices.csv")
+        if not intune_data.get("vc_devices"):
+            intune_data["vc_devices"] = load_csv("intune_vc_devices.csv")
         if not intune_data.get("android_compliance"):
             intune_data["android_compliance"] = load_csv("intune_android_compliance.csv")
         if not intune_data.get("ios_compliance"):

@@ -140,8 +140,18 @@ class CalendarTelemetryFrame(ctk.CTkFrame):
                     writer = csv.writer(f)
                     writer.writerow(["Configuration", "Value"])
                     for k, v in data.items():
-                        writer.writerow([k, str(v)])
-                calendar_logger.info(f"Successfully streamed Calendar data to {csv_path}")
+                        if k != "RoomsList":
+                            writer.writerow([k, str(v)])
+                
+                rooms_list = data.get("RoomsList", [])
+                rooms_csv = os.path.join(reports_dir, "room_mailboxes.csv")
+                with open(rooms_csv, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["PrimarySmtpAddress"])
+                    for room in rooms_list:
+                        writer.writerow([room])
+                        
+                calendar_logger.info(f"Successfully streamed Calendar data to {csv_path} and room list to {rooms_csv}")
 
             calendar_logger.info("Successfully completed Calendar telemetry data fetch.")
             self.after(0, self._render_success, data)

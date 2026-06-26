@@ -70,7 +70,9 @@ def run_managed_devices_pipeline(
                         "managementAgent": str(item.get("managementAgent") or "unknown"),
                         "deviceRegistrationState": str(item.get("deviceRegistrationState") or "unknown"),
                         "model": item.get("model") or "N/A",
-                        "manufacturer": item.get("manufacturer") or "N/A"
+                        "manufacturer": item.get("manufacturer") or "N/A",
+                        "userPrincipalName": item.get("userPrincipalName") or "N/A",
+                        "emailAddress": item.get("emailAddress") or "N/A"
                     })
                     
                 url = data.get("@odata.nextLink")
