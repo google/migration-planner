@@ -416,6 +416,11 @@ The Usage and Adoption tab scans the following 10 functional modules of a Micros
       <td>Cloud Flows and Desktop Flows configurations, listing active/inactive flows and checking for complex connectors or premium triggers.</td>
       <td>Power Platform Admin / CRM Dataverse API requests:<br>• Environments: <code>GET https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/environments</code><br>• Cloud Flows: <code>GET https://service.flow.microsoft.com/providers/Microsoft.ProcessSimple/environments/{env}/flows</code><br>• Desktop Flows: CRM Dataverse <code>GET /api/data/v9.0/workflows</code> (Category 6)</td>
     </tr>
+    <tr>
+      <td><b>11. Microsoft Teams Overview</b></td>
+      <td>• <b>Teams Activity</b>: Active users, guests, meetings organized, and channel messages over the last 180 days across all teams.</td>
+      <td>Graph Reports API:<br>• Teams Activity: <code>GET /reports/getTeamsTeamActivityDetail(period='D180')</code></td>
+    </tr>
   </tbody>
 </table>
 

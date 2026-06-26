@@ -39,6 +39,7 @@ from telemetry.power_automate import PowerAutomateUsageFrame
 
 
 # Import existing modular views
+from telemetry.files.msteams_overview import MsTeamsOverviewFrame
 from telemetry.files import FilesTelemetryFrame
 from telemetry.devices_apps_telemetry import DevicesAppsTelemetryFrame
 from telemetry.email_client_support import EmailClientSupportFrame
@@ -190,7 +191,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             [self.directory_view],
             [self.m365_apps_view],
             [self.exchange_online_view],
-            [self.files_view],
+            [self.files_view, self.msteams_overview_view],
             [self.devices_apps_view, self.intune_policies_view],
             [self.network_security_view],
             [self.security_gov_view],
@@ -309,13 +310,13 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
-        # 5c. Files (SharePoint & OneDrive) Section
-        self.files_view = FilesTelemetryFrame(
+        # 5d. MsTeams Overview Section
+        self.msteams_overview_view = MsTeamsOverviewFrame(
             master=self,
             log_callback=self.log_msg,
             credentials_callback=self._get_credentials,
             status_change_callback=self._check_all_done,
-            concurrency_semaphore=self.telemetry_semaphore
+            semaphore=self.telemetry_semaphore
         )
 
         # 5e. Network Security Section
@@ -357,18 +358,6 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             concurrency_semaphore=self.telemetry_semaphore
         )
 
-        self.batches = [
-            [self.subscribed_skus_view],
-            [self.devices_apps_view],
-            [self.directory_view],
-            [self.m365_apps_view],
-            [self.exchange_online_view],
-            [self.files_view],
-            [self.intune_policies_view],
-            [self.security_gov_view],
-            [self.power_automate_view]
-        ]
-        self.current_batch_index = 0
 
         # Bind mouse wheel globally to scroll this tab when hovered
         self.bind_all("<MouseWheel>", self._handle_global_mousewheel, add="+")
@@ -388,6 +377,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.m365_apps_view,
             self.exchange_online_view,
             self.files_view,
+            self.msteams_overview_view,
             self.devices_apps_view,
             self.network_security_view,
             self.security_gov_view,
@@ -549,6 +539,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             self.exchange_online_view.pst_files_view,
             self.files_view.sharepoint_view,
             self.files_view.onedrive_view,
+            self.msteams_overview_view,
             self.network_security_view.filtering_view,
             self.network_security_view.ca_view,
             self.network_security_view.fw_view,
@@ -589,6 +580,7 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "SharePointUsageFrame": "SharePoint Online Sites & Files Summary",
             "SharePointDataTypesFrame": "SharePoint Data Types (Tenant Wide)",
             "OneDriveUsageFrame": "OneDrive for Business Personal Accounts Summary",
+            "MsTeamsOverviewFrame": "Microsoft Teams Overview (180 Days)",
             "FilteringPoliciesSubFrame": "Filtering Policies",
             "ConditionalAccessSubFrame": "Conditional Access Policies",
             "FirewallSubFrame": "Firewall and Proxy Configurations",
@@ -1038,7 +1030,8 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "service_principals_sso": getattr(self.security_gov_view.sso_frame, "last_data", []),
             "conditional_access": getattr(self.security_gov_view.auth_frame, "last_data", []),
             "ediscovery_cases": load_csv("ediscovery_cases.csv"),
-            "power_automate": getattr(self.power_automate_view, "last_results", {})
+            "power_automate": getattr(self.power_automate_view, "last_results", {}),
+            "msteams_activity": load_csv("msteams_activity.csv")
         }
 
     def _get_email_clients_pdf_mapped(self) -> dict:
