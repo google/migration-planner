@@ -15,6 +15,7 @@
 """PDF Report Compilation module for Microsoft 365 Tenant Telemetry data."""
 
 import io
+import html
 from datetime import datetime
 from collections import Counter
 from matplotlib.figure import Figure
@@ -24,6 +25,14 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas
+
+
+def escape_text(val) -> str:
+    """Safely escapes XML/HTML special characters in dynamic text to prevent ReportLab Paragraph parsing errors."""
+    if val is None:
+        return "-"
+    return html.escape(str(val))
+
 
 
 class NumberedCanvas(canvas.Canvas):
@@ -389,7 +398,7 @@ def generate_pdf_report(data: dict, filepath: str):
         
         for item in sku_list:
             sku_table_data.append([
-                Paragraph(item.get("skuPartNumber", "UNKNOWN_SKU"), table_cell_bold),
+                Paragraph(escape_text(item.get("skuPartNumber", "UNKNOWN_SKU")), table_cell_bold),
                 Paragraph(format_prepaid_units(item).replace("\n", "<br/>"), table_cell_style),
                 Paragraph(f"{item.get('consumedUnits', 0):,}", table_cell_style)
             ])
@@ -435,13 +444,13 @@ def generate_pdf_report(data: dict, filepath: str):
                 
             org_table_data = [
                 [Paragraph("Property", table_cell_header), Paragraph("Value", table_cell_header)],
-                [Paragraph("displayName", table_cell_bold), Paragraph(format_pdf_val(org.get("displayName")), table_cell_style)],
-                [Paragraph("isMultipleDataLocationsForServicesEnabled", table_cell_bold), Paragraph(format_pdf_val(org.get("isMultipleDataLocationsForServicesEnabled")), table_cell_style)],
-                [Paragraph("onPremisesSyncEnabled", table_cell_bold), Paragraph(format_pdf_val(org.get("onPremisesSyncEnabled")), table_cell_style)],
-                [Paragraph("onPremisesLastSyncDateTime", table_cell_bold), Paragraph(format_pdf_val(org.get("onPremisesLastSyncDateTime")), table_cell_style)],
-                [Paragraph("partnerTenantType", table_cell_bold), Paragraph(format_pdf_val(org.get("partnerTenantType")), table_cell_style)],
-                [Paragraph("tenantType", table_cell_bold), Paragraph(format_pdf_val(org.get("tenantType")), table_cell_style)],
-                [Paragraph("provisionedPlans", table_cell_bold), Paragraph(plan_services_str, table_cell_style)]
+                [Paragraph("displayName", table_cell_bold), Paragraph(escape_text(format_pdf_val(org.get("displayName"))), table_cell_style)],
+                [Paragraph("isMultipleDataLocationsForServicesEnabled", table_cell_bold), Paragraph(escape_text(format_pdf_val(org.get("isMultipleDataLocationsForServicesEnabled"))), table_cell_style)],
+                [Paragraph("onPremisesSyncEnabled", table_cell_bold), Paragraph(escape_text(format_pdf_val(org.get("onPremisesSyncEnabled"))), table_cell_style)],
+                [Paragraph("onPremisesLastSyncDateTime", table_cell_bold), Paragraph(escape_text(format_pdf_val(org.get("onPremisesLastSyncDateTime"))), table_cell_style)],
+                [Paragraph("partnerTenantType", table_cell_bold), Paragraph(escape_text(format_pdf_val(org.get("partnerTenantType"))), table_cell_style)],
+                [Paragraph("tenantType", table_cell_bold), Paragraph(escape_text(format_pdf_val(org.get("tenantType"))), table_cell_style)],
+                [Paragraph("provisionedPlans", table_cell_bold), Paragraph(escape_text(plan_services_str), table_cell_style)]
             ]
             
             org_table = Table(org_table_data, colWidths=[200, 300])
@@ -490,14 +499,14 @@ def generate_pdf_report(data: dict, filepath: str):
                 fed_issuer = item.get("federationIssuerUri") or "-"
                 
                 domains_table_data.append([
-                    Paragraph(item.get("id", "-"), table_cell_bold),
-                    Paragraph(auth_type, table_cell_style),
-                    Paragraph(admin_managed, table_cell_style),
-                    Paragraph(is_default, table_cell_style),
-                    Paragraph(is_verified, table_cell_style),
-                    Paragraph(services_str, table_cell_style),
-                    Paragraph(fed_idp, table_cell_style),
-                    Paragraph(fed_issuer, table_cell_style)
+                    Paragraph(escape_text(item.get("id", "-")), table_cell_bold),
+                    Paragraph(escape_text(auth_type), table_cell_style),
+                    Paragraph(escape_text(admin_managed), table_cell_style),
+                    Paragraph(escape_text(is_default), table_cell_style),
+                    Paragraph(escape_text(is_verified), table_cell_style),
+                    Paragraph(escape_text(services_str), table_cell_style),
+                    Paragraph(escape_text(fed_idp), table_cell_style),
+                    Paragraph(escape_text(fed_issuer), table_cell_style)
                 ])
             domains_table = Table(domains_table_data, colWidths=[80, 50, 45, 35, 35, 95, 80, 80])
             domains_table.setStyle(TableStyle([
@@ -537,8 +546,8 @@ def generate_pdf_report(data: dict, filepath: str):
                 init_by = log.get("initiatedBy") or "-"
                 
                 user_creation_table_data.append([
-                    Paragraph(activity, table_cell_bold),
-                    Paragraph(init_by, table_cell_style)
+                    Paragraph(escape_text(activity), table_cell_bold),
+                    Paragraph(escape_text(init_by), table_cell_style)
                 ])
                 
             user_creation_table = Table(user_creation_table_data, colWidths=[124, 380])
@@ -591,14 +600,14 @@ def generate_pdf_report(data: dict, filepath: str):
                 statusInfo = log.get("provisioningStatusInfo") or "-"
                 
                 prov_table_data.append([
-                    Paragraph(initiatedBy, small_table_cell_style),
-                    Paragraph(action, small_table_cell_bold),
-                    Paragraph(steps, small_table_cell_style),
-                    Paragraph(sp, small_table_cell_style),
-                    Paragraph(src, small_table_cell_style),
-                    Paragraph(tgt, small_table_cell_style),
-                    Paragraph(tenant, small_table_cell_style),
-                    Paragraph(statusInfo, small_table_cell_style)
+                    Paragraph(escape_text(initiatedBy), small_table_cell_style),
+                    Paragraph(escape_text(action), small_table_cell_bold),
+                    Paragraph(escape_text(steps), small_table_cell_style),
+                    Paragraph(escape_text(sp), small_table_cell_style),
+                    Paragraph(escape_text(src), small_table_cell_style),
+                    Paragraph(escape_text(tgt), small_table_cell_style),
+                    Paragraph(escape_text(tenant), small_table_cell_style),
+                    Paragraph(escape_text(statusInfo), small_table_cell_style)
                 ])
                 
             prov_table = Table(prov_table_data, colWidths=[64, 60, 80, 60, 40, 40, 40, 120])
@@ -862,7 +871,7 @@ def generate_pdf_report(data: dict, filepath: str):
     for label, val in exchange_rows:
         workload_table_data.append([
             Paragraph(label, table_cell_bold),
-            Paragraph(val, table_cell_style)
+            Paragraph(escape_text(val), table_cell_style)
         ])
         
     ex_table = Table(workload_table_data, colWidths=[260, 240])
@@ -906,14 +915,14 @@ def generate_pdf_report(data: dict, filepath: str):
             if r_idx < len(left_col):
                 app = left_col[r_idx]
                 enabled_str = "Enabled" if app.get("Enabled") else "Disabled"
-                row_items.extend([app.get("DisplayName", "-"), enabled_str])
+                row_items.extend([escape_text(app.get("DisplayName", "-")), enabled_str])
             else:
                 row_items.extend(["", ""])
                 
             if r_idx < len(right_col):
                 app = right_col[r_idx]
                 enabled_str = "Enabled" if app.get("Enabled") else "Disabled"
-                row_items.extend([app.get("DisplayName", "-"), enabled_str])
+                row_items.extend([escape_text(app.get("DisplayName", "-")), enabled_str])
             else:
                 row_items.extend(["", ""])
                 
@@ -955,12 +964,12 @@ def generate_pdf_report(data: dict, filepath: str):
             Paragraph("Routing Config", table_cell_header)
         ]]
         for conn in connectors:
-            routing_txt = conn.get("Routing", "-").replace("\n", "<br/>")
+            routing_txt = escape_text(conn.get("Routing", "-")).replace("\n", "<br/>")
             conn_table_data.append([
-                Paragraph(conn.get("Direction", "-"), table_cell_style),
-                Paragraph(conn.get("Name", "-"), table_cell_bold),
-                Paragraph(conn.get("Status", "-"), table_cell_style),
-                Paragraph(conn.get("Domains", "-"), table_cell_style),
+                Paragraph(escape_text(conn.get("Direction", "-")), table_cell_style),
+                Paragraph(escape_text(conn.get("Name", "-")), table_cell_bold),
+                Paragraph(escape_text(conn.get("Status", "-")), table_cell_style),
+                Paragraph(escape_text(conn.get("Domains", "-")), table_cell_style),
                 Paragraph(routing_txt, table_cell_style)
             ])
         conn_table = Table(conn_table_data, colWidths=[70, 120, 60, 100, 154])
@@ -1153,12 +1162,12 @@ def generate_pdf_report(data: dict, filepath: str):
         
         for row in msteams_data[:20]:
             teams_table_data.append([
-                Paragraph(row.get("Team Name", "-"), table_cell_bold),
-                Paragraph(row.get("Last Activity Date", "-"), table_cell_style),
-                Paragraph(row.get("Active Users", "0"), table_cell_style),
-                Paragraph(row.get("Guests", "0"), table_cell_style),
-                Paragraph(row.get("Meetings Organized", "0"), table_cell_style),
-                Paragraph(row.get("Channel Messages", "0"), table_cell_style)
+                Paragraph(escape_text(row.get("Team Name", "-")), table_cell_bold),
+                Paragraph(escape_text(row.get("Last Activity Date", "-")), table_cell_style),
+                Paragraph(escape_text(row.get("Active Users", "0")), table_cell_style),
+                Paragraph(escape_text(row.get("Guests", "0")), table_cell_style),
+                Paragraph(escape_text(row.get("Meetings Organized", "0")), table_cell_style),
+                Paragraph(escape_text(row.get("Channel Messages", "0")), table_cell_style)
             ])
             
         teams_table = Table(teams_table_data, colWidths=[120, 70, 70, 50, 70, 70])
@@ -1196,8 +1205,8 @@ def generate_pdf_report(data: dict, filepath: str):
         
         for app, success in app_signins:
             app_signins_table_data.append([
-                Paragraph(app, table_cell_bold),
-                Paragraph(success, table_cell_style)
+                Paragraph(escape_text(app), table_cell_bold),
+                Paragraph(escape_text(success), table_cell_style)
             ])
             
         app_signins_table = Table(app_signins_table_data, colWidths=[250, 254])
@@ -1233,11 +1242,11 @@ def generate_pdf_report(data: dict, filepath: str):
         for name, app_id, created, audience, creds in app_registrations:
             formatted_created = created[:10] if created else ""
             app_regs_table_data.append([
-                Paragraph(name, table_cell_bold),
-                Paragraph(app_id, table_cell_style),
-                Paragraph(formatted_created, table_cell_style),
-                Paragraph(audience, table_cell_style),
-                Paragraph(creds, table_cell_style)
+                Paragraph(escape_text(name), table_cell_bold),
+                Paragraph(escape_text(app_id), table_cell_style),
+                Paragraph(escape_text(formatted_created), table_cell_style),
+                Paragraph(escape_text(audience), table_cell_style),
+                Paragraph(escape_text(creds), table_cell_style)
             ])
             
         app_regs_table = Table(app_regs_table_data, colWidths=[120, 110, 70, 110, 94])
@@ -1264,9 +1273,9 @@ def generate_pdf_report(data: dict, filepath: str):
     else:
         user_signins_table_data = [
             [Paragraph("Sign-in Attribute", table_cell_header), Paragraph("Successful Unique Values", table_cell_header)],
-            [Paragraph("App Display Names", table_cell_bold), Paragraph(", ".join(user_signins.get("apps", [])) or "None", table_cell_style)],
-            [Paragraph("Operating Systems", table_cell_bold), Paragraph(", ".join(user_signins.get("os", [])) or "None", table_cell_style)],
-            [Paragraph("Browsers", table_cell_bold), Paragraph(", ".join(user_signins.get("browsers", [])) or "None", table_cell_style)]
+            [Paragraph("App Display Names", table_cell_bold), Paragraph(escape_text(", ".join(user_signins.get("apps", [])) or "None"), table_cell_style)],
+            [Paragraph("Operating Systems", table_cell_bold), Paragraph(escape_text(", ".join(user_signins.get("os", [])) or "None"), table_cell_style)],
+            [Paragraph("Browsers", table_cell_bold), Paragraph(escape_text(", ".join(user_signins.get("browsers", [])) or "None"), table_cell_style)]
         ]
         user_table = Table(user_signins_table_data, colWidths=[150, 354])
         user_table.setStyle(TableStyle([
@@ -1303,8 +1312,8 @@ def generate_pdf_report(data: dict, filepath: str):
         
         for method, activity in auth_methods:
             auth_table_data.append([
-                Paragraph(method, table_cell_bold),
-                Paragraph(activity, table_cell_style)
+                Paragraph(escape_text(method), table_cell_bold),
+                Paragraph(escape_text(activity), table_cell_style)
             ])
             
         auth_table = Table(auth_table_data, colWidths=[250, 254])
@@ -1356,13 +1365,13 @@ def generate_pdf_report(data: dict, filepath: str):
         
         for dev in managed_devices[:10]:
             dev_table_data.append([
-                Paragraph(dev.get("userId", "N/A"), table_cell_bold),
-                Paragraph(dev.get("deviceName", "N/A"), table_cell_style),
-                Paragraph(dev.get("operatingSystem", "N/A"), table_cell_style),
-                Paragraph(dev.get("managementAgent", "unknown"), table_cell_style),
-                Paragraph(dev.get("deviceRegistrationState", "unknown"), table_cell_style),
-                Paragraph(dev.get("model", "N/A"), table_cell_style),
-                Paragraph(dev.get("manufacturer", "N/A"), table_cell_style)
+                Paragraph(escape_text(dev.get("userId", "N/A")), table_cell_bold),
+                Paragraph(escape_text(dev.get("deviceName", "N/A")), table_cell_style),
+                Paragraph(escape_text(dev.get("operatingSystem", "N/A")), table_cell_style),
+                Paragraph(escape_text(dev.get("managementAgent", "unknown")), table_cell_style),
+                Paragraph(escape_text(dev.get("deviceRegistrationState", "unknown")), table_cell_style),
+                Paragraph(escape_text(dev.get("model", "N/A")), table_cell_style),
+                Paragraph(escape_text(dev.get("manufacturer", "N/A")), table_cell_style)
             ])
             
         dev_table = Table(dev_table_data, colWidths=[90, 80, 60, 70, 70, 64, 70])
@@ -1398,13 +1407,13 @@ def generate_pdf_report(data: dict, filepath: str):
         
         for dev in vc_devices[:10]:
             vc_table_data.append([
-                Paragraph(dev.get("userId", "N/A"), table_cell_bold),
-                Paragraph(dev.get("deviceName", "N/A"), table_cell_style),
-                Paragraph(dev.get("operatingSystem", "N/A"), table_cell_style),
-                Paragraph(dev.get("managementAgent", "unknown"), table_cell_style),
-                Paragraph(dev.get("deviceRegistrationState", "unknown"), table_cell_style),
-                Paragraph(dev.get("model", "N/A"), table_cell_style),
-                Paragraph(dev.get("manufacturer", "N/A"), table_cell_style)
+                Paragraph(escape_text(dev.get("userId", "N/A")), table_cell_bold),
+                Paragraph(escape_text(dev.get("deviceName", "N/A")), table_cell_style),
+                Paragraph(escape_text(dev.get("operatingSystem", "N/A")), table_cell_style),
+                Paragraph(escape_text(dev.get("managementAgent", "unknown")), table_cell_style),
+                Paragraph(escape_text(dev.get("deviceRegistrationState", "unknown")), table_cell_style),
+                Paragraph(escape_text(dev.get("model", "N/A")), table_cell_style),
+                Paragraph(escape_text(dev.get("manufacturer", "N/A")), table_cell_style)
             ])
             
         vc_table = Table(vc_table_data, colWidths=[90, 80, 60, 70, 70, 64, 70])
@@ -1435,9 +1444,9 @@ def generate_pdf_report(data: dict, filepath: str):
         
         for platform, p_type, count in table_rows:
             intune_table_data.append([
-                Paragraph(platform, table_cell_bold),
-                Paragraph(p_type, table_cell_style),
-                Paragraph(count, table_cell_style)
+                Paragraph(escape_text(platform), table_cell_bold),
+                Paragraph(escape_text(p_type), table_cell_style),
+                Paragraph(escape_text(count), table_cell_style)
             ])
             
         intune_table = Table(intune_table_data, colWidths=[150, 200, 154])
@@ -1475,11 +1484,11 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         for policy in android_compliance[:10]:
             compliance_table_data.append([
-                Paragraph(policy.get("displayName", "N/A"), table_cell_bold),
-                Paragraph(policy.get("description", "N/A"), table_cell_style),
-                Paragraph(policy.get("createdDateTime", "N/A"), table_cell_style),
-                Paragraph(policy.get("lastModifiedDateTime", "N/A"), table_cell_style),
-                Paragraph(str(policy.get("version", 0)), table_cell_style)
+                Paragraph(escape_text(policy.get("displayName", "N/A")), table_cell_bold),
+                Paragraph(escape_text(policy.get("description", "N/A")), table_cell_style),
+                Paragraph(escape_text(policy.get("createdDateTime", "N/A")), table_cell_style),
+                Paragraph(escape_text(policy.get("lastModifiedDateTime", "N/A")), table_cell_style),
+                Paragraph(escape_text(str(policy.get("version", 0))), table_cell_style)
             ])
         compliance_table = Table(compliance_table_data, colWidths=[120, 150, 100, 100, 34])
         compliance_table.setStyle(TableStyle([
@@ -1510,11 +1519,11 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         for policy in ios_compliance[:10]:
             compliance_table_data.append([
-                Paragraph(policy.get("displayName", "N/A"), table_cell_bold),
-                Paragraph(policy.get("description", "N/A"), table_cell_style),
-                Paragraph(policy.get("createdDateTime", "N/A"), table_cell_style),
-                Paragraph(policy.get("lastModifiedDateTime", "N/A"), table_cell_style),
-                Paragraph(str(policy.get("version", 0)), table_cell_style)
+                Paragraph(escape_text(policy.get("displayName", "N/A")), table_cell_bold),
+                Paragraph(escape_text(policy.get("description", "N/A")), table_cell_style),
+                Paragraph(escape_text(policy.get("createdDateTime", "N/A")), table_cell_style),
+                Paragraph(escape_text(policy.get("lastModifiedDateTime", "N/A")), table_cell_style),
+                Paragraph(escape_text(str(policy.get("version", 0))), table_cell_style)
             ])
         compliance_table = Table(compliance_table_data, colWidths=[120, 150, 100, 100, 34])
         compliance_table.setStyle(TableStyle([
@@ -1547,13 +1556,13 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         for config in byod_configs[:10]:
             byod_table_data.append([
-                Paragraph(config.get("displayName", "N/A"), table_cell_bold),
-                Paragraph(config.get("description", "N/A"), table_cell_style),
-                Paragraph(str(config.get("priority", 0)), table_cell_style),
-                Paragraph(config.get("lastModifiedDateTime", "N/A"), table_cell_style),
-                Paragraph(config.get("iosRestrictions", "N/A"), table_cell_style),
-                Paragraph(config.get("windowsMobileRestrictions", "N/A"), table_cell_style),
-                Paragraph(config.get("androidRestrictions", "N/A"), table_cell_style)
+                Paragraph(escape_text(config.get("displayName", "N/A")), table_cell_bold),
+                Paragraph(escape_text(config.get("description", "N/A")), table_cell_style),
+                Paragraph(escape_text(str(config.get("priority", 0))), table_cell_style),
+                Paragraph(escape_text(config.get("lastModifiedDateTime", "N/A")), table_cell_style),
+                Paragraph(escape_text(config.get("iosRestrictions", "N/A")), table_cell_style),
+                Paragraph(escape_text(config.get("windowsMobileRestrictions", "N/A")), table_cell_style),
+                Paragraph(escape_text(config.get("androidRestrictions", "N/A")), table_cell_style)
             ])
         byod_table = Table(byod_table_data, colWidths=[70, 75, 34, 65, 90, 90, 90])
         byod_table.setStyle(TableStyle([
@@ -1586,12 +1595,12 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         for policy in mdm_policies[:10]:
             mdm_table_data.append([
-                Paragraph(policy.get("displayName", "N/A"), table_cell_bold),
-                Paragraph(policy.get("description", "N/A"), table_cell_style),
-                Paragraph(policy.get("appliesTo", "None"), table_cell_style),
-                Paragraph(policy.get("discoveryUrl", "N/A"), table_cell_style),
-                Paragraph(policy.get("termsOfUseUrl", "N/A"), table_cell_style),
-                Paragraph(policy.get("complianceUrl", "N/A"), table_cell_style)
+                Paragraph(escape_text(policy.get("displayName", "N/A")), table_cell_bold),
+                Paragraph(escape_text(policy.get("description", "N/A")), table_cell_style),
+                Paragraph(escape_text(policy.get("appliesTo", "None")), table_cell_style),
+                Paragraph(escape_text(policy.get("discoveryUrl", "N/A")), table_cell_style),
+                Paragraph(escape_text(policy.get("termsOfUseUrl", "N/A")), table_cell_style),
+                Paragraph(escape_text(policy.get("complianceUrl", "N/A")), table_cell_style)
             ])
         mdm_table = Table(mdm_table_data, colWidths=[90, 100, 64, 86, 86, 86])
         mdm_table.setStyle(TableStyle([
@@ -1624,10 +1633,10 @@ def generate_pdf_report(data: dict, filepath: str):
         
         for app in detected_apps[:10]:
             det_table_data.append([
-                Paragraph(app.get("displayName", "N/A"), table_cell_bold),
-                Paragraph(app.get("version", "N/A"), table_cell_style),
-                Paragraph(app.get("publisher", "N/A"), table_cell_style),
-                Paragraph(app.get("platform", "unknown"), table_cell_style)
+                Paragraph(escape_text(app.get("displayName", "N/A")), table_cell_bold),
+                Paragraph(escape_text(app.get("version", "N/A")), table_cell_style),
+                Paragraph(escape_text(app.get("publisher", "N/A")), table_cell_style),
+                Paragraph(escape_text(app.get("platform", "unknown")), table_cell_style)
             ])
             
         det_table = Table(det_table_data, colWidths=[150, 100, 150, 104])
@@ -1672,11 +1681,11 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         for item in filtering_policies:
             table_data.append([
-                Paragraph(item.get("name", "N/A"), table_cell_bold),
-                Paragraph(item.get("description", "N/A"), table_cell_style),
-                Paragraph(item.get("version", "N/A"), table_cell_style),
-                Paragraph(item.get("action", "N/A"), table_cell_style),
-                Paragraph(item.get("rules_count", "0"), table_cell_style)
+                Paragraph(escape_text(item.get("name", "N/A")), table_cell_bold),
+                Paragraph(escape_text(item.get("description", "N/A")), table_cell_style),
+                Paragraph(escape_text(item.get("version", "N/A")), table_cell_style),
+                Paragraph(escape_text(item.get("action", "N/A")), table_cell_style),
+                Paragraph(escape_text(item.get("rules_count", "0")), table_cell_style)
             ])
         t = Table(table_data, colWidths=[120, 180, 70, 70, 64])
         t.setStyle(TableStyle([
@@ -1706,11 +1715,11 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         for item in ca_policies:
             table_data.append([
-                Paragraph(item.get("name", "N/A"), table_cell_bold),
-                Paragraph(item.get("state", "N/A"), table_cell_style),
-                Paragraph(item.get("target_users", "N/A"), table_cell_style),
-                Paragraph(item.get("target_apps", "N/A"), table_cell_style),
-                Paragraph(item.get("controls", "N/A"), table_cell_style)
+                Paragraph(escape_text(item.get("name", "N/A")), table_cell_bold),
+                Paragraph(escape_text(item.get("state", "N/A")), table_cell_style),
+                Paragraph(escape_text(item.get("target_users", "N/A")), table_cell_style),
+                Paragraph(escape_text(item.get("target_apps", "N/A")), table_cell_style),
+                Paragraph(escape_text(item.get("controls", "N/A")), table_cell_style)
             ])
         t = Table(table_data, colWidths=[130, 60, 100, 100, 114])
         t.setStyle(TableStyle([
@@ -1739,10 +1748,10 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         for item in fw_policies:
             table_data.append([
-                Paragraph(item.get("name", "N/A"), table_cell_bold),
-                Paragraph(item.get("policy_type", "N/A"), table_cell_style),
-                Paragraph(item.get("firewall_status", "N/A"), table_cell_style),
-                Paragraph(item.get("proxy_status", "N/A"), table_cell_style)
+                Paragraph(escape_text(item.get("name", "N/A")), table_cell_bold),
+                Paragraph(escape_text(item.get("policy_type", "N/A")), table_cell_style),
+                Paragraph(escape_text(item.get("firewall_status", "N/A")), table_cell_style),
+                Paragraph(escape_text(item.get("proxy_status", "N/A")), table_cell_style)
             ])
         t = Table(table_data, colWidths=[150, 150, 100, 104])
         t.setStyle(TableStyle([
@@ -1809,11 +1818,11 @@ def generate_pdf_report(data: dict, filepath: str):
             status_str = "Enabled" if item["isEnabled"] else "Disabled"
             
             labels_table_data.append([
-                Paragraph(item["name"], bg_bold_s),
-                Paragraph(item["description"], table_cell_style),
+                Paragraph(escape_text(item["name"]), bg_bold_s),
+                Paragraph(escape_text(item["description"]), table_cell_style),
                 Paragraph(protection_str, table_cell_style),
-                Paragraph(str(item["applicationMode"]).capitalize(), table_cell_style),
-                Paragraph(str(item["priority"]), table_cell_style),
+                Paragraph(escape_text(str(item["applicationMode"]).capitalize()), table_cell_style),
+                Paragraph(escape_text(str(item["priority"])), table_cell_style),
                 Paragraph(status_str, table_cell_style)
             ])
             
@@ -1869,10 +1878,10 @@ def generate_pdf_report(data: dict, filepath: str):
             status_str = "Enabled" if is_enabled else "Disabled"
             
             ret_table_data.append([
-                Paragraph(policy.get("Name", "N/A"), table_cell_bold),
-                Paragraph(policy.get("Workload", "N/A"), table_cell_style),
+                Paragraph(escape_text(policy.get("Name", "N/A")), table_cell_bold),
+                Paragraph(escape_text(policy.get("Workload", "N/A")), table_cell_style),
                 Paragraph(duration_str, table_cell_style),
-                Paragraph(policy.get("DistributionStatus", "Success"), table_cell_style),
+                Paragraph(escape_text(policy.get("DistributionStatus", "Success")), table_cell_style),
                 Paragraph(status_str, table_cell_style)
             ])
             
@@ -1911,12 +1920,12 @@ def generate_pdf_report(data: dict, filepath: str):
             state_str = "Enabled" if en_val in ("true", "1", "yes") else "Disabled"
             
             dlp_table_data.append([
-                Paragraph(dlp.get("Name", "-"), table_cell_bold),
-                Paragraph(dlp.get("Mode", "-"), table_cell_style),
-                Paragraph(dlp.get("Workload", "-"), table_cell_style),
+                Paragraph(escape_text(dlp.get("Name", "-")), table_cell_bold),
+                Paragraph(escape_text(dlp.get("Mode", "-")), table_cell_style),
+                Paragraph(escape_text(dlp.get("Workload", "-")), table_cell_style),
                 Paragraph(state_str, table_cell_style),
-                Paragraph(dlp.get("Actions", "-"), table_cell_style),
-                Paragraph(dlp.get("CreatedBy", "-"), table_cell_style)
+                Paragraph(escape_text(dlp.get("Actions", "-")), table_cell_style),
+                Paragraph(escape_text(dlp.get("CreatedBy", "-")), table_cell_style)
             ])
         dlp_table = Table(dlp_table_data, colWidths=[110, 50, 110, 60, 90, 80])
         dlp_table.setStyle(TableStyle([
@@ -1947,9 +1956,9 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         for sit in sit_types:
             sit_table_data.append([
-                Paragraph(sit.get("Name", "-"), table_cell_bold),
-                Paragraph(sit.get("Type", "-"), table_cell_style),
-                Paragraph(str(sit.get("RecommendedConfidence", "-")), table_cell_style)
+                Paragraph(escape_text(sit.get("Name", "-")), table_cell_bold),
+                Paragraph(escape_text(sit.get("Type", "-")), table_cell_style),
+                Paragraph(escape_text(str(sit.get("RecommendedConfidence", "-"))), table_cell_style)
             ])
         sit_table = Table(sit_table_data, colWidths=[280, 100, 120])
         sit_table.setStyle(TableStyle([
@@ -2032,11 +2041,11 @@ def generate_pdf_report(data: dict, filepath: str):
         for rule in display_rules:
             desc_text = rule.get("Description") or "N/A"
             rules_table_data.append([
-                Paragraph(str(rule.get("Name", "-")), table_cell_bold),
-                Paragraph(str(rule.get("State", "-")), table_cell_style),
-                Paragraph(str(rule.get("Priority", "-")), table_cell_style),
-                Paragraph(str(rule.get("Mode", "-")), table_cell_style),
-                Paragraph(str(desc_text), small_table_cell_style)
+                Paragraph(escape_text(rule.get("Name", "-")), table_cell_bold),
+                Paragraph(escape_text(rule.get("State", "-")), table_cell_style),
+                Paragraph(escape_text(rule.get("Priority", "-")), table_cell_style),
+                Paragraph(escape_text(rule.get("Mode", "-")), table_cell_style),
+                Paragraph(escape_text(desc_text), small_table_cell_style)
             ])
             
         rules_table = Table(rules_table_data, colWidths=[120, 50, 40, 60, 234])
@@ -2106,9 +2115,9 @@ def generate_pdf_report(data: dict, filepath: str):
         ]]
         for cap in ca_policies:
             ca_table_data.append([
-                Paragraph(cap.get("name", "-"), table_cell_bold),
-                Paragraph(cap.get("state", "-"), table_cell_style),
-                Paragraph(cap.get("controls", "-"), table_cell_style)
+                Paragraph(escape_text(cap.get("name", "-")), table_cell_bold),
+                Paragraph(escape_text(cap.get("state", "-")), table_cell_style),
+                Paragraph(escape_text(cap.get("controls", "-")), table_cell_style)
             ])
         ca_table = Table(ca_table_data, colWidths=[250, 100, 150])
         ca_table.setStyle(TableStyle([
@@ -2142,10 +2151,10 @@ def generate_pdf_report(data: dict, filepath: str):
         for case in ediscovery_cases[:10]:
             created_date = str(case.get("createdDateTime", "-")).split("T")[0]
             edisc_table_data.append([
-                Paragraph(case.get("displayName", "-"), table_cell_bold),
-                Paragraph(case.get("status", "-"), table_cell_style),
-                Paragraph(created_date, table_cell_style),
-                Paragraph(case.get("closedBy", "-"), table_cell_style)
+                Paragraph(escape_text(case.get("displayName", "-")), table_cell_bold),
+                Paragraph(escape_text(case.get("status", "-")), table_cell_style),
+                Paragraph(escape_text(created_date), table_cell_style),
+                Paragraph(escape_text(case.get("closedBy", "-")), table_cell_style)
             ])
             
         edisc_table = Table(edisc_table_data, colWidths=[200, 80, 100, 120])
