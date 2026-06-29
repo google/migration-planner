@@ -16,7 +16,10 @@
 
 import io
 import html
+import logging
 from datetime import datetime
+
+logger = logging.getLogger("M365TelemetryAsyncLogger.PdfReport")
 from collections import Counter
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -426,6 +429,7 @@ def generate_pdf_report(data: dict, filepath: str):
             ]))
             story.append(sku_table)
     except Exception as e:
+        logger.exception("Failed to format Subscribed SKUs section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting Subscribed SKUs section: {escape_text(str(e))}", section_err_style))
     story.append(Spacer(1, 15))
 
@@ -707,6 +711,7 @@ def generate_pdf_report(data: dict, filepath: str):
             dir_table.setStyle(TableStyle(dir_table_style))
             story.append(dir_table)
     except Exception as e:
+        logger.exception("Failed to format Directory Summary section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting Directory Summary section: {escape_text(str(e))}", section_err_style))
     story.append(Spacer(1, 15))
 
@@ -813,6 +818,7 @@ def generate_pdf_report(data: dict, filepath: str):
              story.append(app_table)
         
     except Exception as e:
+        logger.exception("Failed to format App Usage Summary section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting App Usage Summary section: {escape_text(str(e))}", section_err_style))
     story.append(Spacer(1, 15))
 
@@ -1085,6 +1091,7 @@ def generate_pdf_report(data: dict, filepath: str):
             story.append(pst_table)
         
     except Exception as e:
+        logger.exception("Failed to format Exchange Online Workload Telemetry section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting Exchange Online Workload Telemetry section: {escape_text(str(e))}", section_err_style))
     story.append(Spacer(1, 15))
     story.append(PageBreak())
@@ -1165,6 +1172,7 @@ def generate_pdf_report(data: dict, filepath: str):
             story.append(sp_dt_table)
             story.append(Spacer(1, 15))
     except Exception as e:
+        logger.exception("Failed to format SharePoint & OneDrive Environment Telemetry section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting SharePoint & OneDrive Environment Telemetry section: {escape_text(str(e))}", section_err_style))
 
     # 3.2b Microsoft Teams Overview
@@ -1208,6 +1216,7 @@ def generate_pdf_report(data: dict, filepath: str):
             ]))
             story.append(teams_table)
     except Exception as e:
+        logger.exception("Failed to format Microsoft Teams Overview section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting Microsoft Teams Overview section: {escape_text(str(e))}", section_err_style))
         story.append(Spacer(1, 15))
 
@@ -1357,6 +1366,7 @@ def generate_pdf_report(data: dict, filepath: str):
             ]))
             story.append(auth_table)
     except Exception as e:
+        logger.exception("Failed to format Microsoft Entra Data section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting Microsoft Entra Data section: {escape_text(str(e))}", section_err_style))
         
     story.append(Spacer(1, 15))
@@ -1685,6 +1695,7 @@ def generate_pdf_report(data: dict, filepath: str):
             story.append(Spacer(1, 4))
             story.append(Paragraph("<font size=8 color='#6B7280'>* Showing top 10 detected apps. The full inventory list of up to 10,000 apps is available in the exported CSV report.</font>", body_style))
     except Exception as e:
+        logger.exception("Failed to format Microsoft Intune Data section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting Microsoft Intune Data section: {escape_text(str(e))}", section_err_style))
         
     story.append(Spacer(1, 15))
@@ -1800,6 +1811,7 @@ def generate_pdf_report(data: dict, filepath: str):
             ]))
             story.append(t)
     except Exception as e:
+        logger.exception("Failed to format Network Security section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting Network Security section: {escape_text(str(e))}", section_err_style))
 
     story.append(Spacer(1, 15))
@@ -2210,6 +2222,7 @@ def generate_pdf_report(data: dict, filepath: str):
                  story.append(Paragraph(f"...and {len(ediscovery_cases) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=body_style, fontName='Helvetica-Oblique', textColor=secondary_color)))
         story.append(Spacer(1, 15))
     except Exception as e:
+        logger.exception("Failed to format Data Security, Governance & Compliance section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting Data Security, Governance & Compliance section: {escape_text(str(e))}", section_err_style))
     story.append(PageBreak())
 
@@ -2277,6 +2290,7 @@ def generate_pdf_report(data: dict, filepath: str):
                 except Exception as chart_ex:
                     print(f"Failed to generate Power Automate chart for PDF: {chart_ex}")
     except Exception as e:
+        logger.exception("Failed to format Power Platform & Automate Flows Analytics section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting Power Platform & Automate Flows Analytics section: {escape_text(str(e))}", section_err_style))
 
     # 4. Build Document
