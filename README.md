@@ -350,6 +350,8 @@ Upon launching, you are greeted with the **Unified Login Screen**:
 *   Click **Connect & Continue**. Follow any [certificate upload instructions](#2-powershell--certificate-based-authentication) if prompted.
 
 Once authenticated, the tool provides a left-hand navigation sidebar with two main tabs:
+* Usage and Adoption
+* Migration Planner
 
 ## Tab 1: Usage and Adoption
 This tab loads the M365 Telemetry dashboard.
