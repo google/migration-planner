@@ -230,6 +230,7 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 > **Note** : When [running the deal assistant tool](#running-the-tool) with [Delegated Authentication Flow enabled](#1-delegated-authentication-flow), the user who logs in must be an eDiscovery administrator for these permissions to work in the deal assistant app.
 
 **2.1.2. APIs my organization uses > Office 365 Exchange Online**
+
 **Application Permissions:**
 *  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 *  `Exchange.ManageAsAppV2`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
