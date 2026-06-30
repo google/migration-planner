@@ -349,9 +349,9 @@ Upon launching, you are greeted with the **Unified Login Screen**:
 *   Select if you wish to use [Delegated Authentication](#1-delegated-authentication-flow).
 *   Click **Connect & Continue**. Follow any [certificate upload instructions](#2-powershell--certificate-based-authentication) if prompted.
 
-Once authenticated, the tool provides a left-hand navigation sidebar with two main tabs:
-* Usage and Adoption
-* Migration Planner
+Once authenticated, the tool provides a left-hand navigation sidebar with three main tabs:
+* **[Usage and Adoption](#tab-1-usage-and-adoption)**
+* **[Migration Planner](#tab-2-migration-planner)**
 
 ## Tab 1: Usage and Adoption
 This tab loads the M365 Telemetry dashboard.
