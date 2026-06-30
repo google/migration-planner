@@ -2604,7 +2604,8 @@ class MigrationEstimatorTool(ctk.CTk):
     # TODO Remove the need to provide config when only ETA is needed
     # Helper: Calculate ETA for subset
     config = self._get_scan_configuration()
-    if ENABLE_IN_PLACE_ARCHIVE_ETA:
+    in_place_archive_estimator = None
+    if ENABLE_IN_PLACE_ARCHIVE_ETA and self.factory.one_token_per_app_manager is not None:
       in_place_archive_estimator = self.factory.get_in_place_archive_estimator(use_delta_api=True)
     if ENABLE_SHARED_MAILBOX_ETA:
       shared_mail_box_estimator = self.factory.get_shared_mailbox_estimator()
@@ -2640,7 +2641,7 @@ class MigrationEstimatorTool(ctk.CTk):
             ETA_CONTACT_BATCH_TIME,
         )
       eta_in_place_archive = 0.0
-      if ENABLE_IN_PLACE_ARCHIVE_ETA:
+      if ENABLE_IN_PLACE_ARCHIVE_ETA and in_place_archive_estimator is not None:
         eta_in_place_archive = in_place_archive_estimator.calculate_migration_eta(
           {
             "item_counts": subset_df["In Place Archive Count"].tolist(),
@@ -2674,7 +2675,7 @@ class MigrationEstimatorTool(ctk.CTk):
           }
         )
 
-      if ENABLE_IN_PLACE_ARCHIVE_ETA:
+      if ENABLE_IN_PLACE_ARCHIVE_ETA and in_place_archive_estimator is not None:
         in_place_archive_estimator.shutdown()
       if ENABLE_SHARED_MAILBOX_ETA:
         shared_mail_box_estimator.shutdown()
@@ -2827,7 +2828,7 @@ class MigrationEstimatorTool(ctk.CTk):
           f" {self.format_eta(chunk['start_time'])}"
       )
 
-    if ENABLE_IN_PLACE_ARCHIVE_ETA:
+    if ENABLE_IN_PLACE_ARCHIVE_ETA and in_place_archive_estimator is not None:
       in_place_archive_estimator.shutdown()
     if ENABLE_SHARED_MAILBOX_ETA:
       shared_mail_box_estimator.shutdown()
