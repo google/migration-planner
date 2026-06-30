@@ -235,7 +235,9 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 *  `Exchange.ManageAsApp`: required to read data governance and security policies (sensitive, information types, exchange connectors etc)
 *  `Exchange.ManageAsAppV2`: required to read data governance and security policies (sensitive, information types, exchange connectors etc)
 
-#### 2.2. Migration Planner (Microsoft Graph Application Permissions)
+#### 2.2. Migration Planner
+
+**Microsoft APIs > Microsoft Graph > Application Permissions**
 
 **2.2.1. Shared Core Permissions**
 *   `User.Read.All` (To list users)
