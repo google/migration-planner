@@ -194,7 +194,7 @@ To scan your tenant, you need to register an app in the Microsoft Entra ID (form
 3.  Name the app (e.g., "Deal Assistant Tool").
 4.  Select **"Accounts in this organizational directory only"** (Single Tenant).
 5.  Click **Register**.
-6.  **(Required for Delegated Auth & eDiscovery)**: Go to **Authentication**. Under **Redirect URI configuration**, click **Add Redirect URI** -> **Web**. Add `http://localhost` as the redirect URI.
+6.  **(Required for Delegated Auth Flows)**: Go to **Manage > Authentication**. Under **Redirect URI configuration**, click **Add Redirect URI** -> **Web**. Add `http://localhost` as the redirect URI.
 
 ### 2. API Permissions
 In your new app, go to **API permissions > Add a permission**, and assign permissions based on the workloads you plan to scan. *Don't forget to click **"Grant admin consent"** after adding these permissions.*
