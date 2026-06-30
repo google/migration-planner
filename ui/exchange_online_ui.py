@@ -1,5 +1,10 @@
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
+
+# Performance optimizations for CustomTkinter across OS
+ctk.set_window_scaling(1.0)
+ctk.set_widget_scaling(1.0)
+
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import queue
@@ -2648,7 +2653,6 @@ class MigrationEstimatorTool(ctk.CTk):
             "user_limit": ETA_EMAIL_USER_LIMIT,
             "batch_size": ETA_EMAIL_BATCH_SIZE,
             "batch_time": ETA_EMAIL_BATCH_TIME,
-            "multiplier": IPA_ETA_MULTIPLIER
           }
         )
       eta_shared_mail_box = 0.0

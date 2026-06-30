@@ -10,8 +10,7 @@ class FailureType(Enum):
   UNKNOWN_ERROR = 7
 
 class ResourceType(Enum):
-  SITE = "SITE COLLECTION"
+  SITE = "SITE"
   FOLDER = "FOLDER"
-  DL = "DOCUMENT LIBRARY"
+  DL = "DL"
   FILE = "FILE"
-  SUBSITE = "SUBSITE"
