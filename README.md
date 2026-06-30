@@ -227,7 +227,7 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 * `Policy.Read.All`: Required to retrieve Mobile Device Management (MDM) Policies on behalf of the user.
 * `offline_access`: required to maintain access to data you have given the app access to
 
-> **Note** : The user who logs in must be an eDiscovery administrator.
+> **Note** : The user who logs in must be an eDiscovery administrator when [running the tool](#running-the-tool) with [Delegated Authentication Flow enabled](#1-delegated-authentication-flow).
 
 **2.1.2. Office 365 Exchange Online Application Permissions (under `APIs my organization uses`):**
 *  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
