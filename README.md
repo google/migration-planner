@@ -203,7 +203,7 @@ In your new app, go to **API permissions > Add a permission**, and assign permis
 The Usage and Adoption tab performs extensive tenant auditing. While the following permissions are recommended for a complete report, you may choose to grant only a subset. 
 **NOTE: Be aware that any missing permissions will simply cause the tool to gracefully skip those specific telemetry sections.**
 
-**2.1.1. Microsoft Graph:**
+**2.1.1. Microsoft APIs > Microsoft Graph:**
 
 **<u>Application permissions</u>**:
 *   `Reports.Read.All`: Used to retrieve active user trends, mailbox/SharePoint usage reports, M365 Apps, and Email Client usage.
@@ -229,7 +229,8 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 
 > **Note** : When [running the deal assistant tool](#running-the-tool) with [Delegated Authentication Flow enabled](#1-delegated-authentication-flow), the user who logs in must be an eDiscovery administrator for these permissions to work in the deal assistant app.
 
-**2.1.2. Office 365 Exchange Online Application Permissions (under `APIs my organization uses`):**
+**2.1.2. APIs my organization uses > Office 365 Exchange Online**
+**Application Permissions:**
 *  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 *  `Exchange.ManageAsAppV2`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 
