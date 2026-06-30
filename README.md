@@ -199,7 +199,7 @@ To scan your tenant, you need to register an app in the Microsoft Entra ID (form
 ### 2. API Permissions
 In your new app, go to **API permissions > Add a permission**, and assign permissions based on the workloads you plan to scan. *Don't forget to click **"Grant admin consent"** after adding these permissions.*
 
-#### 2.1. Deal Assistant Telemetry Permissions (Usage and Adoption)
+#### 2.1. Deal Assistant Telemetry Permissions ([Usage and Adoption](#introduction))
 The Usage and Adoption tab performs extensive tenant auditing. While the following permissions are recommended for a complete report, you may choose to grant only a subset. 
 **NOTE: Be aware that any missing permissions will simply cause the tool to gracefully skip those specific telemetry sections.**
 
