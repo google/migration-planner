@@ -232,8 +232,8 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 **2.1.2. APIs my organization uses > Office 365 Exchange Online**
 
 **Application Permissions:**
-*  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
-*  `Exchange.ManageAsAppV2`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
+*  `Exchange.ManageAsApp`: required to read data governance and security policies (sensitive, information types, exchange connectors etc)
+*  `Exchange.ManageAsAppV2`: required to read data governance and security policies (sensitive, information types, exchange connectors etc)
 
 #### 2.2. Migration Planner (Microsoft Graph Application Permissions)
 
