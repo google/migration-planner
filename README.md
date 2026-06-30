@@ -311,7 +311,7 @@ You will need three values for the tool:
 ## Advanced Authentication & Setup (Deal Assistant)
 
 ### 1. Delegated Authentication Flow
-Certain features like **eDiscovery** require **Delegated Authentication**. On the login screen, you can check the box to enable Delegated Authentication. 
+Certain features like **eDiscovery** require **Delegated Authentication**. On the login screen of deal assistant, you can check the box to enable Delegated Authentication. 
 > **⚠️ IMPORTANT WARNING**: If you enable this, your Entra App Registration MUST have `http://localhost` registered as a redirect URI. Otherwise, the interactive browser login popup will fail!
 
 ### 2. PowerShell & Certificate-Based Authentication
