@@ -376,7 +376,7 @@ def generate_pdf_report(data: dict, filepath: str):
     
     # Metadata Table
     meta_data = [
-        [Paragraph("Tenant Name / ID:", meta_label_style), Paragraph(data.get("tenant_id", "N/A"), meta_val_style)],
+        [Paragraph("Tenant Name / ID:", meta_label_style), Paragraph(escape_text(data.get("tenant_id", "N/A")), meta_val_style)],
         [Paragraph("Report Generated:", meta_label_style), Paragraph(datetime.now().strftime("%B %d, %Y at %I:%M %p"), meta_val_style)],
         [Paragraph("Assessment Status:", meta_label_style), Paragraph("🟢 Audit Completed Successfully", ParagraphStyle('StatusStyle', parent=meta_val_style, fontName='Helvetica-Bold', textColor=colors.HexColor("#15803D")))],
         [Paragraph("Report Context:", meta_label_style), Paragraph("Usage & Adoption Inventory", meta_val_style)]
@@ -552,7 +552,7 @@ def generate_pdf_report(data: dict, filepath: str):
                 story.append(Paragraph("No user creation or deletion audit logs discovered.", body_style))
             elif user_creation_logs[0].get("activity") == "ERROR":
                 err_msg = user_creation_logs[0].get("initiatedBy")
-                story.append(Paragraph(f"Error: {err_msg}", ParagraphStyle('ErrTxtUserCreation', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+                story.append(Paragraph(f"Error: {escape_text(err_msg)}", ParagraphStyle('ErrTxtUserCreation', parent=body_style, textColor=colors.HexColor("#DC2626"))))
             else:
                 user_creation_table_data = [[
                     Paragraph("Activity", table_cell_header),
@@ -594,7 +594,7 @@ def generate_pdf_report(data: dict, filepath: str):
                 story.append(Paragraph("No provisioning audit logs discovered.", body_style))
             elif provisioning_logs[0].get("initiatedBy") == "ERROR":
                 err_msg = provisioning_logs[0].get("provisioningAction")
-                story.append(Paragraph(f"Error: {err_msg}", ParagraphStyle('ErrTxtProvisioning', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+                story.append(Paragraph(f"Error: {escape_text(err_msg)}", ParagraphStyle('ErrTxtProvisioning', parent=body_style, textColor=colors.HexColor("#DC2626"))))
             else:
                 prov_table_data = [[
                     Paragraph("Initiated By", small_table_cell_header),
@@ -688,7 +688,7 @@ def generate_pdf_report(data: dict, filepath: str):
                     
                 cell_bold = table_cell_bold if is_bold else table_cell_style
                 dir_table_data.append([
-                    Paragraph(metric_name, cell_bold),
+                    Paragraph(escape_text(str(metric_name)), cell_bold),
                     Paragraph(f"{val:,}", table_cell_style)
                 ])
                 # Alternate row background
@@ -738,7 +738,7 @@ def generate_pdf_report(data: dict, filepath: str):
             
             for row in o365_usage:
                 usage_table_data.append([
-                    Paragraph(str(row[0]), table_cell_bold),
+                    Paragraph(escape_text(str(str(row[0]))), table_cell_bold),
                     Paragraph(f"{row[1]:,}", table_cell_style),
                     Paragraph(f"{row[2]:,}", table_cell_style),
                     Paragraph(f"{row[3]:,}", table_cell_style)
@@ -799,10 +799,10 @@ def generate_pdf_report(data: dict, filepath: str):
                  r_val = f"{right_col[r_idx][1]:,}" if r_idx < len(right_col) else ""
                  
                  app_table_data.append([
-                     Paragraph(l_name, table_cell_bold if l_name else table_cell_style),
-                     Paragraph(l_val, table_cell_style),
-                     Paragraph(r_name, table_cell_bold if r_name else table_cell_style),
-                     Paragraph(r_val, table_cell_style)
+                     Paragraph(escape_text(str(l_name)), table_cell_bold if l_name else table_cell_style),
+                     Paragraph(escape_text(l_val), table_cell_style),
+                     Paragraph(escape_text(str(r_name)), table_cell_bold if r_name else table_cell_style),
+                     Paragraph(escape_text(r_val), table_cell_style)
                  ])
                  
              app_table = Table(app_table_data, colWidths=[150, 100, 150, 100])
@@ -844,7 +844,7 @@ def generate_pdf_report(data: dict, filepath: str):
             pw_warn.append(f"Calendar: {calendar['powershell_error']}")
             
         if pw_warn:
-            story.append(Paragraph(f"⚠️ Warning: PowerShell metrics are restricted or incomplete ({'; '.join(pw_warn)})", ParagraphStyle('WarnTxt', parent=body_style, textColor=colors.HexColor("#D97706"), fontName="Helvetica-Bold")))
+            story.append(Paragraph(escape_text(f"⚠️ Warning: PowerShell metrics are restricted or incomplete ({'; '.join(pw_warn)})"), ParagraphStyle('WarnTxt', parent=body_style, textColor=colors.HexColor("#D97706"), fontName="Helvetica-Bold")))
             story.append(Spacer(1, 4))
             
         workload_table_data = [[
@@ -896,7 +896,7 @@ def generate_pdf_report(data: dict, filepath: str):
         
         for label, val in exchange_rows:
             workload_table_data.append([
-                Paragraph(label, table_cell_bold),
+                Paragraph(escape_text(label), table_cell_bold),
                 Paragraph(escape_text(val), table_cell_style)
             ])
             
@@ -922,7 +922,7 @@ def generate_pdf_report(data: dict, filepath: str):
         apps_error = calendar.get("AppsError")
         
         if apps_error:
-            story.append(Paragraph(f"Error querying organization apps: {apps_error}", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
+            story.append(Paragraph(f"Error querying organization apps: {escape_text(apps_error)}", ParagraphStyle('ErrTxt', parent=body_style, textColor=colors.HexColor("#DC2626"))))
         elif not org_apps:
             story.append(Paragraph("No organization-wide apps found in Exchange Online.", body_style))
         else:
@@ -953,10 +953,10 @@ def generate_pdf_report(data: dict, filepath: str):
                     row_items.extend(["", ""])
                     
                 apps_table_data.append([
-                    Paragraph(row_items[0], table_cell_bold if row_items[0] else table_cell_style),
-                    Paragraph(row_items[1], table_cell_style),
-                    Paragraph(row_items[2], table_cell_bold if row_items[2] else table_cell_style),
-                    Paragraph(row_items[3], table_cell_style)
+                    Paragraph(escape_text(str(row_items[0])), table_cell_bold if row_items[0] else table_cell_style),
+                    Paragraph(escape_text(str(row_items[1])), table_cell_style),
+                    Paragraph(escape_text(str(row_items[2])), table_cell_bold if row_items[2] else table_cell_style),
+                    Paragraph(escape_text(str(row_items[3])), table_cell_style)
                 ])
                 
             apps_table = Table(apps_table_data, colWidths=[180, 70, 180, 70])
@@ -996,7 +996,7 @@ def generate_pdf_report(data: dict, filepath: str):
                     Paragraph(escape_text(conn.get("Name", "-")), table_cell_bold),
                     Paragraph(escape_text(conn.get("Status", "-")), table_cell_style),
                     Paragraph(escape_text(conn.get("Domains", "-")), table_cell_style),
-                    Paragraph(routing_txt, table_cell_style)
+                    Paragraph(escape_text(routing_txt), table_cell_style)
                 ])
             conn_table = Table(conn_table_data, colWidths=[70, 120, 60, 100, 154])
             conn_table.setStyle(TableStyle([
@@ -1038,7 +1038,7 @@ def generate_pdf_report(data: dict, filepath: str):
             ]
             for label, val in rows:
                 ec_table_data.append([
-                    Paragraph(label, table_cell_bold),
+                    Paragraph(escape_text(label), table_cell_bold),
                     Paragraph(f"{val:,} Users" if 'SMTP' not in label else f"{val:,} Accounts", table_cell_style)
                 ])
             ec_table = Table(ec_table_data, colWidths=[250, 150])
@@ -1076,7 +1076,7 @@ def generate_pdf_report(data: dict, filepath: str):
             cloud_size_str = f" ({format_bytes(cloud_bytes)})" if cloud_bytes > 0 else ""
             cloud_str = f"{cloud_count:,} Files{cloud_size_str}" if cloud_count > 0 else "None Detected"
     
-            pst_table_data.append([Paragraph("Cloud (SharePoint & OneDrive)", table_cell_bold), Paragraph(cloud_str, table_cell_style)])
+            pst_table_data.append([Paragraph("Cloud (SharePoint & OneDrive)", table_cell_bold), Paragraph(escape_text(cloud_str), table_cell_style)])
             
             pst_table = Table(pst_table_data, colWidths=[250, 150])
             pst_table.setStyle(TableStyle([
@@ -1122,9 +1122,9 @@ def generate_pdf_report(data: dict, filepath: str):
         
         for label, sp_val, od_val in files_rows:
             files_table_data.append([
-                Paragraph(label, table_cell_bold),
-                Paragraph(sp_val, table_cell_style),
-                Paragraph(od_val, table_cell_style)
+                Paragraph(escape_text(label), table_cell_bold),
+                Paragraph(escape_text(sp_val), table_cell_style),
+                Paragraph(escape_text(od_val), table_cell_style)
             ])
             
         files_table = Table(files_table_data, colWidths=[200, 150, 150])
@@ -1155,7 +1155,7 @@ def generate_pdf_report(data: dict, filepath: str):
                          ("Lists", sp_data_types.get("Lists", 0)),
                          ("Web Pages", sp_data_types.get("Web Pages", 0))]:
                 sp_dt_table_data.append([
-                    Paragraph(k, table_cell_bold),
+                    Paragraph(escape_text(k), table_cell_bold),
                     Paragraph(f"{v:,}", table_cell_style)
                 ])
                 
@@ -1384,7 +1384,7 @@ def generate_pdf_report(data: dict, filepath: str):
         # Render Mobile Apps
         story.append(Paragraph("<b>Managed Mobile Apps:</b>", body_style))
         apps_text = ", ".join(mobile_apps) if mobile_apps else "No mobile apps discovered or permission restricted."
-        story.append(Paragraph(apps_text, body_style))
+        story.append(Paragraph(escape_text(apps_text), body_style))
         story.append(Spacer(1, 10))
         
         # Render Managed Devices Table (Top 10)
@@ -1870,10 +1870,10 @@ def generate_pdf_report(data: dict, filepath: str):
                 labels_table_data.append([
                     Paragraph(escape_text(item["name"]), bg_bold_s),
                     Paragraph(escape_text(item["description"]), table_cell_style),
-                    Paragraph(protection_str, table_cell_style),
+                    Paragraph(escape_text(str(protection_str)), table_cell_style),
                     Paragraph(escape_text(str(item["applicationMode"]).capitalize()), table_cell_style),
                     Paragraph(escape_text(str(item["priority"])), table_cell_style),
-                    Paragraph(status_str, table_cell_style)
+                    Paragraph(escape_text(status_str), table_cell_style)
                 ])
                 
             labels_table = Table(labels_table_data, colWidths=[120, 160, 50, 60, 50, 60])
@@ -1930,9 +1930,9 @@ def generate_pdf_report(data: dict, filepath: str):
                 ret_table_data.append([
                     Paragraph(escape_text(policy.get("Name", "N/A")), table_cell_bold),
                     Paragraph(escape_text(policy.get("Workload", "N/A")), table_cell_style),
-                    Paragraph(duration_str, table_cell_style),
+                    Paragraph(escape_text(str(duration_str)), table_cell_style),
                     Paragraph(escape_text(policy.get("DistributionStatus", "Success")), table_cell_style),
-                    Paragraph(status_str, table_cell_style)
+                    Paragraph(escape_text(status_str), table_cell_style)
                 ])
                 
             ret_table = Table(ret_table_data, colWidths=[130, 110, 110, 90, 60])
@@ -1973,7 +1973,7 @@ def generate_pdf_report(data: dict, filepath: str):
                     Paragraph(escape_text(dlp.get("Name", "-")), table_cell_bold),
                     Paragraph(escape_text(dlp.get("Mode", "-")), table_cell_style),
                     Paragraph(escape_text(dlp.get("Workload", "-")), table_cell_style),
-                    Paragraph(state_str, table_cell_style),
+                    Paragraph(escape_text(str(state_str)), table_cell_style),
                     Paragraph(escape_text(dlp.get("Actions", "-")), table_cell_style),
                     Paragraph(escape_text(dlp.get("CreatedBy", "-")), table_cell_style)
                 ])
@@ -2046,14 +2046,14 @@ def generate_pdf_report(data: dict, filepath: str):
             if defender_data.get("skus"):
                 ms_table_data.append([
                     Paragraph("Microsoft Defender for Office 365", table_cell_bold),
-                    Paragraph(", ".join(defender_data.get("skus", [])), table_cell_style),
+                    Paragraph(escape_text(", ".join(defender_data.get("skus", []))), table_cell_style),
                     Paragraph(f"{defender_data.get('users', 0):,} Users", table_cell_style)
                 ])
                 
             if eop_data.get("skus"):
                 ms_table_data.append([
                     Paragraph("Exchange Online Protection (Baseline)", table_cell_bold),
-                    Paragraph(", ".join(eop_data.get("skus", [])), table_cell_style),
+                    Paragraph(escape_text(", ".join(eop_data.get("skus", []))), table_cell_style),
                     Paragraph(f"{eop_data.get('users', 0):,} Users", table_cell_style)
                 ])
                 
@@ -2132,7 +2132,7 @@ def generate_pdf_report(data: dict, filepath: str):
             
             for mode, count in sorted(mode_counts.items(), key=lambda x: x[1], reverse=True):
                 sso_table_data.append([
-                    Paragraph(mode, table_cell_bold),
+                    Paragraph(escape_text(mode), table_cell_bold),
                     Paragraph(f"{count:,} Apps", table_cell_style)
                 ])
                 
@@ -2262,8 +2262,8 @@ def generate_pdf_report(data: dict, filepath: str):
             
             for label, val in pa_rows:
                 pa_table_data.append([
-                    Paragraph(label, table_cell_bold),
-                    Paragraph(val, table_cell_style)
+                    Paragraph(escape_text(label), table_cell_bold),
+                    Paragraph(escape_text(str(val)), table_cell_style)
                 ])
                 
             pa_table = Table(pa_table_data, colWidths=[220, 280])

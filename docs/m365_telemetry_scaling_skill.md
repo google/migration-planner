@@ -315,8 +315,9 @@ Follow these rules to prevent missing data in the exported PDF:
    - If `pdf_report.py` expects nested objects (e.g. `closedBy` containing `user`), ensure the data returned by `.last_data` or `load_csv()` matches this format or parse it accordingly.
 
 5. **XML/HTML Parsing Safety inside Paragraphs**:
-   - ReportLab `Paragraph` flowables attempt to parse content strings as basic XML/HTML markup. Raw HTML tags (like `<div style="...">` or `<span style="...">` found in disclaimers/descriptions) or unescaped characters (like `&` or `<`/`>`) will cause ReportLab to crash with `ValueError: findSpanStyle not implemented in this parser` or parsing exceptions.
-   - **Rule**: Always wrap any dynamic string variable retrieved from Graph or PowerShell inside `escape_text(val)` before constructing a `Paragraph`. Static layout formatting (like `<b>` or `<br/>`) should remain unescaped.
+   - ReportLab `Paragraph` flowables attempt to parse content strings as basic XML/HTML markup. Raw HTML tags (like `<div style="...">` or `<span style="...">` found in disclaimers/descriptions) or unescaped characters (like `&`, `<`, or `>`) will cause ReportLab to abruptly crash with `xml.parsers.expat.ExpatError` or `ValueError: findSpanStyle not implemented in this parser`.
+   - **Rule**: Always wrap **all** dynamic string variables retrieved from Graph or PowerShell inside `escape_text(val)` before constructing a `Paragraph`. 
+   - **Important Pitfall**: When using Python f-strings, be sure to escape the variables inside the string (e.g. `Paragraph(f"Error: {escape_text(err)}")`), or escape the entire dynamically composed string if no static HTML is present. Static layout formatting (like `<b>` or `<br/>`) must remain outside the `escape_text()` call.
 
 6. **Isolated Section Rendering Fail-safes**:
    - To prevent a single query or formatting error in one section from failing the entire report download, all major PDF sections must be wrapped in independent `try...except` blocks.
