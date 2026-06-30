@@ -346,8 +346,8 @@ A standard Client Secret cannot authorize PowerShell modules—a certificate is 
 
 Upon launching, you are greeted with the **Unified Login Screen**:
 *   Enter your **Tenant ID**, **Client ID**, and **Client Secret**.
-*   Select if you wish to use **Delegated Authentication**.
-*   Click **Connect & Continue**. Follow any certificate upload instructions if prompted.
+*   Select if you wish to use [Delegated Authentication](#1-delegated-authentication-flow).
+*   Click **Connect & Continue**. Follow any [certificate upload instructions](#2-powershell--certificate-based-authentication) if prompted.
 
 Once authenticated, the tool provides a left-hand navigation sidebar with two main tabs:
 
