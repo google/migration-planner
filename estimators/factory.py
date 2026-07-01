@@ -127,24 +127,40 @@ class EstimatorFactory:
     return self.shared_mail_box_estimator
 
   def get_in_place_archive_estimator(
-      self, use_delta_api=True, hard_reset=False
+      self, use_delta_api: bool = True, hard_reset: bool = False, use_for_eta_calc: bool = False
   ):
     if self.in_place_archive_estimator is None or hard_reset:
       if self.in_place_archive_estimator is not None:
         self.in_place_archive_estimator.shutdown()
-      url_invoker = self.get_url_invoker()
-      child_folder_url_invoker = self.get_child_folder_url_invoker()
-      self.in_place_archive_estimator = EOInPlaceArchiveEstimator(
-          self.config,
-          url_invoker,
-          child_folder_url_invoker,
-          logger=self.logger,
-          stop_event=self.stop_event,
-          use_delta_api=use_delta_api,
-      )
-      self.in_place_archive_estimator.set_id_to_display_name_map(
+      
+      # Only initialize url invokers and token managers when we need to do full scan.
+      if not use_for_eta_calc:
+        url_invoker = self.get_url_invoker()
+        child_folder_url_invoker = None if use_delta_api else self.get_child_folder_url_invoker()
+        self.in_place_archive_estimator = EOInPlaceArchiveEstimator(
+            self.config,
+            url_invoker,
+            child_folder_url_invoker,
+            logger=self.logger,
+            stop_event=self.stop_event,
+            use_delta_api=use_delta_api,
+        )
+        self.in_place_archive_estimator.set_id_to_display_name_map(
           self.id_to_display_name
-      )
+        )
+      # If estimator is only needed for ETA estimation, we don't need to initialize the token managers.
+      # Ideally we should not need this flow but it comes in handy in two cases:
+      # 1. If IPA scan didn't take place then a dummy instance is needed
+      # 2. If accidently the ui code shuts down the original estimator then a dummy instance is needed for ETA
+      else:
+        self.in_place_archive_estimator = EOInPlaceArchiveEstimator(
+            self.config,
+            None,
+            None,
+            logger=self.logger,
+            stop_event=self.stop_event,
+            use_delta_api=use_delta_api,
+        )
 
     return self.in_place_archive_estimator
 
