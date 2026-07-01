@@ -92,14 +92,6 @@ graph TD
          backoff=backoff_val
      )
      ```
-4. **API Payload Null Safety**:
-   - Never assume keys returned by Microsoft Graph API or PowerShell scripts are always non-null. If a key's value is explicitly set to `null` (None) in the API payload, `dict.get("key", {})` returns `None` (bypassing the default `{}` argument).
-   - Chaining lookups on this (e.g. `p.get("grantControls", {}).get("builtInControls")`) will crash with `AttributeError: 'NoneType' object has no attribute 'get'`.
-   - **Rule**: Always use the falsy check operator `or` to define defaults when chaining dictionary queries:
-     ```python
-     grant_controls = p.get("grantControls") or {}
-     controls = grant_controls.get("builtInControls") or []
-     ```
 
 ---
 
@@ -313,23 +305,6 @@ Follow these rules to prevent missing data in the exported PDF:
 4. **Coordinate Data Schemas**:
    - Ensure the structure of data retrieved (e.g., list of dictionaries, flat rows, or tuples) matches exactly what the PDF builder (`telemetry/pdf_report.py`) expects.
    - If `pdf_report.py` expects nested objects (e.g. `closedBy` containing `user`), ensure the data returned by `.last_data` or `load_csv()` matches this format or parse it accordingly.
-
-5. **XML/HTML Parsing Safety inside Paragraphs**:
-   - ReportLab `Paragraph` flowables attempt to parse content strings as basic XML/HTML markup. Raw HTML tags (like `<div style="...">` or `<span style="...">` found in disclaimers/descriptions) or unescaped characters (like `&`, `<`, or `>`) will cause ReportLab to abruptly crash with `xml.parsers.expat.ExpatError` or `ValueError: findSpanStyle not implemented in this parser`.
-   - **Rule**: Always wrap **all** dynamic string variables retrieved from Graph or PowerShell inside `escape_text(val)` before constructing a `Paragraph`. 
-   - **Important Pitfall**: When using Python f-strings, be sure to escape the variables inside the string (e.g. `Paragraph(f"Error: {escape_text(err)}")`), or escape the entire dynamically composed string if no static HTML is present. Static layout formatting (like `<b>` or `<br/>`) must remain outside the `escape_text()` call.
-
-6. **Isolated Section Rendering Fail-safes**:
-   - To prevent a single query or formatting error in one section from failing the entire report download, all major PDF sections must be wrapped in independent `try...except` blocks.
-   - If an exception occurs, use `logger.exception("Failed to format [Section Name] section in PDF")` to write the full traceback to the telemetry logs, and append a warning paragraph to the `story` using `section_err_style`:
-     ```python
-     try:
-         # Build section...
-         story.append(section_table)
-     except Exception as e:
-         logger.exception("Failed to format Feature section in PDF")
-         story.append(Paragraph(f"⚠️ Error formatting Feature section: {escape_text(str(e))}", section_err_style))
-     ```
 
 ---
 

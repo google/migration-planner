@@ -61,12 +61,10 @@ def run_authentication_pipeline(
             if is_cancelled_callback and is_cancelled_callback(): break
             resp = session.get(url, headers=headers)
             if resp.status_code == 200:
-                data = resp.json() or {}
+                data = resp.json()
                 value_list = data.get("value", [])
                 if writer:
                     for p in value_list:
-                        if not p:
-                            continue
                         name = p.get("displayName", "N/A")
                         state = p.get("state", "N/A")
                         

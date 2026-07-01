@@ -1,17 +1,17 @@
- <#    
+<#    
 .SYNOPSIS    
-Automates the creation of a Single-Tenant Entra ID App for Workspace Migration.    
-Strictly forces account selection and verifies specific Admin roles.    
+Automates the creation of a Single-Tenant Entra ID App for Workspace Migration and Deal Assistant Telemetry.
+Strictly forces account selection, verifies Admin roles, configures Graph & Exchange API permissions, grants admin consent,
+and automatically assigns required Entra ID Directory Roles to the Service Principal.
 #>
 
-# Check if the module is missing
+# Check if the Microsoft Graph module is installed
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
     Write-Host "Microsoft Graph module is NOT installed." -ForegroundColor Yellow
     $UserResponse = Read-Host "Would you like to try installing Microsoft Graph? (Y/N)"
 
     if ($UserResponse -ieq "Y") {
         try {
-            # Use only native cmdlets, no .NET property setting
             Install-Module -Name Microsoft.Graph -Scope CurrentUser -Force -AllowClobber
             Write-Host "Installation complete!" -ForegroundColor Green
         }
@@ -37,18 +37,17 @@ if (Test-Path $CachePath) {
     try { Remove-Item $CachePath -Recurse -Force -ErrorAction SilentlyContinue } catch {}
 }
 
-Write-Host "Opening Microsoft Login... (Please select the correct account)" -ForegroundColor Cyan
+Write-Host "Opening Microsoft Login... (Please select an administrative account)" -ForegroundColor Cyan
 
 $RequiredScopes = @(
     "Application.ReadWrite.All", 
     "AppRoleAssignment.ReadWrite.All", 
     "Directory.Read.All", 
-    "RoleManagement.Read.Directory"
+    "RoleManagement.Read.Directory",
+    "RoleManagement.ReadWrite.Directory"
 )
 
 try {
-    # In v2, -ContextScope Process is the most reliable way to force account selection
-    # and prevent the session from saving to the machine permanently.
     Connect-MgGraph -Scopes $RequiredScopes -ContextScope Process
 
     $Context = Get-MgContext
@@ -58,7 +57,7 @@ try {
     Write-Host "Logged in as: $UserPrincipal" -ForegroundColor Green
 
     # --- ROLE VALIDATION ---
-    Write-Host "Verifying Directory Roles..." -ForegroundColor Gray
+    Write-Host "Verifying Directory Roles of authenticating user..." -ForegroundColor Gray
     $UserRoles = Get-MgUserMemberOf -UserId $Context.Account -All | Where-Object { $_.AdditionalProperties.displayName -ne $null }
     
     $Authorized = $false
@@ -110,6 +109,12 @@ $ExchangeAppRoles = @(
     "Exchange.ManageAsApp", "Exchange.ManageAsAppV2"
 )
 
+$DirectoryRolesToAssign = @(
+    "Global Reader",
+    "Compliance Administrator",
+    "Compliance Data Administrator"
+)
+
 $TenantId = $Context.TenantId
 
 try {
@@ -126,10 +131,10 @@ try {
     # --- STEP 2: PREPARE SERVICE PRINCIPAL ---
     $NewServicePrincipal = New-MgServicePrincipal -BodyParameter @{ appId = $Application.AppId }
 
-    Write-Host "Waiting 10 seconds for replication..." -ForegroundColor DarkGray
+    Write-Host "Waiting 10 seconds for service principal replication..." -ForegroundColor DarkGray
     Start-Sleep -Seconds 10
 
-    # --- STEP 3: CONFIGURE & GRANT PERMISSIONS ---
+    # --- STEP 3: CONFIGURE & GRANT API PERMISSIONS ---
     Write-Host "Configuring API Permissions & Granting Admin Consent..." -ForegroundColor Cyan
     
     $AllRequiredResourceAccess = @()
@@ -198,8 +203,53 @@ try {
         Write-Host " - Admin Consent Granted for Delegated Scopes" -ForegroundColor Gray
     }
 
-    # --- STEP 4: CREATE CLIENT SECRET ---
-    Write-Host "Generating Client Secret..." -ForegroundColor Cyan
+    # --- STEP 4: AUTOMATED DIRECTORY ROLE ASSIGNMENTS ---
+    Write-Host "`nAssigning Directory Roles to Service Principal..." -ForegroundColor Cyan
+    
+    foreach ($RoleName in $DirectoryRolesToAssign) {
+        try {
+            # Check if directory role is enabled in tenant
+            $Role = Get-MgDirectoryRole -Filter "displayName eq '$RoleName'" -ErrorAction SilentlyContinue
+            if (-not $Role) {
+                # Enable role from template if not instantiated
+                $Template = Get-MgDirectoryRoleTemplate -Filter "displayName eq '$RoleName'" -ErrorAction SilentlyContinue
+                if ($Template) {
+                    $Role = New-MgDirectoryRole -RoleTemplateId $Template.Id -ErrorAction SilentlyContinue
+                }
+            }
+
+            if ($Role) {
+                # Add service principal as member
+                New-MgDirectoryRoleMemberByRef -DirectoryRoleId $Role.Id -OdataId "https://graph.microsoft.com/v1.0/directoryObjects/$($NewServicePrincipal.Id)" -ErrorAction Stop
+                Write-Host " - Successfully Assigned Directory Role: $RoleName" -ForegroundColor Green
+            } else {
+                # Fallback via REST if template resolution requires raw REST API call
+                $RoleRest = (Invoke-MgRestMethod -Uri "https://graph.microsoft.com/v1.0/directoryRoles?`$filter=displayName eq '$RoleName'").value[0]
+                if (-not $RoleRest) {
+                    $TemplateRest = (Invoke-MgRestMethod -Uri "https://graph.microsoft.com/v1.0/directoryRoleTemplates?`$filter=displayName eq '$RoleName'").value[0]
+                    if ($TemplateRest) {
+                        $RoleRest = Invoke-MgRestMethod -Uri "https://graph.microsoft.com/v1.0/directoryRoles" -Method Post -Body @{ roleTemplateId = $TemplateRest.id }
+                    }
+                }
+                if ($RoleRest) {
+                    $MemberBody = @{ "`@odata.id" = "https://graph.microsoft.com/v1.0/directoryObjects/$($NewServicePrincipal.Id)" }
+                    Invoke-MgRestMethod -Uri "https://graph.microsoft.com/v1.0/directoryRoles/$($RoleRest.id)/members/`$ref" -Method Post -Body $MemberBody | Out-Null
+                    Write-Host " - Successfully Assigned Directory Role (REST): $RoleName" -ForegroundColor Green
+                } else {
+                    Write-Host " - Warning: Unable to resolve Directory Role template for '$RoleName'." -ForegroundColor Yellow
+                }
+            }
+        } catch {
+            if ($_.ToString() -match "already exists" -or $_.ToString() -match "Request_BadRequest") {
+                Write-Host " - Directory Role '$RoleName' is already assigned." -ForegroundColor DarkGreen
+            } else {
+                Write-Host " - Failed to assign Directory Role '$RoleName': $_" -ForegroundColor Yellow
+            }
+        }
+    }
+
+    # --- STEP 5: CREATE CLIENT SECRET ---
+    Write-Host "`nGenerating Client Secret..." -ForegroundColor Cyan
     $ExpiryDate = (Get-Date).AddYears(2).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     $PasswordCred = Add-MgApplicationPassword -ApplicationId $Application.Id -BodyParameter @{
         passwordCredential = @{
@@ -216,6 +266,7 @@ try {
     Write-Host "Application (Client) ID : $($Application.AppId)"
     Write-Host "Client Secret Value     : $($PasswordCred.SecretText)"
     Write-Host "Directory (Tenant) ID   : $TenantId"
+    Write-Host "Directory Roles Assigned: $($DirectoryRolesToAssign -join ', ')" -ForegroundColor Green
     Write-Warning "IMPORTANT: Copy the Client Secret Value immediately."
 
 }
@@ -223,7 +274,7 @@ catch {
     Write-Error "Operation failed: $_"
 }
 
-# --- STEP 5: POWER PLATFORM MANAGEMENT APP (OPTIONAL) ---
+# --- STEP 6: POWER PLATFORM MANAGEMENT APP (OPTIONAL) ---
 Write-Host "`n--- POWER AUTOMATE & DATAVERSE CONFIGURATION ---" -ForegroundColor Cyan
 $PromptPower = Read-Host "Would you like to register this app for Power Automate telemetry? (Y/N)"
 if ($PromptPower -ieq "Y") {
@@ -237,6 +288,7 @@ if ($PromptPower -ieq "Y") {
         Write-Host "Registering App as Management App..." -ForegroundColor Gray
         New-PowerAppManagementApp -ApplicationId $Application.AppId -ErrorAction Stop
         Write-Host "Power Automate Management App Registration Complete!" -ForegroundColor Green
+        Write-Host "`nNote: For Desktop Flow scanning, ensure this App Registration is added as an Application User with the 'System Administrator' security role in your Dataverse environment(s)." -ForegroundColor Yellow
     } catch {
         Write-Warning "Power Automate registration failed: $_"
         Write-Host "You can safely ignore this error. The main App Registration was created successfully." -ForegroundColor Yellow
@@ -247,4 +299,3 @@ if ($PromptPower -ieq "Y") {
 # --- FINAL DISCONNECT ---
 Disconnect-MgGraph
 Read-Host "`nPress Enter to close this window"
-    

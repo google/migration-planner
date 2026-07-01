@@ -185,8 +185,8 @@ Please follow the [official Microsoft guide](https://learn.microsoft.com/en-us/p
 
 To scan your tenant, you need to register an app in the Microsoft Entra ID (formerly Azure AD) portal.
 
-> **💡 AUTOMATED SETUP AVAILABLE:** You can completely automate Steps 1-3 below (App Creation, API Permissions, Admin Consent, and Secret Generation) by running the provided PowerShell script `app_creation_script.ps1` after [downloading the tool from github repository](#running-the-tool). Simply execute `.\scripts\app_creation_script.ps1` from your PowerShell terminal or right click and select "Run with Powershell" and follow the prompts thereafter. Note that this requires the Microsoft Graph PowerShell module. If you prefer manual setup, follow the steps below.
-
+> **💡 AUTOMATED SETUP AVAILABLE:** You can completely automate Steps 1-3 below (App Creation, API Permissions, Admin Consent, and Secret Generation) by running the provided PowerShell script. Simply execute `.\scripts\app_creation_script.ps1` from your PowerShell terminal and follow the prompts. Note that this requires the Microsoft Graph PowerShell module. If you prefer manual setup, follow the steps below.
+In order to execute the script right click and select "Run with Powershell" 
 
 ### 1. Register the App
 1.  Go to [portal.azure.com](https://portal.azure.com/).
@@ -194,18 +194,16 @@ To scan your tenant, you need to register an app in the Microsoft Entra ID (form
 3.  Name the app (e.g., "Deal Assistant Tool").
 4.  Select **"Accounts in this organizational directory only"** (Single Tenant).
 5.  Click **Register**.
-6.  **(Required for Delegated Auth Flows)**: Go to **Manage > Authentication**. Under **Redirect URI configuration**, click **Add Redirect URI** -> **Web**. Add `http://localhost` as the redirect URI.
+6.  **(Required for Delegated Auth & eDiscovery)**: Go to **Authentication**. Under **Redirect URI configuration**, click **Add Redirect URI** -> **Web**. Add `http://localhost` as the redirect URI.
 
 ### 2. API Permissions
 In your new app, go to **API permissions > Add a permission**, and assign permissions based on the workloads you plan to scan. *Don't forget to click **"Grant admin consent"** after adding these permissions.*
 
-#### 2.1. Deal Assistant Telemetry Permissions ([Usage and Adoption](#introduction))
+#### 2.1. Deal Assistant Telemetry Permissions (Usage and Adoption)
 The Usage and Adoption tab performs extensive tenant auditing. While the following permissions are recommended for a complete report, you may choose to grant only a subset. 
 **NOTE: Be aware that any missing permissions will simply cause the tool to gracefully skip those specific telemetry sections.**
 
-**2.1.1. Microsoft APIs > Microsoft Graph:**
-
-**<u>Application permissions</u>**:
+**2.1.1. Microsoft Graph API Application permissions:**
 *   `Reports.Read.All`: Used to retrieve active user trends, mailbox/SharePoint usage reports, M365 Apps, and Email Client usage.
 *   `Directory.Read.All`: Used to read tenant organization configuration data, Domain, User, and Group summaries.
 *   `Policy.Read.All`: Required for Conditional Access & Authentication mechanics.
@@ -222,22 +220,18 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 *   `SensitivityLabels.Read.All`: to read all sensitivity labels
 *   `Application.Read.All`: Required to retrieve App Registrations directory details and Service Principal SSO configurations.
 
-**<u>Delegated permissions</u>**
+**2.1.2. Microsoft Graph API Delegated permissions:**
 * `eDiscovery.Read.All`: Required to retrieve active/closed Microsoft Purview eDiscovery cases on behalf of the user.
 * `Policy.Read.All`: Required to retrieve Mobile Device Management (MDM) Policies on behalf of the user.
 * `offline_access`: required to maintain access to data you have given the app access to
 
-> **Note** : When [running the deal assistant tool](#running-the-tool) with [Delegated Authentication Flow enabled](#1-delegated-authentication-flow), the user who logs in must be an eDiscovery administrator for these permissions to work in the deal assistant app.
+> **Note** : The user who logs in must be an eDiscovery administrator.
 
-**2.1.2. APIs my organization uses > Office 365 Exchange Online**
+**2.1.3. Office 365 Exchange Online Application Permissions (under `APIs my organization uses`):**
+*  `Exchange.ManageAsApp`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
+*  `Exchange.ManageAsAppV2`: required to read data governance ans security policies (sensitive, information types, exchange connectors etc)
 
-**Application Permissions:**
-*  `Exchange.ManageAsApp`: required to read data governance and security policies (sensitive, information types, exchange connectors etc)
-*  `Exchange.ManageAsAppV2`: required to read data governance and security policies (sensitive, information types, exchange connectors etc)
-
-#### 2.2. Migration Planner
-
-**Microsoft APIs > Microsoft Graph > Application Permissions**
+#### 2.2. Migration Planner Permissions (Microsoft Graph Application Permissions)
 
 **2.2.1. Shared Core Permissions**
 *   `User.Read.All` (To list users)
@@ -311,7 +305,7 @@ You will need three values for the tool:
 ## Advanced Authentication & Setup (Deal Assistant)
 
 ### 1. Delegated Authentication Flow
-Certain features like **eDiscovery** require **Delegated Authentication**. On the login screen of deal assistant, you can check the box to enable Delegated Authentication. 
+Certain features like **eDiscovery** require **Delegated Authentication**. On the login screen, you can check the box to enable Delegated Authentication. 
 > **⚠️ IMPORTANT WARNING**: If you enable this, your Entra App Registration MUST have `http://localhost` registered as a redirect URI. Otherwise, the interactive browser login popup will fail!
 
 ### 2. PowerShell & Certificate-Based Authentication
@@ -346,12 +340,10 @@ A standard Client Secret cannot authorize PowerShell modules—a certificate is 
 
 Upon launching, you are greeted with the **Unified Login Screen**:
 *   Enter your **Tenant ID**, **Client ID**, and **Client Secret**.
-*   Select if you wish to use [Delegated Authentication](#1-delegated-authentication-flow).
-*   Click **Connect & Continue**. Follow any [certificate upload instructions](#2-powershell--certificate-based-authentication) if prompted.
+*   Select if you wish to use **Delegated Authentication**.
+*   Click **Connect & Continue**. Follow any certificate upload instructions if prompted.
 
-Once authenticated, the tool provides a left-hand navigation sidebar with three main tabs:
-* **[Usage and Adoption](#tab-1-usage-and-adoption)**
-* **[Migration Planner](#tab-2-migration-planner)**
+Once authenticated, the tool provides a left-hand navigation sidebar with two main tabs:
 
 ## Tab 1: Usage and Adoption
 This tab loads the M365 Telemetry dashboard.

@@ -55,12 +55,10 @@ def run_conditional_access_pipeline(
             if is_cancelled_callback and is_cancelled_callback(): break
             resp = session.get(url, headers=headers)
             if resp.status_code == 200:
-                data = resp.json() or {}
+                data = resp.json()
                 value_list = data.get("value", [])
                 
                 for p in value_list:
-                    if not p:
-                        continue
                     p["name"] = p.get("displayName") or p.get("name") or "N/A"
                     p["state"] = p.get("state") or "N/A"
                     
