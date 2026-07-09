@@ -357,6 +357,7 @@ Once authenticated, the tool provides a left-hand navigation sidebar with three 
 This tab loads the M365 Telemetry dashboard.
 *   **Fetch Report**: Queries Microsoft Graph APIs and PowerShell in parallel across 10 telemetry modules to audit licenses, usage trends, security policies, and mobile endpoints.
 *   **Download PDF**: Once telemetry fetching is complete, exports a high-fidelity, comprehensive PDF usage report (`m365_usage_report_<timestamp>.pdf`) detailing the entire tenant's footprint with inline tables and charts.
+*   **Troubleshoot**: If there are powershell related errors even though [PowerShell installation steps](#4-powershell-core-pwsh-installation-optional-but-recommended) were followed, do check these [troubleshooting steps](#common-errors-and-troubleshooting-steps-with-powershell).
 
 ### Telemetry Modules & Technical Mechanisms
 
