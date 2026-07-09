@@ -455,15 +455,21 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
             
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         f = filedialog.asksaveasfilename(
-            initialfile=f"sensitive_info_types_{ts}.csv",
-            defaultextension=".csv",
-            filetypes=[("CSV Files", "*.csv")],
+            initialfile=f"sensitive_info_types_export_{ts}.zip",
+            defaultextension=".zip",
+            filetypes=[("Zip Archive", "*.zip")],
             parent=self
         )
         if not f: return
         try:
-            shutil.copyfile(self.csv_path, f)
-            messagebox.showinfo("Export Successful", f"SIT exported to:\n{f}", parent=self)
+            import zipfile
+            with zipfile.ZipFile(f, 'w') as zf:
+                zf.write(self.csv_path, arcname=os.path.basename(self.csv_path))
+                if getattr(self, 'custom_csv_path', None) and os.path.exists(self.custom_csv_path):
+                    zf.write(self.custom_csv_path, arcname=os.path.basename(self.custom_csv_path))
+                if getattr(self, 'edm_csv_path', None) and os.path.exists(self.edm_csv_path):
+                    zf.write(self.edm_csv_path, arcname=os.path.basename(self.edm_csv_path))
+            messagebox.showinfo("Export Successful", f"SIT data exported to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Error: {e}", parent=self)
 
