@@ -2869,7 +2869,8 @@ class MigrationEstimatorTool(ctk.CTk):
     if not emails:
       return []
     resolved = []
-    if url is None:
+    custom_url_provided = url is not None
+    if not custom_url_provided:
       url = ("{GRAPH_BASE_URL}/users?$filter=userPrincipalName eq"
               " '{cln}'&$select=id,userPrincipalName"
             )
@@ -2883,11 +2884,30 @@ class MigrationEstimatorTool(ctk.CTk):
       h = {"Authorization": f"Bearer {t}", "ConsistencyLevel": "eventual"}
       try:
         cln = email.replace("'", "''")
-        u = url.format(GRAPH_BASE_URL = GRAPH_BASE_URL, cln = cln)
-        r = s.get(u, headers=h, timeout=60)
-        if r.status_code == 200 and r.json().get("value"):
-          return r.json()["value"][0]
-      except:
+        if custom_url_provided:
+          target_urls = [url.format(GRAPH_BASE_URL=GRAPH_BASE_URL, cln=cln)]
+        else:
+          target_urls = [
+              f"{GRAPH_BASE_URL}/users?$filter=userPrincipalName eq '{cln}'&$select=id,userPrincipalName",
+              f"{GRAPH_BASE_URL}/users?$filter=mail eq '{cln}'&$select=id,userPrincipalName",
+              f"{GRAPH_BASE_URL}/users?$filter=proxyAddresses/any(c:c eq 'smtp:{cln}')&$select=id,userPrincipalName"
+          ]
+        for u in target_urls:
+          for attempt in range(3):
+            if self.stop_scan_event.is_set():
+              return None
+            try:
+              r = s.get(u, headers=h, timeout=60)
+              if r.status_code in (429, 503):
+                time.sleep(1 << attempt)
+                continue
+              if r.status_code == 200 and r.json().get("value"):
+                return r.json()["value"][0]
+              break
+            except Exception:
+              if attempt < 2:
+                time.sleep(1 << attempt)
+      except Exception:
         pass
       finally:
         manager.return_token_slot(token_data)
