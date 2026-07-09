@@ -88,9 +88,8 @@ class DLPPoliciesSubFrame(ctk.CTkFrame):
         self.grid_frame.grid_columnconfigure(3, weight=1)
         self.grid_frame.grid_columnconfigure(4, weight=2)
         self.grid_frame.grid_columnconfigure(5, weight=2)
-        self.grid_frame.grid_columnconfigure(6, weight=1)
         
-        headers = ["Policy Name", "Mode", "Workload", "State", "Locations", "Actions", "Regex"]
+        headers = ["Policy Name", "Mode", "Workload", "State", "Locations", "Actions"]
         for col_idx, head_text in enumerate(headers):
             cell = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))

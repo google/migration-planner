@@ -243,7 +243,7 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
         self.custom_sits_master.pack(fill="x", expand=True, pady=(20, 0))
         header = ctk.CTkFrame(self.custom_sits_master, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(0, 10))
-        ctk.CTkLabel(header, text="Custom SITs", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        ctk.CTkLabel(header, text="Custom SITs", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(side="left")
         
         self.custom_sits_container = ctk.CTkFrame(self.custom_sits_master, fg_color="transparent")
         self.custom_sits_container.pack(fill="x", expand=True)
@@ -263,7 +263,7 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
         self.edm_schemas_master.pack(fill="x", expand=True, pady=(20, 0))
         header = ctk.CTkFrame(self.edm_schemas_master, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(0, 10))
-        ctk.CTkLabel(header, text="EDM Schemas", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        ctk.CTkLabel(header, text="EDM Schemas", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(side="left")
         
         self.edm_schemas_container = ctk.CTkFrame(self.edm_schemas_master, fg_color="transparent")
         self.edm_schemas_container.pack(fill="x", expand=True)
