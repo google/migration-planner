@@ -247,10 +247,6 @@ class DLPPoliciesSubFrame(ctk.CTkFrame):
                 lbl = ctk.CTkLabel(cell, text=str(val), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=140)
                 lbl.pack(padx=10, pady=12, anchor="nw")
                 
-            # Regex Column
-            cell = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
-            cell.grid(row=r_idx, column=6, sticky="nsew", padx=0, pady=(0, 1))
-            ctk.CTkButton(cell, text="View", width=50, command=lambda: messagebox.showinfo("Regex View", "Regex rules will be downloaded as a TXT file via Export.")).pack(padx=5, pady=10)
 
         # Pagination controls row
         control_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
