@@ -122,6 +122,7 @@ class SharePointUsageFrame(ctk.CTkFrame):
         
         self.pack(fill="x", expand=True, pady=(20, 5))
         self.grid_frame.pack_forget()
+        self.heavy_sites_master.pack_forget()
         
         self._set_state_loading("Downloading and parsing SharePoint Site Usage and Data Types...")
         
@@ -201,6 +202,9 @@ class SharePointUsageFrame(ctk.CTkFrame):
             ctk.CTkLabel(c1, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN).pack(padx=10, pady=6, anchor="w")
 
         # --- TENANT INVENTORY & HEAVY SITES ---
+        for w in self.heavy_sites_master.winfo_children():
+            w.destroy()
+            
         self.heavy_sites = data.get("heavy_sites", [])
         if self.heavy_sites:
             self.current_page = 0
