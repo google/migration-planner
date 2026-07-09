@@ -17,6 +17,8 @@
 import os
 import logging
 import pandas as pd
+import requests
+import concurrent.futures
 
 from core.graph.client import GraphClient
 from core.graph.reports import ReportsService
@@ -24,7 +26,7 @@ from core.graph.files.onedrive import format_bytes
 
 logger = logging.getLogger(__name__)
 
-def parse_sharepoint_csv(filepath):
+def parse_sharepoint_csv(filepath, client=None):
     """Streams the SharePoint Site Usage Detail CSV and aggregates metrics in chunks."""
     logger.info(f"Processing SharePoint Site Usage file: {os.path.basename(filepath)}")
     if not os.path.exists(filepath):
@@ -56,13 +58,65 @@ def parse_sharepoint_csv(filepath):
             active_files += int(pd.to_numeric(active_chunk["Active File Count"], errors='coerce').fillna(0).sum())
 
     logger.info(f"SharePoint parsing complete: sites={total_sites}, storage={format_bytes(total_storage)}, files={total_files}, active_files={active_files}")
+    
+    # Reload to get heavy sites
+    heavy_sites = []
+    if "Storage Used (Byte)" in headers:
+        usecols = ["Storage Used (Byte)"]
+        for col in ["Site URL", "Site Id", "Owner Principal Name", "Owner Display Name"]:
+            if col in headers:
+                usecols.append(col)
+                
+        df = pd.read_csv(filepath, usecols=usecols, encoding="utf-8-sig")
+        df["Storage Used (Byte)"] = pd.to_numeric(df["Storage Used (Byte)"], errors='coerce').fillna(0)
+        df_sorted = df.sort_values(by="Storage Used (Byte)", ascending=False).head(25)
+        df_sorted = df_sorted.fillna("")
+        
+        records = df_sorted.to_dict("records")
+        
+        def resolve_site(record):
+            site_name = record.get("Site URL", "")
+            
+            # Resolve via Graph API if concealed
+            if not site_name and client:
+                site_id = record.get("Site Id")
+                if site_id:
+                    try:
+                        token_slot = client.get_active_token()
+                        try:
+                            headers_req = {"Authorization": f"Bearer {token_slot['token']}", "Accept": "application/json"}
+                            resp = requests.get(f"https://graph.microsoft.com/v1.0/sites/{site_id}", headers=headers_req, timeout=5)
+                            if resp.status_code == 200:
+                                site_name = resp.json().get("webUrl", "")
+                        finally:
+                            client.release_token(token_slot)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch site url for {site_id}: {e}")
+                        
+            if not site_name:
+                site_name = record.get("Owner Display Name") or record.get("Owner Principal Name") or record.get("Site Id") or "Unknown Site"
+                site_name = f"Concealed Site ({site_name})"
+            
+            return {
+                "Site URL": site_name,
+                "Site Id": record.get("Site Id", ""),
+                "Storage Used (Byte)": record.get("Storage Used (Byte)", 0)
+            }
+            
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            heavy_sites = list(executor.map(resolve_site, records))
+        
+        # Sort heavy sites by storage again just in case (executor.map preserves order, but to be safe)
+        heavy_sites = sorted(heavy_sites, key=lambda x: x.get("Storage Used (Byte)", 0), reverse=True)
+        
     return {
         "total_sites": total_sites,
         "total_storage_bytes": total_storage,
         "total_storage_formatted": format_bytes(total_storage),
         "total_files": total_files,
         "active_files": active_files,
-        "active_files_pct": (active_files / total_files * 100) if total_files > 0 else 0.0
+        "active_files_pct": (active_files / total_files * 100) if total_files > 0 else 0.0,
+        "heavy_sites": heavy_sites
     }
 
 def run_sharepoint_pipeline(client_id, client_secret, tenant_id) -> dict:
@@ -86,8 +140,9 @@ def run_sharepoint_pipeline(client_id, client_secret, tenant_id) -> dict:
     
     service.download_sharepoint_details(reports_dir)
     logger.info("SharePoint Site Usage CSV download completed. Initiating parser...")
+    
+    sp_data = parse_sharepoint_csv(os.path.join(reports_dir, "SharePointSiteUsageDetail(180d).csv"), client=client)
     client.close()
     
-    sp_data = parse_sharepoint_csv(os.path.join(reports_dir, "SharePointSiteUsageDetail(180d).csv"))
     logger.info("SharePoint Telemetry Pipeline completed successfully.")
     return sp_data

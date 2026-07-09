@@ -82,14 +82,15 @@ class DLPPoliciesSubFrame(ctk.CTkFrame):
         
         self.grid_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
         
-        self.grid_frame.grid_columnconfigure(0, weight=3)
+        self.grid_frame.grid_columnconfigure(0, weight=2)
         self.grid_frame.grid_columnconfigure(1, weight=1)
         self.grid_frame.grid_columnconfigure(2, weight=2)
         self.grid_frame.grid_columnconfigure(3, weight=1)
         self.grid_frame.grid_columnconfigure(4, weight=2)
         self.grid_frame.grid_columnconfigure(5, weight=2)
+        self.grid_frame.grid_columnconfigure(6, weight=1)
         
-        headers = ["Policy Name", "Mode", "Workload", "State", "Actions", "Created By"]
+        headers = ["Policy Name", "Mode", "Workload", "State", "Locations", "Actions", "Regex"]
         for col_idx, head_text in enumerate(headers):
             cell = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_TONAL_BG, corner_radius=0)
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
@@ -233,15 +234,24 @@ class DLPPoliciesSubFrame(ctk.CTkFrame):
             en_val = str(row_item.get("Enabled", "")).lower()
             enabled = "🟢 Enabled" if en_val in ("true", "1", "yes") else "🔴 Disabled"
             
+            exc = "EX" if row_item.get("ExchangeLocation") else ""
+            spo = "SPO" if row_item.get("SharePointLocation") else ""
+            od = "OD" if row_item.get("OneDriveLocation") else ""
+            locations = ", ".join([loc for loc in (exc, spo, od) if loc]) or "N/A"
+            
             actions = row_item.get("Actions", "None")
-            created_by = row_item.get("CreatedBy", "N/A")
 
-            vals = [name, mode, workloads, enabled, actions, created_by]
+            vals = [name, mode, workloads, enabled, locations, actions]
             for col_idx, val in enumerate(vals):
                 cell = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
                 cell.grid(row=r_idx, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
-                lbl = ctk.CTkLabel(cell, text=str(val), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=180)
+                lbl = ctk.CTkLabel(cell, text=str(val), font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=140)
                 lbl.pack(padx=10, pady=12, anchor="nw")
+                
+            # Regex Column
+            cell = ctk.CTkFrame(self.grid_frame, fg_color=bg_style, corner_radius=0)
+            cell.grid(row=r_idx, column=6, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkButton(cell, text="View", width=50, command=lambda: messagebox.showinfo("Regex View", "Regex rules will be downloaded as a TXT file via Export.")).pack(padx=5, pady=10)
 
         # Pagination controls row
         control_frame = ctk.CTkFrame(self.grid_frame, fg_color="transparent")

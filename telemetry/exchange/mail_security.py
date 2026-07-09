@@ -53,6 +53,7 @@ class MailSecurityFrame(ctk.CTkFrame):
         self.defender_skus = []
         
         self.encryption_data = {"m365_policies": [], "exchange_deps": [], "error": None}
+        self.legal_holds_data = {"value": [], "error": None}
         self.last_data = {}
         
         self.inner_pad = ctk.CTkFrame(self, fg_color="transparent")
@@ -92,37 +93,33 @@ class MailSecurityFrame(ctk.CTkFrame):
         if self.semaphore:
             self.semaphore.acquire()
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                 skus_future = executor.submit(run_mail_security_pipeline, c_id, c_secret, tenant)
                 
-                # Fetch encryption policies
+                # Fetch tenant primary domain for Exchange PowerShell
+                primary_domain = tenant
+                try:
+                    from core.graph.client import GraphClient
+                    from core.graph.directory import DirectoryService
+                    client = GraphClient(
+                        tenant_id=tenant,
+                        client_ids=c_id,
+                        client_secrets=c_secret,
+                        concurrency=1,
+                        retries=3,
+                        backoff=2
+                    )
+                    client.authenticate()
+                    dir_svc = DirectoryService(client)
+                    primary_domain = dir_svc.get_tenant_primary_domain()
+                    client.close()
+                except Exception as e:
+                    usage_logger.warning(f"Could not retrieve tenant domain via Graph. Falling back to Tenant ID Guid: {e}")
+                
                 def fetch_encryption():
                     try:
-                        from core.graph.client import GraphClient
-                        from core.graph.directory import DirectoryService
-                        
-                        tenant_domain = tenant
-                        client = None
-                        try:
-                            client = GraphClient(
-                                tenant_id=tenant,
-                                client_ids=c_id,
-                                client_secrets=c_secret,
-                                concurrency=1,
-                                retries=3,
-                                backoff=2
-                            )
-                            client.authenticate()
-                            dir_svc = DirectoryService(client)
-                            tenant_domain = dir_svc.get_tenant_primary_domain()
-                        except Exception as e:
-                            usage_logger.warning(f"Could not retrieve tenant domain via Graph. Falling back to Tenant ID Guid: {e}")
-                        finally:
-                            if client:
-                                client.close()
-
                         ps_client = PowerShellClient(
-                            tenant_id=tenant_domain,
+                            tenant_id=primary_domain,
                             client_id=c_id,
                             client_secret=c_secret,
                             cert_tenant_id=tenant
@@ -131,11 +128,35 @@ class MailSecurityFrame(ctk.CTkFrame):
                     except Exception as e:
                         usage_logger.warning(f"Failed to fetch encryption policies: {e}")
                         return {"m365_policies": [], "exchange_deps": [], "error": str(e)}
+                def fetch_legal_hold():
+                    try:
+                        from core.powershell.mailbox import MailboxStatsService
+                        ps_client = PowerShellClient(
+                            tenant_id=primary_domain,
+                            client_id=c_id,
+                            client_secret=c_secret,
+                            cert_tenant_id=tenant
+                        )
+                        svc = MailboxStatsService(ps_client)
+                        data = svc.fetch_legal_holds()
+                        if data and "value" in data:
+                            script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+                            if os.path.basename(script_dir) == "exchange":
+                                script_dir = os.path.dirname(script_dir)
+                            reports_dir = os.path.join(script_dir, "reports", f"{tenant}_{c_id}")
+                            svc.export_to_csv(data["value"], "legal_holds.csv", reports_dir)
+                            self.legal_holds_csv = os.path.join(reports_dir, "legal_holds.csv")
+                        return data
+                    except Exception as e:
+                        usage_logger.warning(f"Failed to fetch legal holds: {e}")
+                        return {"error": str(e)}
                 
                 enc_future = executor.submit(fetch_encryption)
+                lh_future = executor.submit(fetch_legal_hold)
                 
                 result_data = skus_future.result()
                 self.encryption_data = enc_future.result()
+                self.legal_holds_data = lh_future.result()
             
             self.defender_skus = result_data["defender"]["skus"]
             self.total_defender_users = result_data["defender"]["users"]
@@ -293,3 +314,50 @@ class MailSecurityFrame(ctk.CTkFrame):
         # --- DISCLAIMER ---
         disclaimer = ctk.CTkLabel(self.grid_frame, text="Note: Users can track inbound connectors displayed below to identify 3rd-party security apps.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, anchor="w")
         disclaimer.pack(fill="x", padx=15, pady=(5, 15))
+
+        # --- LEGAL HOLDS UI ---
+        lh_header = ctk.CTkFrame(self.grid_frame, fg_color="transparent")
+        lh_header.pack(fill="x", padx=15, pady=(10, 5))
+        ctk.CTkLabel(lh_header, text="Mailboxes on Legal Hold", font=FONT_HEADER_SMALL, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        ctk.CTkButton(lh_header, text="Export CSV", width=80, height=24, command=lambda: __import__('os').system(f"open '{getattr(self, 'legal_holds_csv', '')}'" if __import__('os').name == "posix" else f"start \"\" \"{getattr(self, 'legal_holds_csv', '')}\"")).pack(side="right")
+        
+        lh_grid = ctk.CTkFrame(self.grid_frame, fg_color=COLOR_SURFACE, corner_radius=0)
+        lh_grid.pack(fill="x", padx=10, pady=(0, 10))
+        
+        lh_headers = ["Display Name", "In-Place Holds"]
+        lh_grid.grid_columnconfigure(0, weight=1)
+        lh_grid.grid_columnconfigure(1, weight=3)
+        
+        for col_idx, head_text in enumerate(lh_headers):
+            cell = ctk.CTkFrame(lh_grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
+            ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+
+        if self.legal_holds_data.get("error"):
+            c = ctk.CTkFrame(lh_grid, fg_color=COLOR_SURFACE, corner_radius=0)
+            c.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=0, pady=(0, 1))
+            err_lbl = f"Failed to fetch legal holds: {self.legal_holds_data['error']}"
+            ctk.CTkLabel(c, text=err_lbl, font=FONT_BODY_MEDIUM, text_color=COLOR_ERROR, justify="center").pack(padx=10, pady=12)
+        else:
+            lh_list = self.legal_holds_data.get("value", [])
+            if not lh_list:
+                c = ctk.CTkFrame(lh_grid, fg_color=COLOR_SURFACE, corner_radius=0)
+                c.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=0, pady=(0, 1))
+                ctk.CTkLabel(c, text="No mailboxes on legal hold detected.", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="center").pack(padx=10, pady=12)
+            else:
+                for r_idx, lh in enumerate(lh_list[:10], start=1):
+                    bg_style = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+                    dname = lh.get("DisplayName", "Unknown")
+                    holds = ", ".join(lh.get("InPlaceHolds", [])) if isinstance(lh.get("InPlaceHolds"), list) else str(lh.get("InPlaceHolds", ""))
+                    
+                    c1 = ctk.CTkFrame(lh_grid, fg_color=bg_style, corner_radius=0)
+                    c1.grid(row=r_idx, column=0, sticky="nsew", padx=0, pady=(0, 1))
+                    ctk.CTkLabel(c1, text=dname, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left").pack(padx=10, pady=12, anchor="nw")
+                    
+                    c2 = ctk.CTkFrame(lh_grid, fg_color=bg_style, corner_radius=0)
+                    c2.grid(row=r_idx, column=1, sticky="nsew", padx=0, pady=(0, 1))
+                    ctk.CTkLabel(c2, text=holds, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, justify="left", wraplength=450).pack(padx=10, pady=12, anchor="nw")
+                if len(lh_list) > 10:
+                    c = ctk.CTkFrame(lh_grid, fg_color=COLOR_SURFACE, corner_radius=0)
+                    c.grid(row=11, column=0, columnspan=2, sticky="nsew", padx=0, pady=(0, 1))
+                    ctk.CTkLabel(c, text=f"... and {len(lh_list) - 10} more (see CSV Export)", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB, justify="center").pack(padx=10, pady=12)

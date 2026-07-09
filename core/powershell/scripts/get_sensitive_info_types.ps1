@@ -25,11 +25,23 @@ try {
     }
     
     # Retrieve sensitive info types
-    $sitData = Get-DlpSensitiveInformationType | Select-Object Name, Description, PublisherName, RecommendedConfidence, Type, IsExactMatch, ContainsData
+    $sitData = Get-DlpSensitiveInformationType | Select-Object Name, Description, PublisherName, RecommendedConfidence, Type, IsExactMatch, ContainsData, IsExactDataMatch, Publisher, IsOutOfBox
     
+    # Retrieve Custom SIT Rule Packages (XML)
+    $customRulePackages = Get-DlpSensitiveInformationTypeRulePackage | Where-Object { $_.IsDefault -eq $false } | Select-Object Name, Description, PublisherName, ClassificationRuleCollectionXml
+    
+    # Retrieve EDM Schemas
+    $edmSchemas = @()
+    # Check if Get-EdmSchema is available (sometimes requires specific permissions/modules)
+    if (Get-Command "Get-EdmSchema" -ErrorAction SilentlyContinue) {
+        $edmSchemas = Get-EdmSchema
+    }
+
     # Return as JSON
     $result = @{
         "SensitiveInformationTypes" = $sitData
+        "CustomRulePackages" = $customRulePackages
+        "EdmSchemas" = $edmSchemas
     }
     $result | ConvertTo-Json -Depth 10
 } catch {
