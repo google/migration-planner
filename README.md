@@ -227,7 +227,7 @@ The Usage and Adoption tab performs extensive tenant auditing. While the followi
 * `Policy.Read.All`: Required to retrieve Mobile Device Management (MDM) Policies on behalf of the user.
 * `offline_access`: required to maintain access to data you have given the app access to
 
-> **Note** : When [running the deal assistant tool](#running-the-tool) with [Delegated Authentication Flow enabled](#1-delegated-authentication-flow), the user who logs in must be an eDiscovery administrator for these permissions to work in the deal assistant app.
+> **Note** : When [running the deal assistant tool](#running-the-tool) with [Delegated Authentication Flow enabled](#1-delegated-authentication-flow), the user who logs in must be an [eDiscovery administrator](https://learn.microsoft.com/en-us/purview/edisc-permissions#assign-ediscovery-permissions) for these permissions to work in the deal assistant app.
 
 **2.1.2. APIs my organization uses > Office 365 Exchange Online**
 
