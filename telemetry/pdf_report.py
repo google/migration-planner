@@ -1446,6 +1446,41 @@ def _add_m365_core_services_section(story, data, custom_styles, primary_color, s
                 ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
             ]))
             story.append(sp_dt_table)
+            
+        heavy_sites = sp.get("heavy_sites", [])
+        if heavy_sites:
+            story.append(Spacer(1, 10))
+            story.append(Paragraph("<b>Heavy Sites Inventory (Top Consumers)</b>", custom_styles['ReportBody']))
+            story.append(Spacer(1, 4))
+            
+            hs_table_data = [[
+                Paragraph("Site URL", custom_styles['TableCellHeader']),
+                Paragraph("Site ID", custom_styles['TableCellHeader']),
+                Paragraph("Storage Used (MB)", custom_styles['TableCellHeader'])
+            ]]
+            
+            for hs in heavy_sites[:15]:
+                try:
+                    stor_mb = float(hs.get("Storage Used (Byte)", 0)) / (1024 * 1024)
+                except ValueError:
+                    stor_mb = 0.0
+                hs_table_data.append([
+                    Paragraph(escape_text(hs.get("Site URL", "")), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(hs.get("Site Id", "")), custom_styles['TableCell']),
+                    Paragraph(f"{stor_mb:,.2f} MB", custom_styles['TableCell'])
+                ])
+                
+            hs_table = Table(hs_table_data, colWidths=[200, 200, 100])
+            hs_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(hs_table)
     except Exception as e:
         logger.exception("Failed to format SharePoint & OneDrive Telemetry section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting SharePoint & OneDrive Telemetry section: {escape_text(str(e))}", custom_styles['SectionErrTxt']))
@@ -2095,32 +2130,97 @@ def _add_purview_defender_section(story, data, custom_styles, primary_color, sec
     story.append(Spacer(1, 8))
     
     try:
-        sit_types = data.get("sensitive_info_types", [])
-        if not sit_types:
+        sit_dict = data.get("sensitive_info_types", {})
+        if isinstance(sit_dict, list):
+            sit_types = sit_dict
+            custom_types = []
+            edm_schemas = []
+        else:
+            sit_types = sit_dict.get("standard", [])
+            custom_types = sit_dict.get("custom", [])
+            edm_schemas = sit_dict.get("edm", [])
+            
+        if not sit_types and not custom_types and not edm_schemas:
             story.append(Paragraph("No Sensitive Information Types discovered.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
         else:
-            sit_table_data = [[
-                Paragraph("Name", custom_styles['TableCellHeader']),
-                Paragraph("Type", custom_styles['TableCellHeader']),
-                Paragraph("Confidence", custom_styles['TableCellHeader'])
-            ]]
-            for sit in sit_types:
-                sit_table_data.append([
-                    Paragraph(escape_text(sit.get("Name", "-")), custom_styles['TableCellBold']),
-                    Paragraph(escape_text(sit.get("Type", "-")), custom_styles['TableCell']),
-                    Paragraph(escape_text(str(sit.get("RecommendedConfidence", "-"))), custom_styles['TableCell'])
-                ])
-            sit_table = Table(sit_table_data, colWidths=[280, 100, 120])
-            sit_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('TOPPADDING', (0, 0), (-1, -1), 5),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
-                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
-            ]))
-            story.append(sit_table)
+            if sit_types:
+                sit_table_data = [[
+                    Paragraph("Built-in Name", custom_styles['TableCellHeader']),
+                    Paragraph("Type", custom_styles['TableCellHeader']),
+                    Paragraph("Confidence", custom_styles['TableCellHeader'])
+                ]]
+                # limit built-in to keep report reasonably sized if many
+                for sit in sit_types[:30]:
+                    sit_table_data.append([
+                        Paragraph(escape_text(sit.get("Name", "-")), custom_styles['TableCellBold']),
+                        Paragraph(escape_text(sit.get("Type", "-")), custom_styles['TableCell']),
+                        Paragraph(escape_text(str(sit.get("RecommendedConfidence", "-"))), custom_styles['TableCell'])
+                    ])
+                sit_table = Table(sit_table_data, colWidths=[280, 100, 120])
+                sit_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                    ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+                ]))
+                story.append(sit_table)
+                
+            if custom_types:
+                story.append(Spacer(1, 10))
+                story.append(Paragraph("<b>Custom Sensitive Info Types</b>", custom_styles['ReportBody']))
+                story.append(Spacer(1, 4))
+                cust_table_data = [[
+                    Paragraph("Name", custom_styles['TableCellHeader']),
+                    Paragraph("Publisher", custom_styles['TableCellHeader']),
+                    Paragraph("Description", custom_styles['TableCellHeader'])
+                ]]
+                for sit in custom_types:
+                    cust_table_data.append([
+                        Paragraph(escape_text(sit.get("Name", "-")), custom_styles['TableCellBold']),
+                        Paragraph(escape_text(sit.get("PublisherName", "-")), custom_styles['TableCell']),
+                        Paragraph(escape_text(sit.get("Description", "-")), custom_styles['TableCell'])
+                    ])
+                cust_table = Table(cust_table_data, colWidths=[150, 150, 200])
+                cust_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                    ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+                ]))
+                story.append(cust_table)
+                
+            if edm_schemas:
+                story.append(Spacer(1, 10))
+                story.append(Paragraph("<b>Exact Data Match (EDM) Schemas</b>", custom_styles['ReportBody']))
+                story.append(Spacer(1, 4))
+                edm_table_data = [[
+                    Paragraph("Name", custom_styles['TableCellHeader']),
+                    Paragraph("Description", custom_styles['TableCellHeader']),
+                    Paragraph("Data Store Name", custom_styles['TableCellHeader'])
+                ]]
+                for sit in edm_schemas:
+                    edm_table_data.append([
+                        Paragraph(escape_text(sit.get("Name", "-")), custom_styles['TableCellBold']),
+                        Paragraph(escape_text(sit.get("Description", "-")), custom_styles['TableCell']),
+                        Paragraph(escape_text(sit.get("DataStoreName", "-")), custom_styles['TableCell'])
+                    ])
+                edm_table = Table(edm_table_data, colWidths=[150, 200, 150])
+                edm_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                    ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+                ]))
+                story.append(edm_table)
     except Exception as e:
         logger.exception("Failed to format Sensitive Info Types section in PDF")
         story.append(Paragraph(f"⚠️ Error formatting Sensitive Info Types section: {escape_text(str(e))}", custom_styles['SectionErrTxt']))

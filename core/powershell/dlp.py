@@ -89,9 +89,7 @@ class DLPService:
             
             try:
                 data = json.loads(raw_output)
-                if isinstance(data, dict) and "SensitiveInformationTypes" in data:
-                    return {"value": data["SensitiveInformationTypes"]}
-                elif isinstance(data, dict) and "value" in data:
+                if isinstance(data, dict):
                     return data
                 elif isinstance(data, list):
                     return {"value": data}
@@ -105,9 +103,7 @@ class DLPService:
                         json_str += line
                 if json_str:
                     data = json.loads(json_str)
-                    if isinstance(data, dict) and "SensitiveInformationTypes" in data:
-                        return {"value": data["SensitiveInformationTypes"]}
-                    elif isinstance(data, dict) and "value" in data:
+                    if isinstance(data, dict):
                         return data
                     elif isinstance(data, list):
                         return {"value": data}
@@ -118,3 +114,44 @@ class DLPService:
         except Exception as e:
             logger.error("Error executing fetch_sensitive_info_types", exc_info=True)
             raise Exception(f"PowerShell script execution failed: {str(e)}")
+
+    def export_custom_sit_xml(self, data: dict, output_dir: str = "scratch"):
+        os.makedirs(output_dir, exist_ok=True)
+        custom_sits = data.get("CustomRulePackages") or []
+        for sit in custom_sits:
+            name = sit.get("Name", "Unknown").replace(" ", "_")
+            xml_content = sit.get("ClassificationRuleCollectionXml", "")
+            if xml_content:
+                with open(os.path.join(output_dir, f"{name}_rule_package.xml"), "w") as f:
+                    f.write(xml_content)
+                    
+    def export_advanced_rules_txt(self, data: dict, output_dir: str = "scratch"):
+        os.makedirs(output_dir, exist_ok=True)
+        rules = data.get("Rules") or []
+        with open(os.path.join(output_dir, "advanced_dlp_rules.txt"), "w") as f:
+            for rule in rules:
+                advanced_rule = rule.get("AdvancedRule")
+                if advanced_rule:
+                    f.write(f"Rule Name: {rule.get('Name')}\n")
+                    f.write(f"Advanced Rule:\n{advanced_rule}\n")
+                    f.write("-" * 80 + "\n")
+
+    def export_to_csv(self, data_list: list, filename: str, output_dir: str = "scratch"):
+        import csv, os
+        os.makedirs(output_dir, exist_ok=True)
+        filepath = os.path.join(output_dir, filename)
+        if not data_list:
+            open(filepath, 'a').close()
+            return
+        
+        # Get all possible keys to avoid missing fieldnames error
+        keys = set()
+        for row in data_list:
+            if isinstance(row, dict):
+                keys.update(row.keys())
+                
+        with open(filepath, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(keys))
+            writer.writeheader()
+            for row in data_list:
+                writer.writerow(row)

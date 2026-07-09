@@ -1039,7 +1039,11 @@ class M365TelemetryTab(ctk.CTkScrollableFrame):
             "security_labels": getattr(self.security_gov_view.sensitivity_frame, "last_data", []),
             "retention_policies": getattr(self.security_gov_view.retention_frame, "last_data", []),
             "dlp_policies": getattr(self.security_gov_view.dlp_frame, "last_data", []),
-            "sensitive_info_types": getattr(self.security_gov_view.sit_frame, "last_data", []),
+            "sensitive_info_types": {
+                "standard": getattr(self.security_gov_view.sit_frame, "last_data", []),
+                "custom": load_csv("custom_sits.csv"),
+                "edm": load_csv("edm_schemas.csv")
+            },
             "service_principals_sso": getattr(self.security_gov_view.sso_frame, "last_data", []),
             "conditional_access": getattr(self.security_gov_view.auth_frame, "last_data", []),
             "ediscovery_cases": load_csv("ediscovery_cases.csv"),

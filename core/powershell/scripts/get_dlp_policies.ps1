@@ -24,7 +24,8 @@ try {
 
     # Retrieve policies
     $policies = Get-DlpCompliancePolicy
-    $output = @()
+    $policies_output = @()
+    $rules_output = @()
 
     if ($policies) {
         # Retrieve all compliance rules at once to map them
@@ -32,6 +33,17 @@ try {
         $ruleMap = @{}
         if ($allRules) {
             foreach ($rule in @($allRules)) {
+                # Add to rules output
+                $rules_output += [PSCustomObject]@{
+                    Name = $rule.Name
+                    Policy = $rule.Policy.ToString()
+                    ContentContainsSensitiveInformation = $rule.ContentContainsSensitiveInformation
+                    ExceptIfContentContainsSensitiveInformation = $rule.ExceptIfContentContainsSensitiveInformation
+                    AccessScope = $rule.AccessScope
+                    BlockAccess = $rule.BlockAccess
+                    AdvancedRule = $rule.AdvancedRule
+                }
+
                 if ($rule.Policy) {
                     $rawKey = $rule.Policy.ToString()
                     
@@ -86,6 +98,10 @@ try {
                 Comment = $policy.Comment
                 Workload = $policy.Workload
                 Mode = $policy.Mode
+                State = $policy.State
+                ExchangeLocation = $policy.ExchangeLocation
+                SharePointLocation = $policy.SharePointLocation
+                OneDriveLocation = $policy.OneDriveLocation
                 DistributionStatus = $policy.DistributionStatus
                 Enabled = $policy.Enabled
                 Actions = $actions
@@ -95,9 +111,14 @@ try {
                 CreatedBy = $policy.CreatedBy
                 LastModifiedBy = $policy.LastModifiedBy
             }
-            $output += $policyObj
+            $policies_output += $policyObj
         }
-        $output | ConvertTo-Json -Depth 5
+        
+        $finalOutput = @{
+            value = $policies_output
+            Rules = $rules_output
+        }
+        $finalOutput | ConvertTo-Json -Depth 10
     } else {
         "[]"
     }

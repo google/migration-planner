@@ -68,7 +68,7 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
             command=self._export, state="disabled"
         )
         self.btn_export.pack(side="right")
-
+        
         self.state_frame = ctk.CTkFrame(self, fg_color="transparent")
         
         self.grid_frame = ctk.CTkFrame(self, fg_color=COLOR_SURFACE, border_color=COLOR_OUTLINE_LIGHT, border_width=1, corner_radius=8)
@@ -84,6 +84,8 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
             cell.grid(row=0, column=col_idx, sticky="nsew", padx=0, pady=(0, 1))
             ctk.CTkLabel(cell, text=head_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
 
+        self.custom_sits_master = ctk.CTkFrame(self, fg_color="transparent")
+        self.edm_schemas_master = ctk.CTkFrame(self, fg_color="transparent")
         self.reset_view()
 
     def reset_view(self):
@@ -93,6 +95,8 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
         self.page = 0
         self.state_frame.pack_forget()
         self.grid_frame.pack_forget()
+        self.custom_sits_master.pack_forget()
+        self.edm_schemas_master.pack_forget()
         self.btn_export.configure(state="disabled")
         for w in self.state_frame.winfo_children(): w.destroy()
         for w in self.grid_frame.winfo_children():
@@ -119,6 +123,8 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
         self.btn_reload.configure(state="disabled")
         self.btn_export.configure(state="disabled")
         self.grid_frame.pack_forget()
+        self.custom_sits_master.pack_forget()
+        self.edm_schemas_master.pack_forget()
         
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         if os.path.basename(script_dir) == "security":
@@ -140,10 +146,45 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
                 tenant_id=tenant
             )
             
-            # Stream to CSV
-            if isinstance(sit_data, dict) and "value" in sit_data:
-                sit_data = sit_data["value"]
-            sit_list = sit_data if isinstance(sit_data, list) else [sit_data]
+            # Parse new dictionary structure
+            sit_list = []
+            custom_sits = []
+            edm_schemas = []
+            if isinstance(sit_data, dict):
+                sit_list = sit_data.get("SensitiveInformationTypes", [])
+                if isinstance(sit_list, dict): sit_list = [sit_list]
+                elif sit_list is None: sit_list = []
+                
+                custom_sits = sit_data.get("CustomRulePackages", [])
+                if isinstance(custom_sits, dict): custom_sits = [custom_sits]
+                elif custom_sits is None: custom_sits = []
+                
+                edm_schemas = sit_data.get("EdmSchemas", [])
+                if isinstance(edm_schemas, dict): edm_schemas = [edm_schemas]
+                elif edm_schemas is None: edm_schemas = []
+            elif isinstance(sit_data, list):
+                sit_list = sit_data
+
+            # Filter modern custom SITs and EDMs embedded in standard list
+            standard_sits = []
+            for sit in sit_list:
+                if str(sit.get("IsOutOfBox", "True")).lower() == "false":
+                    # It's a custom creation
+                    if str(sit.get("Type", "")).lower() == "exactmatch":
+                        # Also remap properties to match EDM UI layout if missing
+                        if "DataStoreName" not in sit:
+                            sit["DataStoreName"] = sit.get("Publisher", "Unknown")
+                        edm_schemas.append(sit)
+                    else:
+                        if "PublisherName" not in sit or not sit["PublisherName"]:
+                            sit["PublisherName"] = sit.get("Publisher", "Unknown")
+                        custom_sits.append(sit)
+                else:
+                    standard_sits.append(sit)
+            sit_list = standard_sits
+                
+            self.custom_sit_count = len(custom_sits)
+            self.edm_schema_count = len(edm_schemas)
             
             script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
             if os.path.basename(script_dir) == "security":
@@ -157,6 +198,16 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
                     writer = csv.DictWriter(f, fieldnames=sit_list[0].keys())
                     writer.writeheader()
                     writer.writerows(sit_list)
+                    
+            from core.powershell.dlp import DLPService
+            dlp_svc = DLPService(None)
+            self.custom_xml_dir = os.path.join(reports_dir, "custom_sits_xml")
+            self.custom_csv_path = os.path.join(reports_dir, "custom_sits.csv")
+            self.edm_csv_path = os.path.join(reports_dir, "edm_schemas.csv")
+            
+            dlp_svc.export_custom_sit_xml(sit_data, output_dir=self.custom_xml_dir)
+            dlp_svc.export_to_csv(custom_sits, "custom_sits.csv", output_dir=reports_dir)
+            dlp_svc.export_to_csv(edm_schemas, "edm_schemas.csv", output_dir=reports_dir)
                     
             self.status = "success"
             self.after(0, self._render_success)
@@ -175,6 +226,48 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
         self.grid_frame.pack(fill="x")
         
         self._update_grid()
+        self._render_custom_sits_master()
+        self._render_edm_schemas_master()
+
+    def _render_custom_sits_master(self):
+        for w in self.custom_sits_master.winfo_children():
+            w.destroy()
+            
+        self.custom_sits_data = []
+        if hasattr(self, 'custom_csv_path') and os.path.exists(self.custom_csv_path):
+            with open(self.custom_csv_path, 'r', encoding='utf-8') as f:
+                self.custom_sits_data = list(csv.DictReader(f))
+        
+        self.custom_page = 0
+        
+        self.custom_sits_master.pack(fill="x", expand=True, pady=(20, 0))
+        header = ctk.CTkFrame(self.custom_sits_master, fg_color="transparent")
+        header.pack(fill="x", padx=10, pady=(0, 10))
+        ctk.CTkLabel(header, text="Custom SITs", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        
+        self.custom_sits_container = ctk.CTkFrame(self.custom_sits_master, fg_color="transparent")
+        self.custom_sits_container.pack(fill="x", expand=True)
+        self._render_custom_sits_page()
+
+    def _render_edm_schemas_master(self):
+        for w in self.edm_schemas_master.winfo_children():
+            w.destroy()
+            
+        self.edm_schemas_data = []
+        if hasattr(self, 'edm_csv_path') and os.path.exists(self.edm_csv_path):
+            with open(self.edm_csv_path, 'r', encoding='utf-8') as f:
+                self.edm_schemas_data = list(csv.DictReader(f))
+            
+        self.edm_page = 0
+        
+        self.edm_schemas_master.pack(fill="x", expand=True, pady=(20, 0))
+        header = ctk.CTkFrame(self.edm_schemas_master, fg_color="transparent")
+        header.pack(fill="x", padx=10, pady=(0, 10))
+        ctk.CTkLabel(header, text="EDM Schemas", font=FONT_BODY_BOLD, text_color=COLOR_TEXT_MAIN).pack(side="left")
+        
+        self.edm_schemas_container = ctk.CTkFrame(self.edm_schemas_master, fg_color="transparent")
+        self.edm_schemas_container.pack(fill="x", expand=True)
+        self._render_edm_schemas_page()
 
     def _render_error(self, err_msg):
         self.btn_reload.configure(state="normal")
@@ -269,6 +362,92 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
         self.page += delta
         self._update_grid()
 
+    def _render_custom_sits_page(self):
+        for w in self.custom_sits_container.winfo_children(): w.destroy()
+        
+        grid = ctk.CTkFrame(self.custom_sits_container, fg_color=COLOR_SURFACE, border_width=1, border_color=COLOR_OUTLINE_LIGHT, corner_radius=8)
+        grid.pack(fill="x", expand=True)
+        
+        headers = ["Name", "Publisher", "Description"]
+        for i in range(3): grid.grid_columnconfigure(i, weight=1)
+        
+        for c_idx, h_text in enumerate(headers):
+            cell = ctk.CTkFrame(grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=c_idx, sticky="nsew", padx=0, pady=(0, 1) if c_idx == 0 else (0, 1))
+            ctk.CTkLabel(cell, text=h_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+            
+        total_pages = max(1, (len(self.custom_sits_data) + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
+        start_idx = self.custom_page * self.ITEMS_PER_PAGE
+        page_data = self.custom_sits_data[start_idx:start_idx + self.ITEMS_PER_PAGE]
+        
+        if not self.custom_sits_data:
+            ctk.CTkLabel(grid, text="N/A (No Custom SITs found)", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).grid(row=1, column=0, columnspan=3, padx=20, pady=20, sticky="w")
+        else:
+            for r_idx, sit in enumerate(page_data, start=1):
+                bg = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+                for c_idx, key in enumerate(["Name", "PublisherName", "Description"]):
+                    cell = ctk.CTkFrame(grid, fg_color=bg, corner_radius=0)
+                    cell.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
+                    val = sit.get(key, "N/A")
+                    ctk.CTkLabel(cell, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, wraplength=300).pack(padx=10, pady=6, anchor="w")
+                
+        if total_pages > 1:
+            ctrl = ctk.CTkFrame(grid, fg_color=COLOR_SURFACE)
+            ctrl.grid(row=self.ITEMS_PER_PAGE + 2, column=0, columnspan=3, sticky="ew")
+            ctr = ctk.CTkFrame(ctrl, fg_color="transparent")
+            ctr.pack(pady=(5, 10))
+            
+            ctk.CTkButton(ctr, text="◀ Prev", width=70, height=22, corner_radius=6, font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state="normal" if self.custom_page > 0 else "disabled", command=lambda: self._change_custom_sits_page(-1)).pack(side="left", padx=5)
+            ctk.CTkLabel(ctr, text=f"Page {self.custom_page + 1} of {total_pages}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=15)
+            ctk.CTkButton(ctr, text="Next ▶", width=70, height=22, corner_radius=6, font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state="normal" if self.custom_page < total_pages - 1 else "disabled", command=lambda: self._change_custom_sits_page(1)).pack(side="left", padx=5)
+
+    def _change_custom_sits_page(self, delta):
+        self.custom_page += delta
+        self._render_custom_sits_page()
+        
+    def _render_edm_schemas_page(self):
+        for w in self.edm_schemas_container.winfo_children(): w.destroy()
+        
+        grid = ctk.CTkFrame(self.edm_schemas_container, fg_color=COLOR_SURFACE, border_width=1, border_color=COLOR_OUTLINE_LIGHT, corner_radius=8)
+        grid.pack(fill="x", expand=True)
+        
+        headers = ["Name", "Description", "DataStoreName"]
+        for i in range(3): grid.grid_columnconfigure(i, weight=1)
+        
+        for c_idx, h_text in enumerate(headers):
+            cell = ctk.CTkFrame(grid, fg_color=COLOR_TONAL_BG, corner_radius=0)
+            cell.grid(row=0, column=c_idx, sticky="nsew", padx=0, pady=(0, 1) if c_idx == 0 else (0, 1))
+            ctk.CTkLabel(cell, text=h_text, font=FONT_BODY_BOLD, text_color=COLOR_TONAL_TEXT).pack(padx=10, pady=8, anchor="w")
+            
+        total_pages = max(1, (len(self.edm_schemas_data) + self.ITEMS_PER_PAGE - 1) // self.ITEMS_PER_PAGE)
+        start_idx = self.edm_page * self.ITEMS_PER_PAGE
+        page_data = self.edm_schemas_data[start_idx:start_idx + self.ITEMS_PER_PAGE]
+        
+        if not self.edm_schemas_data:
+            ctk.CTkLabel(grid, text="N/A (No EDM Schemas found)", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).grid(row=1, column=0, columnspan=3, padx=20, pady=20, sticky="w")
+        else:
+            for r_idx, schema in enumerate(page_data, start=1):
+                bg = COLOR_SURFACE if r_idx % 2 != 0 else COLOR_SURFACE_VARIANT
+                for c_idx, key in enumerate(["Name", "Description", "DataStoreName"]):
+                    cell = ctk.CTkFrame(grid, fg_color=bg, corner_radius=0)
+                    cell.grid(row=r_idx, column=c_idx, sticky="nsew", padx=0, pady=(0, 1))
+                    val = schema.get(key, "N/A")
+                    ctk.CTkLabel(cell, text=val, font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_MAIN, wraplength=300).pack(padx=10, pady=6, anchor="w")
+                
+        if total_pages > 1:
+            ctrl = ctk.CTkFrame(grid, fg_color=COLOR_SURFACE)
+            ctrl.grid(row=self.ITEMS_PER_PAGE + 2, column=0, columnspan=3, sticky="ew")
+            ctr = ctk.CTkFrame(ctrl, fg_color="transparent")
+            ctr.pack(pady=(5, 10))
+            
+            ctk.CTkButton(ctr, text="◀ Prev", width=70, height=22, corner_radius=6, font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state="normal" if self.edm_page > 0 else "disabled", command=lambda: self._change_edm_schemas_page(-1)).pack(side="left", padx=5)
+            ctk.CTkLabel(ctr, text=f"Page {self.edm_page + 1} of {total_pages}", font=FONT_BODY_MEDIUM, text_color=COLOR_TEXT_SUB).pack(side="left", padx=15)
+            ctk.CTkButton(ctr, text="Next ▶", width=70, height=22, corner_radius=6, font=FONT_BODY_SMALL, fg_color="transparent", border_width=1, border_color=COLOR_OUTLINE, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, state="normal" if self.edm_page < total_pages - 1 else "disabled", command=lambda: self._change_edm_schemas_page(1)).pack(side="left", padx=5)
+
+    def _change_edm_schemas_page(self, delta):
+        self.edm_page += delta
+        self._render_edm_schemas_page()
+
     def _export(self):
         if not self.csv_path or not os.path.exists(self.csv_path):
             messagebox.showinfo("No Data", "There is no SIT data to export.", parent=self)
@@ -276,15 +455,21 @@ class SensitiveInfoTypesSubFrame(ctk.CTkFrame):
             
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         f = filedialog.asksaveasfilename(
-            initialfile=f"sensitive_info_types_{ts}.csv",
-            defaultextension=".csv",
-            filetypes=[("CSV Files", "*.csv")],
+            initialfile=f"sensitive_info_types_export_{ts}.zip",
+            defaultextension=".zip",
+            filetypes=[("Zip Archive", "*.zip")],
             parent=self
         )
         if not f: return
         try:
-            shutil.copyfile(self.csv_path, f)
-            messagebox.showinfo("Export Successful", f"SIT exported to:\n{f}", parent=self)
+            import zipfile
+            with zipfile.ZipFile(f, 'w') as zf:
+                zf.write(self.csv_path, arcname=os.path.basename(self.csv_path))
+                if getattr(self, 'custom_csv_path', None) and os.path.exists(self.custom_csv_path):
+                    zf.write(self.custom_csv_path, arcname=os.path.basename(self.custom_csv_path))
+                if getattr(self, 'edm_csv_path', None) and os.path.exists(self.edm_csv_path):
+                    zf.write(self.edm_csv_path, arcname=os.path.basename(self.edm_csv_path))
+            messagebox.showinfo("Export Successful", f"SIT data exported to:\n{f}", parent=self)
         except Exception as e:
             messagebox.showerror("Export Failed", f"Error: {e}", parent=self)
 
