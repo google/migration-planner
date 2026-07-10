@@ -15,6 +15,7 @@ import traceback
 import json
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
+GRAPH_BETA_URL = "https://graph.microsoft.com/beta"
 
 class FileEstimator(Estimator):
     def __init__(self,
@@ -190,7 +191,8 @@ class FileEstimator(Estimator):
                     teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
                     driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
                     listCount=site_discovery_progress_metrics.get("listCount", 0), 
-                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
+                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0),
+                    recycleBinItemCount=site_discovery_progress_metrics.get("recycleBinItemCount", 0)
                 )
 
                 self.logger("Site Scanning is finished!!!!")
@@ -350,11 +352,14 @@ class FileEstimator(Estimator):
             metrics["folderCountExceedingDepthLimit"] += drive_metric.get("folderCountExceedingDepthLimit", 0)
             metrics["fileCountExceedingDepthLimit"] += drive_metric.get("fileCountExceedingDepthLimit", 0)
         
-        # Aggregate listCount for all sites (including those without drives or with failed drive scans)
+        # Aggregate listCount and recycleBin metrics for all sites (including those without drives or with failed drive scans)
         for site_id in list(metrics["siteMetrics"].keys()):
             top_level_site = subsite_to_top_level_site.get(site_id, site_id)
             if top_level_site in metrics["siteMetrics"]:
                 metrics["siteMetrics"][top_level_site]["listCount"] = metrics["siteMetrics"][top_level_site].get("listCount", 0) + self.site_to_metadata.get(site_id, {}).get("listCount", 0)
+                if site_id != top_level_site and self.config.include_recycle_bin_contents:
+                    metrics["siteMetrics"][top_level_site]["recycleBinSize"] = metrics["siteMetrics"][top_level_site].get("recycleBinSize", 0) + metrics["siteMetrics"][site_id].get("recycleBinSize", 0)
+                    metrics["siteMetrics"][top_level_site]["recycleBinCount"] = metrics["siteMetrics"][top_level_site].get("recycleBinCount", 0) + metrics["siteMetrics"][site_id].get("recycleBinCount", 0)
 
         for subsite_id, drive_ids in subsite_to_drives.items():
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
@@ -734,9 +739,123 @@ class FileEstimator(Estimator):
                 if key not in tenant_metrics["driveCounts"]:
                     tenant_metrics["driveCounts"][key] = 0
                 tenant_metrics["driveCounts"][key] += value
-                
+            
+            if self.config.include_recycle_bin_contents:
+                self._update_recycle_bin_metrics(site_ids, tenant_metrics, site_discovery_progress_metrics, failures)
         except Exception as e:
             self._log_and_fail("Error in _append_tenant_level_metrics", e, failures)
+
+    def _update_recycle_bin_metrics(
+        self,
+        site_ids: List[str],
+        tenant_metrics: Dict[str, Any],
+        site_discovery_progress_metrics: Dict[str, int],
+        failures: List[Dict[str, str]]
+    ): 
+        try:
+            recycle_bin_url = "/sites/{siteId}/recycleBin/items?$top=999&$select=size"
+            batches = create_batches(recycle_bin_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
+
+            futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
+            batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
+            idx = 0
+            for batch in batches:
+                futures_map[idx] = self.executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+                batch_id_to_batch_map[idx] = batch
+                idx += 1
+
+            from concurrent.futures import as_completed
+            future_to_batch_id = {future: bid for bid, future in futures_map.items()}
+
+            site_to_resp_map: Dict[str, Dict[str, Any]] = {}
+            pending_next_items = []
+
+            def local_progress_callback(responses: List, has_next=False):
+                site_discovery_progress_metrics["recycleBinItemCount"] = site_discovery_progress_metrics.get("recycleBinItemCount", 0) + len(responses)
+                self.progress_update_callback(
+                    "site_discovery", 
+                    count=site_discovery_progress_metrics.get("siteCount", 0), 
+                    personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                    teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                    driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
+                    listCount=site_discovery_progress_metrics.get("listCount", 0), 
+                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0),
+                    recycleBinItemCount=site_discovery_progress_metrics.get("recycleBinItemCount", 0)
+                )
+
+            for future in as_completed(futures_map.values()):
+                batch_id = future_to_batch_id[future]
+                responses = future.result()
+                batch = batch_id_to_batch_map[batch_id]
+                batch_responses_map = get_batch_responses_map(responses, self.logger)
+                for req in batch:
+                    req_id = req["id"]
+                    if req_id in batch_responses_map:
+                        resp = batch_responses_map[req_id]
+                        site_id = req["headers"]["siteId"]
+                        site_to_resp_map[site_id] = resp
+
+                        if "body" in resp and "value" in resp["body"]:
+                            local_progress_callback(resp["body"]["value"])
+
+                        if "body" in resp and "@odata.nextLink" in resp["body"]:
+                            next_url = resp["body"]["@odata.nextLink"]
+                            relative_url = get_relative_url(next_url, GRAPH_BETA_URL)
+                            pending_next_items.append({
+                                "siteId": site_id,
+                                "url": relative_url
+                            })
+                        elif "body" in resp and "error" in resp["body"]:
+                            failures.append({
+                                "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
+                                "statusCode": resp["status"],
+                                "message": f"Error in fetching recycle bin items for site {site_id}: {resp['body']['error']['message']}"
+                            })
+                    else:
+                        failures.append({
+                            "type": FailureType.NOT_FOUND.name,
+                            "statusCode": None,
+                            "message": f"No response found for recycle bin API for site {req['headers']['siteId']}."
+                        })
+
+            while pending_next_items and not self.is_hard_stop_requested():
+                batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+                
+                next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
+                next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
+                idx = 0
+                for batch in batches:
+                    next_futures_map[idx] = self.executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+                    next_batch_id_to_batch_map[idx] = batch
+                    idx += 1
+                    
+                from concurrent.futures import as_completed
+                
+                future_to_batch_id = {future: bid for bid, future in next_futures_map.items()}
+                new_pending_next_items = []
+                
+                for future in as_completed(next_futures_map.values()):
+                    batch_id = future_to_batch_id[future]
+                    responses = future.result()
+                    batch = next_batch_id_to_batch_map[batch_id]
+                    new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BETA_URL, failures, False, local_progress_callback))
+                    
+                pending_next_items = new_pending_next_items
+
+            for site_id, resp in site_to_resp_map.items():
+                if "body" in resp and "value" in resp["body"]:
+                    items = resp["body"]["value"]
+                    total_size = sum(item.get("size", 0) for item in items)
+                    item_count = len(items)
+
+                    if site_id not in tenant_metrics["siteMetrics"]:
+                        tenant_metrics["siteMetrics"][site_id] = {}
+                    
+                    tenant_metrics["siteMetrics"][site_id]["recycleBinSize"] = total_size
+                    tenant_metrics["siteMetrics"][site_id]["recycleBinCount"] = item_count
+
+        except Exception as e:
+            self._log_and_fail("Error in _update_recycle_bin_metrics", e, failures)
 
     def _get_list_count(
         self,
@@ -772,7 +891,8 @@ class FileEstimator(Estimator):
                     teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
                     driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
                     listCount=site_discovery_progress_metrics.get("listCount", 0), 
-                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
+                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0),
+                    recycleBinItemCount=site_discovery_progress_metrics.get("recycleBinItemCount", 0)
                 )
 
             for future in as_completed(futures_map.values()):
@@ -973,7 +1093,8 @@ class FileEstimator(Estimator):
                     teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
                     driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
                     listCount=site_discovery_progress_metrics.get("listCount", 0), 
-                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
+                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0),
+                    recycleBinItemCount=site_discovery_progress_metrics.get("recycleBinItemCount", 0)
                 )
 
             for future in as_completed(futures_map.values()):

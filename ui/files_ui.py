@@ -66,6 +66,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     super().setup_variables()
     self.include_personal_sites = ctk.BooleanVar(value=True)
     self.include_team_sites = ctk.BooleanVar(value=False)
+    self.include_recycle_bin_contents = ctk.BooleanVar(value=False)
     self.eta_min_users = ctk.IntVar(value=1000)
     self.eta_max_users = ctk.IntVar(value=5000)
 
@@ -165,6 +166,26 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
     ).pack(side="left", padx=10)
+
+    # Additional Settings
+    ctk.CTkLabel(
+        self.adv_frame,
+        text="Additional Settings",
+        font=FONT_BODY_BOLD,
+        text_color=COLOR_TEXT_MAIN,
+    ).pack(anchor="w", padx=15, pady=(10, 5))
+
+    additional_settings_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
+    additional_settings_frame.pack(fill="x", padx=15)
+
+    ctk.CTkCheckBox(
+        additional_settings_frame,
+        text="Include Recycle Bin Contents",
+        variable=self.include_recycle_bin_contents,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
@@ -183,6 +204,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         list_count = msg.get("listCount", 0)
         drive_count = msg.get("driveCount", 0)
         license_count = msg.get("licenseCount", 0)
+        recycle_bin_item_count = msg.get("recycleBinItemCount", 0)
         status = msg.get("status", "Scanning...")
         if "sites" in self.prog_widgets:
           widget = self.prog_widgets["sites"]["lbl"]
@@ -202,6 +224,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               text += f" | Drives: {drive_count}"
             if license_count > 0:
               text += f" | Licenses: {license_count}"
+            if recycle_bin_item_count > 0:
+              text += f" | Recycle Bin Items: {recycle_bin_item_count}"
             widget.configure(
                 text=text
             )
@@ -543,7 +567,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         raise Exception("No sites were scanned successfully. Please check Azure app permissions or organization access policies.")
       site_data = []
       for site_id, s_data in site_metrics.items():
-        site_data.append({
+        row_data = {
             "Site Id": site_id,
             "Subsite Count": s_data.get("subsiteCount", 0),
             "DL Count": s_data.get("dlCount", 0),
@@ -556,7 +580,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             "Entities with > 500k item count": s_data.get("largeResourceCount", 0),
             "Corpus Size": s_data.get("totalSize", 0),
             "Resource Count": s_data.get("resourceCount", 0)
-        })
+        }
+        if getattr(self, "val_include_recycle_bin_contents", False):
+            row_data["Recycle Bin Item Count"] = s_data.get("recycleBinCount", 0)
+            row_data["Recycle Bin Size"] = s_data.get("recycleBinSize", 0)
+            
+        site_data.append(row_data)
       df = pd.DataFrame(site_data)
       
       if self.show_eta:
@@ -611,6 +640,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       original_site_ids = df_output["Site Id"].copy()
       df_output["Site Id"] = df_output["Site Id"].apply(self._get_display_name)
       df_output["Corpus Size"] = df_output["Corpus Size"].apply(self.format_size)
+      if "Recycle Bin Size" in df_output.columns:
+        df_output["Recycle Bin Size"] = df_output["Recycle Bin Size"].apply(self.format_size)
       df_output.rename(columns={"Site Id": "Site URL/Name"}, inplace=True)
       if "SortMetric" in df_output.columns:
         df_output.drop(columns=["SortMetric"], inplace=True)
@@ -950,6 +981,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       card_frame.pack(fill="x", pady=10)
 
       self.create_stat_card(card_frame, "Total Corpus Size", f"{self.format_size(sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🏢")
+      if getattr(self, "val_include_recycle_bin_contents", False):
+        self.create_stat_card(card_frame, "Total Recycle Bin Size", f"{self.format_size(sum([entry.get('recycleBinSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🗑️")
+        self.create_stat_card(card_frame, "Total Recycle Bin Item Count", f"{sum([entry.get('recycleBinCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🗑️")
       self.create_stat_card(card_frame, "Site Collection Count", f"{data.get('siteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsiteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Document Library Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
@@ -1250,6 +1284,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       total_corpus_size = sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()])
       summary_rows = [
           ("Total Corpus Size", self.format_size(total_corpus_size)),
+      ]
+      if getattr(self, "val_include_recycle_bin_contents", False):
+          total_recycle_bin_size = sum([entry.get('recycleBinSize', 0) for entry in data.get('siteMetrics', {}).values()])
+          total_recycle_bin_count = sum([entry.get('recycleBinCount', 0) for entry in data.get('siteMetrics', {}).values()])
+          summary_rows.extend([
+              ("Total Recycle Bin Size", self.format_size(total_recycle_bin_size)),
+              ("Total Recycle Bin Item Count", total_recycle_bin_count),
+          ])
+      
+      summary_rows.extend([
           ("Site Collection Count", data.get("siteCount", 0)),
           ("Subsite Count", data.get("subsiteCount", 0)),
           ("Personal (OneDrive) Site / Subsite Count", data.get("personalSiteCount", 0)),
@@ -1264,7 +1308,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ("Folder count beyond depth limit 100", data.get("folderCountExceedingDepthLimit", 0)),
           ("File count beyond depth limit 100", data.get("fileCountExceedingDepthLimit", 0)),
           ("Large Resource Count (Entities with >500k items)", data.get("tenantLevelLargeResourceCount", 0))
-      ]
+      ])
       
       for label, val in summary_rows:
           writer.writerow([label, val])
@@ -1318,6 +1362,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         else:
           row = ["Site Collection", "Email Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Corpus Size"]
 
+        if getattr(self, "val_include_recycle_bin_contents", False):
+          row.extend(["Recycle Bin Item Count", "Recycle Bin Size"])
+
         if self.show_eta:
           row.append("Suggested Batch")
 
@@ -1368,6 +1415,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                   s_data.get("largeResourceCount", 0),
                   self.format_size(s_data.get("totalSize", 0))
               ]
+              if getattr(self, "val_include_recycle_bin_contents", False):
+                row.extend([
+                    s_data.get("recycleBinCount", 0),
+                    self.format_size(s_data.get("recycleBinSize", 0))
+                ])
             else:
               row = [
                 self._get_display_name(site_id), 
@@ -1383,6 +1435,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                 s_data.get("largeResourceCount", 0),
                 self.format_size(s_data.get("totalSize", 0))
             ]
+            if getattr(self, "val_include_recycle_bin_contents", False):
+              row.extend([
+                  s_data.get("recycleBinCount", 0),
+                  self.format_size(s_data.get("recycleBinSize", 0))
+              ])
 
             if self.show_eta:
               row.append(batch_name)
@@ -1394,6 +1451,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config = super()._get_scan_configuration()
     config.includePersonalSites = self.val_include_personal_sites
     config.includeTeamSites = self.val_include_team_sites
+    config.include_recycle_bin_contents = self.val_include_recycle_bin_contents
     return config
 
   def start_scan(self):    
@@ -1410,6 +1468,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     # Save values to regular variables to avoid thread-safety issues in Tkinter
     self.val_include_personal_sites = self.include_personal_sites.get()
     self.val_include_team_sites = self.include_team_sites.get()
+    self.val_include_recycle_bin_contents = self.include_recycle_bin_contents.get()
     self.val_eta_min_users = self.eta_min_users.get()
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()
