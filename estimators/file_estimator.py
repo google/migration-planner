@@ -15,6 +15,7 @@ import traceback
 import json
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
+GRAPH_BETA_URL = "https://graph.microsoft.com/beta"
 
 class FileEstimator(Estimator):
     def __init__(self,
@@ -190,21 +191,22 @@ class FileEstimator(Estimator):
                     teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
                     driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
                     listCount=site_discovery_progress_metrics.get("listCount", 0), 
-                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
+                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0),
+                    recycleBinItemCount=site_discovery_progress_metrics.get("recycleBinItemCount", 0)
                 )
 
                 self.logger("Site Scanning is finished!!!!")
 
             # get adjacency lists and parent references for each drive
             self.progress_update_callback("drive_discovery", status="Fetching...", count=0)
-            drive_discovery_progress_metrics = {
-                "folderCount": 0,
-                "fileCount": 0,
-                "shortcutCount": 0
-            }
+            drive_discovery_progress_metrics = ThreadSafeMap()
+            drive_discovery_progress_metrics.update("folderCount", 0)
+            drive_discovery_progress_metrics.update("fileCount", 0)
+            drive_discovery_progress_metrics.update("shortcutCount", 0)
+            drive_discovery_progress_metrics.update("versionCount", 0)
 
             drive_id_to_adj_list, parent_references, resource_id_to_details, drive_id_to_total_size = self._create_in_memory_tree([drive["id"] for drive in drives], drive_discovery_progress_metrics, failures)
-            self.progress_update_callback("drive_discovery", status="Done", count=len(drives), **drive_discovery_progress_metrics)
+            self.progress_update_callback("drive_discovery", status="Done", count=len(drives), **drive_discovery_progress_metrics.get_all())
 
             # Calculate metrics for all drives
             drive_metrics = {}
@@ -350,11 +352,14 @@ class FileEstimator(Estimator):
             metrics["folderCountExceedingDepthLimit"] += drive_metric.get("folderCountExceedingDepthLimit", 0)
             metrics["fileCountExceedingDepthLimit"] += drive_metric.get("fileCountExceedingDepthLimit", 0)
         
-        # Aggregate listCount for all sites (including those without drives or with failed drive scans)
+        # Aggregate listCount and recycleBin metrics for all sites (including those without drives or with failed drive scans)
         for site_id in list(metrics["siteMetrics"].keys()):
             top_level_site = subsite_to_top_level_site.get(site_id, site_id)
             if top_level_site in metrics["siteMetrics"]:
                 metrics["siteMetrics"][top_level_site]["listCount"] = metrics["siteMetrics"][top_level_site].get("listCount", 0) + self.site_to_metadata.get(site_id, {}).get("listCount", 0)
+                if site_id != top_level_site and self.config.include_recycle_bin_contents:
+                    metrics["siteMetrics"][top_level_site]["recycleBinSize"] = metrics["siteMetrics"][top_level_site].get("recycleBinSize", 0) + metrics["siteMetrics"][site_id].get("recycleBinSize", 0)
+                    metrics["siteMetrics"][top_level_site]["recycleBinCount"] = metrics["siteMetrics"][top_level_site].get("recycleBinCount", 0) + metrics["siteMetrics"][site_id].get("recycleBinCount", 0)
 
         for subsite_id, drive_ids in subsite_to_drives.items():
             metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
@@ -387,6 +392,9 @@ class FileEstimator(Estimator):
                     metrics["siteMetrics"][top_level_site]["fileCount"] =  metrics["siteMetrics"].get(top_level_site, {}).get("fileCount", 0) + drive_metric.get("fileCount", 0)
                     metrics["siteMetrics"][top_level_site]["shortcutCount"] =  metrics["siteMetrics"].get(top_level_site, {}).get("shortcutCount", 0) + drive_metric.get("shortcutCount", 0)
                     metrics["siteMetrics"][top_level_site]["totalSize"] =  metrics["siteMetrics"].get(top_level_site, {}).get("totalSize", 0) + drive_id_to_total_size.get(drive_id, 0)
+                    if self.config.include_file_versions:
+                        metrics["siteMetrics"][top_level_site]["versionSize"] = metrics["siteMetrics"].get(top_level_site, {}).get("versionSize", 0) + self.drive_id_to_version_size.get(drive_id, 0)
+                        metrics["siteMetrics"][top_level_site]["versionCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("versionCount", 0) + self.drive_id_to_version_count.get(drive_id, 0)
                     metrics["siteMetrics"][top_level_site]["folderCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("folderCountExceedingDepthLimit", 0) + drive_metric.get("folderCountExceedingDepthLimit", 0)
                     metrics["siteMetrics"][top_level_site]["fileCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("fileCountExceedingDepthLimit", 0) + drive_metric.get("fileCountExceedingDepthLimit", 0)
                 
@@ -734,9 +742,123 @@ class FileEstimator(Estimator):
                 if key not in tenant_metrics["driveCounts"]:
                     tenant_metrics["driveCounts"][key] = 0
                 tenant_metrics["driveCounts"][key] += value
-                
+            
+            if self.config.include_recycle_bin_contents:
+                self._update_recycle_bin_metrics(site_ids, tenant_metrics, site_discovery_progress_metrics, failures)
         except Exception as e:
             self._log_and_fail("Error in _append_tenant_level_metrics", e, failures)
+
+    def _update_recycle_bin_metrics(
+        self,
+        site_ids: List[str],
+        tenant_metrics: Dict[str, Any],
+        site_discovery_progress_metrics: Dict[str, int],
+        failures: List[Dict[str, str]]
+    ): 
+        try:
+            recycle_bin_url = "/sites/{siteId}/recycleBin/items?$top=999&$select=size"
+            batches = create_batches(recycle_bin_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
+
+            futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
+            batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
+            idx = 0
+            for batch in batches:
+                futures_map[idx] = self.executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+                batch_id_to_batch_map[idx] = batch
+                idx += 1
+
+            from concurrent.futures import as_completed
+            future_to_batch_id = {future: bid for bid, future in futures_map.items()}
+
+            site_to_resp_map: Dict[str, Dict[str, Any]] = {}
+            pending_next_items = []
+
+            def local_progress_callback(responses: List, has_next=False):
+                site_discovery_progress_metrics["recycleBinItemCount"] = site_discovery_progress_metrics.get("recycleBinItemCount", 0) + len(responses)
+                self.progress_update_callback(
+                    "site_discovery", 
+                    count=site_discovery_progress_metrics.get("siteCount", 0), 
+                    personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+                    teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+                    driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
+                    listCount=site_discovery_progress_metrics.get("listCount", 0), 
+                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0),
+                    recycleBinItemCount=site_discovery_progress_metrics.get("recycleBinItemCount", 0)
+                )
+
+            for future in as_completed(futures_map.values()):
+                batch_id = future_to_batch_id[future]
+                responses = future.result()
+                batch = batch_id_to_batch_map[batch_id]
+                batch_responses_map = get_batch_responses_map(responses, self.logger)
+                for req in batch:
+                    req_id = req["id"]
+                    if req_id in batch_responses_map:
+                        resp = batch_responses_map[req_id]
+                        site_id = req["headers"]["siteId"]
+                        site_to_resp_map[site_id] = resp
+
+                        if "body" in resp and "value" in resp["body"]:
+                            local_progress_callback(resp["body"]["value"])
+
+                        if "body" in resp and "@odata.nextLink" in resp["body"]:
+                            next_url = resp["body"]["@odata.nextLink"]
+                            relative_url = get_relative_url(next_url, GRAPH_BETA_URL)
+                            pending_next_items.append({
+                                "siteId": site_id,
+                                "url": relative_url
+                            })
+                        elif "body" in resp and "error" in resp["body"]:
+                            failures.append({
+                                "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
+                                "statusCode": resp["status"],
+                                "message": f"Error in fetching recycle bin items for site {site_id}: {resp['body']['error']['message']}"
+                            })
+                    else:
+                        failures.append({
+                            "type": FailureType.NOT_FOUND.name,
+                            "statusCode": None,
+                            "message": f"No response found for recycle bin API for site {req['headers']['siteId']}."
+                        })
+
+            while pending_next_items and not self.is_hard_stop_requested():
+                batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+                
+                next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
+                next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
+                idx = 0
+                for batch in batches:
+                    next_futures_map[idx] = self.executor.submit(self.url_invoker.invoke, GRAPH_BETA_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+                    next_batch_id_to_batch_map[idx] = batch
+                    idx += 1
+                    
+                from concurrent.futures import as_completed
+                
+                future_to_batch_id = {future: bid for bid, future in next_futures_map.items()}
+                new_pending_next_items = []
+                
+                for future in as_completed(next_futures_map.values()):
+                    batch_id = future_to_batch_id[future]
+                    responses = future.result()
+                    batch = next_batch_id_to_batch_map[batch_id]
+                    new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BETA_URL, failures, False, local_progress_callback))
+                    
+                pending_next_items = new_pending_next_items
+
+            for site_id, resp in site_to_resp_map.items():
+                if "body" in resp and "value" in resp["body"]:
+                    items = resp["body"]["value"]
+                    total_size = sum(item.get("size", 0) for item in items)
+                    item_count = len(items)
+
+                    if site_id not in tenant_metrics["siteMetrics"]:
+                        tenant_metrics["siteMetrics"][site_id] = {}
+                    
+                    tenant_metrics["siteMetrics"][site_id]["recycleBinSize"] = total_size
+                    tenant_metrics["siteMetrics"][site_id]["recycleBinCount"] = item_count
+
+        except Exception as e:
+            self._log_and_fail("Error in _update_recycle_bin_metrics", e, failures)
 
     def _get_list_count(
         self,
@@ -772,7 +894,8 @@ class FileEstimator(Estimator):
                     teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
                     driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
                     listCount=site_discovery_progress_metrics.get("listCount", 0), 
-                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
+                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0),
+                    recycleBinItemCount=site_discovery_progress_metrics.get("recycleBinItemCount", 0)
                 )
 
             for future in as_completed(futures_map.values()):
@@ -973,7 +1096,8 @@ class FileEstimator(Estimator):
                     teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
                     driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
                     listCount=site_discovery_progress_metrics.get("listCount", 0), 
-                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0)
+                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0),
+                    recycleBinItemCount=site_discovery_progress_metrics.get("recycleBinItemCount", 0)
                 )
 
             for future in as_completed(futures_map.values()):
@@ -1058,13 +1182,104 @@ class FileEstimator(Estimator):
             self._log_and_fail("Error in _get_drives", e, failures)
             return 0, 0
 
+    def _fetch_file_versions_size(
+        self,
+        drive_id: str,
+        item_id: str,
+        failures: List[Dict[str, str]],
+        drive_discovery_progress_metrics: ThreadSafeMap,
+        completed_drives: AtomicInt,
+        total_drives: int
+    ):
+        if self.is_hard_stop_requested():
+            return
+
+        try:
+            url = f"/drives/{drive_id}/items/{item_id}/versions?$select=size,id"
+            is_first_page = True
+            
+            while url and not self.is_hard_stop_requested():
+                req = {
+                    "id": 0,
+                    "method": "GET",
+                    "url": url,
+                    "headers": {}
+                }
+                batch = [req]
+                responses = self.url_invoker.invoke(GRAPH_BASE_URL, batch, self.logger, self.stop_event, self.get_resource_type())
+                
+                if not responses:
+                    break
+
+                resp = responses[0]
+                if "body" in resp and "value" in resp["body"]:
+                    versions = resp["body"]["value"]
+                    
+                    if is_first_page:
+                        if len(versions) > 1: # Skip if only 1 version (current)
+                            # Assuming reverse chronological order, skip the first one
+                            extra_versions = versions[1:]
+                            version_size = sum(v.get("size", 0) for v in extra_versions)
+                            version_count = len(extra_versions)
+                        else:
+                            version_size = 0
+                            version_count = 0
+                        is_first_page = False
+                    else:
+                        # For subsequent pages, all versions are historical
+                        version_size = sum(v.get("size", 0) for v in versions)
+                        version_count = len(versions)
+
+                    if version_count > 0:
+                        with self.version_size_lock:
+                            self.drive_id_to_version_size[drive_id] = self.drive_id_to_version_size.get(drive_id, 0) + version_size
+                            self.drive_id_to_version_count[drive_id] = self.drive_id_to_version_count.get(drive_id, 0) + version_count
+                        
+                        drive_discovery_progress_metrics.increment("versionCount", version_count)
+
+                    if "body" in resp and "@odata.nextLink" in resp["body"]:
+                        next_url = resp["body"]["@odata.nextLink"]
+                        url = get_relative_url(next_url, GRAPH_BASE_URL)
+                    else:
+                        url = None
+
+                elif "body" in resp and "error" in resp["body"]:
+                    print(f"DEBUG: Error in response for item {item_id}: {resp['body']['error']}")
+                    failures.append({
+                        "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
+                        "statusCode": resp.get("status"),
+                        "message": f"Error fetching versions for file {item_id} in drive {drive_id}: {resp['body']['error'].get('message')}"
+                    })
+                    break
+                else:
+                    print(f"DEBUG: Unexpected response structure for item {item_id}: {json.dumps(resp, indent=2)}")
+                    break
+
+            self.processed_versions_count.increment()
+            if self.processed_versions_count.get_value() % 10 == 0:
+                self.progress_update_callback(
+                    "drive_discovery",
+                    count=completed_drives.get_value(),
+                    total_drives=total_drives,
+                    **drive_discovery_progress_metrics.get_all()
+                )
+
+        except Exception as e:
+            print(f"DEBUG: Exception in _fetch_file_versions_size for item {item_id}: {str(e)}")
+            failures.append({
+                "type": FailureType.EXCEPTION.name,
+                "statusCode": None,
+                "message": f"Exception fetching versions for file {item_id} in drive {drive_id}: {str(e)}"
+            })
+
     def _create_in_memory_tree(
         self, 
         drive_ids: List[str], 
-        drive_discovery_progress_metrics: Dict[str, int],
+        drive_discovery_progress_metrics: ThreadSafeMap,
         failures: List[Dict[str, str]]
     ):
-        completed_drives = 0
+        completed_drives = AtomicInt(0)
+        self.processed_versions_count = AtomicInt(0)
         total_drives = len(drive_ids)
         adj_list = {}
         parent_references: Dict[str, Dict[str, str]] = {}
@@ -1073,6 +1288,15 @@ class FileEstimator(Estimator):
         for drive_id in drive_ids:
             adj_list[drive_id] = {}
             parent_references[drive_id] = {}
+
+        self.drive_id_to_version_size = {}
+        self.drive_id_to_version_count = {}
+        self.version_size_lock = threading.Lock()
+        self.versions_executor = None
+        if self.config.include_file_versions:
+            from concurrent.futures import ThreadPoolExecutor
+            self.versions_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
+
         try:
             # use delta api to fetch the folders
             delta_api = "/drives/{driveId}/root/delta?$select=id,parentReference,name,webUrl,folder,file,remoteItem,size"
@@ -1099,31 +1323,33 @@ class FileEstimator(Estimator):
                 return "id" not in resource["parentReference"] and resource["name"] == "root"
 
             def local_progress_callback(responses: List, has_next=False):
-                nonlocal completed_drives
                 if not has_next:
-                    completed_drives += 1
+                    completed_drives.increment()
                 for curr_response in responses:
                     if curr_response["id"] in seen_ids or _is_root(curr_response):
                         continue
                     seen_ids.add(curr_response["id"])
                     
                     if "folder" in curr_response:
-                        drive_discovery_progress_metrics["folderCount"] += 1
+                        drive_discovery_progress_metrics.increment("folderCount")
                     elif "file" in curr_response:
-                        drive_discovery_progress_metrics["fileCount"] += 1
+                        drive_discovery_progress_metrics.increment("fileCount")
                         drive_id = curr_response["parentReference"]["driveId"]
                         drive_id_to_total_size[drive_id] = drive_id_to_total_size.get(drive_id, 0) + curr_response.get("size", 0)
+                        
+                        if self.config.include_file_versions and self.versions_executor:
+                            item_id = curr_response["id"]
+                            self.versions_executor.submit(self._fetch_file_versions_size, drive_id, item_id, failures, drive_discovery_progress_metrics, completed_drives, total_drives)
+                            
                     elif "remoteItem" in curr_response:
-                        drive_discovery_progress_metrics["shortcutCount"] += 1
+                        drive_discovery_progress_metrics.increment("shortcutCount")
                 
 
                 self.progress_update_callback(
                     "drive_discovery",
-                    count=completed_drives,
+                    count=completed_drives.get_value(),
                     total_drives=total_drives,
-                    fileCount=drive_discovery_progress_metrics.get("fileCount", 0),
-                    folderCount=drive_discovery_progress_metrics.get("folderCount", 0),
-                    shortcutCount=drive_discovery_progress_metrics.get("shortcutCount", 0)
+                    **drive_discovery_progress_metrics.get_all()
                 )
 
             for future in as_completed(futures_map.values()):
@@ -1206,6 +1432,9 @@ class FileEstimator(Estimator):
         except Exception as e:
             self._log_and_fail(f"Error in _create_in_memory_tree", e, failures)
             return {}, {}, {}
+        finally:
+            if self.config.include_file_versions and hasattr(self, "versions_executor") and self.versions_executor:
+                self.versions_executor.shutdown(wait=True)
 
     def _calculate_drive_metrics(
         self, 

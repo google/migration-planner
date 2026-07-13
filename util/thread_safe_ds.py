@@ -52,6 +52,12 @@ class ThreadSafeMap():
         with self.lock:
             return key in self.map
 
+    def increment(self, key, count: int = 1):
+        with self.lock:
+            if key not in self.map:
+                self.map[key] = 0
+            self.map[key] += count
+
     def get_all(self):
         with self.lock:
             return self.map.copy()
