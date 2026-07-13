@@ -190,7 +190,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     ctk.CTkCheckBox(
         additional_settings_frame,
-        text="Include File Versions in Corpus Size",
+        text="Include Historical File Versions in Corpus Size",
         variable=self.include_file_versions,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
@@ -994,12 +994,23 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           text_color=COLOR_TEXT_SUB,
       ).pack(anchor="w", padx=10, pady=(0, 5))
 
-      ctk.CTkLabel(
-          self.view_results,
-          text="Note: Recycle Bin contents and historical File Versions are accounted for in Corpus Size calculations but will not be migrated.",
-          font=FONT_BODY_BOLD,
-          text_color=COLOR_TEXT_MAIN,
-      ).pack(anchor="w", padx=10, pady=(0, 10))
+      include_recycle = getattr(self, "val_include_recycle_bin_contents", False)
+      include_versions = getattr(self, "val_include_file_versions", False)
+
+      note_parts = []
+      if include_recycle:
+          note_parts.append("Recycle Bin contents")
+      if include_versions:
+          note_parts.append("Historical File Versions")
+
+      if note_parts:
+          note_text = f"Note: {' and '.join(note_parts)} are accounted for in Corpus Size calculations but will not be migrated."
+          ctk.CTkLabel(
+              self.view_results,
+              text=note_text,
+              font=FONT_BODY_BOLD,
+              text_color=COLOR_TEXT_MAIN,
+          ).pack(anchor="w", padx=10, pady=(0, 10))
 
       # Cards for simple metrics
       card_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
@@ -1308,7 +1319,18 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Section 1: Summary Metrics
       writer.writerow(["Summary Metrics", "Value"])
-      writer.writerow(["Note: Recycle Bin contents and historical File Versions are accounted for in Corpus Size calculations but will not be migrated."])
+      include_recycle = getattr(self, "val_include_recycle_bin_contents", False)
+      include_versions = getattr(self, "val_include_file_versions", False)
+
+      note_parts = []
+      if include_recycle:
+          note_parts.append("Recycle Bin contents")
+      if include_versions:
+          note_parts.append("Historical File Versions")
+
+      if note_parts:
+          note_text = f"Note: {' and '.join(note_parts)} are accounted for in Corpus Size calculations but will not be migrated."
+          writer.writerow([note_text])
       
       total_corpus_size = sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()])
       summary_rows = [
@@ -1402,7 +1424,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           row.extend(["Recycle Bin Item Count", "Recycle Bin Size"])
 
         if getattr(self, "val_include_file_versions", False):
-          row.extend(["File Version Count", "File Version Size"])
+          row.extend(["Historical File Version Count", "Historical File Version Size"])
 
         if self.show_eta:
           row.append("Suggested Batch")
@@ -1523,7 +1545,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     if self.val_include_file_versions:
         warning_msg = (
-            "Enabling 'Include File Versions in Corpus Size' will cause severe performance degradation "
+            "Enabling 'Include Historical File Versions in Corpus Size' will cause severe performance degradation "
             "as it requires fetching versions for every single file. "
             "It is highly recommended to only enable this for a very small corpus (e.g., one SharePoint site or OneDrive site)."
         )
