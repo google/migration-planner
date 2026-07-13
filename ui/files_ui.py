@@ -67,6 +67,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.include_personal_sites = ctk.BooleanVar(value=True)
     self.include_team_sites = ctk.BooleanVar(value=False)
     self.include_recycle_bin_contents = ctk.BooleanVar(value=False)
+    self.include_file_versions = ctk.BooleanVar(value=False)
     self.eta_min_users = ctk.IntVar(value=1000)
     self.eta_max_users = ctk.IntVar(value=5000)
 
@@ -186,6 +187,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
     ).pack(side="left", padx=10)
+
+    ctk.CTkCheckBox(
+        additional_settings_frame,
+        text="Include File Versions in Corpus Size",
+        variable=self.include_file_versions,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
@@ -250,6 +260,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         folder_count = msg.get("folderCount", 0)
         file_count = msg.get("fileCount", 0)
         shortcut_count = msg.get("shortcutCount", 0)
+        version_count = msg.get("versionCount", 0)
         status = msg.get("status", "Scanning...")
         if "drives" in self.prog_widgets:
           widget = self.prog_widgets["drives"]["lbl"]
@@ -264,6 +275,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             text += f" | Files: {file_count}"
           if shortcut_count > 0:
             text += f" | Shortcuts: {shortcut_count}"
+          if version_count > 0:
+            text += f" | Versions: {version_count}"
           if widget.winfo_exists():
             widget.configure(
                 text=text
@@ -584,6 +597,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         if getattr(self, "val_include_recycle_bin_contents", False):
             row_data["Recycle Bin Item Count"] = s_data.get("recycleBinCount", 0)
             row_data["Recycle Bin Size"] = s_data.get("recycleBinSize", 0)
+        if getattr(self, "val_include_file_versions", False):
+            row_data["Historical File Version Count"] = s_data.get("versionCount", 0)
+            row_data["Historical File Version Size"] = s_data.get("versionSize", 0)
             
         site_data.append(row_data)
       df = pd.DataFrame(site_data)
@@ -642,6 +658,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       df_output["Corpus Size"] = df_output["Corpus Size"].apply(self.format_size)
       if "Recycle Bin Size" in df_output.columns:
         df_output["Recycle Bin Size"] = df_output["Recycle Bin Size"].apply(self.format_size)
+      if "Historical File Version Size" in df_output.columns:
+        df_output["Historical File Version Size"] = df_output["Historical File Version Size"].apply(self.format_size)
       df_output.rename(columns={"Site Id": "Site URL/Name"}, inplace=True)
       if "SortMetric" in df_output.columns:
         df_output.drop(columns=["SortMetric"], inplace=True)
@@ -974,6 +992,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           text="Review the analyzed data.",
           font=FONT_BODY_MEDIUM,
           text_color=COLOR_TEXT_SUB,
+      ).pack(anchor="w", padx=10, pady=(0, 5))
+
+      ctk.CTkLabel(
+          self.view_results,
+          text="Note: Recycle Bin contents and historical File Versions are accounted for in Corpus Size calculations but will not be migrated.",
+          font=FONT_BODY_BOLD,
+          text_color=COLOR_TEXT_MAIN,
       ).pack(anchor="w", padx=10, pady=(0, 10))
 
       # Cards for simple metrics
@@ -984,6 +1009,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if getattr(self, "val_include_recycle_bin_contents", False):
         self.create_stat_card(card_frame, "Total Recycle Bin Size", f"{self.format_size(sum([entry.get('recycleBinSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🗑️")
         self.create_stat_card(card_frame, "Total Recycle Bin Item Count", f"{sum([entry.get('recycleBinCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🗑️")
+      if getattr(self, "val_include_file_versions", False):
+        self.create_stat_card(card_frame, "Total Historical File Version Size", f"{self.format_size(sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "📄")
+        self.create_stat_card(card_frame, "Total Historical File Version Count", f"{sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "📄")
       self.create_stat_card(card_frame, "Site Collection Count", f"{data.get('siteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsiteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Document Library Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
@@ -1280,6 +1308,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Section 1: Summary Metrics
       writer.writerow(["Summary Metrics", "Value"])
+      writer.writerow(["Note: Recycle Bin contents and historical File Versions are accounted for in Corpus Size calculations but will not be migrated."])
       
       total_corpus_size = sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()])
       summary_rows = [
@@ -1291,6 +1320,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           summary_rows.extend([
               ("Total Recycle Bin Size", self.format_size(total_recycle_bin_size)),
               ("Total Recycle Bin Item Count", total_recycle_bin_count),
+          ])
+      if getattr(self, "val_include_file_versions", False):
+          total_version_size = sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()])
+          total_version_count = sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()])
+          summary_rows.extend([
+              ("Total Historical File Version Size", self.format_size(total_version_size)),
+              ("Total Historical File Version Count", total_version_count),
           ])
       
       summary_rows.extend([
@@ -1364,6 +1400,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
         if getattr(self, "val_include_recycle_bin_contents", False):
           row.extend(["Recycle Bin Item Count", "Recycle Bin Size"])
+
+        if getattr(self, "val_include_file_versions", False):
+          row.extend(["File Version Count", "File Version Size"])
 
         if self.show_eta:
           row.append("Suggested Batch")
@@ -1441,6 +1480,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                   self.format_size(s_data.get("recycleBinSize", 0))
               ])
 
+            if getattr(self, "val_include_file_versions", False):
+              row.extend([
+                  s_data.get("versionCount", 0),
+                  self.format_size(s_data.get("versionSize", 0))
+              ])
+
             if self.show_eta:
               row.append(batch_name)
             writer.writerow(row)
@@ -1452,6 +1497,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config.includePersonalSites = self.val_include_personal_sites
     config.includeTeamSites = self.val_include_team_sites
     config.include_recycle_bin_contents = self.val_include_recycle_bin_contents
+    config.include_file_versions = self.val_include_file_versions
     return config
 
   def start_scan(self):    
@@ -1469,10 +1515,26 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.val_include_personal_sites = self.include_personal_sites.get()
     self.val_include_team_sites = self.include_team_sites.get()
     self.val_include_recycle_bin_contents = self.include_recycle_bin_contents.get()
+    self.val_include_file_versions = self.include_file_versions.get()
     self.val_eta_min_users = self.eta_min_users.get()
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()
     self.val_eta_max_batches = self.eta_max_batches.get()
+
+    if self.val_include_file_versions:
+        warning_msg = (
+            "Enabling 'Include File Versions in Corpus Size' will cause severe performance degradation "
+            "as it requires fetching versions for every single file. "
+            "It is highly recommended to only enable this for a very small corpus (e.g., one SharePoint site or OneDrive site)."
+        )
+        should_continue = messagebox.askyesno(
+            title="Performance Warning",
+            message=warning_msg,
+            icon="warning",
+            parent=self
+        )
+        if not should_continue:
+            return
       
     disclaimer_text = (
         "The estimations provided by this tool are calculated projections"
