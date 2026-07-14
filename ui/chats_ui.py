@@ -1483,12 +1483,14 @@ class ChatMigrationEstimatorTool(ctk.CTk):
             if widget_lbl.winfo_exists():
               widget_lbl.configure(text=msg.get("extra_text", ""))
           else:
-            if source == "chats":
-              label = "Chat Messages"
-            elif source == "channels":
-              label = "Channel Messages"
-            else:
-              label = source
+            label = msg.get("label")
+            if not label:
+              if source == "chats":
+                label = "Chat Messages"
+              elif source == "channels":
+                label = "Channel Messages"
+              else:
+                label = source
 
             widget_lbl = self.prog_widgets[source]["lbl"]
             if widget_lbl.winfo_exists():
@@ -1889,10 +1891,23 @@ class ChatMigrationEstimatorTool(ctk.CTk):
       for chunk in all_chunks_with_time:
         if "team_ids" in chunk:
           for team_id in chunk["team_ids"]:
+            if str(team_id).startswith("extrapolated_"):
+              continue
             display_name = self.id_to_display_name.get(team_id, team_id)
             teams_rows.append({
-                "Team ID": team_id,
-                "Team Name": display_name,
+                "Source MicrosoftTeamsID": team_id,
+                "Source Type": "Team",
+                "Name": display_name,
+                "Suggested Batch": chunk["name"]
+            })
+        if "user_ids" in chunk:
+          for user_id in chunk["user_ids"]:
+            if str(user_id).startswith("extrapolated_"):
+              continue
+            teams_rows.append({
+                "Source MicrosoftTeamsID": user_id,
+                "Source Type": "User",
+                "Name": user_id,
                 "Suggested Batch": chunk["name"]
             })
       if teams_rows:
@@ -1944,16 +1959,14 @@ class ChatMigrationEstimatorTool(ctk.CTk):
       teams_report_path = os.path.join(output_dir, f"teams_report_{ts}.csv")
       self.df_teams_output.to_csv(teams_report_path, index=False)
 
-      teams_batches_dir = os.path.join(output_dir, "suggested teams batches")
+      teams_batches_dir = os.path.join(output_dir, "suggested batches")
       os.makedirs(teams_batches_dir, exist_ok=True)
       unique_team_batches = self.df_teams_output["Suggested Batch"].unique()
       for batch in unique_team_batches:
         if not batch:
           continue
         batch_data = self.df_teams_output[self.df_teams_output["Suggested Batch"] == batch].copy()
-        batch_export = batch_data[["Team ID"]].rename(
-            columns={"Team ID": "Source MicrosoftTeamsID"}
-        )
+        batch_export = batch_data[["Source MicrosoftTeamsID", "Source Type"]]
         safe_name = batch.replace(" ", "")
         batch_path = os.path.join(teams_batches_dir, f"{safe_name}.csv")
         batch_export.to_csv(batch_path, index=False)

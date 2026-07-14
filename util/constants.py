@@ -30,9 +30,9 @@ MEMBERSHIP_COST_SEC: float = 1.0
 
 # QPS Limits
 CHANNEL_QPS: float = 2.0
-MESSAGE_QPS: float = 26.0
-MEMBERSHIP_QPS: float = 18.0
-MAX_TEAMS_PER_BATCH: int = 1000
+MESSAGE_QPS: float = 22.0
+MEMBERSHIP_QPS: float = 75.0
+MAX_TEAMS_USERS_PER_BATCH: int = 10000
 
 # --- UI Colors (Google Material 3) ---
 COLOR_PRIMARY = "#0B57D0"  # Google Blue

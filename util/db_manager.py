@@ -288,3 +288,26 @@ class DatabaseManager:
             "(team_id, channel_id, count) VALUES (?, ?, ?)",
             (team_id, channel_id, count),
         )
+
+  def get_discovered_chat_count(self) -> int:
+    """Returns the count of unique discovered chats using SQL JSON parsing."""
+    with self._lock:
+      cursor = self._conn.execute(
+          "SELECT COUNT(DISTINCT value) "
+          "FROM processed_users, json_each(processed_users.chat_ids)"
+      )
+      row = cursor.fetchone()
+      return row[0] if row else 0
+
+  def get_random_discovered_chat_sample(self, sample_size: int) -> list[str]:
+    """Retrieves a randomized unique sample pool of discovered chat IDs."""
+    with self._lock:
+      cursor = self._conn.execute(
+          "SELECT DISTINCT value "
+          "FROM processed_users, json_each(processed_users.chat_ids) "
+          "ORDER BY random() LIMIT ?",
+          (sample_size,),
+      )
+      rows = cursor.fetchall()
+      return [row[0] for row in rows]
+
