@@ -2776,7 +2776,6 @@ class MigrationEstimatorTool(ctk.CTk):
                 current["total_shared_mails"] += next_batch["total_shared_mails"]
                 current["total_group_mails"] += next_batch["total_group_mails"]
                 current["total_group_threads"] += next_batch["total_group_threads"]
-                current["eta"] += next_batch["eta"]
                 
                 if "constituent_chunks" not in current:
                   current["constituent_chunks"] = [
@@ -2786,8 +2785,19 @@ class MigrationEstimatorTool(ctk.CTk):
                     {"start_idx": next_batch["start_idx"], "end_idx": next_batch["end_idx"]}
                 )
               else:
+                if "constituent_chunks" in current:
+                  parts = [df_sorted.iloc[p["start_idx"]:p["end_idx"]] for p in current["constituent_chunks"]]
+                  merged_subset = pd.concat(parts)
+                  current["eta"] = get_batch_eta(merged_subset)
+
                 merged_batches.append(current)
                 current = next_batch
+            
+            if "constituent_chunks" in current:
+              parts = [df_sorted.iloc[p["start_idx"]:p["end_idx"]] for p in current["constituent_chunks"]]
+              merged_subset = pd.concat(parts)
+              current["eta"] = get_batch_eta(merged_subset)
+
             merged_batches.append(current)
           b["batches"] = merged_batches
           b["total"] = sum(chunk["eta"] for chunk in b["batches"])
