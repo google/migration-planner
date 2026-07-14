@@ -4,6 +4,12 @@ Automates the creation of a Single-Tenant Entra ID App for Workspace Migration.
 Strictly forces account selection and verifies specific Admin roles.    
 #>
 
+# Initialize Transcript
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$ProjectDir = Split-Path -Parent $ScriptDir
+$TranscriptTemp = Join-Path $ProjectDir "app_creation_temp_log.txt"
+Start-Transcript -Path $TranscriptTemp -Force
+
 # Check if the module is missing
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
     Write-Host "Microsoft Graph module is NOT installed." -ForegroundColor Yellow
@@ -43,7 +49,7 @@ $RequiredScopes = @(
     "Application.ReadWrite.All", 
     "AppRoleAssignment.ReadWrite.All", 
     "Directory.Read.All", 
-    "RoleManagement.Read.Directory"
+    "RoleManagement.ReadWrite.Directory"
 )
 
 try {
@@ -198,6 +204,30 @@ try {
         Write-Host " - Admin Consent Granted for Delegated Scopes" -ForegroundColor Gray
     }
 
+    # --- STEP 3.5: ASSIGN DIRECTORY ROLES (Entra ID) ---
+    Write-Host "Assigning Directory Roles (Exchange Admin, Global Reader, Compliance Admin)..." -ForegroundColor Cyan
+    $RequiredDirRoles = @("Exchange Administrator", "Global Reader", "Compliance Administrator", "Compliance Data Administrator")
+
+    foreach ($DirRoleName in $RequiredDirRoles) {
+        $DirRole = Get-MgDirectoryRole -Filter "displayName eq '$DirRoleName'"
+        if (-not $DirRole) {
+            # Activate the role if it's not yet instantiated in the tenant
+            $RoleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq '$DirRoleName'"
+            if ($RoleTemplate) {
+                $DirRole = New-MgDirectoryRole -BodyParameter @{ roleTemplateId = $RoleTemplate.Id }
+            }
+        }
+        
+        if ($DirRole) {
+            try {
+                New-MgDirectoryRoleMemberByRef -DirectoryRoleId $DirRole.Id -OdataId "https://graph.microsoft.com/v1.0/servicePrincipals/$($NewServicePrincipal.Id)" | Out-Null
+                Write-Host " - Assigned Directory Role: $DirRoleName" -ForegroundColor Gray
+            } catch {
+                Write-Host " - Warning: Could not assign $DirRoleName (Role might already be assigned)" -ForegroundColor Yellow
+            }
+        }
+    }
+
     # --- STEP 4: CREATE CLIENT SECRET ---
     Write-Host "Generating Client Secret..." -ForegroundColor Cyan
     $ExpiryDate = (Get-Date).AddYears(2).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -246,5 +276,17 @@ if ($PromptPower -ieq "Y") {
 
 # --- FINAL DISCONNECT ---
 Disconnect-MgGraph
+
+if ($TenantId -and $Application.AppId) {
+    # Move transcript to the telemetry directory alongside Deal Assistant logs
+    $FinalLogDir = Join-Path $ProjectDir "telemetry/logs/${TenantId}_$($Application.AppId)"
+    if (-not (Test-Path $FinalLogDir)) { New-Item -ItemType Directory -Path $FinalLogDir -Force | Out-Null }
+    Stop-Transcript
+    Move-Item -Path $TranscriptTemp -Destination (Join-Path $FinalLogDir "app_creation_log.txt") -Force
+    Write-Host "Transcript saved to: $(Join-Path $FinalLogDir 'app_creation_log.txt')" -ForegroundColor Green
+} else {
+    Stop-Transcript
+    Write-Host "Transcript saved to: $TranscriptTemp" -ForegroundColor Yellow
+}
+
 Read-Host "`nPress Enter to close this window"
-    
