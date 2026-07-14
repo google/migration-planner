@@ -7,7 +7,7 @@ from util.batch_client import GraphBatchClient
 from util.connectors import UrlInvoker
 from util.constants import BLENDED_MSG_COST_SEC
 from util.constants import CHANNEL_COST_SEC
-from util.constants import MAX_TEAMS_PER_BATCH
+from util.constants import MAX_TEAMS_USERS_PER_BATCH
 from util.constants import MEMBERSHIP_COST_SEC
 from util.constants import CHANNEL_QPS
 from util.constants import MESSAGE_QPS
@@ -86,23 +86,62 @@ class ChatEstimator(Estimator):
       failures.append({"type": "CHAT_FAIL", "message": str(e)})
       return {}
 
+  def _extrapolate_entities(
+      self,
+      metrics_map: Dict[str, Any],
+      total_count: int,
+      entity_type: str,
+      mode: str,
+      channel_key: str = "channels",
+  ) -> list[dict[str, Any]]:
+    """Gathers and extrapolates workload metrics for user or team entities."""
+    entity_list = []
+    for entity_id, metrics in metrics_map.items():
+      # Note: We map user's chats to the channels field in items_list
+      # to align user data structure with the internal batch chunking logic
+      entity_list.append({
+          "id": entity_id,
+          "type": entity_type,
+          "messages": metrics.get("messages", 0),
+          "channels": metrics.get(channel_key, 0),
+          "memberships": metrics.get("memberships", 0),
+      })
+    if mode == "sampling" and total_count > len(entity_list):
+      avg_msg = sum(x["messages"] for x in entity_list) / len(entity_list) if entity_list else 0
+      avg_chan = sum(x["channels"] for x in entity_list) / len(entity_list) if entity_list else 0
+      avg_mem = sum(x["memberships"] for x in entity_list) / len(entity_list) if entity_list else 0
+      missing_count = total_count - len(entity_list)
+      for i in range(missing_count):
+        entity_list.append({
+            "id": f"extrapolated_{entity_type.lower()}_{i}",
+            "type": entity_type,
+            "messages": int(avg_msg),
+            "channels": int(avg_chan),
+            "memberships": int(avg_mem),
+        })
+    return entity_list
+
   def calculate_migration_eta(self, data: Dict[str, Any]) -> float:
-    """Calculates chat-centric migration ETA using robust team batch chunking logic."""
+    """Calculates chat-centric migration ETA using robust team and user batch chunking logic."""
     private_channels = data.get("private_channels", 0)
 
     private_channel_elapsed_sec = private_channels * CHANNEL_COST_SEC
     private_eta_hours = private_channel_elapsed_sec / 3600.0
 
     team_metrics_map = data.get("t_map", {})
-    if not team_metrics_map:
+    user_metrics_map = data.get("u_map", {})
+    if not team_metrics_map and not user_metrics_map:
       total_channel_messages = data.get("channel_messages", 0)
       total_channels = data.get("channels", 0)
       total_team_memberships = data.get("team_memberships", 0)
+      total_chat_messages = data.get("private_chat_messages", 0)
+      total_chats = data.get("private_chats", 0)
+      total_chat_memberships = data.get("private_chat_memberships", 0)
 
       total_measured_sec = (
-          (total_channel_messages * BLENDED_MSG_COST_SEC)
-          + (total_channels * CHANNEL_COST_SEC)
-          + (total_team_memberships * MEMBERSHIP_COST_SEC)
+          ((total_channel_messages + total_chat_messages) * BLENDED_MSG_COST_SEC)
+          + ((total_channels + total_chats) * CHANNEL_COST_SEC)
+          + ((total_team_memberships + total_chat_memberships) * MEMBERSHIP_COST_SEC)
       )
       return (total_measured_sec / 3600.0) + private_eta_hours
 
@@ -110,41 +149,15 @@ class ChatEstimator(Estimator):
     sample_percentage = getattr(
         self.config, "percent", getattr(self.config, "sample_percentage", 10)
     )
-    total_teams = data.get("total_teams", 0)
 
-    items_list = [
-        {
-            "id": team_id,
-            "messages": team_metrics.get("messages", 0),
-            "channels": team_metrics.get("channels", 0),
-            "memberships": team_metrics.get("memberships", 0),
-        }
-        for team_id, team_metrics in team_metrics_map.items()
-    ]
+    # 1. Gather and extrapolate teams
+    team_list = self._extrapolate_entities(team_metrics_map, data.get("total_teams", 0), "Team", mode)
 
-    if mode == "sampling":
-      avg_msg = 0
-      avg_channels = 0
-      avg_mem = 0
-      if items_list:
-        avg_msg = sum(x["messages"] for x in items_list) / len(items_list)
-        avg_channels = sum(x["channels"] for x in items_list) / len(items_list)
-        avg_mem = sum(x["memberships"] for x in items_list) / len(items_list)
+    # 2. Gather and extrapolate users
+    user_list = self._extrapolate_entities(user_metrics_map, data.get("total_users", 0), "User", mode, channel_key="chats")
 
-      effective_sample = sample_percentage if sample_percentage > 0 else 1.0
-      total_est = (
-          max(len(items_list), total_teams)
-          if total_teams > 0
-          else int(len(items_list) * (100.0 / effective_sample))
-      )
-      missing_count = total_est - len(items_list)
-      for i in range(missing_count):
-        items_list.append({
-            "id": f"extrapolated_team_{i}",
-            "messages": int(avg_msg),
-            "channels": int(avg_channels),
-            "memberships": int(avg_mem),
-        })
+    # 3. Combine lists
+    items_list = team_list + user_list
 
     for x in items_list:
       x["weight"] = (
@@ -210,7 +223,7 @@ class ChatEstimator(Estimator):
 
       while start_idx < total_count:
         remaining = total_count - start_idx
-        current_max = min(MAX_TEAMS_PER_BATCH, remaining)
+        current_max = min(MAX_TEAMS_USERS_PER_BATCH, remaining)
         current_min = min(1, current_max)
 
         chosen_size = current_min
@@ -231,11 +244,15 @@ class ChatEstimator(Estimator):
         end_idx = start_idx + chosen_size
         b_eta = calculate_batch_eta_fast(start_idx, end_idx)
 
+        chunk_items = items_list[start_idx:end_idx]
+        batch_teams = [x for x in chunk_items if x["type"] == "Team"]
+        batch_users = [x for x in chunk_items if x["type"] == "User"]
+
         batches.append({
             "name": f"Batch {len(batches) + 1}",
             "eta": b_eta,
-            "users": 0,
-            "total_teams": chosen_size,
+            "users": len(batch_users),
+            "total_teams": len(batch_teams),
             "total_channels": chan_prefix[end_idx] - chan_prefix[start_idx],
             "total_channel_messages": (
                 msg_prefix[end_idx] - msg_prefix[start_idx]
@@ -246,7 +263,8 @@ class ChatEstimator(Estimator):
             "total_in_place_archives": 0,
             "total_shared_mails": 0,
             "total_group_mails": 0,
-            "team_ids": [x["id"] for x in items_list[start_idx:end_idx]],
+            "team_ids": [x["id"] for x in batch_teams],
+            "user_ids": [x["id"] for x in batch_users],
         })
         start_idx = end_idx
 

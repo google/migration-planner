@@ -260,6 +260,7 @@ class ChatScannerService:
 
     csv_users = []
     csv_teams = []
+    all_users = []
 
     if user_source == "csv":
       if not csv_path or not os.path.exists(csv_path):
@@ -307,6 +308,8 @@ class ChatScannerService:
 
     if config.mode == "heuristics":
       self.log_func("Applying automated heuristics estimation profiles.")
+      if csv_users:
+        all_users = csv_users
 
       user_activity = scanner.fetch_report_user_detail(auth)
       team_activity = scanner.fetch_report_team_activity(auth)
@@ -358,19 +361,16 @@ class ChatScannerService:
       private_chats = 0
 
       if all_users:
-        sample_size = max(1, int(len(all_users) * (sample_percentage / 100.0)))
-        all_users.sort(key=lambda x: json.dumps(x, sort_keys=True))
-        sampled_users = random.sample(all_users, sample_size)
-
         self.ui_callback("phase_status", source="chats", status="running")
-        chat_counts = scanner.fetch_user_chat_counts_batch(auth, sampled_users, self.ui_callback)
+        chat_counts = scanner.fetch_user_chat_counts_batch(auth, all_users, self.ui_callback)
 
-        for chats in chat_counts.values():
-          chat_id_pool.extend(chats[:50])
+        private_chats = scanner.db.get_discovered_chat_count()
+
+        chat_sample_size = max(1, int(private_chats * (sample_percentage / 100.0)))
+        chat_id_pool = scanner.db.get_random_discovered_chat_sample(chat_sample_size)
 
         total_chats_est = sum(len(chats) for chats in chat_counts.values())
         avg_chats = total_chats_est / len(chat_counts) if chat_counts else 0
-        private_chats = int(avg_chats * len(all_users))
       else:
         self.log_func("No users to sample, skipping private chat scanning.")
 
@@ -509,6 +509,51 @@ class ChatScannerService:
             "memberships": team_memberships // max(1, teams),
         }
 
+    user_map = {}
+    if all_users:
+      if config.mode == "sampling":
+        avg_messages_per_chat = (
+            chat_messages / chat_successes if chat_successes else 0
+        )
+        avg_members_per_chat = (
+            chat_members / chat_successes if chat_successes else 2
+        )
+        for u in all_users:
+          u_id = u.get("userPrincipalName") or u.get("id")
+          if not u_id:
+            continue
+          user_chats_count = len(chat_counts.get(u_id, [])) if u_id in chat_counts else avg_chats
+          user_map[u_id] = {
+              "chats": int(user_chats_count),
+              "messages": int(user_chats_count * avg_messages_per_chat),
+              "memberships": int(user_chats_count * avg_members_per_chat),
+          }
+      else:
+        # Heuristics mode with all_users
+        chats_per_user = private_chats / max(1, len(all_users))
+        messages_per_user = private_chat_messages / max(1, len(all_users))
+        memberships_per_user = private_chat_memberships / max(1, len(all_users))
+        for u in all_users:
+          u_id = u.get("userPrincipalName") or u.get("id")
+          if not u_id:
+            continue
+          user_map[u_id] = {
+              "chats": int(chats_per_user),
+              "messages": int(messages_per_user),
+              "memberships": int(memberships_per_user),
+          }
+    else:
+      # Common fallback when all_users is empty
+      chats_per_user = private_chats / max(1, total_users)
+      messages_per_user = private_chat_messages / max(1, total_users)
+      memberships_per_user = private_chat_memberships / max(1, total_users)
+      for user_index in range(total_users):
+        user_map[f"user_{user_index}"] = {
+            "chats": int(chats_per_user),
+            "messages": int(messages_per_user),
+            "memberships": int(memberships_per_user),
+        }
+
     return {
         "total_users": total_users,
         "total_teams": teams,
@@ -520,4 +565,5 @@ class ChatScannerService:
         "private_chats": private_chats,
         "private_chat_memberships": private_chat_memberships,
         "t_map": team_map,
+        "u_map": user_map,
     }
