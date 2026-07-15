@@ -67,7 +67,7 @@ class MigrationEstimatorTool(ctk.CTk):
     self.load_multiplier = ctk.IntVar(value=1)
     self.retries = ctk.IntVar(value=MAX_RETRIES)
     self.backoff = ctk.IntVar(value=BACKOFF)
-    self.eta_min_users = ctk.IntVar(value=400)
+    self.eta_min_users = ctk.IntVar(value=200)
     self.eta_max_users = ctk.IntVar(value=5000)
     self.eta_max_batches = ctk.IntVar(value=50)
     self.parallel_batches = ctk.IntVar(value=10)
@@ -2760,7 +2760,50 @@ class MigrationEstimatorTool(ctk.CTk):
           target["batches"].append(chunk)
           target["total"] += chunk["eta"]
 
+        # --- START MERGING LOGIC ---
+        for b in buckets:
+          merged_batches = []
+          if b["batches"]:
+            current = b["batches"][0]
+            for next_batch in b["batches"][1:]:
+              if current["users"] + next_batch["users"] <= user_max_limit:
+                # Merge Metrics
+                current["users"] += next_batch["users"]
+                current["total_emails"] += next_batch["total_emails"]
+                current["total_contacts"] += next_batch["total_contacts"]
+                current["total_events"] += next_batch["total_events"]
+                current["total_in_place_archives"] += next_batch["total_in_place_archives"]
+                current["total_shared_mails"] += next_batch["total_shared_mails"]
+                current["total_group_mails"] += next_batch["total_group_mails"]
+                current["total_group_threads"] += next_batch["total_group_threads"]
+                
+                if "constituent_chunks" not in current:
+                  current["constituent_chunks"] = [
+                      {"start_idx": current["start_idx"], "end_idx": current["end_idx"]}
+                  ]
+                current["constituent_chunks"].append(
+                    {"start_idx": next_batch["start_idx"], "end_idx": next_batch["end_idx"]}
+                )
+              else:
+                if "constituent_chunks" in current:
+                  parts = [df_sorted.iloc[p["start_idx"]:p["end_idx"]] for p in current["constituent_chunks"]]
+                  merged_subset = pd.concat(parts)
+                  current["eta"] = get_batch_eta(merged_subset)
+
+                merged_batches.append(current)
+                current = next_batch
+            
+            if "constituent_chunks" in current:
+              parts = [df_sorted.iloc[p["start_idx"]:p["end_idx"]] for p in current["constituent_chunks"]]
+              merged_subset = pd.concat(parts)
+              current["eta"] = get_batch_eta(merged_subset)
+
+            merged_batches.append(current)
+          b["batches"] = merged_batches
+          b["total"] = sum(chunk["eta"] for chunk in b["batches"])
+
         total_eta = max(b["total"] for b in buckets)
+        # --- END MERGING LOGIC ---
 
         # Reverse and Name
         all_chunks_with_time = []
@@ -2787,9 +2830,11 @@ class MigrationEstimatorTool(ctk.CTk):
           chunk["name"] = batch_name
           final_batches_list.append(chunk)
           col_idx = df_sorted.columns.get_loc("Suggested Batch")
-          df_sorted.iloc[chunk["start_idx"] : chunk["end_idx"], col_idx] = (
-              batch_name
-          )
+          if "constituent_chunks" in chunk:
+            for part in chunk["constituent_chunks"]:
+              df_sorted.iloc[part["start_idx"] : part["end_idx"], col_idx] = batch_name
+          else:
+            df_sorted.iloc[chunk["start_idx"] : chunk["end_idx"], col_idx] = batch_name
 
       num_batches = len(final_batches_list)
       self.log_msg(

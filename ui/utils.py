@@ -191,19 +191,19 @@ def build_migration_plan_options(self, ctk):
   eta_settings_frame.pack(fill="x", padx=15)
 
   ctk.CTkLabel(
-      eta_settings_frame, text="Max Batches:", text_color=COLOR_TEXT_SUB
+      eta_settings_frame, text="Parallel Batches:", text_color=COLOR_TEXT_SUB
   ).grid(row=1, column=3, sticky="w", padx=5, pady=5)
-  slider_max_batches = ctk.CTkSlider(
+  slider_parallel_batches = ctk.CTkSlider(
       eta_settings_frame,
-      from_=10,
-      to=100,
-      number_of_steps=18,
-      variable=self.eta_max_batches,
+      from_=1,
+      to=10,
+      number_of_steps=9,
+      variable=self.parallel_batches,
   )
-  slider_max_batches.grid(row=1, column=4, sticky="ew", padx=5, pady=5)
+  slider_parallel_batches.grid(row=1, column=4, sticky="ew", padx=5, pady=5)
   ctk.CTkLabel(
       eta_settings_frame,
-      textvariable=self.eta_max_batches,
+      textvariable=self.parallel_batches,
       text_color=COLOR_TEXT_MAIN,
       width=40,
   ).grid(row=1, column=5, sticky="w", padx=5)
@@ -211,8 +211,7 @@ def build_migration_plan_options(self, ctk):
   ctk.CTkLabel(
       self.adv_frame,
       text=(
-          "* The migration plan will try to keep the total number of batches"
-          " below this number."
+          "* The migration plan will simulate running this many batches in parallel."
       ),
       font=FONT_BODY_SMALL,
       text_color=COLOR_TEXT_SUB,
