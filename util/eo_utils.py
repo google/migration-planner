@@ -92,7 +92,7 @@ def fetch_user_batch_data(
                       is_encrypted = False
                       for att in attachments:
                           name = att.get("name", "")
-                          if name and (name.endswith(".rpmsg") or name == "message.rpmsg" or name == "message_v2.rpmsg"):
+                          if name and name.endswith(".rpmsg"):
                               is_encrypted = True
                               break
                       if is_encrypted:

@@ -58,7 +58,7 @@ class MigrationEstimatorTool(ctk.CTk):
     self.user_source = ctk.StringVar(value="tenant")
     self.user_csv_path = ctk.StringVar()
     self.scan_email = ctk.BooleanVar(value=True)
-    self.scan_encrypted_email = ctk.BooleanVar(value=True)
+    self.scan_encrypted_email = ctk.BooleanVar(value=False)
     self.scan_contact = ctk.BooleanVar(value=True)
     self.scan_calendar = ctk.BooleanVar(value=True)
     self.scan_in_place_archives = ctk.BooleanVar(value=True)
