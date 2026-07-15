@@ -2766,7 +2766,7 @@ class MigrationEstimatorTool(ctk.CTk):
           if b["batches"]:
             current = b["batches"][0]
             for next_batch in b["batches"][1:]:
-              if current["users"] + next_batch["users"] <= 5000:
+              if current["users"] + next_batch["users"] <= user_max_limit:
                 # Merge Metrics
                 current["users"] += next_batch["users"]
                 current["total_emails"] += next_batch["total_emails"]
