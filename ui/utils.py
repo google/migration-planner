@@ -105,6 +105,14 @@ def build_eo_resource_checkbox_list(self, ctk):
   ).pack(side="left", padx=10)
   ctk.CTkCheckBox(
       scan_options_frame,
+      text="Encrypted Emails",
+      variable=self.scan_encrypted_email,
+      corner_radius=4,
+      fg_color=COLOR_PRIMARY,
+      border_color=COLOR_TEXT_SUB,
+  ).pack(side="left", padx=10)
+  ctk.CTkCheckBox(
+      scan_options_frame,
       text="In-Place Archives",
       variable=self.scan_in_place_archives,
       corner_radius=4,
