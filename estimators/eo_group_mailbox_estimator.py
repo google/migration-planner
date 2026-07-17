@@ -58,6 +58,7 @@ class EOGroupMailBoxEstimator(Estimator):
                 self.logger(f"Error calculating resource count: {e}")
             failures.append({
                 "groupId": "ALL",
+                "isPartial": False,
                 "error": str(e),
                 "failureType": FailureType.UNKNOWN_ERROR.value,
             })
@@ -347,6 +348,7 @@ class EOGroupMailBoxEstimator(Estimator):
                 except Exception as e:
                     failures.append({
                         "userId": thread_id,
+                        "isPartial": False,
                         "type": FailureType.INVALID_DATA,
                         "statusCode": 200,
                         "message": f"Invalid data - Unable to convert count to integer: {e}"
@@ -355,6 +357,7 @@ class EOGroupMailBoxEstimator(Estimator):
             else:
                 failures.append({
                     "userId": thread_id,
+                    "isPartial": False,
                     "type": FailureType.INVALID_DATA,
                     "statusCode": 200,
                     "message": "Invalid data - No count present in response"

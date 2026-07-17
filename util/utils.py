@@ -223,13 +223,14 @@ def process_pagination_responses(
                     "message": resp["body"]["error"]["message"]
                 })
         else:
-          failures.append({
-            "mailboxId": key,
-            "isPartial": is_partial,
-            "type": FailureType.NOT_FOUND,
-            "statusCode": None,
-            "message": "No response found for API Call."
-          })
+          if failures is not None:
+            failures.append({
+              "mailboxId": key,
+              "isPartial": is_partial,
+              "type": FailureType.NOT_FOUND,
+              "statusCode": None,
+              "message": "No response found for API Call."
+            })
                     
     return next_items
 
@@ -250,6 +251,7 @@ def create_request_to_response_map(
       if failures is not None:
         failures.append({
             "type": FailureType.INVALID_DATA,
+            "isPartial": False,
             "statusCode": 200,
             "message": (
                 f"Invalid data - Unable to convert id to integer: {error}"
