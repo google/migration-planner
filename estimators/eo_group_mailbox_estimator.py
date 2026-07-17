@@ -59,7 +59,7 @@ class EOGroupMailBoxEstimator(Estimator):
             failures.append({
                 "groupId": "ALL",
                 "error": str(e),
-                "failureType": FailureType.UNKNOWN.value,
+                "failureType": FailureType.UNKNOWN_ERROR.value,
             })
             return group_id_to_thread_count, {}
             
