@@ -68,6 +68,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.include_team_sites = ctk.BooleanVar(value=False)
     self.include_recycle_bin_contents = ctk.BooleanVar(value=False)
     self.include_file_versions = ctk.BooleanVar(value=False)
+    self.scan_encrypted_files = ctk.BooleanVar(value=False)
     self.eta_min_users = ctk.IntVar(value=1000)
     self.eta_max_users = ctk.IntVar(value=5000)
 
@@ -196,6 +197,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
     ).pack(side="left", padx=10)
+
+    ctk.CTkCheckBox(
+        additional_settings_frame,
+        text="Scan for Encrypted Files (RMS/MIP)",
+        variable=self.scan_encrypted_files,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
@@ -261,6 +271,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         file_count = msg.get("fileCount", 0)
         shortcut_count = msg.get("shortcutCount", 0)
         version_count = msg.get("versionCount", 0)
+        encrypted_file_count = msg.get("encryptedFileCount", 0)
         status = msg.get("status", "Scanning...")
         if "drives" in self.prog_widgets:
           widget = self.prog_widgets["drives"]["lbl"]
@@ -277,6 +288,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             text += f" | Shortcuts: {shortcut_count}"
           if version_count > 0:
             text += f" | Versions: {version_count}"
+          if encrypted_file_count > 0:
+            text += f" | Encrypted Files: {encrypted_file_count}"
           if widget.winfo_exists():
             widget.configure(
                 text=text
@@ -600,6 +613,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         if getattr(self, "val_include_file_versions", False):
             row_data["Historical File Version Count"] = s_data.get("versionCount", 0)
             row_data["Historical File Version Size"] = s_data.get("versionSize", 0)
+        if getattr(self, "val_scan_encrypted_files", False):
+            row_data["Encrypted File Count"] = s_data.get("encryptedFileCount", 0)
+            row_data["Encrypted File Size"] = s_data.get("encryptedFileSize", 0)
             
         site_data.append(row_data)
       df = pd.DataFrame(site_data)
@@ -660,6 +676,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         df_output["Recycle Bin Size"] = df_output["Recycle Bin Size"].apply(self.format_size)
       if "Historical File Version Size" in df_output.columns:
         df_output["Historical File Version Size"] = df_output["Historical File Version Size"].apply(self.format_size)
+      if "Encrypted File Size" in df_output.columns:
+        df_output["Encrypted File Size"] = df_output["Encrypted File Size"].apply(self.format_size)
       df_output.rename(columns={"Site Id": "Site URL/Name"}, inplace=True)
       if "SortMetric" in df_output.columns:
         df_output.drop(columns=["SortMetric"], inplace=True)
@@ -1520,6 +1538,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config.includeTeamSites = self.val_include_team_sites
     config.include_recycle_bin_contents = self.val_include_recycle_bin_contents
     config.include_file_versions = self.val_include_file_versions
+    config.scan_encrypted_files = self.val_scan_encrypted_files
     return config
 
   def start_scan(self):    
@@ -1538,6 +1557,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.val_include_team_sites = self.include_team_sites.get()
     self.val_include_recycle_bin_contents = self.include_recycle_bin_contents.get()
     self.val_include_file_versions = self.include_file_versions.get()
+    self.val_scan_encrypted_files = self.scan_encrypted_files.get()
     self.val_eta_min_users = self.eta_min_users.get()
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()

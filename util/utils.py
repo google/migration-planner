@@ -35,6 +35,7 @@ class ScanConfig:
   max_allowed_depth: int = 100
   include_recycle_bin_contents: bool = False
   include_file_versions: bool = False
+  scan_encrypted_files: bool = False
 
 @dataclass
 class RequestResponsePair:

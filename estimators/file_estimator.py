@@ -10,6 +10,7 @@ from util.connectors import UrlInvoker
 from util.utils import ScanConfig, Bucket, FileSizeDistribution, LargeResource, create_batches, create_request_to_response_map, get_batch_responses_map, get_relative_url, process_pagination_responses
 from util.enums import FailureType, ResourceType
 from util.thread_safe_ds import ThreadSafeMap, ThreadSafeSortedSet, AtomicInt
+from util import file_encryption_detector
 
 import traceback
 import json
@@ -395,6 +396,9 @@ class FileEstimator(Estimator):
                     if self.config.include_file_versions:
                         metrics["siteMetrics"][top_level_site]["versionSize"] = metrics["siteMetrics"].get(top_level_site, {}).get("versionSize", 0) + self.drive_id_to_version_size.get(drive_id, 0)
                         metrics["siteMetrics"][top_level_site]["versionCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("versionCount", 0) + self.drive_id_to_version_count.get(drive_id, 0)
+                    if self.config.scan_encrypted_files:
+                        metrics["siteMetrics"][top_level_site]["encryptedFileSize"] = metrics["siteMetrics"].get(top_level_site, {}).get("encryptedFileSize", 0) + self.drive_id_to_encrypted_file_size.get(drive_id, 0)
+                        metrics["siteMetrics"][top_level_site]["encryptedFileCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("encryptedFileCount", 0) + self.drive_id_to_encrypted_file_count.get(drive_id, 0)
                     metrics["siteMetrics"][top_level_site]["folderCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("folderCountExceedingDepthLimit", 0) + drive_metric.get("folderCountExceedingDepthLimit", 0)
                     metrics["siteMetrics"][top_level_site]["fileCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("fileCountExceedingDepthLimit", 0) + drive_metric.get("fileCountExceedingDepthLimit", 0)
                 
@@ -1182,6 +1186,60 @@ class FileEstimator(Estimator):
             self._log_and_fail("Error in _get_drives", e, failures)
             return 0, 0
 
+    def _check_file_encryption(
+        self,
+        drive_id: str,
+        item_id: str,
+        file_size: int,
+        failures: List[Dict[str, str]],
+        drive_discovery_progress_metrics: ThreadSafeMap,
+        completed_drives: AtomicInt,
+        total_drives: int
+    ):
+        if self.is_hard_stop_requested():
+            return
+
+        try:
+            url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}/content"
+            
+            token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
+            token = token_data["token"]
+            session = self.url_invoker.token_manager.get_session()
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Range": "bytes=0-10239" # 10 KB
+            }
+            
+            try:
+                r = session.get(url, headers=headers, timeout=60)
+                if r.status_code in [200, 206]: # 206 Partial Content
+                    content = r.content
+                    status = file_encryption_detector.detect_encryption(content)
+                    if file_encryption_detector.is_encrypted(status):
+                        with self.encryption_metrics_lock:
+                            self.drive_id_to_encrypted_file_count[drive_id] = self.drive_id_to_encrypted_file_count.get(drive_id, 0) + 1
+                            self.drive_id_to_encrypted_file_size[drive_id] = self.drive_id_to_encrypted_file_size.get(drive_id, 0) + file_size
+                        
+                        drive_discovery_progress_metrics.increment("encryptedFileCount")
+                else:
+                    # Log error if needed
+                    pass
+            finally:
+                self.url_invoker.token_manager.return_token_slot(token_data)
+
+            self.processed_encryption_count.increment()
+            if self.processed_encryption_count.get_value() % 10 == 0:
+                self.progress_update_callback(
+                    "drive_discovery",
+                    count=completed_drives.get_value(),
+                    total_drives=total_drives,
+                    **drive_discovery_progress_metrics.get_all()
+                )
+
+        except Exception as e:
+            # Log exception
+            pass
+
     def _fetch_file_versions_size(
         self,
         drive_id: str,
@@ -1280,6 +1338,7 @@ class FileEstimator(Estimator):
     ):
         completed_drives = AtomicInt(0)
         self.processed_versions_count = AtomicInt(0)
+        self.processed_encryption_count = AtomicInt(0)
         total_drives = len(drive_ids)
         adj_list = {}
         parent_references: Dict[str, Dict[str, str]] = {}
@@ -1291,11 +1350,20 @@ class FileEstimator(Estimator):
 
         self.drive_id_to_version_size = {}
         self.drive_id_to_version_count = {}
+        self.drive_id_to_encrypted_file_size = {}
+        self.drive_id_to_encrypted_file_count = {}
         self.version_size_lock = threading.Lock()
+        self.encryption_metrics_lock = threading.Lock()
         self.versions_executor = None
+        self.encryption_executor = None
         if self.config.include_file_versions:
             from concurrent.futures import ThreadPoolExecutor
             self.versions_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
+        if self.config.scan_encrypted_files:
+            from concurrent.futures import ThreadPoolExecutor
+            if not self.versions_executor: # Reuse import if already done, though it's at top now? Wait, line 1 has it!
+                 pass # It is imported at line 1
+            self.encryption_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
 
         try:
             # use delta api to fetch the folders
@@ -1340,6 +1408,11 @@ class FileEstimator(Estimator):
                         if self.config.include_file_versions and self.versions_executor:
                             item_id = curr_response["id"]
                             self.versions_executor.submit(self._fetch_file_versions_size, drive_id, item_id, failures, drive_discovery_progress_metrics, completed_drives, total_drives)
+                        
+                        if self.config.scan_encrypted_files and self.encryption_executor:
+                            item_id = curr_response["id"]
+                            file_size = curr_response.get("size", 0)
+                            self.encryption_executor.submit(self._check_file_encryption, drive_id, item_id, file_size, failures, drive_discovery_progress_metrics, completed_drives, total_drives)
                             
                     elif "remoteItem" in curr_response:
                         drive_discovery_progress_metrics.increment("shortcutCount")
@@ -1435,6 +1508,8 @@ class FileEstimator(Estimator):
         finally:
             if self.config.include_file_versions and hasattr(self, "versions_executor") and self.versions_executor:
                 self.versions_executor.shutdown(wait=True)
+            if self.config.scan_encrypted_files and hasattr(self, "encryption_executor") and self.encryption_executor:
+                self.encryption_executor.shutdown(wait=True)
 
     def _calculate_drive_metrics(
         self, 
