@@ -12,6 +12,7 @@ class ScanConfig:
   user_source: str
   csv_path: str
   scan_email: bool = False
+  scan_encrypted_email: bool = False
   scan_chat: bool = False
   scan_contact: bool = False
   scan_calendar: bool = False
