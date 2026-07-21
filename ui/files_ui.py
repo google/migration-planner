@@ -1041,6 +1041,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if getattr(self, "val_include_file_versions", False):
         self.create_stat_card(card_frame, "Total Historical File Version Size", f"{self.format_size(sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "📄")
         self.create_stat_card(card_frame, "Total Historical File Version Count", f"{sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "📄")
+      if getattr(self, "val_scan_encrypted_files", False):
+        self.create_stat_card(card_frame, "Total Encrypted File Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
+        self.create_stat_card(card_frame, "Total Encrypted File Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
       self.create_stat_card(card_frame, "Site Collection Count", f"{data.get('siteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsiteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Document Library Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
