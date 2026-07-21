@@ -77,6 +77,7 @@ IPA_ETA_MULTIPLIER = 1.1
 
 FILES_GLOBAL_COUNT_LIMIT = 4  # 4 files/folders per second
 FILES_GLOBAL_CORPUS_SIZE_LIMIT = (400 * 1024 * 1024 * 1024) // 3600  # 400 GB per hour in bytes per second
+ENCRYPTED_FILE_ETA_MULTIPLIER = 0.5 # 0.5x speed for encrypted files
 
 ENABLE_CALENDAR_ETA = False
 ETA_CALENDAR_GLOBAL_LIMIT = 50

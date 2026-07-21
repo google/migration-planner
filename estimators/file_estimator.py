@@ -11,6 +11,7 @@ from util.utils import ScanConfig, Bucket, FileSizeDistribution, LargeResource, 
 from util.enums import FailureType, ResourceType
 from util.thread_safe_ds import ThreadSafeMap, ThreadSafeSortedSet, AtomicInt
 from util import file_encryption_detector
+from util.constants import ENCRYPTED_FILE_ETA_MULTIPLIER
 
 import traceback
 import json
@@ -57,14 +58,32 @@ class FileEstimator(Estimator):
         batch_corpus_size = sum(item["size"] for item in items)
         batch_resource_count = sum(item["files"] for item in items)
 
-        average_batch_file_size = batch_corpus_size / batch_resource_count if batch_resource_count > 0 else 0
+        encrypted_corpus_size = sum(item.get("encrypted_size", 0.0) for item in items)
+        encrypted_resource_count = sum(item.get("encrypted_files", 0) for item in items)
 
-        max_qps_from_file_size = data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT") / average_batch_file_size if average_batch_file_size > 0 else data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT")
+        unencrypted_corpus_size = batch_corpus_size - encrypted_corpus_size
+        unencrypted_resource_count = batch_resource_count - encrypted_resource_count
+
+        # Unencrypted calculation
+        average_unencrypted_file_size = unencrypted_corpus_size / unencrypted_resource_count if unencrypted_resource_count > 0 else 0
+        max_qps_from_unencrypted_file_size = data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT") / average_unencrypted_file_size if average_unencrypted_file_size > 0 else data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT")
         max_qps_from_license_counts = data.get("FILES_GLOBAL_COUNT_LIMIT")
         
-        qps = min(max_qps_from_license_counts, max_qps_from_file_size)
+        qps_unencrypted = min(max_qps_from_license_counts, max_qps_from_unencrypted_file_size)
+        time_unencrypted = unencrypted_resource_count / qps_unencrypted if qps_unencrypted > 0 else 0
+
+        # Encrypted calculation
+        average_encrypted_file_size = encrypted_corpus_size / encrypted_resource_count if encrypted_resource_count > 0 else 0
         
-        time_in_seconds =  batch_resource_count / qps
+        encrypted_corpus_limit = data.get("FILES_GLOBAL_CORPUS_SIZE_LIMIT") * ENCRYPTED_FILE_ETA_MULTIPLIER
+        encrypted_count_limit = data.get("FILES_GLOBAL_COUNT_LIMIT") * ENCRYPTED_FILE_ETA_MULTIPLIER
+        
+        max_qps_from_encrypted_file_size = encrypted_corpus_limit / average_encrypted_file_size if average_encrypted_file_size > 0 else encrypted_corpus_limit
+        
+        qps_encrypted = min(encrypted_count_limit, max_qps_from_encrypted_file_size)
+        time_encrypted = encrypted_resource_count / qps_encrypted if qps_encrypted > 0 else 0
+
+        time_in_seconds = time_unencrypted + time_encrypted
         return time_in_seconds / 3600
 
     def calculate_resource_metrics(

@@ -793,7 +793,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             "size": row.get("Corpus Size", 0),
             "files": int(row.get("File Count", 0)),
             "folders": int(row.get("Folder Count", 0)),
-            "shortcuts": int(row.get("Shortcut Count", 0))
+            "shortcuts": int(row.get("Shortcut Count", 0)),
+            "encrypted_files": int(row.get("Encrypted File Count", 0)) if "Encrypted File Count" in subset_df.columns else 0,
+            "encrypted_size": float(row.get("Encrypted File Size", 0)) if "Encrypted File Size" in subset_df.columns else 0.0
         })
         
       data = {
@@ -1041,14 +1043,14 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if getattr(self, "val_include_file_versions", False):
         self.create_stat_card(card_frame, "Total Historical File Version Size", f"{self.format_size(sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "📄")
         self.create_stat_card(card_frame, "Total Historical File Version Count", f"{sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "📄")
-      if getattr(self, "val_scan_encrypted_files", False):
-        self.create_stat_card(card_frame, "Total Encrypted File Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
-        self.create_stat_card(card_frame, "Total Encrypted File Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
       self.create_stat_card(card_frame, "Site Collection Count", f"{data.get('siteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsiteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Document Library Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
       self.create_stat_card(card_frame, "Folder Count", f"{data.get('folderCount', 0):,}", "📁")
       self.create_stat_card(card_frame, "File Count", f"{data.get('fileCount', 0):,}", "📄")
+      if getattr(self, "val_scan_encrypted_files", False):
+        self.create_stat_card(card_frame, "Total Encrypted File Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
+        self.create_stat_card(card_frame, "Total Encrypted File Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
       self.create_stat_card(card_frame, "Shortcut Count", f"{data.get('shortcutCount', 0):,}", "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
       self.create_stat_card(card_frame, "Folder count beyond depth limit 100", f"{data.get('folderCountExceedingDepthLimit', 0):,}", "📁")
@@ -1371,6 +1373,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               ("Total Historical File Version Size", self.format_size(total_version_size)),
               ("Total Historical File Version Count", total_version_count),
           ])
+      if getattr(self, "val_scan_encrypted_files", False):
+          total_encrypted_size = sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()])
+          total_encrypted_count = sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()])
+          summary_rows.extend([
+              ("Total Encrypted File Size", self.format_size(total_encrypted_size)),
+              ("Total Encrypted File Count", total_encrypted_count),
+          ])
       
       summary_rows.extend([
           ("Site Collection Count", data.get("siteCount", 0)),
@@ -1446,6 +1455,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
         if getattr(self, "val_include_file_versions", False):
           row.extend(["Historical File Version Count", "Historical File Version Size"])
+
+        if getattr(self, "val_scan_encrypted_files", False):
+          row.extend(["Encrypted File Count", "Encrypted File Size"])
 
         if self.show_eta:
           row.append("Suggested Batch")
@@ -1527,6 +1539,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               row.extend([
                   s_data.get("versionCount", 0),
                   self.format_size(s_data.get("versionSize", 0))
+              ])
+
+            if getattr(self, "val_scan_encrypted_files", False):
+              row.extend([
+                  s_data.get("encryptedFileCount", 0),
+                  self.format_size(s_data.get("encryptedFileSize", 0))
               ])
 
             if self.show_eta:
