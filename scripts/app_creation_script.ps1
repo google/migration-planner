@@ -43,7 +43,8 @@ $RequiredScopes = @(
     "Application.ReadWrite.All", 
     "AppRoleAssignment.ReadWrite.All", 
     "Directory.Read.All", 
-    "RoleManagement.Read.Directory"
+    "RoleManagement.Read.Directory",
+    "DelegatedPermissionGrant.ReadWrite.All"
 )
 
 try {
