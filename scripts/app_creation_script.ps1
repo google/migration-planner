@@ -222,7 +222,7 @@ try {
 
     # --- STEP 5: DIRECTORY ROLE ASSIGNMENTS ---
     Write-Host "`n--- ENTRA ID DIRECTORY ROLE ASSIGNMENTS ---" -ForegroundColor Cyan
-    $PromptRoles = Read-Host "Would you like to assign Directory Roles (Compliance Data Administrator, Compliance Administrator, Power Platform Administrator) to this App? (Y/N)"
+    $PromptRoles = Read-Host "Would you like to assign Directory Roles (Compliance Data Administrator, Compliance Administrator) to this App? (Y/N)"
     
     $UserConsentedRoles = ($PromptRoles -ieq "Y")
 
