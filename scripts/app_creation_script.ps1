@@ -43,7 +43,7 @@ $RequiredScopes = @(
     "Application.ReadWrite.All", 
     "AppRoleAssignment.ReadWrite.All", 
     "Directory.Read.All", 
-    "RoleManagement.Read.Directory",
+    "RoleManagement.ReadWrite.Directory",
     "DelegatedPermissionGrant.ReadWrite.All"
 )
 
@@ -112,6 +112,7 @@ $ExchangeAppRoles = @(
 )
 
 $TenantId = $Context.TenantId
+$UserConsentedRoles = $false
 
 try {
     # --- STEP 1: REGISTER APPLICATION ---
@@ -219,12 +220,48 @@ try {
     Write-Host "Directory (Tenant) ID   : $TenantId"
     Write-Warning "IMPORTANT: Copy the Client Secret Value immediately."
 
+    # --- STEP 5: DIRECTORY ROLE ASSIGNMENTS ---
+    Write-Host "`n--- ENTRA ID DIRECTORY ROLE ASSIGNMENTS ---" -ForegroundColor Cyan
+    $PromptRoles = Read-Host "Would you like to assign Directory Roles (Compliance Data Administrator, Compliance Administrator, Power Platform Administrator) to this App? (Y/N)"
+    
+    $UserConsentedRoles = ($PromptRoles -ieq "Y")
+
+    if ($UserConsentedRoles) {
+        Write-Host "Assigning Directory Roles to App Service Principal..." -ForegroundColor Cyan
+        $AppDirectoryRoles = @(
+            "Compliance Data Administrator",
+            "Compliance Administrator"
+        )
+
+        foreach ($RoleName in $AppDirectoryRoles) {
+            try {
+                $Role = Get-MgDirectoryRole -Filter "displayName eq '$RoleName'"
+                if (-not $Role) {
+                    $RoleTemplate = Get-MgDirectoryRoleTemplate -Filter "displayName eq '$RoleName'"
+                    if ($RoleTemplate) {
+                        $Role = New-MgDirectoryRole -RoleTemplateId $RoleTemplate.Id
+                    }
+                }
+                if ($Role) {
+                    New-MgDirectoryRoleMemberByRef -DirectoryRoleId $Role.Id -OdataId "https://graph.microsoft.com/v1.0/directoryObjects/$($NewServicePrincipal.Id)" | Out-Null
+                    Write-Host " - Assigned Directory Role: $RoleName" -ForegroundColor Gray
+                } else {
+                    Write-Warning "Could not find directory role or template: $RoleName"
+                }
+            } catch {
+                Write-Warning "Failed to assign directory role '$RoleName': $_"
+            }
+        }
+    } else {
+        Write-Host "Skipping Directory Role assignment." -ForegroundColor Yellow
+    }
+
 }
 catch {
     Write-Error "Operation failed: $_"
 }
 
-# --- STEP 5: POWER PLATFORM MANAGEMENT APP (OPTIONAL) ---
+# --- STEP 6: POWER PLATFORM MANAGEMENT APP (OPTIONAL) ---
 Write-Host "`n--- POWER AUTOMATE & DATAVERSE CONFIGURATION ---" -ForegroundColor Cyan
 $PromptPower = Read-Host "Would you like to register this app for Power Automate telemetry? (Y/N)"
 if ($PromptPower -ieq "Y") {
