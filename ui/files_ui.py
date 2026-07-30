@@ -1598,6 +1598,21 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         )
         if not should_continue:
             return
+
+    if self.val_scan_encrypted_files:
+        warning_msg = (
+            "Enabling 'Scan for Encrypted Files (RMS/MIP)' will cause performance degradation "
+            "as it requires fetching content headers for every single file to detect encryption. "
+            "It is highly recommended to only enable this if you need to identify RMS/MIP protected files."
+        )
+        should_continue = messagebox.askyesno(
+            title="Performance Warning",
+            message=warning_msg,
+            icon="warning",
+            parent=self
+        )
+        if not should_continue:
+            return
       
     disclaimer_text = (
         "The estimations provided by this tool are calculated projections"
