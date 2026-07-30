@@ -1321,6 +1321,20 @@ class MigrationEstimatorTool(ctk.CTk):
       self.after(100, self.process_log_queue)
 
   def start_scan(self):
+    if self.scan_encrypted_email.get():
+        warning_msg = (
+            "Enabling 'Scan for Encrypted Emails' will cause performance degradation "
+            "as it requires fetching content headers for emails to detect encryption. "
+            "It is highly recommended to only enable this if you need to identify RMS/MIP protected emails."
+        )
+        should_continue = messagebox.askyesno(
+            title="Performance Warning",
+            message=warning_msg,
+            icon="warning",
+            parent=self
+        )
+        if not should_continue:
+            return
     disclaimer_text = (
         "The estimations provided by this tool are calculated projections"
         " intended for preliminary planning only. Actual migration timelines"
