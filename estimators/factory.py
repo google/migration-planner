@@ -3,7 +3,6 @@ from estimators.eo_group_mailbox_estimator import EOGroupMailBoxEstimator
 from estimators.eo_in_place_archive_estimator import EOInPlaceArchiveEstimator
 from estimators.eo_shared_mailbox_estimator import EOSharedMailBoxEstimator
 from estimators.file_estimator import FileEstimator
-from tests.files.mocks import MockUrlInvoker
 from util.auth_manager import TokenManager
 from util.connectors import UrlInvoker
 from util.utils import ScanConfig
@@ -78,6 +77,15 @@ class EstimatorFactory:
 
   def get_mock_url_invoker(self, hard_reset=False, seed=None):
     if self.mock_url_invoker is None or hard_reset:
+      # Deferred import: tests package may not be present in production.
+      try:
+        from tests.files.mocks import MockUrlInvoker
+      except ImportError as e:
+        raise ImportError(
+            "MockUrlInvoker is only available when the 'tests' package is "
+            "present. Do not call get_mock_url_invoker() in production."
+        ) from e
+
       data_path = "tests/files/test_data/state.json"
       if seed is not None:
         data_path = f"tests/files/test_data/state_{seed}.json"
@@ -196,4 +204,4 @@ class EstimatorFactory:
       )
       self.files_estimator.set_id_to_display_name_map(self.id_to_display_name)
     
-    return self.files_estimator 
+    return self.files_estimator

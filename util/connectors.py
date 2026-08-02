@@ -70,9 +70,17 @@ class UrlInvoker():
                 
                 final_responses += get_success_responses(responses)
                 failed_responses = get_failed_responses_that_can_be_retried(responses)
-                failed_response_ids = [response["id"] for response in failed_responses]
+                # failed_responses are response dicts keyed by their "id" field.
+                # Build a set of string ids so we can match against request ids
+                # regardless of whether they were stored as int or str.
+                failed_response_ids = {str(response["id"]) for response in failed_responses}
 
-                curr_batch = [request for request in curr_batch if str(request["id"]) in failed_response_ids]
+                # Rebuild curr_batch from the *original* batch list so that we
+                # keep the full request payload (not just the response slice).
+                curr_batch = [
+                    request for request in batch
+                    if str(request["id"]) in failed_response_ids
+                ]
 
                 if len(failed_responses) > 0:
                     wait_time = self.initial_delay * pow(self.batch_backoff, retry_count) + random.uniform(0, self.jitter)
@@ -82,7 +90,8 @@ class UrlInvoker():
                     break
 
             if len(failed_responses) > 0:
-                logger(f"Consistent failures observed for the following: {",".join(response.get("body") for response in failed_responses)}")
+                failed_ids = ", ".join(str(response.get("id", "?")) for response in failed_responses)
+                logger(f"Consistent failures observed for request ids: {failed_ids}")
 
         except Exception as e:
             logger(f"Error in {context}: {e}")
