@@ -58,6 +58,7 @@ class MigrationEstimatorTool(ctk.CTk):
     self.user_source = ctk.StringVar(value="tenant")
     self.user_csv_path = ctk.StringVar()
     self.scan_email = ctk.BooleanVar(value=True)
+    self.recursive_email_scan = ctk.BooleanVar(value=False)
     self.scan_encrypted_email = ctk.BooleanVar(value=False)
     self.scan_contact = ctk.BooleanVar(value=True)
     self.scan_calendar = ctk.BooleanVar(value=True)
@@ -257,6 +258,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
     # Advanced Content
     ui_utils.build_eo_resource_checkbox_list(self, ctk)
+    ui_utils.build_eo_additional_settings(self, ctk)
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk)
@@ -1429,7 +1431,7 @@ class MigrationEstimatorTool(ctk.CTk):
       # 2. Authentication
       manager = self._authenticate_if_needed(config)
       one_token_per_app_manager = None
-      if config.scan_in_place_archives:
+      if config.scan_in_place_archives or (config.scan_email and config.recursive_email_scan):
         one_token_per_app_manager = self._authenticate_if_needed(config, use_single_app=True)
       self.factory = EstimatorFactory(config, manager, one_token_per_app_manager, self.log_msg, self.stop_scan_event, None)
       
@@ -1475,6 +1477,7 @@ class MigrationEstimatorTool(ctk.CTk):
         user_source=self.user_source.get(),
         csv_path=self.user_csv_path.get(),
         scan_email=self.scan_email.get(),
+        recursive_email_scan=self.recursive_email_scan.get(),
         scan_encrypted_email=self.scan_encrypted_email.get(),
         scan_contact=self.scan_contact.get(),
         scan_calendar=self.scan_calendar.get(),
@@ -1606,8 +1609,11 @@ class MigrationEstimatorTool(ctk.CTk):
           raise Exception(
               "Missing Credentials for Delta Scan (CSV missing some columns)."
           )
-      if not one_token_per_app_manager and config.scan_in_place_archives and not have_in_place_archives:
-        raise Exception("Missing Credentials for In Place Archive Scan.")
+      if not one_token_per_app_manager and (
+          (config.scan_in_place_archives and not have_in_place_archives) or 
+          (config.scan_email and config.recursive_email_scan and not have_email)
+      ):
+        raise Exception("Missing Credentials for Hierarchical Scan.")
 
       # Determine scopes based on what is missing
       required_scopes = ["User.Read.All"]
@@ -1628,8 +1634,12 @@ class MigrationEstimatorTool(ctk.CTk):
 
       manager.authenticate_all(self.log_msg, required_scopes=required_scopes)
       if one_token_per_app_manager:
-        one_token_per_app_manager.authenticate_all(self.log_msg, required_scopes=[
-          "User.Read.All", "MailboxFolder.Read.All"])
+        aux_scopes = ["User.Read.All"]
+        if config.scan_in_place_archives and not have_in_place_archives:
+          aux_scopes.append("MailboxFolder.Read.All")
+        if config.scan_email and config.recursive_email_scan and not have_email:
+          aux_scopes.append("Mail.Read")
+        one_token_per_app_manager.authenticate_all(self.log_msg, required_scopes=aux_scopes)
     else:
       self.log_msg(
           "Skipping Authentication (All required data present in CSV)."
@@ -1842,6 +1852,8 @@ class MigrationEstimatorTool(ctk.CTk):
       estimator = self.factory.get_in_place_archive_estimator(use_delta_api=False)
     elif resource_type == "shared_mails":
       estimator = self.factory.get_shared_mailbox_estimator()
+    elif resource_type == "messages":
+      estimator = self.factory.get_email_estimator()
     
     total_failures = []
     partial_failures = []
@@ -1903,7 +1915,7 @@ class MigrationEstimatorTool(ctk.CTk):
         prog = processed_users / total_users if total_users > 0 else 0
         self.ui_update(
           "scan_progress",
-          entity_type="Users" if resource_type == "in_place_archives" else "Shared Mailboxes",
+          entity_type="Users" if resource_type in ["in_place_archives", "messages"] else "Shared Mailboxes",
           source=resource_type,
           progress=prog,
           cumulative=phase_total,
@@ -1923,14 +1935,17 @@ class MigrationEstimatorTool(ctk.CTk):
             user["In Place Archive Count"] = chunk_result.get(key, 0)
           elif resource_type == "shared_mails":
             user["Shared Mail Count"] = chunk_result.get(key, 0)
+          elif resource_type == "messages":
+            user["Email Count"] = chunk_result.get(key, 0)
         
-        stats[resource_type] += chunk_total
+        stat_key = "emails" if resource_type == "messages" else resource_type
+        stats[stat_key] += chunk_total
         
       if self.stop_scan_event.is_set():
         pending_users_count = total_users - processed_users
         self.ui_update(
           "scan_progress",
-          entity_type="Users" if resource_type == "in_place_archives" else "Shared Mailboxes",
+          entity_type="Users" if resource_type in ["in_place_archives", "messages"] else "Shared Mailboxes",
           source=resource_type,
           progress=1.0,
           cumulative=phase_total,
@@ -1945,7 +1960,7 @@ class MigrationEstimatorTool(ctk.CTk):
     except Exception as e:
       self.ui_update(
         "scan_progress",
-        entity_type="Users" if resource_type == "in_place_archives" else "Shared Mailboxes",
+        entity_type="Users" if resource_type in ["in_place_archives", "messages"] else "Shared Mailboxes",
         source=resource_type,
         progress=1.0,
         cumulative=phase_total,
@@ -2141,15 +2156,21 @@ class MigrationEstimatorTool(ctk.CTk):
     failed_group_mails = []
     partial_in_place_archive_failures = []
     partial_shared_mail_box_failures = []
+    partial_email_failures = []
 
     can_scan = manager is not None
 
     if config.scan_email:
       if can_scan and (not has_email_data or config.user_source == "tenant"):
         self.ui_update("phase_status", source="messages", status="running")
-        failed_emails = self.run_batch_phase_ui(
-            user_chunks, "messages", manager, workers, stats, total_users
-        )
+        if config.recursive_email_scan:
+          failed_emails, partial_email_failures = self.run_batch_scan(
+              "messages", config, user_chunks, manager, one_token_per_app_manager, stats, total_users
+          )
+        else:
+          failed_emails = self.run_batch_phase_ui(
+              user_chunks, "messages", manager, workers, stats, total_users
+          )
         self.ui_update("phase_status", source="messages", status="complete")
       else:
         self.log_msg("Skipping Email Scan (Data present or No Auth)")
@@ -2348,7 +2369,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
       self.log_msg("=" * 40)
     
-    if partial_in_place_archive_failures or partial_shared_mail_box_failures:
+    if partial_in_place_archive_failures or partial_shared_mail_box_failures or partial_email_failures:
       if partial_in_place_archive_failures:
         self.log_msg("In Place Archive Migration Partial Failures")
         for f in partial_in_place_archive_failures:
@@ -2361,6 +2382,13 @@ class MigrationEstimatorTool(ctk.CTk):
         for f in partial_shared_mail_box_failures:
           prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
           self.log_msg(f"{prefix} Shared Mail Box: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
+        self.log_msg("")  # Add blank line
+      
+      if partial_email_failures:
+        self.log_msg("Email Migration Partial Failures")
+        for f in partial_email_failures:
+          prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
+          self.log_msg(f"{prefix} User: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
         self.log_msg("")  # Add blank line
 
       self.log_msg("=" * 40)

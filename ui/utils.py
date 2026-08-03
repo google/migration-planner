@@ -142,6 +142,26 @@ def build_eo_resource_checkbox_list(self, ctk):
       text_color=COLOR_TEXT_SUB,
   ).pack(anchor="w", padx=25, pady=(2, 5))
 
+def build_eo_additional_settings(self, ctk):
+  ctk.CTkLabel(
+      self.adv_frame,
+      text="Additional Settings",
+      font=FONT_BODY_BOLD,
+      text_color=COLOR_TEXT_MAIN,
+  ).pack(anchor="w", padx=15, pady=(10, 5))
+
+  additional_settings_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
+  additional_settings_frame.pack(fill="x", padx=15)
+
+  ctk.CTkCheckBox(
+      additional_settings_frame,
+      text="Use Recursive Email folder hierarchy Scan for Email Counts",
+      variable=self.recursive_email_scan,
+      corner_radius=4,
+      fg_color=COLOR_PRIMARY,
+      border_color=COLOR_TEXT_SUB,
+  ).pack(side="left", padx=10)
+
 
 def build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=False):
   if useConcurrencyHeading:
