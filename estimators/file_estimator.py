@@ -1083,15 +1083,21 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]]
     ) -> Dict[str, int]:
         try:
-            def filter_personal_cache_library(batch_responses):
+            def filter_system_dls_for_one_drive(batch_responses, batch, batch_responses_map):
                 if not batch_responses:
                     return
-                for resp in batch_responses:
-                    if "body" in resp and "value" in resp["body"] and isinstance(resp["body"]["value"], list):
-                        resp["body"]["value"] = [
-                            d for d in resp["body"]["value"]
-                            if d.get("name") != "PersonalCacheLibrary"
-                        ]
+                for req in batch:
+                    req_id = req["id"]
+                    if req_id in batch_responses_map:
+                        resp = batch_responses_map[req_id]
+                        site_id = req["headers"]["siteId"]
+                        is_personal = self.site_to_metadata.get(site_id, {}).get("isPersonalSite", False)
+                        
+                        if is_personal and "body" in resp and "value" in resp["body"] and isinstance(resp["body"]["value"], list):
+                            resp["body"]["value"] = [
+                                d for d in resp["body"]["value"]
+                                if str(d.get("webUrl", "")).endswith("/Documents")
+                            ]
 
             drive_url = "/sites/{siteId}/drives?$select=id,name,driveType,webUrl&$top=999"
             batches = create_batches(drive_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
@@ -1126,9 +1132,9 @@ class FileEstimator(Estimator):
             for future in as_completed(futures_map.values()):
                 batch_id = future_to_batch_id[future]
                 responses = future.result()
-                filter_personal_cache_library(responses)
                 batch = batch_id_to_batch_map[batch_id]
                 batch_responses_map = get_batch_responses_map(responses, self.logger)
+                filter_system_dls_for_one_drive(responses, batch, batch_responses_map)
                 for req in batch:
                     req_id = req["id"]
                     if req_id in batch_responses_map:
@@ -1178,8 +1184,9 @@ class FileEstimator(Estimator):
                 for future in as_completed(next_futures_map.values()):
                     batch_id = future_to_batch_id[future]
                     responses = future.result()
-                    filter_personal_cache_library(responses)
                     batch = next_batch_id_to_batch_map[batch_id]
+                    batch_responses_map = get_batch_responses_map(responses, self.logger)
+                    filter_system_dls_for_one_drive(responses, batch, batch_responses_map)
                     new_pending_next_items.extend(process_pagination_responses(batch, responses, site_to_resp_map, "siteId", GRAPH_BASE_URL, failures, False, local_progress_callback))
                     
                 pending_next_items = new_pending_next_items
