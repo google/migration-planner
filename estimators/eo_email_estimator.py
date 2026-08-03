@@ -185,7 +185,8 @@ class EOEmailEstimator(Estimator):
                         email_count[user_id].increment(count)
                     except (ValueError, TypeError):
                         if self.logger:
-                            self.logger(f"Warning: Invalid totalItemCount '{sub_folder.get('totalItemCount')}' for user {user_id}. Skipping count.")
+                            user_email = self.get_display_name_from_id(user_id)
+                            self.logger(f"Warning: Invalid totalItemCount '{sub_folder.get('totalItemCount')}' for user {user_email}. Skipping count.")
                         failures.append({
                             "userId": user_id,
                             "isPartial": True,
@@ -201,7 +202,8 @@ class EOEmailEstimator(Estimator):
                         child_count = int(sub_folder["childFolderCount"])
                     except (ValueError, TypeError):
                         if self.logger:
-                            self.logger(f"Warning: Invalid childFolderCount '{sub_folder.get('childFolderCount')}' for user {user_id}. Assuming 0.")
+                            user_email = self.get_display_name_from_id(user_id)
+                            self.logger(f"Warning: Invalid childFolderCount '{sub_folder.get('childFolderCount')}' for user {user_email}. Assuming 0.")
                         failures.append({
                             "userId": user_id,
                             "isPartial": True,
