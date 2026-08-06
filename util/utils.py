@@ -31,6 +31,7 @@ class ScanConfig:
   sample_percentage: int = 10
   bucket_ranges: List[Tuple[int, int]] = field(default_factory=lambda: [(0, 10240), (10241, 102400), (102401, 1048576), (1048577, float("inf"))])
   large_resource_count_limit: int = 500000
+  warning_resource_count_limit: int = 200000
   includePersonalSites: bool = True
   includeTeamSites: bool = True
   max_allowed_depth: int = 100

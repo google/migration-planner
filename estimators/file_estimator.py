@@ -135,7 +135,9 @@ class FileEstimator(Estimator):
                     "buckets": []
                 },
                 "tenantLevelLargeResources": [],
-                "tenantLevelLargeResourceCount": 0
+                "tenantLevelLargeResourceCount": 0,
+                "tenantLevelWarningResources": [],
+                "tenantLevelWarningResourceCount": 0
             }
 
             if "drives" in data and len(data["drives"]) > 0:
@@ -395,6 +397,8 @@ class FileEstimator(Estimator):
                     drive_metric = metrics["driveMetrics"][drive_id]
                     
                     subsite_item_count += drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0)
+                    
+                    # Large Resources
                     metrics["siteMetrics"][top_level_site]["largeResourceCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("largeResourceCount", 0) + len(drive_metric.get("largeResources", []))
                     if drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0) > self.config.large_resource_count_limit:
                         metrics["siteMetrics"][top_level_site]["largeResourceCount"] += 1    
@@ -405,6 +409,20 @@ class FileEstimator(Estimator):
                                 "subTreeCount": drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0),
                                 "parent": subsite_id,   # Explicitly showing subsite id here as users can use it to determine site collection easily (webUrl will be displayed in final report).
                                 "Limit": self.config.large_resource_count_limit
+                            }
+                        )
+
+                    # Warning Resources
+                    metrics["siteMetrics"][top_level_site]["warningResourceCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("warningResourceCount", 0) + len(drive_metric.get("warningResources", []))
+                    if drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0) > self.config.warning_resource_count_limit:
+                        metrics["siteMetrics"][top_level_site]["warningResourceCount"] += 1    
+                        metrics["tenantLevelWarningResources"].append(
+                            {
+                                "type": ResourceType.DL.value,
+                                "id": drive_id,
+                                "subTreeCount": drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0),
+                                "parent": subsite_id,
+                                "Limit": self.config.warning_resource_count_limit
                             }
                         )
                     
@@ -434,6 +452,19 @@ class FileEstimator(Estimator):
                     }
                 )            
 
+            # Check if this subsite is a Warning Resource
+            if subsite_item_count > self.config.warning_resource_count_limit and subsite_id != top_level_site:
+                metrics["siteMetrics"][top_level_site]["warningResourceCount"] = metrics["siteMetrics"][top_level_site].get("warningResourceCount", 0) + 1
+                metrics["tenantLevelWarningResources"].append(
+                    {
+                        "type": ResourceType.SUBSITE.value,
+                        "id": subsite_id,
+                        "subTreeCount": subsite_item_count,
+                        "parent": top_level_site,
+                        "Limit": self.config.warning_resource_count_limit
+                    }
+                )            
+
             metrics["siteMetrics"][top_level_site]["dlCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("dlCount", 0) + len(drive_ids)
             
             if self._is_subsite_personal(subsite_id):
@@ -453,6 +484,16 @@ class FileEstimator(Estimator):
                         "subTreeCount": metric.get("fileCount", 0) + metric.get("folderCount", 0),
                         "parent": "N/A (Top level site)",
                         "Limit": self.config.large_resource_count_limit
+                    }
+                )
+            if metric.get("folderCount", 0) + metric.get("fileCount", 0) > self.config.warning_resource_count_limit:
+                metrics["tenantLevelWarningResources"].append(
+                    {
+                        "type": ResourceType.SITE.value,
+                        "id": site_id,
+                        "subTreeCount": metric.get("fileCount", 0) + metric.get("folderCount", 0),
+                        "parent": "N/A (Top level site)",
+                        "Limit": self.config.warning_resource_count_limit
                     }
                 )
                     
@@ -490,8 +531,14 @@ class FileEstimator(Estimator):
                 curr_dict = large_resource
                 curr_dict["parent"] = drive_id
                 metrics["tenantLevelLargeResources"].append(curr_dict)
+            
+            for warning_resource in metric.get("warningResources", []):
+                curr_dict = warning_resource
+                curr_dict["parent"] = drive_id
+                metrics["tenantLevelWarningResources"].append(curr_dict)
         
         metrics["tenantLevelLargeResourceCount"] = len(metrics["tenantLevelLargeResources"])
+        metrics["tenantLevelWarningResourceCount"] = len(metrics["tenantLevelWarningResources"])
         
         self.progress_update_callback(
             "scan_progress",
@@ -1656,7 +1703,8 @@ class FileEstimator(Estimator):
                 "fileCount": 0,
                 "shortcutCount": 0,
                 "fileSizeDistribution": {"buckets": []},
-                "largeResources": []
+                "largeResources": [],
+                "warningResources": []
             }
 
             for size_range in self.config.bucket_ranges:
@@ -1808,6 +1856,15 @@ class FileEstimator(Estimator):
                     "id": resource["id"],
                     "subTreeCount": resource_metric["subTreeCount"],
                     "Limit": self.config.large_resource_count_limit
+                })
+
+            # Update warning resources
+            if resource_metric["subTreeCount"] >= self.config.warning_resource_count_limit:
+                drive_metric["warningResources"].append({
+                    "type": ResourceType.FOLDER.value if "folder" in resource else ResourceType.FILE.value,
+                    "id": resource["id"],
+                    "subTreeCount": resource_metric["subTreeCount"],
+                    "Limit": self.config.warning_resource_count_limit
                 })
 
     def _log_and_fail(self, message: str, e: Exception, failures: List[Dict[str, str]]):
