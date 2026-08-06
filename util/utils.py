@@ -31,13 +31,14 @@ class ScanConfig:
   sample_percentage: int = 10
   bucket_ranges: List[Tuple[int, int]] = field(default_factory=lambda: [(0, 10240), (10241, 102400), (102401, 1048576), (1048577, float("inf"))])
   large_resource_count_limit: int = 500000
-  warning_resource_count_limit: int = 200000
+  warning_resource_count_limit: int = 2
   includePersonalSites: bool = True
   includeTeamSites: bool = True
   max_allowed_depth: int = 100
   include_recycle_bin_contents: bool = False
   include_file_versions: bool = False
   scan_encrypted_files: bool = False
+  generate_folder_amr_map: bool = False
 
 @dataclass
 class RequestResponsePair:

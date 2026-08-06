@@ -69,6 +69,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.include_recycle_bin_contents = ctk.BooleanVar(value=False)
     self.include_file_versions = ctk.BooleanVar(value=False)
     self.scan_encrypted_files = ctk.BooleanVar(value=False)
+    self.generate_folder_amr_map = ctk.BooleanVar(value=False)
     self.eta_min_users = ctk.IntVar(value=1000)
     self.eta_max_users = ctk.IntVar(value=5000)
 
@@ -202,6 +203,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         additional_settings_frame,
         text="Scan for Encrypted Files (RMS/MIP)",
         variable=self.scan_encrypted_files,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
+
+    ctk.CTkCheckBox(
+        additional_settings_frame,
+        text="Generate Migration Map for Folder Level AMR",
+        variable=self.generate_folder_amr_map,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
@@ -690,8 +700,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       df_output.to_csv(report_path, index=False)
       
-      batches_dir = os.path.join(output_dir, "suggested batches")
+      batches_dir = os.path.join(output_dir, "suggested_batches")
       os.makedirs(batches_dir, exist_ok=True)
+
+      # Export AMR map if available
+      if "folderAmrBatchSplit" in file_metrics and file_metrics["folderAmrBatchSplit"]:
+          amr_path = os.path.join(batches_dir, "folder_amr_batch_split.csv")
+          amr_df = pd.DataFrame(file_metrics["folderAmrBatchSplit"])
+          amr_df.to_csv(amr_path, index=False)
+          self.log_msg(f"Folder AMR batch split exported to: {amr_path}")
       
       if self.show_eta:
         unique_batches = df_output["Suggested Batch"].unique()
@@ -1587,6 +1604,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config.include_recycle_bin_contents = self.val_include_recycle_bin_contents
     config.include_file_versions = self.val_include_file_versions
     config.scan_encrypted_files = self.val_scan_encrypted_files
+    config.generate_folder_amr_map = self.val_generate_folder_amr_map
     return config
 
   def start_scan(self):    
@@ -1606,6 +1624,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.val_include_recycle_bin_contents = self.include_recycle_bin_contents.get()
     self.val_include_file_versions = self.include_file_versions.get()
     self.val_scan_encrypted_files = self.scan_encrypted_files.get()
+    self.val_generate_folder_amr_map = self.generate_folder_amr_map.get()
     self.val_eta_min_users = self.eta_min_users.get()
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()
