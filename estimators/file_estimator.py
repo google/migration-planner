@@ -135,7 +135,9 @@ class FileEstimator(Estimator):
                     "buckets": []
                 },
                 "tenantLevelLargeResources": [],
-                "tenantLevelLargeResourceCount": 0
+                "tenantLevelLargeResourceCount": 0,
+                "tenantLevelWarningResources": [],
+                "tenantLevelWarningResourceCount": 0
             }
 
             if "drives" in data and len(data["drives"]) > 0:
@@ -230,6 +232,7 @@ class FileEstimator(Estimator):
 
             # Calculate metrics for all drives
             drive_metrics = {}
+            self.all_resource_metrics = ThreadSafeMap() # Store for AMR map generation
             
             batch_size = max(1, self.config.concurrency // 10)
             total_drives = len(drives)
@@ -314,6 +317,18 @@ class FileEstimator(Estimator):
                 if s_data.get("siteLevel", 0) == 0
             }
             
+            # Generate AMR map if enabled
+            if self.config.generate_folder_amr_map:
+                self.progress_update_callback("phase_status", source="amr_map_generation", status="running")
+                metrics["folderAmrBatchSplit"] = self._generate_amr_map(
+                    metrics, 
+                    subsite_to_drives, 
+                    subsite_to_top_level_site, 
+                    drive_id_to_adj_list, 
+                    resource_id_to_details
+                )
+                self.progress_update_callback("phase_status", source="amr_map_generation", status="complete")
+
             self.progress_update_callback("phase_status", source="plan_generation", status="complete")
 
             metrics["siteClassification"] = {siteId: "personal" if self._is_subsite_personal(siteId) else "teams" for siteId in metrics["siteMetrics"].keys()}
@@ -395,6 +410,8 @@ class FileEstimator(Estimator):
                     drive_metric = metrics["driveMetrics"][drive_id]
                     
                     subsite_item_count += drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0)
+                    
+                    # Large Resources
                     metrics["siteMetrics"][top_level_site]["largeResourceCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("largeResourceCount", 0) + len(drive_metric.get("largeResources", []))
                     if drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0) > self.config.large_resource_count_limit:
                         metrics["siteMetrics"][top_level_site]["largeResourceCount"] += 1    
@@ -405,6 +422,20 @@ class FileEstimator(Estimator):
                                 "subTreeCount": drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0),
                                 "parent": subsite_id,   # Explicitly showing subsite id here as users can use it to determine site collection easily (webUrl will be displayed in final report).
                                 "Limit": self.config.large_resource_count_limit
+                            }
+                        )
+
+                    # Warning Resources
+                    metrics["siteMetrics"][top_level_site]["warningResourceCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("warningResourceCount", 0) + len(drive_metric.get("warningResources", []))
+                    if drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0) > self.config.warning_resource_count_limit:
+                        metrics["siteMetrics"][top_level_site]["warningResourceCount"] += 1    
+                        metrics["tenantLevelWarningResources"].append(
+                            {
+                                "type": ResourceType.DL.value,
+                                "id": drive_id,
+                                "subTreeCount": drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0),
+                                "parent": subsite_id,
+                                "Limit": self.config.warning_resource_count_limit
                             }
                         )
                     
@@ -434,6 +465,19 @@ class FileEstimator(Estimator):
                     }
                 )            
 
+            # Check if this subsite is a Warning Resource
+            if subsite_item_count > self.config.warning_resource_count_limit and subsite_id != top_level_site:
+                metrics["siteMetrics"][top_level_site]["warningResourceCount"] = metrics["siteMetrics"][top_level_site].get("warningResourceCount", 0) + 1
+                metrics["tenantLevelWarningResources"].append(
+                    {
+                        "type": ResourceType.SUBSITE.value,
+                        "id": subsite_id,
+                        "subTreeCount": subsite_item_count,
+                        "parent": top_level_site,
+                        "Limit": self.config.warning_resource_count_limit
+                    }
+                )            
+
             metrics["siteMetrics"][top_level_site]["dlCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("dlCount", 0) + len(drive_ids)
             
             if self._is_subsite_personal(subsite_id):
@@ -453,6 +497,16 @@ class FileEstimator(Estimator):
                         "subTreeCount": metric.get("fileCount", 0) + metric.get("folderCount", 0),
                         "parent": "N/A (Top level site)",
                         "Limit": self.config.large_resource_count_limit
+                    }
+                )
+            if metric.get("folderCount", 0) + metric.get("fileCount", 0) > self.config.warning_resource_count_limit:
+                metrics["tenantLevelWarningResources"].append(
+                    {
+                        "type": ResourceType.SITE.value,
+                        "id": site_id,
+                        "subTreeCount": metric.get("fileCount", 0) + metric.get("folderCount", 0),
+                        "parent": "N/A (Top level site)",
+                        "Limit": self.config.warning_resource_count_limit
                     }
                 )
                     
@@ -490,8 +544,14 @@ class FileEstimator(Estimator):
                 curr_dict = large_resource
                 curr_dict["parent"] = drive_id
                 metrics["tenantLevelLargeResources"].append(curr_dict)
+            
+            for warning_resource in metric.get("warningResources", []):
+                curr_dict = warning_resource
+                curr_dict["parent"] = drive_id
+                metrics["tenantLevelWarningResources"].append(curr_dict)
         
         metrics["tenantLevelLargeResourceCount"] = len(metrics["tenantLevelLargeResources"])
+        metrics["tenantLevelWarningResourceCount"] = len(metrics["tenantLevelWarningResources"])
         
         self.progress_update_callback(
             "scan_progress",
@@ -1551,7 +1611,8 @@ class FileEstimator(Estimator):
             drive_id_to_adj_list,
             parent_references,
             resource_id_to_details,
-            failures
+            failures,
+            self.all_resource_metrics
         )
 
         additional_metrics = self._calculate_metrics_using_regular_parsing(
@@ -1604,7 +1665,7 @@ class FileEstimator(Estimator):
                 "fileCountExceedingDepthLimit": AtomicInt(0)
             }
         
-        def _dfs(drive_id, node, current_depth = 1):
+        def _bfs(drive_id, node, current_depth = 1):
             try:
                 if current_depth > self.config.max_allowed_depth:
                     resource_details = resource_id_to_details[node]
@@ -1616,7 +1677,7 @@ class FileEstimator(Estimator):
                 children = set(drive_id_to_adj_list[drive_id].get(node, []))
                 for child in children:
                     active_thread_count.increment()
-                    self.tree_executor.submit(_dfs, drive_id, child, current_depth + 1)
+                    self.tree_executor.submit(_bfs, drive_id, child, current_depth + 1)
             finally:
                 active_thread_count.decrement()
                 with self.condition:
@@ -1625,7 +1686,7 @@ class FileEstimator(Estimator):
         for drive_id in drive_ids:
             for root in roots.get(drive_id, []):
                 active_thread_count.increment()
-                self.tree_executor.submit(_dfs, drive_id, root)
+                self.tree_executor.submit(_bfs, drive_id, root)
 
         
         while active_thread_count.get_value() > 0:
@@ -1644,7 +1705,8 @@ class FileEstimator(Estimator):
         drive_id_to_adj_list: Dict[str, List[str]], 
         parent_references: Dict[str, Dict[str, str]], 
         resource_id_to_details: Dict[str, Dict[str, Any]],
-        failures: List[Dict[str, str]]
+        failures: List[Dict[str, str]],
+        resource_metrics: ThreadSafeMap
     ) -> Dict[str, Any]:
 
         # print("Inside _calculate_metrics_using_upside_down_parsing")
@@ -1656,7 +1718,8 @@ class FileEstimator(Estimator):
                 "fileCount": 0,
                 "shortcutCount": 0,
                 "fileSizeDistribution": {"buckets": []},
-                "largeResources": []
+                "largeResources": [],
+                "warningResources": []
             }
 
             for size_range in self.config.bucket_ranges:
@@ -1665,8 +1728,6 @@ class FileEstimator(Estimator):
                     "count": 0
                 })
         
-        resource_metrics = ThreadSafeMap()
-
         try:
             dependency_set = ThreadSafeSortedSet()
             resource_to_dependency_count = ThreadSafeMap()
@@ -1773,6 +1834,172 @@ class FileEstimator(Estimator):
             with self.condition:
                 self.condition.notify_all()
 
+    def _generate_amr_map(
+        self,
+        metrics: Dict[str, Any],
+        subsite_to_drives: Dict[str, List[str]],
+        subsite_to_top_level_site: Dict[str, str],
+        drive_id_to_adj_list: Dict[str, Dict[str, List[str]]],
+        resource_id_to_details: Dict[str, Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        amr_list = []
+        limit = self.config.warning_resource_count_limit
+
+        # 1. Check Top Level Sites
+        for site_id, s_data in metrics["siteMetrics"].items():
+            # Skip if it's a subsite (though siteMetrics should be filtered by now, double check)
+            if s_data.get("siteLevel", 0) != 0:
+                continue
+
+            total_items = s_data.get("fileCount", 0) + s_data.get("folderCount", 0)
+            if total_items < limit:
+                amr_list.append({
+                    "Type": "SITE",
+                    "URL": self.id_to_display.get(site_id, site_id),
+                    "Item Count": total_items
+                })
+            else:
+                # Proceed to Subsites and DLs
+                pass # Handled by below loops
+
+        # Helper to get subsite items
+        def get_subsite_item_count(subsite_id):
+            count = 0
+            for dl_id in subsite_to_drives.get(subsite_id, []):
+                dl_metric = metrics["driveMetrics"].get(dl_id, {})
+                count += dl_metric.get("fileCount", 0) + dl_metric.get("folderCount", 0)
+            return count
+
+        # 2. Check Subsites
+        for subsite_id, dl_ids in subsite_to_drives.items():
+            top_level_site = subsite_to_top_level_site.get(subsite_id, subsite_id)
+            # Skip top level sites as they are handled or skipped above
+            if subsite_id == top_level_site:
+                continue
+            
+            top_level_metric = metrics["siteMetrics"].get(top_level_site, {})
+            # If top level site was < limit, it was reported and we skip its subsites
+            if (top_level_metric.get("fileCount", 0) + top_level_metric.get("folderCount", 0)) < limit:
+                continue
+
+            subsite_items = get_subsite_item_count(subsite_id)
+            if subsite_items < limit:
+                amr_list.append({
+                    "Type": "SUBSITE",
+                    "URL": self.id_to_display.get(subsite_id, subsite_id),
+                    "Item Count": subsite_items
+                })
+            else:
+                # Handled by DL loop
+                pass
+
+        # 3. Check DLs
+        for dl_id, dl_metric in metrics["driveMetrics"].items():
+            # Find parent subsite
+            parent_subsite = None
+            for s_id, dl_ids in subsite_to_drives.items():
+                if dl_id in dl_ids:
+                    parent_subsite = s_id
+                    break
+            
+            if not parent_subsite:
+                continue
+
+            # Check if parent subsite was reported
+            top_level_site = subsite_to_top_level_site.get(parent_subsite, parent_subsite)
+            top_level_metric = metrics["siteMetrics"].get(top_level_site, {})
+            if (top_level_metric.get("fileCount", 0) + top_level_metric.get("folderCount", 0)) < limit:
+                continue
+
+            if parent_subsite != top_level_site:
+                subsite_items = get_subsite_item_count(parent_subsite)
+                if subsite_items < limit:
+                    continue
+
+            dl_items = dl_metric.get("fileCount", 0) + dl_metric.get("folderCount", 0)
+            if dl_items < limit:
+                amr_list.append({
+                    "Type": "DL",
+                    "URL": self.id_to_display.get(dl_id, dl_id),
+                    "Item Count": dl_items
+                })
+            else:
+                # Proceed to Folders
+                self._traverse_folders_for_amr(dl_id, drive_id_to_adj_list[dl_id], resource_id_to_details, amr_list)
+
+        return amr_list
+
+    def _traverse_folders_for_amr(
+        self,
+        dl_id: str,
+        adj_list: Dict[str, List[str]],
+        resource_id_to_details: Dict[str, Dict[str, Any]],
+        amr_list: List[Dict[str, Any]]
+    ):
+        # Find roots of this DL
+        roots = []
+        for child_id, parent_id in adj_list.items(): # Wait, adj_list is parent -> children
+            pass
+        
+        # Better way to find roots: nodes with no parents in this DL
+        # parent_references is not passed, but we can infer from resource_id_to_details
+        # Or we can just start from the "root" folder if we can identify it.
+        # In _create_in_memory_tree, we have resource["parentReference"]["driveId"]
+        
+        # Let's find nodes in adj_list that are not children of any other node in this DL
+        all_children = set()
+        for children in adj_list.values():
+            all_children.update(children)
+        
+        roots = [node for node in adj_list.keys() if node not in all_children]
+
+        active_thread_count = AtomicInt(0)
+        
+        def _bfs(node):
+            try:
+                res_details = resource_id_to_details.get(node, {})
+                
+                # Check if it's a root folder
+                is_root = "id" not in res_details.get("parentReference", {}) and res_details.get("name") == "root"
+                
+                if is_root:
+                    # It's the root of the DL. We are here because DL >= limit.
+                    # Do NOT report it as a folder. Just crawl its children.
+                    children = adj_list.get(node, [])
+                    for child in children:
+                        active_thread_count.increment()
+                        self.tree_executor.submit(_bfs, child)
+                    return # Exit early
+
+                res_metric = self.all_resource_metrics.get(node, {})
+                sub_tree_count = res_metric.get("subTreeCount", 0)
+                
+                if sub_tree_count < self.config.warning_resource_count_limit:
+                    if "folder" in res_details:
+                        amr_list.append({
+                            "Type": "FOLDER",
+                            "URL": res_details.get("webUrl", node),
+                            "Item Count": sub_tree_count
+                        })
+                else:
+                    # Crawl children
+                    children = adj_list.get(node, [])
+                    for child in children:
+                        active_thread_count.increment()
+                        self.tree_executor.submit(_bfs, child)
+            finally:
+                active_thread_count.decrement()
+                with self.condition:
+                    self.condition.notify_all()
+
+        for root in roots:
+            active_thread_count.increment()
+            self.tree_executor.submit(_bfs, root)
+
+        with self.condition:
+            while active_thread_count.get_value() > 0:
+                self.condition.wait()
+
     def _update_drive_metrics_from_resource(
         self,
         resource: Dict[str, Any],
@@ -1808,6 +2035,15 @@ class FileEstimator(Estimator):
                     "id": resource["id"],
                     "subTreeCount": resource_metric["subTreeCount"],
                     "Limit": self.config.large_resource_count_limit
+                })
+
+            # Update warning resources
+            if resource_metric["subTreeCount"] >= self.config.warning_resource_count_limit:
+                drive_metric["warningResources"].append({
+                    "type": ResourceType.FOLDER.value if "folder" in resource else ResourceType.FILE.value,
+                    "id": resource["id"],
+                    "subTreeCount": resource_metric["subTreeCount"],
+                    "Limit": self.config.warning_resource_count_limit
                 })
 
     def _log_and_fail(self, message: str, e: Exception, failures: List[Dict[str, str]]):

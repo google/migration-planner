@@ -69,6 +69,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.include_recycle_bin_contents = ctk.BooleanVar(value=False)
     self.include_file_versions = ctk.BooleanVar(value=False)
     self.scan_encrypted_files = ctk.BooleanVar(value=False)
+    self.generate_folder_amr_map = ctk.BooleanVar(value=False)
     self.eta_min_users = ctk.IntVar(value=1000)
     self.eta_max_users = ctk.IntVar(value=5000)
 
@@ -202,6 +203,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         additional_settings_frame,
         text="Scan for Encrypted Files (RMS/MIP)",
         variable=self.scan_encrypted_files,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
+
+    ctk.CTkCheckBox(
+        additional_settings_frame,
+        text="Generate Migration Map for Folder Level AMR",
+        variable=self.generate_folder_amr_map,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
@@ -459,6 +469,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           "folderCountExceedingDepthLimit": int(pd.to_numeric(row.get("Folder Count > Depth Limit 100", 0), errors="coerce") or 0),
           "fileCountExceedingDepthLimit": int(pd.to_numeric(row.get("File Count > Depth Limit 100", 0), errors="coerce") or 0),
           "largeResourceCount": int(pd.to_numeric(row.get("Entities with > 500k item count", 0), errors="coerce") or 0),
+          "warningResourceCount": int(pd.to_numeric(row.get("Entities with > 200k item count", 0), errors="coerce") or 0),
           "totalSize": _parse_size_str(row.get("Corpus Size", 0)),
           "resourceCount": res_cnt,
       }
@@ -481,10 +492,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "folderCountExceedingDepthLimit": int(pd.to_numeric(df.get("Folder Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "fileCountExceedingDepthLimit": int(pd.to_numeric(df.get("File Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "tenantLevelLargeResourceCount": int(pd.to_numeric(df.get("Entities with > 500k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "tenantLevelWarningResourceCount": int(pd.to_numeric(df.get("Entities with > 200k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "siteClassification": {site_id: "personal" for site_id in site_metrics.keys()},
         "licenseMetrics": {},
         "tenantLevelFileSizeDistribution": {},
         "tenantLevelLargeResources": [],
+        "tenantLevelWarningResources": [],
     }
 
   def _get_input_from_csv_if_uploaded(self, config):
@@ -554,7 +567,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "fileCount": "File Count",
         "folderCountExceedingDepthLimit": "Folder Count > Depth Limit",
         "fileCountExceedingDepthLimit": "File Count > Depth Limit",
-        "tenantLevelLargeResourceCount": "Tenant Level Large Resource Count"
+        "tenantLevelLargeResourceCount": "Tenant Level Large Resource Count",
+        "tenantLevelWarningResourceCount": "Tenant Level Warning Resource Count"
       }
 
       self.id_to_display_name = id_to_display
@@ -686,8 +700,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       df_output.to_csv(report_path, index=False)
       
-      batches_dir = os.path.join(output_dir, "suggested batches")
+      batches_dir = os.path.join(output_dir, "suggested_batches")
       os.makedirs(batches_dir, exist_ok=True)
+
+      # Export AMR map if available
+      if "folderAmrBatchSplit" in file_metrics and file_metrics["folderAmrBatchSplit"]:
+          amr_path = os.path.join(batches_dir, "folder_amr_batch_split.csv")
+          amr_df = pd.DataFrame(file_metrics["folderAmrBatchSplit"])
+          amr_df.to_csv(amr_path, index=False)
+          self.log_msg(f"Folder AMR batch split exported to: {amr_path}")
       
       if self.show_eta:
         unique_batches = df_output["Suggested Batch"].unique()
@@ -1056,6 +1077,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.create_stat_card(card_frame, "Folder count beyond depth limit 100", f"{data.get('folderCountExceedingDepthLimit', 0):,}", "📁")
       self.create_stat_card(card_frame, "File count beyond depth limit 100", f"{data.get('fileCountExceedingDepthLimit', 0):,}", "📄")
       self.create_stat_card(card_frame, "Large Resource Count (Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Warning Resource Count (Entities with >200k items)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
 
       if self.show_eta:
         # Timeline
@@ -1442,13 +1464,33 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         
         writer.writerow([]) # Blank line separator
       
+      # Section 5: Warning Resources
+      if len(data.get("tenantLevelWarningResources", [])) > 0:
+        weights = {
+          "SITE COLLECTION": 1,
+          "SUBSITE": 2,
+          "DOCUMENT LIBRARY": 3,
+          "FOLDER": 4
+        }
+        sorted_warning_resources = sorted(data.get("tenantLevelWarningResources", []), key=lambda x: weights.get(x.get("Type", x.get("type", "")), 0), reverse=False)
+        writer.writerow(["Warning Resources (Entities with >200k items)", ""])
+        writer.writerow(["Type", "URL", "Item Count"])
+        for res in sorted_warning_resources:
+          writer.writerow([
+            res.get("Type", res.get("type", "")),
+            self._get_display_name(res.get("Id", res.get("id", ""))),
+            res.get("subTreeCount", 0)
+        ])
+        
+        writer.writerow([]) # Blank line separator
+
       if len(data.get("siteMetrics", {}).items()) > 0:
-        # Section 5: Site Details
+        # Section 6: Site Details
         writer.writerow(["Site Details", ""])
         if "siteIdToMail" not in data:
-          row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Corpus Size"]
+          row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
         else:
-          row = ["Site Collection", "Email Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Corpus Size"]
+          row = ["Site Collection", "Email Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
 
         if getattr(self, "val_include_recycle_bin_contents", False):
           row.extend(["Recycle Bin Item Count", "Recycle Bin Size"])
@@ -1507,6 +1549,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                   s_data.get("folderCountExceedingDepthLimit", 0),
                   s_data.get("fileCountExceedingDepthLimit", 0),
                   s_data.get("largeResourceCount", 0),
+                  s_data.get("warningResourceCount", 0),
                   self.format_size(s_data.get("totalSize", 0))
               ]
               if getattr(self, "val_include_recycle_bin_contents", False):
@@ -1527,6 +1570,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                 s_data.get("folderCountExceedingDepthLimit", 0),
                 s_data.get("fileCountExceedingDepthLimit", 0),
                 s_data.get("largeResourceCount", 0),
+                s_data.get("warningResourceCount", 0),
                 self.format_size(s_data.get("totalSize", 0))
             ]
             if getattr(self, "val_include_recycle_bin_contents", False):
@@ -1560,6 +1604,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config.include_recycle_bin_contents = self.val_include_recycle_bin_contents
     config.include_file_versions = self.val_include_file_versions
     config.scan_encrypted_files = self.val_scan_encrypted_files
+    config.generate_folder_amr_map = self.val_generate_folder_amr_map
     return config
 
   def start_scan(self):    
@@ -1579,6 +1624,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.val_include_recycle_bin_contents = self.include_recycle_bin_contents.get()
     self.val_include_file_versions = self.include_file_versions.get()
     self.val_scan_encrypted_files = self.scan_encrypted_files.get()
+    self.val_generate_folder_amr_map = self.generate_folder_amr_map.get()
     self.val_eta_min_users = self.eta_min_users.get()
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()
