@@ -63,6 +63,8 @@ class MigrationEstimatorTool(ctk.CTk):
     self.user_source = ctk.StringVar(value="tenant")
     self.user_csv_path = ctk.StringVar()
     self.scan_email = ctk.BooleanVar(value=True)
+    self.recursive_email_scan = ctk.BooleanVar(value=False)
+    self.scan_encrypted_email = ctk.BooleanVar(value=False)
     self.scan_contact = ctk.BooleanVar(value=True)
     self.scan_calendar = ctk.BooleanVar(value=True)
     self.scan_in_place_archives = ctk.BooleanVar(value=True)
@@ -72,7 +74,7 @@ class MigrationEstimatorTool(ctk.CTk):
     self.load_multiplier = ctk.IntVar(value=1)
     self.retries = ctk.IntVar(value=MAX_RETRIES)
     self.backoff = ctk.IntVar(value=BACKOFF)
-    self.eta_min_users = ctk.IntVar(value=400)
+    self.eta_min_users = ctk.IntVar(value=200)
     self.eta_max_users = ctk.IntVar(value=5000)
     self.eta_max_batches = ctk.IntVar(value=50)
     self.parallel_batches = ctk.IntVar(value=10)
@@ -261,6 +263,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
     # Advanced Content
     ui_utils.build_eo_resource_checkbox_list(self, ctk)
+    ui_utils.build_eo_additional_settings(self, ctk)
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk)
@@ -394,6 +397,13 @@ class MigrationEstimatorTool(ctk.CTk):
       self.create_stat_card(
           card_frame, "Emails", f"{data['total_emails']:,}", "📩"
       )
+      if data.get("total_encrypted_emails", 0) > 0:
+        self.create_stat_card(
+            card_frame,
+            "Encrypted Emails",
+            f"{data['total_encrypted_emails']:,}",
+            "🔒",
+        )
       self.create_stat_card(
           card_frame,
           "Calendar Events",
@@ -1266,6 +1276,8 @@ class MigrationEstimatorTool(ctk.CTk):
           else:
             if source == "messages":
               label = "Emails"
+            elif source == "encrypted_messages":
+              label = "Encrypted Emails"
             elif source == "contacts":
               label = "Contacts"
             elif source == "in_place_archives":
@@ -1285,9 +1297,9 @@ class MigrationEstimatorTool(ctk.CTk):
               ]
               
               if users_partially_failed > 0:
-                  text_parts.append(f"{users_partially_failed} partially failed")
+                text_parts.append(f"{users_partially_failed} partially failed")
               if users_skipped > 0:
-                  text_parts.append(f"{users_skipped} skipped")
+                text_parts.append(f"{users_skipped} skipped")
               
               base_text = ", ".join(text_parts)
               extra_text = msg.get("extra_text", None)    
@@ -1316,6 +1328,20 @@ class MigrationEstimatorTool(ctk.CTk):
       self.after(100, self.process_log_queue)
 
   def start_scan(self):
+    if self.scan_encrypted_email.get():
+        warning_msg = (
+            "Enabling 'Scan for Encrypted Emails' will cause performance degradation "
+            "as it requires fetching content headers for emails to detect encryption. "
+            "It is highly recommended to only enable this if you need to identify RMS/MIP protected emails."
+        )
+        should_continue = messagebox.askyesno(
+            title="Performance Warning",
+            message=warning_msg,
+            icon="warning",
+            parent=self
+        )
+        if not should_continue:
+            return
     disclaimer_text = (
         "The estimations provided by this tool are calculated projections"
         " intended for preliminary planning only. Actual migration timelines"
@@ -1349,6 +1375,10 @@ class MigrationEstimatorTool(ctk.CTk):
     if self.scan_email.get():
       self.create_progress_row(
           self.scan_container, "messages", "Scanning Emails"
+      )
+    if self.scan_encrypted_email.get():
+      self.create_progress_row(
+          self.scan_container, "encrypted_messages", "Scanning Encrypted Emails"
       )
     if self.scan_contact.get():
       self.create_progress_row(
@@ -1406,7 +1436,7 @@ class MigrationEstimatorTool(ctk.CTk):
       # 2. Authentication
       manager = self._authenticate_if_needed(config)
       one_token_per_app_manager = None
-      if config.scan_in_place_archives:
+      if config.scan_in_place_archives or (config.scan_email and config.recursive_email_scan):
         one_token_per_app_manager = self._authenticate_if_needed(config, use_single_app=True)
       self.factory = EstimatorFactory(config, manager, one_token_per_app_manager, self.log_msg, self.stop_scan_event, None)
       
@@ -1452,6 +1482,8 @@ class MigrationEstimatorTool(ctk.CTk):
         user_source=self.user_source.get(),
         csv_path=self.user_csv_path.get(),
         scan_email=self.scan_email.get(),
+        recursive_email_scan=self.recursive_email_scan.get(),
+        scan_encrypted_email=self.scan_encrypted_email.get(),
         scan_contact=self.scan_contact.get(),
         scan_calendar=self.scan_calendar.get(),
         scan_in_place_archives=self.scan_in_place_archives.get(),
@@ -1492,6 +1524,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
     # Flags to determine if we need to scan
     have_email = False
+    have_encrypted_email = False
     have_contact = False
     have_calendar = False
     have_in_place_archives = False
@@ -1522,6 +1555,8 @@ class MigrationEstimatorTool(ctk.CTk):
       if col:
         if "Email Count" in df_input.columns:
           have_email = True
+        if "Encrypted Email Count" in df_input.columns:
+          have_encrypted_email = True
         if "Contact Count" in df_input.columns:
           have_contact = True
         if (
@@ -1561,6 +1596,7 @@ class MigrationEstimatorTool(ctk.CTk):
     # 2. Determine if we need live scanning
     scanning_required = (
         (config.scan_email and not have_email)
+        or (config.scan_encrypted_email and not have_encrypted_email)
         or (config.scan_contact and not have_contact)
         or (config.scan_calendar and not have_calendar)
         or (config.scan_in_place_archives and not have_in_place_archives)
@@ -1578,12 +1614,15 @@ class MigrationEstimatorTool(ctk.CTk):
           raise Exception(
               "Missing Credentials for Delta Scan (CSV missing some columns)."
           )
-      if not one_token_per_app_manager and config.scan_in_place_archives and not have_in_place_archives:
-        raise Exception("Missing Credentials for In Place Archive Scan.")
+      if not one_token_per_app_manager and (
+          (config.scan_in_place_archives and not have_in_place_archives) or 
+          (config.scan_email and config.recursive_email_scan and not have_email)
+      ):
+        raise Exception("Missing Credentials for Hierarchical Scan.")
 
       # Determine scopes based on what is missing
       required_scopes = ["User.Read.All"]
-      if config.scan_email and not have_email:
+      if (config.scan_email and not have_email) or (config.scan_encrypted_email and not have_encrypted_email):
         required_scopes.append("Mail.Read")
       if config.scan_contact and not have_contact:
         required_scopes.append("Contacts.Read")
@@ -1591,7 +1630,7 @@ class MigrationEstimatorTool(ctk.CTk):
         required_scopes.append("Calendars.Read")
       if config.scan_shared_mail_boxes and not have_shared_mails:
         required_scopes.append("MailboxSettings.Read")
-        if not (config.scan_email and not have_email):          # If Email Scan is diabled then add Mail.Read as otherwise Mail.Read is alreay added
+        if not ((config.scan_email and not have_email) or (config.scan_encrypted_email and not have_encrypted_email)):          # If Email Scan is disabled then add Mail.Read as otherwise Mail.Read is already added
           required_scopes.append("Mail.Read")
       if config.scan_in_place_archives and not have_in_place_archives:
         required_scopes.append("MailboxFolder.Read.All")
@@ -1600,8 +1639,12 @@ class MigrationEstimatorTool(ctk.CTk):
 
       manager.authenticate_all(self.log_msg, required_scopes=required_scopes)
       if one_token_per_app_manager:
-        one_token_per_app_manager.authenticate_all(self.log_msg, required_scopes=[
-          "User.Read.All", "MailboxFolder.Read.All"])
+        aux_scopes = ["User.Read.All"]
+        if config.scan_in_place_archives and not have_in_place_archives:
+          aux_scopes.append("MailboxFolder.Read.All")
+        if config.scan_email and config.recursive_email_scan and not have_email:
+          aux_scopes.append("Mail.Read")
+        one_token_per_app_manager.authenticate_all(self.log_msg, required_scopes=aux_scopes)
     else:
       self.log_msg(
           "Skipping Authentication (All required data present in CSV)."
@@ -1708,6 +1751,7 @@ class MigrationEstimatorTool(ctk.CTk):
           "Other Aliases": ';'.join(otherAliases),
           "Type": "User",
           "Email Count": 0,
+          "Encrypted Email Count": 0,
           "Contact Count": 0,
           "Calendar Count": 0,
           "Event Count": 0,
@@ -1739,6 +1783,7 @@ class MigrationEstimatorTool(ctk.CTk):
           "User ID / Group ID": u["id"],
           "Type": "Group Mailbox",
           "Email Count": 0,
+          "Encrypted Email Count": 0,
           "Contact Count": 0,
           "Calendar Count": 0,
           "Event Count": 0,
@@ -1760,6 +1805,7 @@ class MigrationEstimatorTool(ctk.CTk):
           "User ID / Group ID": mailbox["id"],
           "Type": "Shared",
           "Email Count": 0,
+          "Encrypted Email Count": 0,
           "Contact Count": 0,
           "Calendar Count": 0,
           "Event Count": 0,
@@ -1777,6 +1823,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
     stats = {
         "emails": sum(r["Email Count"] for r in csv_rows),
+        "encrypted_emails": sum(r.get("Encrypted Email Count", 0) for r in csv_rows),
         "contacts": sum(r["Contact Count"] for r in csv_rows),
         "calendars": sum(r["Calendar Count"] for r in csv_rows),
         "events": sum(r["Event Count"] for r in csv_rows),
@@ -1810,6 +1857,8 @@ class MigrationEstimatorTool(ctk.CTk):
       estimator = self.factory.get_in_place_archive_estimator(use_delta_api=False)
     elif resource_type == "shared_mails":
       estimator = self.factory.get_shared_mailbox_estimator()
+    elif resource_type == "messages":
+      estimator = self.factory.get_email_estimator()
     
     total_failures = []
     partial_failures = []
@@ -1871,7 +1920,7 @@ class MigrationEstimatorTool(ctk.CTk):
         prog = processed_users / total_users if total_users > 0 else 0
         self.ui_update(
           "scan_progress",
-          entity_type="Users" if resource_type == "in_place_archives" else "Shared Mailboxes",
+          entity_type="Users" if resource_type in ["in_place_archives", "messages"] else "Shared Mailboxes",
           source=resource_type,
           progress=prog,
           cumulative=phase_total,
@@ -1891,14 +1940,17 @@ class MigrationEstimatorTool(ctk.CTk):
             user["In Place Archive Count"] = chunk_result.get(key, 0)
           elif resource_type == "shared_mails":
             user["Shared Mail Count"] = chunk_result.get(key, 0)
+          elif resource_type == "messages":
+            user["Email Count"] = chunk_result.get(key, 0)
         
-        stats[resource_type] += chunk_total
+        stat_key = "emails" if resource_type == "messages" else resource_type
+        stats[stat_key] += chunk_total
         
       if self.stop_scan_event.is_set():
         pending_users_count = total_users - processed_users
         self.ui_update(
           "scan_progress",
-          entity_type="Users" if resource_type == "in_place_archives" else "Shared Mailboxes",
+          entity_type="Users" if resource_type in ["in_place_archives", "messages"] else "Shared Mailboxes",
           source=resource_type,
           progress=1.0,
           cumulative=phase_total,
@@ -1913,7 +1965,7 @@ class MigrationEstimatorTool(ctk.CTk):
     except Exception as e:
       self.ui_update(
         "scan_progress",
-        entity_type="Users" if resource_type == "in_place_archives" else "Shared Mailboxes",
+        entity_type="Users" if resource_type in ["in_place_archives", "messages"] else "Shared Mailboxes",
         source=resource_type,
         progress=1.0,
         cumulative=phase_total,
@@ -2094,12 +2146,14 @@ class MigrationEstimatorTool(ctk.CTk):
     total_groups = len(group_csv_rows)
 
     has_email_data = any(r["Email Count"] > 0 for r in csv_rows)
+    has_encrypted_email_data = any(r.get("Encrypted Email Count", 0) > 0 for r in csv_rows)
     has_contact_data = any(r["Contact Count"] > 0 for r in csv_rows)
     has_calendar_data = any(r["Calendar Count"] > 0 for r in csv_rows)
     has_in_place_archives_data = any(r["In Place Archive Count"] > 0 for r in csv_rows)
     has_shared_mails_data = any(r["Shared Mail Count"] > 0 for r in shared_csv_rows)
     has_group_mails_data = any(r["Group Post Count"] > 0 for r in group_csv_rows)
     failed_emails = []
+    failed_encrypted_emails = []
     failed_contacts = []
     failed_calendars = []
     failed_in_place_archives = []
@@ -2107,15 +2161,21 @@ class MigrationEstimatorTool(ctk.CTk):
     failed_group_mails = []
     partial_in_place_archive_failures = []
     partial_shared_mail_box_failures = []
+    partial_email_failures = []
 
     can_scan = manager is not None
 
     if config.scan_email:
       if can_scan and (not has_email_data or config.user_source == "tenant"):
         self.ui_update("phase_status", source="messages", status="running")
-        failed_emails = self.run_batch_phase_ui(
-            user_chunks, "messages", manager, workers, stats, total_users
-        )
+        if config.recursive_email_scan:
+          failed_emails, partial_email_failures = self.run_batch_scan(
+              "messages", config, user_chunks, manager, one_token_per_app_manager, stats, total_users
+          )
+        else:
+          failed_emails = self.run_batch_phase_ui(
+              user_chunks, "messages", manager, workers, stats, total_users
+          )
         self.ui_update("phase_status", source="messages", status="complete")
       else:
         self.log_msg("Skipping Email Scan (Data present or No Auth)")
@@ -2129,6 +2189,26 @@ class MigrationEstimatorTool(ctk.CTk):
             total=total_users,
         )
         self.ui_update("phase_status", source="messages", status="complete")
+
+    if config.scan_encrypted_email:
+      if can_scan and (not has_encrypted_email_data or config.user_source == "tenant"):
+        self.ui_update("phase_status", source="encrypted_messages", status="running")
+        failed_encrypted_emails = self.run_batch_phase_ui(
+            user_chunks, "encrypted_messages", manager, workers, stats, total_users
+        )
+        self.ui_update("phase_status", source="encrypted_messages", status="complete")
+      else:
+        self.log_msg("Skipping Encrypted Email Scan (Data present or No Auth)")
+        self.ui_update("phase_status", source="encrypted_messages", status="running")
+        self.ui_update(
+            "scan_progress",
+            source="encrypted_messages",
+            progress=1.0,
+            cumulative=stats.get("encrypted_emails", 0),
+            processed=total_users,
+            total=total_users,
+        )
+        self.ui_update("phase_status", source="encrypted_messages", status="complete")
 
     if config.scan_contact:
       if can_scan and (not has_contact_data or config.user_source == "tenant"):
@@ -2241,12 +2321,18 @@ class MigrationEstimatorTool(ctk.CTk):
         self.ui_update("phase_status", source="group_mails", status="complete")
 
     # --- LOG FAILED USERS SUMMARY ---
-    if failed_emails or failed_calendars or failed_contacts or failed_in_place_archives or failed_shared_mails or failed_group_mails:
+    if failed_emails or failed_encrypted_emails or failed_calendars or failed_contacts or failed_in_place_archives or failed_shared_mails or failed_group_mails:
       self.log_msg("\n" + "=" * 40)
 
       if failed_emails:
         self.log_msg("Email Migration Failures")
         for f in failed_emails:
+          self.log_msg(f"User: {f['user']} | Cause: {f['cause']}")
+        self.log_msg("")  # Add blank line
+
+      if failed_encrypted_emails:
+        self.log_msg("Encrypted Email Migration Failures")
+        for f in failed_encrypted_emails:
           self.log_msg(f"User: {f['user']} | Cause: {f['cause']}")
         self.log_msg("")  # Add blank line
 
@@ -2288,7 +2374,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
       self.log_msg("=" * 40)
     
-    if partial_in_place_archive_failures or partial_shared_mail_box_failures:
+    if partial_in_place_archive_failures or partial_shared_mail_box_failures or partial_email_failures:
       if partial_in_place_archive_failures:
         self.log_msg("In Place Archive Migration Partial Failures")
         for f in partial_in_place_archive_failures:
@@ -2301,6 +2387,13 @@ class MigrationEstimatorTool(ctk.CTk):
         for f in partial_shared_mail_box_failures:
           prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
           self.log_msg(f"{prefix} Shared Mail Box: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
+        self.log_msg("")  # Add blank line
+      
+      if partial_email_failures:
+        self.log_msg("Email Migration Partial Failures")
+        for f in partial_email_failures:
+          prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
+          self.log_msg(f"{prefix} User: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
         self.log_msg("")  # Add blank line
 
       self.log_msg("=" * 40)
@@ -2344,7 +2437,7 @@ class MigrationEstimatorTool(ctk.CTk):
     self.log_msg(f"TOTAL TIME: {elapsed}")
     self.log_msg(f"Total Users / Groups: {len(csv_rows)}")
     self.log_msg(
-        f"Emails: {stats['emails']} | Contacts: {stats['contacts']} |"
+        f"Emails: {stats['emails']} (Encrypted: {stats.get('encrypted_emails', 0)}) | Contacts: {stats['contacts']} |"
         f" Calendars: {stats['calendars']} | Events: {stats['events']} |"
         f" In Place Archives: {stats['in_place_archives']} |"
         f" Shared Mails: {stats['shared_mails']} |"
@@ -2373,6 +2466,8 @@ class MigrationEstimatorTool(ctk.CTk):
     final_columns = ["Email Id", "Other Aliases", "Suggested Batch", "Type"]
     if config.scan_email:
       final_columns.append("Email Count")
+    if config.scan_encrypted_email:
+      final_columns.append("Encrypted Email Count")
     if config.scan_contact:
       final_columns.append("Contact Count")
     if config.scan_calendar:
@@ -2420,6 +2515,7 @@ class MigrationEstimatorTool(ctk.CTk):
     result_data = {
         "total_users": len(df),
         "total_emails": stats["emails"],
+        "total_encrypted_emails": stats.get("encrypted_emails", 0),
         "total_contacts": stats["contacts"],
         "total_calendars": stats["calendars"],
         "total_events": stats["events"],
@@ -2460,6 +2556,27 @@ class MigrationEstimatorTool(ctk.CTk):
     phase_total = 0
     phase_events = 0
     phase_cals = 0
+    
+    state_lock = threading.Lock()
+
+    def realtime_callback(count):
+        nonlocal phase_total
+        with state_lock:
+            phase_total += count
+            current_cumulative = phase_total
+            current_processed = users_processed
+            current_failed = users_failed
+
+        self.ui_update(
+            "scan_progress",
+            source=res_type,
+            progress=current_processed / total_users if total_users > 0 else 0,
+            cumulative=current_cumulative,
+            processed=current_processed,
+            failed=current_failed,
+            total=total_users,
+            extra_text="",
+        )
 
     executor = ThreadPoolExecutor(max_workers=workers)
     try:
@@ -2472,6 +2589,7 @@ class MigrationEstimatorTool(ctk.CTk):
               manager,
               self.log_msg,
               self.stop_scan_event,
+              realtime_callback if res_type == "encrypted_messages" else None
           ): chunk
           for chunk in chunks
       }
@@ -2493,6 +2611,10 @@ class MigrationEstimatorTool(ctk.CTk):
             val = r["emails"]
             stats["emails"] += val
             phase_total += val
+          elif res_type == "encrypted_messages":
+            val = r.get("encrypted_emails", 0)
+            stats["encrypted_emails"] += val
+            # phase_total is updated via callback in real-time
           elif res_type == "contacts":
             val = r["contacts"]
             stats["contacts"] += val
@@ -2526,7 +2648,12 @@ class MigrationEstimatorTool(ctk.CTk):
                 f" Events: {phase_events}"
             )
           else:
-            label = "messages" if res_type == "messages" else "contacts"
+            if res_type == "messages":
+              label = "messages"
+            elif res_type == "encrypted_messages":
+              label = "encrypted_messages"
+            else:
+              label = "contacts"
             self.log_msg(
                 f"Processed {users_processed}/{total_users} | Failed:"
                 f" {users_failed}/{total_users} | {label}: {phase_total}"
@@ -2554,7 +2681,15 @@ class MigrationEstimatorTool(ctk.CTk):
 
   def calculate_migration_batches(self, df):
     # Ensure numeric columns
-    target_cols = ["Email Count", "Contact Count", "Event Count", "In Place Archive Count", "Shared Mail Count", "Group Post Count"]
+    target_cols = [
+        "Email Count",
+        "Encrypted Email Count",
+        "Contact Count",
+        "Event Count",
+        "In Place Archive Count",
+        "Shared Mail Count",
+        "Group Post Count"
+    ]
     for col in target_cols:
       if col not in df.columns:
         df[col] = 0
@@ -2610,7 +2745,9 @@ class MigrationEstimatorTool(ctk.CTk):
     # Helper: Calculate ETA for subset
     config = self._get_scan_configuration()
     if ENABLE_IN_PLACE_ARCHIVE_ETA:
-      in_place_archive_estimator = self.factory.get_in_place_archive_estimator(use_delta_api=True)
+      # hard_reset=False --> Re-use existing IPA estimator if available
+      # use_for_eta_calc=True --> Doesn't try to initialize the token managers
+      in_place_archive_estimator = self.factory.get_in_place_archive_estimator(use_delta_api=True, hard_reset=False, use_for_eta_calc=True)
     if ENABLE_SHARED_MAILBOX_ETA:
       shared_mail_box_estimator = self.factory.get_shared_mailbox_estimator()
     if ENABLE_GROUP_MAILBOX_ETA:
@@ -2619,13 +2756,28 @@ class MigrationEstimatorTool(ctk.CTk):
     def get_batch_eta(subset_df):
       eta_email = 0.0
       if ENABLE_EMAIL_ETA:
+        # Email Count includes both encrypted and unencrypted emails
+        total_emails = subset_df["Email Count"].tolist()
+        encrypted_emails = subset_df["Encrypted Email Count"].tolist()
+        unencrypted_emails = [max(0, t - e) for t, e in zip(total_emails, encrypted_emails)]
+        
         eta_email = calculate_batch_duration(
-            subset_df["Email Count"].tolist(),
+            unencrypted_emails,
             ETA_EMAIL_GLOBAL_LIMIT,
             ETA_EMAIL_USER_LIMIT,
             ETA_EMAIL_BATCH_SIZE,
             ETA_EMAIL_BATCH_TIME,
         )
+      eta_encrypted_email = 0.0
+      if ENABLE_ENCRYPTED_EMAIL_ETA:
+        eta_encrypted_email = calculate_batch_duration(
+            subset_df["Encrypted Email Count"].tolist(),
+            ETA_ENCRYPTED_EMAIL_GLOBAL_LIMIT,
+            ETA_ENCRYPTED_EMAIL_USER_LIMIT,
+            ETA_ENCRYPTED_EMAIL_BATCH_SIZE,
+            ETA_ENCRYPTED_EMAIL_BATCH_TIME,
+        )
+      eta_email += eta_encrypted_email
       eta_calendar = 0.0
       if ENABLE_CALENDAR_ETA:
         eta_calendar = calculate_batch_duration(
@@ -2645,7 +2797,7 @@ class MigrationEstimatorTool(ctk.CTk):
             ETA_CONTACT_BATCH_TIME,
         )
       eta_in_place_archive = 0.0
-      if ENABLE_IN_PLACE_ARCHIVE_ETA:
+      if ENABLE_IN_PLACE_ARCHIVE_ETA and in_place_archive_estimator is not None:
         eta_in_place_archive = in_place_archive_estimator.calculate_migration_eta(
           {
             "item_counts": subset_df["In Place Archive Count"].tolist(),
@@ -2653,6 +2805,7 @@ class MigrationEstimatorTool(ctk.CTk):
             "user_limit": ETA_EMAIL_USER_LIMIT,
             "batch_size": ETA_EMAIL_BATCH_SIZE,
             "batch_time": ETA_EMAIL_BATCH_TIME,
+            "multiplier": IPA_ETA_MULTIPLIER
           }
         )
       eta_shared_mail_box = 0.0
@@ -2678,7 +2831,7 @@ class MigrationEstimatorTool(ctk.CTk):
           }
         )
 
-      if ENABLE_IN_PLACE_ARCHIVE_ETA:
+      if ENABLE_IN_PLACE_ARCHIVE_ETA and in_place_archive_estimator is not None:
         in_place_archive_estimator.shutdown()
       if ENABLE_SHARED_MAILBOX_ETA:
         shared_mail_box_estimator.shutdown()
@@ -2762,7 +2915,50 @@ class MigrationEstimatorTool(ctk.CTk):
           target["batches"].append(chunk)
           target["total"] += chunk["eta"]
 
+        # --- START MERGING LOGIC ---
+        for b in buckets:
+          merged_batches = []
+          if b["batches"]:
+            current = b["batches"][0]
+            for next_batch in b["batches"][1:]:
+              if current["users"] + next_batch["users"] <= user_max_limit:
+                # Merge Metrics
+                current["users"] += next_batch["users"]
+                current["total_emails"] += next_batch["total_emails"]
+                current["total_contacts"] += next_batch["total_contacts"]
+                current["total_events"] += next_batch["total_events"]
+                current["total_in_place_archives"] += next_batch["total_in_place_archives"]
+                current["total_shared_mails"] += next_batch["total_shared_mails"]
+                current["total_group_mails"] += next_batch["total_group_mails"]
+                current["total_group_threads"] += next_batch["total_group_threads"]
+                
+                if "constituent_chunks" not in current:
+                  current["constituent_chunks"] = [
+                      {"start_idx": current["start_idx"], "end_idx": current["end_idx"]}
+                  ]
+                current["constituent_chunks"].append(
+                    {"start_idx": next_batch["start_idx"], "end_idx": next_batch["end_idx"]}
+                )
+              else:
+                if "constituent_chunks" in current:
+                  parts = [df_sorted.iloc[p["start_idx"]:p["end_idx"]] for p in current["constituent_chunks"]]
+                  merged_subset = pd.concat(parts)
+                  current["eta"] = get_batch_eta(merged_subset)
+
+                merged_batches.append(current)
+                current = next_batch
+            
+            if "constituent_chunks" in current:
+              parts = [df_sorted.iloc[p["start_idx"]:p["end_idx"]] for p in current["constituent_chunks"]]
+              merged_subset = pd.concat(parts)
+              current["eta"] = get_batch_eta(merged_subset)
+
+            merged_batches.append(current)
+          b["batches"] = merged_batches
+          b["total"] = sum(chunk["eta"] for chunk in b["batches"])
+
         total_eta = max(b["total"] for b in buckets)
+        # --- END MERGING LOGIC ---
 
         # Reverse and Name
         all_chunks_with_time = []
@@ -2789,9 +2985,11 @@ class MigrationEstimatorTool(ctk.CTk):
           chunk["name"] = batch_name
           final_batches_list.append(chunk)
           col_idx = df_sorted.columns.get_loc("Suggested Batch")
-          df_sorted.iloc[chunk["start_idx"] : chunk["end_idx"], col_idx] = (
-              batch_name
-          )
+          if "constituent_chunks" in chunk:
+            for part in chunk["constituent_chunks"]:
+              df_sorted.iloc[part["start_idx"] : part["end_idx"], col_idx] = batch_name
+          else:
+            df_sorted.iloc[chunk["start_idx"] : chunk["end_idx"], col_idx] = batch_name
 
       num_batches = len(final_batches_list)
       self.log_msg(
@@ -2831,7 +3029,7 @@ class MigrationEstimatorTool(ctk.CTk):
           f" {self.format_eta(chunk['start_time'])}"
       )
 
-    if ENABLE_IN_PLACE_ARCHIVE_ETA:
+    if ENABLE_IN_PLACE_ARCHIVE_ETA and in_place_archive_estimator is not None:
       in_place_archive_estimator.shutdown()
     if ENABLE_SHARED_MAILBOX_ETA:
       shared_mail_box_estimator.shutdown()
@@ -2871,7 +3069,8 @@ class MigrationEstimatorTool(ctk.CTk):
     if not emails:
       return []
     resolved = []
-    if url is None:
+    custom_url_provided = url is not None
+    if not custom_url_provided:
       url = ("{GRAPH_BASE_URL}/users?$filter=userPrincipalName eq"
               " '{cln}'&$select=id,userPrincipalName"
             )
@@ -2885,11 +3084,30 @@ class MigrationEstimatorTool(ctk.CTk):
       h = {"Authorization": f"Bearer {t}", "ConsistencyLevel": "eventual"}
       try:
         cln = email.replace("'", "''")
-        u = url.format(GRAPH_BASE_URL = GRAPH_BASE_URL, cln = cln)
-        r = s.get(u, headers=h, timeout=60)
-        if r.status_code == 200 and r.json().get("value"):
-          return r.json()["value"][0]
-      except:
+        if custom_url_provided:
+          target_urls = [url.format(GRAPH_BASE_URL=GRAPH_BASE_URL, cln=cln)]
+        else:
+          target_urls = [
+              f"{GRAPH_BASE_URL}/users?$filter=userPrincipalName eq '{cln}'&$select=id,userPrincipalName",
+              f"{GRAPH_BASE_URL}/users?$filter=mail eq '{cln}'&$select=id,userPrincipalName",
+              f"{GRAPH_BASE_URL}/users?$filter=proxyAddresses/any(c:c eq 'smtp:{cln}')&$select=id,userPrincipalName"
+          ]
+        for u in target_urls:
+          for attempt in range(3):
+            if self.stop_scan_event.is_set():
+              return None
+            try:
+              r = s.get(u, headers=h, timeout=60)
+              if r.status_code in (429, 503):
+                time.sleep(1 << attempt)
+                continue
+              if r.status_code == 200 and r.json().get("value"):
+                return r.json()["value"][0]
+              break
+            except Exception:
+              if attempt < 2:
+                time.sleep(1 << attempt)
+      except Exception:
         pass
       finally:
         manager.return_token_slot(token_data)

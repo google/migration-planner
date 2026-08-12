@@ -457,37 +457,41 @@ class MigrationScanner:
       users: list[dict[str, typing.Any]],
       ui_callback: typing.Callable[..., None] | None = None,
   ) -> dict[str, list[str]]:
-    """Constructs concurrency bound workers for aggregated batch extraction."""
+    """Constructs concurrency bound batch pagination queries for user chats."""
     counts: dict[str, list[str]] = {}
-    to_do = []
+    active_queries: dict[str, str] = {}  # user_id -> relative_url
+
     for user in users:
       user_id = user.get("id") or user.get("userPrincipalName")
-      cached = self.db.get_processed_user(user_id) if user_id else None
+      if not user_id:
+        continue
+      cached = self.db.get_processed_user(user_id)
       if cached is not None:
         counts[user_id] = cached
-      elif user_id:
-        to_do.append(user)
+      else:
+        counts[user_id] = []
+        # Query up to 50 chats per request to minimize pagination steps
+        active_queries[user_id] = f"/users/{user_id}/chats?$select=id&$top=50"
 
-    if not to_do:
+    if not active_queries:
       return counts
 
-    chunks = [to_do[i : i + 20] for i in range(0, len(to_do), 20)]
-
-    def _worker(chunk: list[dict[str, typing.Any]]) -> dict[str, list[str]]:
-      if self.stop_event.is_set():
-        return {}
-      token_data = token_manager.get_valid_token_slot()
+    # Loop until all pages of chats for all users are fully retrieved
+    while active_queries and not self.stop_event.is_set():
+      # Chunk active queries into batches of up to 20 requests
+      chunk_items = list(active_queries.items())[:20]
       batch_requests = []
       request_map = {}
-      for index, user in enumerate(chunk):
-        user_id = user.get("id") or user.get("userPrincipalName")
+
+      for index, (user_id, relative_url) in enumerate(chunk_items):
         request_map[str(index)] = user_id
         batch_requests.append({
             "id": str(index),
             "method": "GET",
-            "url": f"/users/{user_id}/chats",
-            "headers": {"ConsistencyLevel": "eventual"},
+            "url": relative_url,
         })
+
+      token_data = token_manager.get_valid_token_slot()
       try:
         responses = self.client.execute_batch_request(
             token_manager.get_session(),
@@ -498,56 +502,74 @@ class MigrationScanner:
             self.metrics,
             self.chat_batch_limiter,
             self.stop_event,
-            "user_chats",
+            "user_chats_paginated",
         )
-        local_counts = {}
+
         for request_id, response in responses.items():
           user_id = request_map.get(request_id)
           if not user_id:
             continue
+
           if response.get("status") == 200:
             body = response.get("body", {})
             chat_id_list = [
-                chat.get("id")
-                for chat in body.get("value", [])
-                if chat.get("id")
+                c.get("id")
+                for c in body.get("value", [])
+                if c.get("id")
             ]
-            local_counts[user_id] = chat_id_list
-            self.db.save_processed_user(user_id, chat_id_list)
+            
+            # Append new chat IDs
+            counts[user_id].extend(chat_id_list)
+
+            # Check for nextLink pagination
+            next_link = body.get("@odata.nextLink")
+            if next_link:
+              # Extract the relative path from the next link (which starts after /v1.0)
+              relative_path = next_link
+              if "/v1.0" in next_link:
+                relative_path = next_link.split("/v1.0")[-1]
+              active_queries[user_id] = relative_path
+            else:
+              # No more pages for this user
+              active_queries.pop(user_id, None)
+              # Save complete, deduplicated list to DB
+              self.db.save_processed_user(user_id, counts[user_id])
           else:
             status_val = response.get("status")
             body = response.get("body", {})
             error_msg = body.get("error", {}).get("message", "Unknown error")
             if self.log_func:
               self.log_func(
-                  f"WARNING: Batch request for user {user_id} chats returned status {status_val}: {error_msg}"
+                  f"WARNING: Batch request for user {user_id} chats failed (status {status_val}): {error_msg}"
               )
-        return local_counts
-      except Exception:
-        logger.exception("Async batch failure trapped inside worker.")
-        return {}
-      finally:
-        token_manager.return_token_slot(token_data)
+            # Remove from active queries on error to avoid infinite loops, but keep whatever was fetched
+            active_queries.pop(user_id, None)
+            self.db.save_processed_user(user_id, counts[user_id])
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-      futures = [executor.submit(_worker, chunk) for chunk in chunks]
-      for future in concurrent.futures.as_completed(futures):
-        result = future.result()
-        counts.update(result)
         if ui_callback:
-          progress_val = 0.2 * (len(counts) / max(1, len(users)))
+          # Update progress based on number of completed users
+          completed_count = len(users) - len(active_queries)
+          progress_val = 0.2 * (completed_count / max(1, len(users)))
+          
           ui_callback(
               "scan_progress",
               source="chats",
-              entity_type="Chats",
+              entity_type="Users",
+              label="Discovered Chats",
               progress=progress_val,
               extra_text=(
-                  f"Enumerating Chats ({len(counts)}/{len(users)} users)"
+                  f"Enumerating Chats ({completed_count}/{len(users)} users completed)"
               ),
-              processed=len(counts),
+              processed=completed_count,
               failed=0,
-              cumulative=0,
+              cumulative=self.db.get_discovered_chat_count(),
           )
+
+      except Exception:
+        logger.exception("Failure in paginated batch chat extraction loop.")
+        break
+      finally:
+        token_manager.return_token_slot(token_data)
     return counts
 
   def fetch_users_joined_teams_batch(
@@ -639,7 +661,8 @@ class MigrationScanner:
           ui_callback(
               "scan_progress",
               source="channels",
-              entity_type="Teams",
+              entity_type="Users",
+              label="Discovered Teams",
               progress=progress_val,
               extra_text=(
                   f"Resolving user teams ({processed_users}/{len(to_do)} users)"
@@ -752,14 +775,15 @@ class MigrationScanner:
           ui_callback(
               "scan_progress",
               source="channels",
-              entity_type="Channels",
+              entity_type="Teams",
+              label="Discovered Channels",
               progress=progress_val,
               extra_text=(
                   f"Enumerating Channels ({processed_count}/{len(teams)} teams)"
               ),
               processed=processed_count,
               failed=0,
-              cumulative=0,
+              cumulative=sum(d.get("channels", 0) for d in details.values()),
           )
     return details
 

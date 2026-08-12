@@ -139,7 +139,11 @@ class TestFileEstimatorLoad(unittest.TestCase):
             self.assertEqual(r_site.get("shortcutCount", 0), e_site.get("shortcutCount", 0))
             self.assertEqual(r_site.get("folderCountExceedingDepthLimit", 0), e_site.get("folderCountExceedingDepthLimit", 0))
             self.assertEqual(r_site.get("fileCountExceedingDepthLimit", 0), e_site.get("fileCountExceedingDepthLimit", 0))
-            self.assertEqual(r_site.get("largeResourceCount", 0), e_site.get("largeResourceCount", 0))
+            try:
+                self.assertEqual(r_site.get("largeResourceCount", 0), e_site.get("largeResourceCount", 0))
+            except AssertionError as e:
+                print(f"\nDISCREPANCY for site {site_id}: result={r_site} | expected={e_site}\n")
+                raise e
             self.assertEqual(r_site.get("totalSize", 0), e_site.get("totalSize", 0))
             self.assertEqual(r_site.get("resourceCount", 0), e_site.get("resourceCount", 0))
 
@@ -151,7 +155,8 @@ class TestFileEstimatorLoad(unittest.TestCase):
         self.assertEqual(sum(s.get("shortcutCount", 0) for s in site_metrics_values), result.get("shortcutCount", 0))
         self.assertEqual(sum(s.get("folderCountExceedingDepthLimit", 0) for s in site_metrics_values), result.get("folderCountExceedingDepthLimit", 0))
         self.assertEqual(sum(s.get("fileCountExceedingDepthLimit", 0) for s in site_metrics_values), result.get("fileCountExceedingDepthLimit", 0))
-        self.assertEqual(sum(s.get("largeResourceCount", 0) for s in site_metrics_values), result.get("tenantLevelLargeResourceCount", 0))
+        site_collection_large_res_count = sum(1 for res in result.get("tenantLevelLargeResources", []) if res.get("type") == "SITE COLLECTION")
+        self.assertEqual(sum(s.get("largeResourceCount", 0) for s in site_metrics_values) + site_collection_large_res_count, result.get("tenantLevelLargeResourceCount", 0))
         self.assertEqual(sum(s.get("dlCount", 0) for s in site_metrics_values), sum(result.get("driveCounts", {}).values()))
 
     def _get_expected_for_subset(self, email_ids: List[str]) -> Tuple[Dict[str, Any], List[str]]:
@@ -205,7 +210,7 @@ class TestFileEstimatorLoad(unittest.TestCase):
             "siteCount": len(root_site_ids),
             "subsiteCount": len(all_site_ids) - len(root_site_ids),
             "personalSiteCount": len(email_ids),
-            "teamSiteCount": 0,
+            "teamSiteCount": len(all_site_ids) - len(root_site_ids),
             "personalSiteDLCount": personal_site_dl_count,
             "teamSiteDLCount": team_site_dl_count,
             "listCount": sum(len(self.test_data.get("sites", {}).get(sid, {}).get("lists", [])) for sid in all_site_ids),
@@ -244,6 +249,19 @@ class TestFileEstimatorLoad(unittest.TestCase):
                 for bucket in d_expected.get("fileSizeDistribution", {}).get("buckets", []):
                     r_bucket = next(b for b in expected["tenantLevelFileSizeDistribution"]["buckets"] if b["sizeRange"] == tuple(bucket["sizeRange"]))
                     r_bucket["count"] += bucket["count"]
+                    
+        # Count other large resources (DLs, Subsites, Site Collections)
+        all_large_resources = self.test_data.get(expected_key, {}).get("tenantLevelLargeResources", [])
+        for lr in all_large_resources:
+            lr_type = lr.get("type")
+            lr_id = lr.get("id")
+            
+            if lr_type == "DOCUMENT LIBRARY" and lr_id in scanned_drives:
+                expected["tenantLevelLargeResourceCount"] += 1
+            elif lr_type == "SUBSITE" and lr_id in all_site_ids and lr_id not in root_site_ids:
+                expected["tenantLevelLargeResourceCount"] += 1
+            elif lr_type == "SITE COLLECTION" and lr_id in root_site_ids:
+                expected["tenantLevelLargeResourceCount"] += 1
                     
         return expected, subset_drive_ids
 

@@ -26,6 +26,7 @@ class Estimator:
         global_limit = data.get("global_limit", 100)
         batch_time = data.get("batch_time", 1)
         user_limit = data.get("user_limit", 1)
+        multiplier = data.get("multiplier", 1)
         
         active_counts = [c for c in item_counts if c > 0]
         if not active_counts:
@@ -50,7 +51,7 @@ class Estimator:
                 total_seconds += seconds_for_layer
             previous_level = current_level
 
-        return total_seconds / 3600.0
+        return multiplier * (total_seconds / 3600.0)
     
     def get_resource_type(self) -> str:
         raise NotImplementedError("Subclasses must implement the get_resource_type method")

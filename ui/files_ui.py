@@ -70,6 +70,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     super().setup_variables()
     self.include_personal_sites = ctk.BooleanVar(value=True)
     self.include_team_sites = ctk.BooleanVar(value=False)
+    self.include_recycle_bin_contents = ctk.BooleanVar(value=False)
+    self.include_file_versions = ctk.BooleanVar(value=False)
+    self.scan_encrypted_files = ctk.BooleanVar(value=False)
+    self.generate_folder_amr_map = ctk.BooleanVar(value=False)
     self.eta_min_users = ctk.IntVar(value=1000)
     self.eta_max_users = ctk.IntVar(value=5000)
 
@@ -169,6 +173,53 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
     ).pack(side="left", padx=10)
+
+    # Additional Settings
+    ctk.CTkLabel(
+        self.adv_frame,
+        text="Additional Settings",
+        font=FONT_BODY_BOLD,
+        text_color=COLOR_TEXT_MAIN,
+    ).pack(anchor="w", padx=15, pady=(10, 5))
+
+    additional_settings_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
+    additional_settings_frame.pack(fill="x", padx=15)
+
+    ctk.CTkCheckBox(
+        additional_settings_frame,
+        text="Include Recycle Bin Contents",
+        variable=self.include_recycle_bin_contents,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
+
+    ctk.CTkCheckBox(
+        additional_settings_frame,
+        text="Include Historical File Versions in Corpus Size",
+        variable=self.include_file_versions,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
+
+    ctk.CTkCheckBox(
+        additional_settings_frame,
+        text="Scan for Encrypted Files (RMS/MIP)",
+        variable=self.scan_encrypted_files,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
+
+    ctk.CTkCheckBox(
+        additional_settings_frame,
+        text="Generate Migration Map for Folder Level AMR",
+        variable=self.generate_folder_amr_map,
+        corner_radius=4,
+        fg_color=COLOR_PRIMARY,
+        border_color=COLOR_TEXT_SUB,
+    ).pack(side="left", padx=10)
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
@@ -187,6 +238,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         list_count = msg.get("listCount", 0)
         drive_count = msg.get("driveCount", 0)
         license_count = msg.get("licenseCount", 0)
+        recycle_bin_item_count = msg.get("recycleBinItemCount", 0)
         status = msg.get("status", "Scanning...")
         if "sites" in self.prog_widgets:
           widget = self.prog_widgets["sites"]["lbl"]
@@ -206,6 +258,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               text += f" | Drives: {drive_count}"
             if license_count > 0:
               text += f" | Licenses: {license_count}"
+            if recycle_bin_item_count > 0:
+              text += f" | Recycle Bin Items: {recycle_bin_item_count}"
             widget.configure(
                 text=text
             )
@@ -230,6 +284,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         folder_count = msg.get("folderCount", 0)
         file_count = msg.get("fileCount", 0)
         shortcut_count = msg.get("shortcutCount", 0)
+        version_count = msg.get("versionCount", 0)
+        encrypted_file_count = msg.get("encryptedFileCount", 0)
         status = msg.get("status", "Scanning...")
         if "drives" in self.prog_widgets:
           widget = self.prog_widgets["drives"]["lbl"]
@@ -244,6 +300,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             text += f" | Files: {file_count}"
           if shortcut_count > 0:
             text += f" | Shortcuts: {shortcut_count}"
+          if version_count > 0:
+            text += f" | Versions: {version_count}"
+          if encrypted_file_count > 0:
+            text += f" | Encrypted Files: {encrypted_file_count}"
           if widget.winfo_exists():
             widget.configure(
                 text=text
@@ -366,7 +426,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "Shortcut Count",
         "Folder Count > Depth Limit 100",
         "File Count > Depth Limit 100",
-        "Folder with > 500k item count",
+        "Entities with > 500k item count",
         "Corpus Size",
     }
     id_col = "Site URL/Name" if "Site URL/Name" in df.columns else ("Site Id" if "Site Id" in df.columns else ("Entity" if "Entity" in df.columns else None))
@@ -412,7 +472,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           "shortcutCount": shortcut_cnt,
           "folderCountExceedingDepthLimit": int(pd.to_numeric(row.get("Folder Count > Depth Limit 100", 0), errors="coerce") or 0),
           "fileCountExceedingDepthLimit": int(pd.to_numeric(row.get("File Count > Depth Limit 100", 0), errors="coerce") or 0),
-          "largeResourceCount": int(pd.to_numeric(row.get("Folder with > 500k item count", 0), errors="coerce") or 0),
+          "largeResourceCount": int(pd.to_numeric(row.get("Entities with > 500k item count", 0), errors="coerce") or 0),
+          "warningResourceCount": int(pd.to_numeric(row.get("Entities with > 200k item count", 0), errors="coerce") or 0),
           "totalSize": _parse_size_str(row.get("Corpus Size", 0)),
           "resourceCount": res_cnt,
       }
@@ -434,11 +495,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "listCount": int(pd.to_numeric(df.get("List Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "folderCountExceedingDepthLimit": int(pd.to_numeric(df.get("Folder Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "fileCountExceedingDepthLimit": int(pd.to_numeric(df.get("File Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
-        "tenantLevelLargeResourceCount": int(pd.to_numeric(df.get("Folder with > 500k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "tenantLevelLargeResourceCount": int(pd.to_numeric(df.get("Entities with > 500k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "tenantLevelWarningResourceCount": int(pd.to_numeric(df.get("Entities with > 200k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "siteClassification": {site_id: "personal" for site_id in site_metrics.keys()},
         "licenseMetrics": {},
         "tenantLevelFileSizeDistribution": {},
         "tenantLevelLargeResources": [],
+        "tenantLevelWarningResources": [],
     }
 
   def _get_input_from_csv_if_uploaded(self, config):
@@ -508,7 +571,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "fileCount": "File Count",
         "folderCountExceedingDepthLimit": "Folder Count > Depth Limit",
         "fileCountExceedingDepthLimit": "File Count > Depth Limit",
-        "tenantLevelLargeResourceCount": "Tenant Level Large Resource Count"
+        "tenantLevelLargeResourceCount": "Tenant Level Large Resource Count",
+        "tenantLevelWarningResourceCount": "Tenant Level Warning Resource Count"
       }
 
       self.id_to_display_name = id_to_display
@@ -547,7 +611,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         raise Exception("No sites were scanned successfully. Please check Azure app permissions or organization access policies.")
       site_data = []
       for site_id, s_data in site_metrics.items():
-        site_data.append({
+        row_data = {
             "Site Id": site_id,
             "Subsite Count": s_data.get("subsiteCount", 0),
             "DL Count": s_data.get("dlCount", 0),
@@ -557,10 +621,21 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             "Shortcut Count": s_data.get("shortcutCount", 0),
             "Folder Count > Depth Limit 100": s_data.get("folderCountExceedingDepthLimit", 0),
             "File Count > Depth Limit 100": s_data.get("fileCountExceedingDepthLimit", 0),
-            "Folder with > 500k item count": s_data.get("largeResourceCount", 0),
+            "Entities with > 500k item count": s_data.get("largeResourceCount", 0),
             "Corpus Size": s_data.get("totalSize", 0),
             "Resource Count": s_data.get("resourceCount", 0)
-        })
+        }
+        if getattr(self, "val_include_recycle_bin_contents", False):
+            row_data["Recycle Bin Item Count"] = s_data.get("recycleBinCount", 0)
+            row_data["Recycle Bin Size"] = s_data.get("recycleBinSize", 0)
+        if getattr(self, "val_include_file_versions", False):
+            row_data["Historical File Version Count"] = s_data.get("versionCount", 0)
+            row_data["Historical File Version Size"] = s_data.get("versionSize", 0)
+        if getattr(self, "val_scan_encrypted_files", False):
+            row_data["Encrypted File Count"] = s_data.get("encryptedFileCount", 0)
+            row_data["Encrypted File Size"] = s_data.get("encryptedFileSize", 0)
+            
+        site_data.append(row_data)
       df = pd.DataFrame(site_data)
       
       if self.show_eta:
@@ -615,6 +690,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       original_site_ids = df_output["Site Id"].copy()
       df_output["Site Id"] = df_output["Site Id"].apply(self._get_display_name)
       df_output["Corpus Size"] = df_output["Corpus Size"].apply(self.format_size)
+      if "Recycle Bin Size" in df_output.columns:
+        df_output["Recycle Bin Size"] = df_output["Recycle Bin Size"].apply(self.format_size)
+      if "Historical File Version Size" in df_output.columns:
+        df_output["Historical File Version Size"] = df_output["Historical File Version Size"].apply(self.format_size)
+      if "Encrypted File Size" in df_output.columns:
+        df_output["Encrypted File Size"] = df_output["Encrypted File Size"].apply(self.format_size)
       df_output.rename(columns={"Site Id": "Site URL/Name"}, inplace=True)
       if "SortMetric" in df_output.columns:
         df_output.drop(columns=["SortMetric"], inplace=True)
@@ -623,8 +704,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       df_output.to_csv(report_path, index=False)
       
-      batches_dir = os.path.join(output_dir, "suggested batches")
+      batches_dir = os.path.join(output_dir, "suggested_batches")
       os.makedirs(batches_dir, exist_ok=True)
+
+      # Export AMR map if available
+      if "folderAmrBatchSplit" in file_metrics and file_metrics["folderAmrBatchSplit"]:
+          amr_path = os.path.join(batches_dir, "folder_amr_batch_split.csv")
+          amr_df = pd.DataFrame(file_metrics["folderAmrBatchSplit"])
+          amr_df.to_csv(amr_path, index=False)
+          self.log_msg(f"Folder AMR batch split exported to: {amr_path}")
       
       if self.show_eta:
         unique_batches = df_output["Suggested Batch"].unique()
@@ -730,7 +818,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             "size": row.get("Corpus Size", 0),
             "files": int(row.get("File Count", 0)),
             "folders": int(row.get("Folder Count", 0)),
-            "shortcuts": int(row.get("Shortcut Count", 0))
+            "shortcuts": int(row.get("Shortcut Count", 0)),
+            "encrypted_files": int(row.get("Encrypted File Count", 0)) if "Encrypted File Count" in subset_df.columns else 0,
+            "encrypted_size": float(row.get("Encrypted File Size", 0)) if "Encrypted File Size" in subset_df.columns else 0.0
         })
         
       data = {
@@ -947,23 +1037,51 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           text="Review the analyzed data.",
           font=FONT_BODY_MEDIUM,
           text_color=COLOR_TEXT_SUB,
-      ).pack(anchor="w", padx=10, pady=(0, 10))
+      ).pack(anchor="w", padx=10, pady=(0, 5))
+
+      include_recycle = getattr(self, "val_include_recycle_bin_contents", False)
+      include_versions = getattr(self, "val_include_file_versions", False)
+
+      note_parts = []
+      if include_recycle:
+          note_parts.append("Recycle Bin contents")
+      if include_versions:
+          note_parts.append("Historical File Versions")
+
+      if note_parts:
+          note_text = f"Note: {' and '.join(note_parts)} are accounted for in Corpus Size calculations but will not be migrated."
+          ctk.CTkLabel(
+              self.view_results,
+              text=note_text,
+              font=FONT_BODY_BOLD,
+              text_color=COLOR_TEXT_MAIN,
+          ).pack(anchor="w", padx=10, pady=(0, 10))
 
       # Cards for simple metrics
       card_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
       card_frame.pack(fill="x", pady=10)
 
       self.create_stat_card(card_frame, "Total Corpus Size", f"{self.format_size(sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🏢")
+      if getattr(self, "val_include_recycle_bin_contents", False):
+        self.create_stat_card(card_frame, "Total Recycle Bin Size", f"{self.format_size(sum([entry.get('recycleBinSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🗑️")
+        self.create_stat_card(card_frame, "Total Recycle Bin Item Count", f"{sum([entry.get('recycleBinCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🗑️")
+      if getattr(self, "val_include_file_versions", False):
+        self.create_stat_card(card_frame, "Total Historical File Version Size", f"{self.format_size(sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "📄")
+        self.create_stat_card(card_frame, "Total Historical File Version Count", f"{sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "📄")
       self.create_stat_card(card_frame, "Site Collection Count", f"{data.get('siteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsiteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Document Library Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
       self.create_stat_card(card_frame, "Folder Count", f"{data.get('folderCount', 0):,}", "📁")
       self.create_stat_card(card_frame, "File Count", f"{data.get('fileCount', 0):,}", "📄")
+      if getattr(self, "val_scan_encrypted_files", False):
+        self.create_stat_card(card_frame, "Total Encrypted File Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
+        self.create_stat_card(card_frame, "Total Encrypted File Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
       self.create_stat_card(card_frame, "Shortcut Count", f"{data.get('shortcutCount', 0):,}", "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
       self.create_stat_card(card_frame, "Folder count beyond depth limit 100", f"{data.get('folderCountExceedingDepthLimit', 0):,}", "📁")
       self.create_stat_card(card_frame, "File count beyond depth limit 100", f"{data.get('fileCountExceedingDepthLimit', 0):,}", "📄")
-      self.create_stat_card(card_frame, "Large Resource Count (Folders with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Large Resource Count (Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Warning Resource Count (Entities with >200k items)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
 
       if self.show_eta:
         # Timeline
@@ -1181,7 +1299,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "Shortcut Count",
         "Folder Count > Depth Limit 100",
         "File Count > Depth Limit 100",
-        "Folder with > 500k item count",
+        "Entities with > 500k item count",
         "Corpus Size",
     }
     is_report_csv = "Entity" in df.columns and report_cols.issubset(df.columns)
@@ -1250,10 +1368,46 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Section 1: Summary Metrics
       writer.writerow(["Summary Metrics", "Value"])
+      include_recycle = getattr(self, "val_include_recycle_bin_contents", False)
+      include_versions = getattr(self, "val_include_file_versions", False)
+
+      note_parts = []
+      if include_recycle:
+          note_parts.append("Recycle Bin contents")
+      if include_versions:
+          note_parts.append("Historical File Versions")
+
+      if note_parts:
+          note_text = f"Note: {' and '.join(note_parts)} are accounted for in Corpus Size calculations but will not be migrated."
+          writer.writerow([note_text])
       
       total_corpus_size = sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()])
       summary_rows = [
           ("Total Corpus Size", self.format_size(total_corpus_size)),
+      ]
+      if getattr(self, "val_include_recycle_bin_contents", False):
+          total_recycle_bin_size = sum([entry.get('recycleBinSize', 0) for entry in data.get('siteMetrics', {}).values()])
+          total_recycle_bin_count = sum([entry.get('recycleBinCount', 0) for entry in data.get('siteMetrics', {}).values()])
+          summary_rows.extend([
+              ("Total Recycle Bin Size", self.format_size(total_recycle_bin_size)),
+              ("Total Recycle Bin Item Count", total_recycle_bin_count),
+          ])
+      if getattr(self, "val_include_file_versions", False):
+          total_version_size = sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()])
+          total_version_count = sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()])
+          summary_rows.extend([
+              ("Total Historical File Version Size", self.format_size(total_version_size)),
+              ("Total Historical File Version Count", total_version_count),
+          ])
+      if getattr(self, "val_scan_encrypted_files", False):
+          total_encrypted_size = sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()])
+          total_encrypted_count = sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()])
+          summary_rows.extend([
+              ("Total Encrypted File Size", self.format_size(total_encrypted_size)),
+              ("Total Encrypted File Count", total_encrypted_count),
+          ])
+      
+      summary_rows.extend([
           ("Site Collection Count", data.get("siteCount", 0)),
           ("Subsite Count", data.get("subsiteCount", 0)),
           ("Personal (OneDrive) Site / Subsite Count", data.get("personalSiteCount", 0)),
@@ -1267,8 +1421,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ("Shortcut Count", data.get("shortcutCount", 0)),
           ("Folder count beyond depth limit 100", data.get("folderCountExceedingDepthLimit", 0)),
           ("File count beyond depth limit 100", data.get("fileCountExceedingDepthLimit", 0)),
-          ("Large Resource Count (Folders with >500k items)", data.get("tenantLevelLargeResourceCount", 0))
-      ]
+          ("Large Resource Count (Entities with >500k items)", data.get("tenantLevelLargeResourceCount", 0))
+      ])
       
       for label, val in summary_rows:
           writer.writerow([label, val])
@@ -1296,26 +1450,60 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       # Section 4: Large Resources
       if len(data.get("tenantLevelLargeResources", [])) > 0:
-        writer.writerow(["Large Resources", ""])
-        writer.writerow(["Type", "ID", "SubTreeCount", "Drive"])
-        large_resources = data.get("tenantLevelLargeResources", [])
-        for res in large_resources:
+        weights = {
+          "SITE COLLECTION": 1,
+          "SUBSITE": 2,
+          "DOCUMENT LIBRARY": 3,
+          "FOLDER": 4
+        }
+        sorted_large_resources = sorted(data.get("tenantLevelLargeResources", []), key=lambda x: weights.get(x.get("Type", x.get("type", "")), 0), reverse=False)
+        writer.writerow(["Large Resources (Entities with >500k items)", ""])
+        writer.writerow(["Type", "URL", "Item Count"])
+        for res in sorted_large_resources:
           writer.writerow([
             res.get("Type", res.get("type", "")),
-            res.get("Id", res.get("id", "")),
-            res.get("subTreeCount", 0),
-            self._get_display_name(res.get("drive", ""))
+            self._get_display_name(res.get("Id", res.get("id", ""))),
+            res.get("subTreeCount", 0)
         ])
         
         writer.writerow([]) # Blank line separator
       
+      # Section 5: Warning Resources
+      if len(data.get("tenantLevelWarningResources", [])) > 0:
+        weights = {
+          "SITE COLLECTION": 1,
+          "SUBSITE": 2,
+          "DOCUMENT LIBRARY": 3,
+          "FOLDER": 4
+        }
+        sorted_warning_resources = sorted(data.get("tenantLevelWarningResources", []), key=lambda x: weights.get(x.get("Type", x.get("type", "")), 0), reverse=False)
+        writer.writerow(["Warning Resources (Entities with >200k items)", ""])
+        writer.writerow(["Type", "URL", "Item Count"])
+        for res in sorted_warning_resources:
+          writer.writerow([
+            res.get("Type", res.get("type", "")),
+            self._get_display_name(res.get("Id", res.get("id", ""))),
+            res.get("subTreeCount", 0)
+        ])
+        
+        writer.writerow([]) # Blank line separator
+
       if len(data.get("siteMetrics", {}).items()) > 0:
-        # Section 5: Site Details
+        # Section 6: Site Details
         writer.writerow(["Site Details", ""])
         if "siteIdToMail" not in data:
-          row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
+          row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
         else:
-          row = ["Site Collection", "Email Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Folder with > 500k item count", "Corpus Size"]
+          row = ["Site Collection", "Email Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
+
+        if getattr(self, "val_include_recycle_bin_contents", False):
+          row.extend(["Recycle Bin Item Count", "Recycle Bin Size"])
+
+        if getattr(self, "val_include_file_versions", False):
+          row.extend(["Historical File Version Count", "Historical File Version Size"])
+
+        if getattr(self, "val_scan_encrypted_files", False):
+          row.extend(["Encrypted File Count", "Encrypted File Size"])
 
         if self.show_eta:
           row.append("Suggested Batch")
@@ -1365,8 +1553,14 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                   s_data.get("folderCountExceedingDepthLimit", 0),
                   s_data.get("fileCountExceedingDepthLimit", 0),
                   s_data.get("largeResourceCount", 0),
+                  s_data.get("warningResourceCount", 0),
                   self.format_size(s_data.get("totalSize", 0))
               ]
+              if getattr(self, "val_include_recycle_bin_contents", False):
+                row.extend([
+                    s_data.get("recycleBinCount", 0),
+                    self.format_size(s_data.get("recycleBinSize", 0))
+                ])
             else:
               row = [
                 self._get_display_name(site_id), 
@@ -1380,8 +1574,26 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                 s_data.get("folderCountExceedingDepthLimit", 0),
                 s_data.get("fileCountExceedingDepthLimit", 0),
                 s_data.get("largeResourceCount", 0),
+                s_data.get("warningResourceCount", 0),
                 self.format_size(s_data.get("totalSize", 0))
             ]
+            if getattr(self, "val_include_recycle_bin_contents", False):
+              row.extend([
+                  s_data.get("recycleBinCount", 0),
+                  self.format_size(s_data.get("recycleBinSize", 0))
+              ])
+
+            if getattr(self, "val_include_file_versions", False):
+              row.extend([
+                  s_data.get("versionCount", 0),
+                  self.format_size(s_data.get("versionSize", 0))
+              ])
+
+            if getattr(self, "val_scan_encrypted_files", False):
+              row.extend([
+                  s_data.get("encryptedFileCount", 0),
+                  self.format_size(s_data.get("encryptedFileSize", 0))
+              ])
 
             if self.show_eta:
               row.append(batch_name)
@@ -1393,6 +1605,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config = super()._get_scan_configuration()
     config.includePersonalSites = self.val_include_personal_sites
     config.includeTeamSites = self.val_include_team_sites
+    config.include_recycle_bin_contents = self.val_include_recycle_bin_contents
+    config.include_file_versions = self.val_include_file_versions
+    config.scan_encrypted_files = self.val_scan_encrypted_files
+    config.generate_folder_amr_map = self.val_generate_folder_amr_map
     return config
 
   def start_scan(self):    
@@ -1409,10 +1625,44 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     # Save values to regular variables to avoid thread-safety issues in Tkinter
     self.val_include_personal_sites = self.include_personal_sites.get()
     self.val_include_team_sites = self.include_team_sites.get()
+    self.val_include_recycle_bin_contents = self.include_recycle_bin_contents.get()
+    self.val_include_file_versions = self.include_file_versions.get()
+    self.val_scan_encrypted_files = self.scan_encrypted_files.get()
+    self.val_generate_folder_amr_map = self.generate_folder_amr_map.get()
     self.val_eta_min_users = self.eta_min_users.get()
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()
     self.val_eta_max_batches = self.eta_max_batches.get()
+
+    if self.val_include_file_versions:
+        warning_msg = (
+            "Enabling 'Include Historical File Versions in Corpus Size' will cause severe performance degradation "
+            "as it requires fetching versions for every single file. "
+            "It is highly recommended to only enable this for a very small corpus (e.g., one SharePoint site or OneDrive site)."
+        )
+        should_continue = messagebox.askyesno(
+            title="Performance Warning",
+            message=warning_msg,
+            icon="warning",
+            parent=self
+        )
+        if not should_continue:
+            return
+
+    if self.val_scan_encrypted_files:
+        warning_msg = (
+            "Enabling 'Scan for Encrypted Files (RMS/MIP)' will cause performance degradation "
+            "as it requires fetching content headers for every single file to detect encryption. "
+            "It is highly recommended to only enable this if you need to identify RMS/MIP protected files."
+        )
+        should_continue = messagebox.askyesno(
+            title="Performance Warning",
+            message=warning_msg,
+            icon="warning",
+            parent=self
+        )
+        if not should_continue:
+            return
       
     disclaimer_text = (
         "The estimations provided by this tool are calculated projections"

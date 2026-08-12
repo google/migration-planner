@@ -105,6 +105,14 @@ def build_eo_resource_checkbox_list(self, ctk):
   ).pack(side="left", padx=10)
   ctk.CTkCheckBox(
       scan_options_frame,
+      text="Encrypted Emails",
+      variable=self.scan_encrypted_email,
+      corner_radius=4,
+      fg_color=COLOR_PRIMARY,
+      border_color=COLOR_TEXT_SUB,
+  ).pack(side="left", padx=10)
+  ctk.CTkCheckBox(
+      scan_options_frame,
       text="In-Place Archives",
       variable=self.scan_in_place_archives,
       corner_radius=4,
@@ -133,6 +141,26 @@ def build_eo_resource_checkbox_list(self, ctk):
       font=FONT_BODY_SMALL,
       text_color=COLOR_TEXT_SUB,
   ).pack(anchor="w", padx=25, pady=(2, 5))
+
+def build_eo_additional_settings(self, ctk):
+  ctk.CTkLabel(
+      self.adv_frame,
+      text="Additional Settings",
+      font=FONT_BODY_BOLD,
+      text_color=COLOR_TEXT_MAIN,
+  ).pack(anchor="w", padx=15, pady=(10, 5))
+
+  additional_settings_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
+  additional_settings_frame.pack(fill="x", padx=15)
+
+  ctk.CTkCheckBox(
+      additional_settings_frame,
+      text="Use Recursive Email folder hierarchy Scan for Email Counts",
+      variable=self.recursive_email_scan,
+      corner_radius=4,
+      fg_color=COLOR_PRIMARY,
+      border_color=COLOR_TEXT_SUB,
+  ).pack(side="left", padx=10)
 
 
 def build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=False):
@@ -191,19 +219,19 @@ def build_migration_plan_options(self, ctk):
   eta_settings_frame.pack(fill="x", padx=15)
 
   ctk.CTkLabel(
-      eta_settings_frame, text="Max Batches:", text_color=COLOR_TEXT_SUB
+      eta_settings_frame, text="Parallel Batches:", text_color=COLOR_TEXT_SUB
   ).grid(row=1, column=3, sticky="w", padx=5, pady=5)
-  slider_max_batches = ctk.CTkSlider(
+  slider_parallel_batches = ctk.CTkSlider(
       eta_settings_frame,
-      from_=10,
-      to=100,
-      number_of_steps=18,
-      variable=self.eta_max_batches,
+      from_=1,
+      to=10,
+      number_of_steps=9,
+      variable=self.parallel_batches,
   )
-  slider_max_batches.grid(row=1, column=4, sticky="ew", padx=5, pady=5)
+  slider_parallel_batches.grid(row=1, column=4, sticky="ew", padx=5, pady=5)
   ctk.CTkLabel(
       eta_settings_frame,
-      textvariable=self.eta_max_batches,
+      textvariable=self.parallel_batches,
       text_color=COLOR_TEXT_MAIN,
       width=40,
   ).grid(row=1, column=5, sticky="w", padx=5)
@@ -211,8 +239,7 @@ def build_migration_plan_options(self, ctk):
   ctk.CTkLabel(
       self.adv_frame,
       text=(
-          "* The migration plan will try to keep the total number of batches"
-          " below this number."
+          "* The migration plan will simulate running this many batches in parallel."
       ),
       font=FONT_BODY_SMALL,
       text_color=COLOR_TEXT_SUB,
