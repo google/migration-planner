@@ -23,7 +23,7 @@
 ### Functionality Limitations
 
 *   This tool only provides migration time estimates for the new Data Migration Service with specific enhancements for large scale migrations. It does not cover Google Workspace Migrate, or any other data migration tool.
-*   Microsoft Exchange Online, Microsoft OneDrive / SharePoint and Microsoft Teams / Private Chat scan and migration planning is supported. ETAs are based on Email and Chat/Channel corpus projections. ETA projections are not yet supported for Onedrive flow.
+*   Microsoft Exchange Online, Microsoft OneDrive / SharePoint and Microsoft Teams / Private Chat scan and migration planning is supported. ETAs are based on Email and Chat/Channel corpus projections.
 *   **Shared & Private Channels Coverage**:
     - **Private Channels**: Standard/private channels are fully scanned and included if their parent Team is resolved or specified.
     - **Shared Channels**: Shared channels hosted within a user's member Team are included. Shared channels hosted in teams the user is *not* a member of are not discovered by the `/users/{id}/joinedTeams` API and thus are not scanned, unless their host Team is explicitly included in the scan scope.

@@ -74,6 +74,7 @@ class EOSharedMailBoxEstimator(Estimator):
             else:
                 failures.append({
                     "userId": request_response_pair.request["headers"]["userId"],
+                    "isPartial": False,
                     "type": FailureType.INVALID_DATA,
                     "statusCode": 200,
                     "message": "Invalid data - userPurpose not present in response"
@@ -111,6 +112,7 @@ class EOSharedMailBoxEstimator(Estimator):
                 except Exception as e:
                     failures.append({
                         "userId": request["headers"]["userId"],
+                        "isPartial": False,
                         "type": FailureType.INVALID_DATA,
                         "statusCode": 200,
                         "message": f"Invalid data - Unable to convert count to integer: {e}"
@@ -119,6 +121,7 @@ class EOSharedMailBoxEstimator(Estimator):
             else:
                 failures.append({
                     "userId": request["headers"]["userId"],
+                    "isPartial": False,
                     "type": FailureType.INVALID_DATA,
                     "statusCode": 200,
                     "message": "Invalid data - No count present in response"

@@ -179,6 +179,91 @@ class TestMigrationScanner(unittest.TestCase):
     
     self.assertEqual(unique_teams, {"teamA": "Team A", "teamB": "Team B"})
 
+  def test_fetch_user_chat_counts_batch_with_pagination(self):
+    """Verify fetch_user_chat_counts_batch handles pagination via nextLink correctly."""
+    users = [{"id": "user1"}, {"id": "user2"}]
+    self.scanner.db.get_processed_user.return_value = None
+    self.scanner.chat_batch_limiter = mock.Mock()
+
+    call_count = 0
+
+    def mock_batch(*args, **kwargs):
+      nonlocal call_count
+      call_count += 1
+      requests_payload = args[4]
+
+      if call_count == 1:
+        self.assertEqual(len(requests_payload), 2)
+        self.assertEqual(requests_payload[0]["url"], "/users/user1/chats?$select=id&$top=50")
+        self.assertEqual(requests_payload[1]["url"], "/users/user2/chats?$select=id&$top=50")
+        return {
+            "0": {
+                "status": 200,
+                "body": {
+                    "value": [{"id": "chat1"}, {"id": "chat2"}],
+                    "@odata.nextLink": "https://graph.microsoft.com/v1.0/users/user1/chats?$select=id&$top=50&$skip=50"
+                }
+            },
+            "1": {
+                "status": 200,
+                "body": {
+                    "value": [{"id": "chat3"}]
+                }
+            }
+        }
+      elif call_count == 2:
+        self.assertEqual(len(requests_payload), 1)
+        self.assertEqual(requests_payload[0]["url"], "/users/user1/chats?$select=id&$top=50&$skip=50")
+        return {
+            "0": {
+                "status": 200,
+                "body": {
+                    "value": [{"id": "chat4"}]
+                }
+            }
+        }
+      return {}
+
+    self.client.execute_batch_request.side_effect = mock_batch
+
+    counts = self.scanner.fetch_user_chat_counts_batch(self.token_manager, users)
+
+    self.assertEqual(call_count, 2)
+    self.assertEqual(counts["user1"], ["chat1", "chat2", "chat4"])
+    self.assertEqual(counts["user2"], ["chat3"])
+    
+    # Verify both users were saved to the database manager with their aggregated chat sets
+    self.scanner.db.save_processed_user.assert_any_call("user1", ["chat1", "chat2", "chat4"])
+    self.scanner.db.save_processed_user.assert_any_call("user2", ["chat3"])
+
+  def test_fetch_user_chat_counts_batch_includes_meeting_chats(self):
+    """Verify fetch_user_chat_counts_batch includes meeting chats."""
+    users = [{"id": "user1"}]
+    self.scanner.db.get_processed_user.return_value = None
+    self.scanner.chat_batch_limiter = mock.Mock()
+
+    def mock_batch(*args, **kwargs):
+      return {
+          "0": {
+              "status": 200,
+              "body": {
+                  "value": [
+                      {"id": "chat1"},
+                      {"id": "19:meeting_A@thread.v2"},
+                      {"id": "chat2"}
+                  ]
+              }
+          }
+      }
+
+    self.client.execute_batch_request.side_effect = mock_batch
+
+    counts = self.scanner.fetch_user_chat_counts_batch(self.token_manager, users)
+
+    self.assertEqual(counts["user1"], ["chat1", "19:meeting_A@thread.v2", "chat2"])
+    self.scanner.db.save_processed_user.assert_called_once_with("user1", ["chat1", "19:meeting_A@thread.v2", "chat2"])
+
+
 
 
 from chat.chat_service import ChatScannerService
@@ -211,6 +296,21 @@ class TestChatScannerService(unittest.TestCase):
     self.token_manager.get_valid_token_slot.return_value = self.token_data
     self.session = mock.Mock()
     self.token_manager.get_session.return_value = self.session
+
+  def _configure_scanner_mock_db(self, scanner_mock):
+    chat_counts = scanner_mock.fetch_user_chat_counts_batch.return_value or {}
+    unique_chats = set()
+    for chats in chat_counts.values():
+      unique_chats.update(chats)
+    unique_chats_list = sorted(list(unique_chats))
+
+    scanner_mock.db.get_discovered_chat_count.return_value = len(unique_chats_list)
+    
+    def mock_sample(sample_size):
+      import random
+      return random.sample(unique_chats_list, min(sample_size, len(unique_chats_list)))
+      
+    scanner_mock.db.get_random_discovered_chat_sample.side_effect = mock_sample
 
   @mock.patch('pandas.read_csv')
   @mock.patch('os.path.exists')
@@ -271,6 +371,8 @@ class TestChatScannerService(unittest.TestCase):
     scanner_mock.fetch_all_channels_for_teams_batch.return_value = {"team1": {"channels": 2, "all_channel_ids": ["ch1", "ch2"]}, "team2": {"channels": 1, "all_channel_ids": ["ch3"]}}
     scanner_mock.fetch_team_details_batch.return_value = {"team1": {"members": 5}, "team2": {"members": 3}}
 
+    self._configure_scanner_mock_db(scanner_mock)
+
     with mock.patch('chat.chat_service.MigrationScanner') as mock_scanner_class:
         mock_scanner_class.return_value = scanner_mock
         
@@ -286,6 +388,75 @@ class TestChatScannerService(unittest.TestCase):
         self.assertEqual(result["total_users"], 2)
         self.assertEqual(result["total_teams"], 2)
         self.assertEqual(result["channels"], 3)
+        self.assertIn("u_map", result)
+        self.assertEqual(len(result["u_map"]), 2)
+        self.assertEqual(result["u_map"]["user1@test.com"]["chats"], 1)
+        # Average messages = 10 / 2 = 5 per chat, so 1 chat * 5 = 5
+        self.assertEqual(result["u_map"]["user1@test.com"]["messages"], 5)
+        # Average memberships = 20 / 2 = 10 per chat, so 1 chat * 10 = 10
+        self.assertEqual(result["u_map"]["user1@test.com"]["memberships"], 10)
+
+  @mock.patch('pandas.read_csv')
+  @mock.patch('os.path.exists')
+  def test_execute_scan_sampling_with_overlapping_chats(self, mock_exists, mock_read_csv):
+    """Verify sampling mode deduplicates overlapping chats across users."""
+    mock_exists.return_value = True
+    
+    real_df = pd.DataFrame({
+        "Email or Team ID": ["user1@test.com", "user2@test.com"],
+        "Type": ["User", "User"]
+    })
+    mock_read_csv.return_value = real_df
+
+    config = mock.Mock()
+    config.mode = "sampling"
+    config.user_source = "csv"
+    config.csv_path = "fake.csv"
+    config.tenant_id = "tenant_id"
+    config.percent = 100.0
+    config.sample_percentage = 100.0
+
+    scanner_mock = mock.Mock()
+    # Both users share 'chat_shared', user1 also has 'chat1'
+    scanner_mock.fetch_user_chat_counts_batch.return_value = {
+        "user1@test.com": ["chat1", "chat_shared"],
+        "user2@test.com": ["chat_shared"]
+    }
+    scanner_mock.fetch_all_channels_for_teams_batch.return_value = {}
+    scanner_mock.fetch_team_details_batch.return_value = {}
+    scanner_mock.fetch_users_joined_teams_batch.return_value = {}
+
+    self._configure_scanner_mock_db(scanner_mock)
+
+    with mock.patch('chat.chat_service.MigrationScanner') as mock_scanner_class:
+        mock_scanner_class.return_value = scanner_mock
+        
+        # We sample 100%, so both unique chats (chat1 and chat_shared) are scanned.
+        # Suppose scan of those 2 unique chats returns 10 messages and 6 memberships in total.
+        self.service._scan_sampled_chats = mock.Mock(return_value=(10, 6, 2))
+        
+        async def mock_async_scan(*args, **kwargs):
+            return 0, 0
+            
+        self.service._scan_sampled_channels_async = mock_async_scan
+        
+        result = self.service.execute_scan(config, self.token_manager, 10)
+        
+        self.assertEqual(result["total_users"], 2)
+        # Unique chats: 'chat1', 'chat_shared' -> total 2 unique chats
+        self.assertEqual(result["private_chats"], 2)
+        
+        # Average messages per chat = 10 / 2 = 5
+        # Average memberships per chat = 6 / 2 = 3
+        # user1 has 2 chats -> messages = 10, memberships = 6
+        self.assertEqual(result["u_map"]["user1@test.com"]["chats"], 2)
+        self.assertEqual(result["u_map"]["user1@test.com"]["messages"], 10)
+        self.assertEqual(result["u_map"]["user1@test.com"]["memberships"], 6)
+        
+        # user2 has 1 chat -> messages = 5, memberships = 3
+        self.assertEqual(result["u_map"]["user2@test.com"]["chats"], 1)
+        self.assertEqual(result["u_map"]["user2@test.com"]["messages"], 5)
+        self.assertEqual(result["u_map"]["user2@test.com"]["memberships"], 3)
 
   @mock.patch('pandas.read_csv')
   @mock.patch('os.path.exists')
@@ -349,6 +520,8 @@ class TestChatScannerService(unittest.TestCase):
     scanner_mock.fetch_users_joined_teams_batch.return_value = {"team_resolved_1": "Team Resolved 1"}
     scanner_mock.fetch_all_channels_for_teams_batch.return_value = {"team_resolved_1": {"channels": 2, "all_channel_ids": ["ch1", "ch2"]}}
     scanner_mock.fetch_team_details_batch.return_value = {"team_resolved_1": {"members": 5}}
+
+    self._configure_scanner_mock_db(scanner_mock)
 
     with mock.patch('chat.chat_service.MigrationScanner') as mock_scanner_class:
         mock_scanner_class.return_value = scanner_mock

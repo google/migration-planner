@@ -10,7 +10,6 @@ env/
 outputs/
 data/
 test_*.py
-
 # Generated application artifacts
 certificate/
 certificates/

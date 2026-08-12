@@ -422,10 +422,10 @@ def generate_data(
                             if f_metrics and f_metrics["subTreeCount"] >= 50: # Using limit 50
                                 drive_metrics["largeResources"].append({
                                     "type": "FOLDER",
-                                    "id": sub_item["name"],
+                                    "id": sub_item["id"],
                                     "subTreeCount": f_metrics["subTreeCount"],
                                     "Limit": 50,
-                                    "drive": drive_id
+                                    "parent": drive_id
                                 })
                                 expected["tenantLevelLargeResources"].append(drive_metrics["largeResources"][-1])
                                 
@@ -467,9 +467,57 @@ def generate_data(
                     expected["siteMetrics"][root_site_id]["fileCountExceedingDepthLimit"] += drive_metric["fileCountExceedingDepthLimit"]
                     
                     expected["siteMetrics"][root_site_id]["totalSize"] += drive_metric["totalSize"]
+
+        # Second pass: compute DL, Subsite, and Site Collection large resources
+        for site_id, site in data["sites"].items():
+            curr_site = site
+            while "parentReference" in curr_site and "siteId" in curr_site["parentReference"]:
+                parent_id = curr_site["parentReference"]["siteId"]
+                curr_site = data["sites"][parent_id]
+            root_site_id = curr_site["id"]
+
+            subsite_item_count = 0
+            for drive_id in site["drives"]:
+                if drive_id in expected["driveMetrics"]:
+                    drive_metric = expected["driveMetrics"][drive_id]
+                    drive_item_count = drive_metric["folderCount"] + drive_metric["fileCount"]
+                    subsite_item_count += drive_item_count
+                    
+                    # Check if DL is a Large Resource
+                    if drive_item_count > 50:
+                        expected["siteMetrics"][root_site_id]["largeResourceCount"] += 1
+                        expected["tenantLevelLargeResources"].append({
+                            "type": "DOCUMENT LIBRARY",
+                            "id": drive_id,
+                            "subTreeCount": drive_item_count,
+                            "parent": site_id,
+                            "Limit": 50
+                        })
+
+            # Check if Subsite is a Large Resource
+            if site["siteLevel"] > 0 and subsite_item_count > 50:
+                expected["siteMetrics"][root_site_id]["largeResourceCount"] += 1
+                expected["tenantLevelLargeResources"].append({
+                    "type": "SUBSITE",
+                    "id": site_id,
+                    "subTreeCount": subsite_item_count,
+                    "parent": root_site_id,
+                    "Limit": 50
+                })
                     
         for root_site_id, s_metrics in expected["siteMetrics"].items():
             s_metrics["resourceCount"] = s_metrics["folderCount"] + s_metrics["fileCount"] + s_metrics["shortcutCount"]
+            
+            # Check if Site Collection is a Large Resource
+            total_site_count = s_metrics["folderCount"] + s_metrics["fileCount"]
+            if total_site_count > 50:
+                expected["tenantLevelLargeResources"].append({
+                    "type": "SITE COLLECTION",
+                    "id": root_site_id,
+                    "subTreeCount": total_site_count,
+                    "parent": "N/A (Top level site)",
+                    "Limit": 50
+                })
 
         for site_id, site in data["sites"].items():
             is_personal = site.get("isPersonalSite", False)

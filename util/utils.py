@@ -12,6 +12,8 @@ class ScanConfig:
   user_source: str
   csv_path: str
   scan_email: bool = False
+  recursive_email_scan: bool = False
+  scan_encrypted_email: bool = False
   scan_chat: bool = False
   scan_contact: bool = False
   scan_calendar: bool = False
@@ -29,9 +31,14 @@ class ScanConfig:
   sample_percentage: int = 10
   bucket_ranges: List[Tuple[int, int]] = field(default_factory=lambda: [(0, 10240), (10241, 102400), (102401, 1048576), (1048577, float("inf"))])
   large_resource_count_limit: int = 500000
+  warning_resource_count_limit: int = 200000
   includePersonalSites: bool = True
   includeTeamSites: bool = True
   max_allowed_depth: int = 100
+  include_recycle_bin_contents: bool = False
+  include_file_versions: bool = False
+  scan_encrypted_files: bool = False
+  generate_folder_amr_map: bool = False
 
 @dataclass
 class RequestResponsePair:
@@ -221,13 +228,14 @@ def process_pagination_responses(
                     "message": resp["body"]["error"]["message"]
                 })
         else:
-          failures.append({
-            "mailboxId": key,
-            "isPartial": is_partial,
-            "type": FailureType.NOT_FOUND,
-            "statusCode": None,
-            "message": "No response found for API Call."
-          })
+          if failures is not None:
+            failures.append({
+              "mailboxId": key,
+              "isPartial": is_partial,
+              "type": FailureType.NOT_FOUND,
+              "statusCode": None,
+              "message": "No response found for API Call."
+            })
                     
     return next_items
 
@@ -248,6 +256,7 @@ def create_request_to_response_map(
       if failures is not None:
         failures.append({
             "type": FailureType.INVALID_DATA,
+            "isPartial": False,
             "statusCode": 200,
             "message": (
                 f"Invalid data - Unable to convert id to integer: {error}"
