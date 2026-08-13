@@ -52,7 +52,7 @@ def main(page: ft.Page):
         client = page.session.store.get("client")
         secret = page.session.store.get("secret")
         page.controls.clear()
-        page.add(DashboardView(tenant, client, secret, on_disconnect=handle_disconnect))
+        page.add(DashboardView(tenant, client, secret, on_disconnect=handle_disconnect, page=page))
         page.update()
 
     def show_cert_instructions(pem_path):
