@@ -1,6 +1,11 @@
 import flet as ft
 import sys
 import os
+import ssl
+
+# Workaround for macOS Python SSL Certificate errors (CERTIFICATE_VERIFY_FAILED)
+# This allows Flet to download the desktop client successfully on its first run.
+ssl._create_default_https_context = ssl._create_unverified_context
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from flet_app.styles import get_theme, COLOR_BACKGROUND
@@ -13,8 +18,10 @@ def main(page: ft.Page):
     page.title = "Deal Assistant (Flet)"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.theme = get_theme()
-    page.bgcolor = COLOR_BACKGROUND
-    page.padding = 20
+    page.bgcolor = "#F0F2F5"
+    page.vertical_alignment = ft.MainAxisAlignment.CENTER
+    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
+    page.padding = 0
     
     # Store session variables
     page.session.store.set("tenant", "")
