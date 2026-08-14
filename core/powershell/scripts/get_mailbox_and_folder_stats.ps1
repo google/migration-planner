@@ -71,7 +71,11 @@ try {
             $pfCount = 0
         }
     } catch {
-        $errors["PublicFolders"] = $_.Exception.Message
+        if ($_.Exception.Message -match "Specify the -Organization parameter") {
+            $pfCount = 0
+        } else {
+            $errors["PublicFolders"] = $_.Exception.Message
+        }
     }
 
     # 2b. Query Mail-Enabled Public Folders
@@ -84,7 +88,11 @@ try {
             $mailPfCount = 0
         }
     } catch {
-        $errors["MailPublicFolders"] = $_.Exception.Message
+        if ($_.Exception.Message -match "Specify the -Organization parameter") {
+            $mailPfCount = 0
+        } else {
+            $errors["MailPublicFolders"] = $_.Exception.Message
+        }
     }
 
     # 2c. Query Public Folder Stats (Size)
@@ -112,7 +120,11 @@ try {
             $pfTotalBytes = 0
         }
     } catch {
-        $errors["PublicFolderStats"] = $_.Exception.Message
+        if ($_.Exception.Message -match "Specify the -Organization parameter") {
+            $pfTotalBytes = 0
+        } else {
+            $errors["PublicFolderStats"] = $_.Exception.Message
+        }
     }
 
     # Output results as JSON
@@ -124,7 +136,7 @@ try {
         MailPublicFoldersCount = $mailPfCount
         Errors = $errors
     }
-    $result | ConvertTo-Json
+    $result | ConvertTo-Json -Depth 3
 }
 finally {
     Disconnect-ExchangeOnline -Confirm:$false -ErrorAction SilentlyContinue
