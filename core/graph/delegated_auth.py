@@ -27,6 +27,9 @@ class DelegatedAuthClient:
         self.client_id = client_id
         self.client_secret = client_secret
         self.authority = f"https://login.microsoftonline.com/{tenant_id}"
+        self.active_port = None
+        self.active_receiver = None
+        self.is_cancelled = False
         
         try:
             self.app = msal.ConfidentialClientApplication(
@@ -42,6 +45,27 @@ class DelegatedAuthClient:
             
         self._lock = threading.Lock()
 
+    def cancel(self):
+        """Aborts any pending browser authentication popup immediately."""
+        self.is_cancelled = True
+        if self.active_port:
+            try:
+                import urllib.request
+                import urllib.parse
+                data = urllib.parse.urlencode({
+                    'error': 'user_cancelled',
+                    'error_description': 'User cancelled in application'
+                }).encode('utf-8')
+                req = urllib.request.Request(f"http://localhost:{self.active_port}", data=data, method='POST')
+                urllib.request.urlopen(req, timeout=1)
+            except Exception:
+                pass
+        if self.active_receiver:
+            try:
+                self.active_receiver.close()
+            except Exception:
+                pass
+
     @staticmethod
     def _parse_error(desc: str) -> str:
         if "AADSTS7000215" in desc or "AADSTS7000222" in desc:
@@ -52,7 +76,7 @@ class DelegatedAuthClient:
             return "Incorrect Tenant ID."
         return desc.split('\n')[0].split('\r')[0] if desc else "Unknown error."
 
-    def get_token(self, scopes: List[str], force_interactive: bool = False) -> Optional[str]:
+    def get_token(self, scopes: List[str], force_interactive: bool = False, timeout: int = 60) -> Optional[str]:
         try:
             with self._lock:
                 result = None
@@ -65,6 +89,7 @@ class DelegatedAuthClient:
                     logger.info("No valid token found in cache. Using MSAL native AuthCodeReceiver popup flow.")
                     
                     port = get_free_port()
+                    self.active_port = port
                     redirect_uri = f"http://localhost:{port}"
                     
                     auth_url = self.app.get_authorization_request_url(
@@ -74,12 +99,20 @@ class DelegatedAuthClient:
                     )
                     auth_url += "&response_mode=form_post"
                     
-                    with AuthCodeReceiver(port=port) as receiver:
-                        auth_response = receiver.get_auth_response(
-                            auth_uri=auth_url,
-                            timeout=120
-                        )
+                    try:
+                        with AuthCodeReceiver(port=port) as receiver:
+                            self.active_receiver = receiver
+                            auth_response = receiver.get_auth_response(
+                                auth_uri=auth_url,
+                                timeout=timeout
+                            )
+                    finally:
+                        self.active_port = None
+                        self.active_receiver = None
                     
+                    if self.is_cancelled or (auth_response and auth_response.get("error") == "user_cancelled"):
+                        raise Exception("Delegated Auth Cancelled.")
+                        
                     if not auth_response:
                         raise Exception("Delegated Auth Cancelled or timed out waiting for browser popup.")
                         
@@ -92,7 +125,7 @@ class DelegatedAuthClient:
                         raise Exception("Delegated Auth Failed: No authorization code received.")
                         
                     auth_code = auth_response["code"]
-                        
+                    
                     result = self.app.acquire_token_by_authorization_code(
                         auth_code,
                         scopes=scopes,
