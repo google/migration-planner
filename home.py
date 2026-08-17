@@ -41,7 +41,7 @@ from flet_ui.views import (
     AuthView,
     HomeView,
     MigrationPlannerPlaceholderView,
-    UsageAdoptionDashboardPlaceholderView,
+    UsageAdoptionDashboardView,
 )
 
 
@@ -58,10 +58,10 @@ def main(page: ft.Page):
     # Configure desktop window properties
     try:
         if hasattr(page, "window"):
-            page.window.width = 1120
-            page.window.height = 720
-            page.window.min_width = 880
-            page.window.min_height = 560
+            page.window.width = 1180
+            page.window.height = 760
+            page.window.min_width = 960
+            page.window.min_height = 600
             page.window.alignment = ft.Alignment(0, 0)
     except Exception:
         pass
@@ -144,6 +144,7 @@ def main(page: ft.Page):
 
     def show_auth():
         """Navigate to the Usage & Adoption Auth Connection screen."""
+        clear_session_credentials()
         nonlocal current_auth_view
         current_auth_view = AuthView(
             on_connect_clicked=handle_connect,
@@ -156,12 +157,19 @@ def main(page: ft.Page):
         page.update()
 
     def show_usage_adoption_dashboard():
-        """Navigate to the blank Usage & Adoption dashboard view."""
+        """Navigate to the Usage & Adoption dashboard view."""
+        tenant = page.session.store.get("tenant") or ""
+        client = page.session.store.get("client") or ""
+        secret = page.session.store.get("secret") or ""
         page.controls.clear()
         page.add(
-            UsageAdoptionDashboardPlaceholderView(
+            UsageAdoptionDashboardView(
                 page=page,
-                on_back=show_home,
+                on_back_to_hub=show_home,
+                on_disconnect=show_auth,
+                tenant=tenant,
+                client=client,
+                secret=secret,
             )
         )
         page.update()
@@ -215,7 +223,7 @@ def main(page: ft.Page):
 
     def handle_connect(tenant: str, client: str, secret: str, use_delegated: bool = False):
         """Handles connection, delegated auth flow, certificate check, and popup triggers."""
-        nonlocal is_auth_cancelled, active_auth_client
+        nonlocal is_auth_cancelled
         page.session.store.set("tenant", tenant)
         page.session.store.set("client", client)
         page.session.store.set("secret", secret)
