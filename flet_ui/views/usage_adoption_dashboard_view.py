@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Placeholder / Transition view for Usage & Adoption module."""
+"""Placeholder / Transition dashboard view for Usage & Adoption module."""
 
 from typing import Callable, Optional
 import flet as ft
@@ -25,8 +25,8 @@ from flet_ui.styles import (
 )
 
 
-class UsageAdoptionPlaceholderView(ft.Container):
-    """Placeholder view for the Usage & Adoption module."""
+class UsageAdoptionDashboardPlaceholderView(ft.Container):
+    """Blank / Placeholder dashboard view for Usage & Adoption."""
 
     def __init__(self, page: ft.Page, on_back: Optional[Callable] = None):
         super().__init__()
@@ -58,19 +58,19 @@ class UsageAdoptionPlaceholderView(ft.Container):
                         bgcolor="#E0EDFD",
                         alignment=ft.alignment.Alignment(0, 0),
                         content=ft.Icon(
-                            ft.Icons.BAR_CHART_ROUNDED,
+                            ft.Icons.INSERT_CHART_OUTLINED,
                             size=32,
                             color=COLOR_PRIMARY,
                         ),
                     ),
                     ft.Text(
-                        "Usage & Adoption",
+                        "Usage & Adoption Dashboard",
                         size=24,
                         weight=ft.FontWeight.BOLD,
                         color=COLOR_TEXT_PRIMARY,
                     ),
                     ft.Text(
-                        "Uncover how your teams use provisioned tools, analyze licenses, active user trends, and security governance.",
+                        "Successfully connected to Microsoft 365. Telemetry reports, SKUs, and adoption metrics will be displayed here.",
                         size=14,
                         color=COLOR_TEXT_SECONDARY,
                         text_align=ft.TextAlign.CENTER,
@@ -82,7 +82,7 @@ class UsageAdoptionPlaceholderView(ft.Container):
                             spacing=8,
                             controls=[
                                 ft.Icon(ft.Icons.ARROW_BACK_ROUNDED, size=18),
-                                ft.Text("Back to Home", size=14, weight=ft.FontWeight.W_600),
+                                ft.Text("Back to Hub", size=14, weight=ft.FontWeight.W_600),
                             ],
                         ),
                         on_click=lambda e: self.on_back() if self.on_back else None,
