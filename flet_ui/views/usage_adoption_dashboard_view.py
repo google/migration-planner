@@ -122,42 +122,42 @@ class UsageAdoptionDashboardView(ft.Container):
                 controls=[
                     # Left: Back button + Title
                     ft.Row(
-                        spacing=8,
+                        spacing=12,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         controls=[
                             ft.IconButton(
                                 icon=ft.Icons.ARROW_BACK_ROUNDED,
-                                icon_size=20,
+                                icon_size=26,
                                 icon_color=COLOR_TEXT_PRIMARY,
                                 tooltip="Back to Hub",
                                 on_click=lambda _: self._handle_back_to_hub(),
                             ),
                             ft.Text(
                                 "Usage and adoption",
-                                size=16,
-                                weight=ft.FontWeight.W_600,
+                                size=24,
+                                weight=ft.FontWeight.W_500,
                                 color=COLOR_TEXT_PRIMARY,
                             ),
                         ],
                     ),
-                    # Right: Export data button (Read me removed)
+                    # Right: Export data button
                     ft.TextButton(
                         content=ft.Row(
                             tight=True,
-                            spacing=6,
+                            spacing=8,
                             controls=[
-                                ft.Icon(ft.Icons.DOWNLOAD_ROUNDED, size=16, color=COLOR_TEXT_PRIMARY),
-                                ft.Text("Export data", size=13, weight=ft.FontWeight.W_500, color=COLOR_TEXT_PRIMARY),
+                                ft.Icon(ft.Icons.DOWNLOAD_ROUNDED, size=20, color=COLOR_TEXT_PRIMARY),
+                                ft.Text("Export data", size=16, weight=ft.FontWeight.W_500, color=COLOR_TEXT_PRIMARY),
                             ],
                         ),
                         on_click=lambda _: self._handle_export_data(),
                         style=ft.ButtonStyle(
-                            padding=ft.Padding(12, 8, 12, 8),
+                            padding=ft.Padding(16, 8, 16, 8),
                         ),
                     ),
                 ],
             ),
-            padding=ft.Padding(0, 2, 0, 4),
+            padding=ft.Padding(0, 4, 0, 8),
         )
 
     def _build_sidebar(self) -> ft.Container:
