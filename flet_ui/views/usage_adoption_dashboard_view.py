@@ -26,6 +26,7 @@ from flet_ui.styles import (
     COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
 )
+from flet_ui.views.sections.identity_licensing_view import IdentityLicensingView
 
 
 class UsageAdoptionDashboardView(ft.Container):
@@ -36,7 +37,7 @@ class UsageAdoptionDashboardView(ft.Container):
             "id": "identity",
             "title": "Identity & Licensing",
             "icon": ft.Icons.BADGE_OUTLINED,
-            "description": "Inspect user licenses, assigned SKUs, active accounts, and directory synchronization across your tenant.",
+            "description": "Inspect user licenses, assigned SKUs, active accounts, directory synchronization, and domain configurations across your tenant.",
         },
         {
             "id": "usage",
@@ -81,6 +82,14 @@ class UsageAdoptionDashboardView(ft.Container):
         self.padding = ft.Padding(36, 18, 36, 22)
 
         self.selected_index = 0
+
+        # Section View Instances (Lazy/Persistent)
+        self.identity_view = IdentityLicensingView(
+            page=self.page_ref,
+            tenant=self.tenant,
+            client=self.client,
+            secret=self.secret,
+        )
 
         # Build UI Components
         self.header = self._build_header()
@@ -296,10 +305,17 @@ class UsageAdoptionDashboardView(ft.Container):
             border=ft.Border.all(1, COLOR_BORDER),
             border_radius=16,
             expand=True,
+            padding=20,
             alignment=ft.alignment.Alignment(0, 0),
-            content=self._render_active_section_placeholder(),
+            content=self._render_current_section(),
         )
         return self.main_card
+
+    def _render_current_section(self) -> ft.Control:
+        """Renders either the modular section view or a placeholder."""
+        if self.selected_index == 0:
+            return self.identity_view
+        return self._render_active_section_placeholder()
 
     def _render_active_section_placeholder(self) -> ft.Control:
         """Renders the section placeholder with icon, description, and Fetch Data button."""
@@ -372,14 +388,14 @@ class UsageAdoptionDashboardView(ft.Container):
                 self._create_nav_item(i, sec) for i, sec in enumerate(self.SECTIONS)
             ]
             # Update main card content
-            self.main_card.content = self._render_active_section_placeholder()
+            self.main_card.content = self._render_current_section()
             try:
                 self.update()
             except Exception:
                 pass
 
     def _handle_fetch_data(self):
-        """Triggers data fetch for the active section."""
+        """Triggers data fetch for the active section placeholder."""
         sec_name = self.SECTIONS[self.selected_index]["title"]
         snack = ft.SnackBar(
             content=ft.Text(f"Fetching telemetry data for {sec_name}..."),
