@@ -146,9 +146,9 @@ class TelemetryCard(ft.Container):
 
         self.table_container = ft.Container(expand=True, opacity=1.0)
         self.pagination_row = ft.Row(
-            alignment=ft.MainAxisAlignment.END,
+            alignment=ft.MainAxisAlignment.CENTER,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=10,
+            spacing=12,
             visible=False,
         )
 

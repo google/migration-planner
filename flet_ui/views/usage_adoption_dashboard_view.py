@@ -26,13 +26,13 @@ from flet_ui.styles import (
     COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
 )
-from flet_ui.views.sections.identity_licensing_view import IdentityLicensingView
+from flet_ui.views.sections import IdentityLicensingView, AppUsageAdoptionView
 
 
 class UsageAdoptionDashboardView(ft.Container):
-    """Telemetry and adoption reports dashboard skeleton with sidebar navigation and system metrics."""
+    """Full-screen Usage and Adoption Telemetry Dashboard view with responsive left sidebar."""
 
-    SECTIONS: List[Dict[str, any]] = [
+    SECTIONS = [
         {
             "id": "identity",
             "title": "Identity & Licensing",
@@ -42,39 +42,39 @@ class UsageAdoptionDashboardView(ft.Container):
         {
             "id": "usage",
             "title": "App Usage, Adoption & Collaboration",
-            "icon": ft.Icons.ANALYTICS_OUTLINED,
-            "description": "Analyze Microsoft Teams, Exchange, SharePoint, OneDrive, and M365 Apps activity and collaboration trends.",
+            "icon": ft.Icons.QUERY_STATS_ROUNDED,
+            "description": "Analyze active usage volume, cross-product active user trends over 30/90/180 days, mailbox sizes, email clients, SharePoint & OneDrive storage, and Teams collaboration metrics.",
         },
         {
             "id": "security",
             "title": "Security, Compliance & Governance",
-            "icon": ft.Icons.SHIELD_OUTLINED,
-            "description": "Monitor compliance policies, DLP rules, retention policies, and potential threat posture across your tenant.",
+            "icon": ft.Icons.SECURITY_ROUNDED,
+            "description": "Evaluate Purview retention, sensitivity labels, DLP policies, SITs, Intune compliance, and threat governance across your tenant.",
         },
         {
             "id": "ecosystem",
             "title": "Ecosystem, Integrations & Automation",
             "icon": ft.Icons.HUB_OUTLINED,
-            "description": "Discover Power Automate flows, third-party app permissions, API connections, and automation integrations.",
+            "description": "Review Power Automate cloud flows, registered apps, enterprise single sign-on service principals, and mail flow connectors.",
         },
     ]
 
     def __init__(
         self,
         page: ft.Page,
-        on_back_to_hub: Optional[Callable[[], None]] = None,
-        on_disconnect: Optional[Callable[[], None]] = None,
         tenant: str = "",
         client: str = "",
         secret: str = "",
+        on_back_to_hub: Optional[Callable[[], None]] = None,
+        on_disconnect: Optional[Callable[[], None]] = None,
     ):
         super().__init__()
         self.page_ref = page
-        self.on_back_to_hub = on_back_to_hub
-        self.on_disconnect = on_disconnect
         self.tenant = tenant
         self.client = client
         self.secret = secret
+        self.on_back_to_hub = on_back_to_hub
+        self.on_disconnect = on_disconnect
 
         self.expand = True
         self.bgcolor = COLOR_APP_BG
@@ -85,6 +85,12 @@ class UsageAdoptionDashboardView(ft.Container):
 
         # Section View Instances (Lazy/Persistent)
         self.identity_view = IdentityLicensingView(
+            page=self.page_ref,
+            tenant=self.tenant,
+            client=self.client,
+            secret=self.secret,
+        )
+        self.usage_view = AppUsageAdoptionView(
             page=self.page_ref,
             tenant=self.tenant,
             client=self.client,
@@ -315,6 +321,8 @@ class UsageAdoptionDashboardView(ft.Container):
         """Renders either the modular section view or a placeholder."""
         if self.selected_index == 0:
             return self.identity_view
+        elif self.selected_index == 1:
+            return self.usage_view
         return self._render_active_section_placeholder()
 
     def _render_active_section_placeholder(self) -> ft.Control:
