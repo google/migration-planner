@@ -1,0 +1,762 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""App Usage, Adoption & Collaboration section view implementation for Flet UI."""
+
+import os
+import csv
+import time
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Dict, List, Optional
+import flet as ft
+
+from core.graph.m365_apps.app_usage import run_m365_pipeline
+from core.graph.m365_apps.active_users import run_o365_pipeline
+from core.graph.exchange.mailbox import run_mailbox_usage_pipeline
+from core.graph.exchange.email_clients import run_email_client_usage_pipeline
+from core.graph.exchange.pst_files import run_pst_discovery_pipeline
+from core.graph.files.sharepoint import run_sharepoint_pipeline
+from core.graph.files.onedrive import run_onedrive_pipeline
+from core.graph.files.msteams_overview import run_msteams_pipeline
+from core.graph.exchange.calendar import run_calendar_telemetry_pipeline
+from flet_ui.components.telemetry_card import TelemetryCard
+from flet_ui.styles import (
+    COLOR_PRIMARY,
+    COLOR_SURFACE,
+    COLOR_TEXT_PRIMARY,
+    COLOR_TEXT_SECONDARY,
+)
+
+logger = logging.getLogger("M365TelemetryAsyncLogger.AppUsageAdoptionView")
+
+
+class AppUsageAdoptionView(ft.Container):
+    """View rendering all App Usage, Adoption & Collaboration telemetry cards with max 2 concurrency."""
+
+    def __init__(
+        self,
+        page: ft.Page,
+        tenant: str = "",
+        client: str = "",
+        secret: str = "",
+    ):
+        super().__init__()
+        self.page_ref = page
+        self.tenant = tenant
+        self.client_id = client
+        self.secret = secret
+
+        self.expand = True
+        self.is_fetched = False
+        self.is_fetching = False
+
+        # Card container with vertical scrolling
+        self.cards_column = ft.Column(
+            expand=True,
+            spacing=20,
+            scroll=ft.ScrollMode.ADAPTIVE,
+        )
+
+        # 1. M365 Apps Usage (Paginated listing)
+        self.m365_apps_card = TelemetryCard(
+            title="M365 Apps Usage (180 Days)",
+            link_text="Apps Reports API",
+            link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getm365appuserdetail",
+            subtitle="Platform & Client breakdown",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 1],
+            on_reload=lambda: self._reload_card(self._fetch_m365_apps_worker),
+        )
+
+        # 2. Active Users Trend (Summary)
+        self.active_users_card = TelemetryCard(
+            title="Active Users Trend",
+            link_text="Active Users API",
+            link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getoffice365activeuserdetail",
+            subtitle="Activity volume across 30, 90, and 180-day periods",
+            paginate=False,
+            column_weights=[3, 2, 2, 2],
+            on_reload=lambda: self._reload_card(self._fetch_active_users_worker),
+        )
+
+        # 3. Exchange Mailboxes & Storage (Summary)
+        self.mailbox_card = TelemetryCard(
+            title="Exchange Mailboxes & Storage",
+            link_text="Mailbox Usage API",
+            link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getmailboxusagedetail",
+            subtitle="Mailbox count, storage capacity, shared mailboxes, and public folders",
+            paginate=False,
+            column_weights=[3, 2],
+            on_reload=lambda: self._reload_card(self._fetch_mailbox_worker),
+        )
+
+        # 4. Email Client Support (Summary)
+        self.email_clients_card = TelemetryCard(
+            title="Email Client Support",
+            link_text="Email Apps API",
+            link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getemailappusagedetail",
+            subtitle="Adoption across browser, desktop Outlook, mobile, and legacy mail protocols",
+            paginate=False,
+            column_weights=[3, 1],
+            on_reload=lambda: self._reload_card(self._fetch_email_clients_worker),
+        )
+
+        # 5. Exchange PST & Archive Files (Summary)
+        self.pst_card = TelemetryCard(
+            title="Exchange PST & Archive Files",
+            link_text="In-Place Archiving API",
+            link_url="https://learn.microsoft.com/en-us/exchange/policy-and-compliance/in-place-archiving/in-place-archiving",
+            subtitle="Cloud-detected PST files and archive mailbox utilization",
+            paginate=False,
+            column_weights=[3, 2],
+            on_reload=lambda: self._reload_card(self._fetch_pst_worker),
+        )
+
+        # 6. SharePoint Site Storage (Summary)
+        self.sharepoint_card = TelemetryCard(
+            title="SharePoint Site Storage",
+            link_text="SharePoint Usage API",
+            link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getsharepointsiteusagedetail",
+            subtitle="Site collections, storage consumption, total files, and heavy sites",
+            paginate=False,
+            column_weights=[3, 2],
+            on_reload=lambda: self._reload_card(self._fetch_sharepoint_worker),
+        )
+
+        # 7. OneDrive Accounts & Storage (Summary)
+        self.onedrive_card = TelemetryCard(
+            title="OneDrive Accounts & Storage",
+            link_text="OneDrive Usage API",
+            link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getonedriveusageaccountdetail",
+            subtitle="Personal accounts, storage used, active sync clients, and OneNote users",
+            paginate=False,
+            column_weights=[3, 2],
+            on_reload=lambda: self._reload_card(self._fetch_onedrive_worker),
+        )
+
+        # 8. Microsoft Teams Activity (Summary)
+        self.teams_card = TelemetryCard(
+            title="Microsoft Teams Activity",
+            link_text="Teams Activity API",
+            link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getmsteamsuseractivityuserdetail",
+            subtitle="Channels, messages, active collaboration users, meetings, and guests",
+            paginate=False,
+            column_weights=[3, 2],
+            on_reload=lambda: self._reload_card(self._fetch_teams_worker),
+        )
+
+        # 9. Calendar & Meeting Telemetry (Summary)
+        self.calendar_card = TelemetryCard(
+            title="Calendar & Meeting Telemetry",
+            link_text="Calendar API Reference",
+            link_url="https://learn.microsoft.com/en-us/graph/api/resources/event",
+            subtitle="Room mailboxes, equipment resources, and calendar sharing policies",
+            paginate=False,
+            column_weights=[3, 2],
+            on_reload=lambda: self._reload_card(self._fetch_calendar_worker),
+        )
+
+        # Initial Placeholder State
+        self.placeholder = self._build_placeholder()
+
+        self.content = ft.Container(
+            expand=True,
+            content=self.placeholder,
+        )
+
+    def _build_placeholder(self) -> ft.Control:
+        """Renders initial placeholder with Icon, Description, and Fetch Data button."""
+        return ft.Column(
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=16,
+            controls=[
+                ft.Container(
+                    width=80,
+                    height=80,
+                    border_radius=40,
+                    bgcolor="#E0EDFD",
+                    alignment=ft.alignment.Alignment(0, 0),
+                    content=ft.Icon(
+                        ft.Icons.QUERY_STATS_ROUNDED,
+                        size=38,
+                        color=COLOR_PRIMARY,
+                    ),
+                ),
+                ft.Text(
+                    "App Usage, Adoption & Collaboration",
+                    size=22,
+                    weight=ft.FontWeight.BOLD,
+                    color=COLOR_TEXT_PRIMARY,
+                ),
+                ft.Container(
+                    width=540,
+                    content=ft.Text(
+                        "Analyze active usage volume, cross-product active user trends over 30/90/180 days, mailbox sizes, email clients, SharePoint & OneDrive storage, and Teams collaboration metrics.",
+                        size=14,
+                        color=COLOR_TEXT_SECONDARY,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                ),
+                ft.Container(height=8),
+                ft.ElevatedButton(
+                    content=ft.Row(
+                        tight=True,
+                        spacing=6,
+                        controls=[
+                            ft.Icon(ft.Icons.SYNC_ROUNDED, size=16),
+                            ft.Text("Fetch Data", size=14, weight=ft.FontWeight.W_500),
+                        ],
+                    ),
+                    bgcolor="#0b57d0",
+                    color=ft.Colors.WHITE,
+                    height=42,
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=8),
+                        padding=ft.Padding(20, 10, 20, 10),
+                    ),
+                    on_click=lambda _: self.fetch_all_data(),
+                ),
+            ],
+        )
+
+    def _safe_run_on_ui(self, callback: Callable):
+        """Dispatches UI updates safely on the event loop."""
+        try:
+            loop = getattr(self.page_ref, "loop", None)
+            if loop and callable(getattr(loop, "is_running", None)) and loop.is_running() and not isinstance(loop, ft.Page):
+                loop.call_soon_threadsafe(callback)
+            else:
+                callback()
+        except Exception:
+            callback()
+
+    def _reload_card(self, worker_func: Callable):
+        """Asynchronously executes single card reload in a daemon thread."""
+        import threading
+        threading.Thread(target=lambda: worker_func(is_reload=True), daemon=True).start()
+
+    def fetch_all_data(self):
+        """Initiates concurrent data fetch with maximum 2 parallel worker threads."""
+        if self.is_fetching:
+            return
+
+        self.is_fetching = True
+        self.is_fetched = True
+
+        self.cards_column.controls.clear()
+
+        self.progress_bar = ft.ProgressBar(
+            value=0.0,
+            width=float("inf"),
+            height=6,
+            color="#15803D",
+            bgcolor="#DCFCE7",
+            border_radius=3,
+        )
+        self.progress_text = ft.Text(
+            "Fetching App Usage, Adoption & Collaboration telemetry (0 of 9 completed)...",
+            size=13,
+            weight=ft.FontWeight.W_500,
+            color="#166534",
+        )
+        self.progress_banner = ft.Container(
+            bgcolor="#F0FDF4",
+            border=ft.Border.all(1, "#BBF7D0"),
+            border_radius=8,
+            padding=ft.Padding(16, 12, 16, 12),
+            margin=ft.Margin(0, 0, 18, 0),
+            content=ft.Column(
+                spacing=8,
+                controls=[
+                    self.progress_text,
+                    self.progress_bar,
+                ],
+            ),
+        )
+        self.cards_column.controls.append(self.progress_banner)
+
+        # Set individual cards to loading state
+        self.m365_apps_card.set_loading("Fetching M365 app details...")
+        self.active_users_card.set_loading("Fetching active users trend...")
+        self.mailbox_card.set_loading("Fetching mailbox usage...")
+        self.email_clients_card.set_loading("Fetching email client breakdown...")
+        self.pst_card.set_loading("Searching PST & archive files...")
+        self.sharepoint_card.set_loading("Fetching SharePoint site storage...")
+        self.onedrive_card.set_loading("Fetching OneDrive usage...")
+        self.teams_card.set_loading("Fetching Teams activity...")
+        self.calendar_card.set_loading("Fetching calendar telemetry...")
+
+        self.content = self.cards_column
+        try:
+            self.update()
+        except Exception:
+            pass
+
+        completed_count = 0
+        total_tasks = 9
+
+        def _track_task_wrapper(func):
+            def _wrapped():
+                nonlocal completed_count
+                try:
+                    func()
+                finally:
+                    completed_count += 1
+                    pct = min(completed_count / total_tasks, 1.0)
+
+                    def _update_progress():
+                        self.progress_bar.value = pct
+                        self.progress_text.value = (
+                            f"Fetching App Usage, Adoption & Collaboration telemetry ({completed_count} of {total_tasks} completed)..."
+                        )
+                        try:
+                            self.progress_banner.update()
+                        except Exception:
+                            pass
+
+                    self._safe_run_on_ui(_update_progress)
+            return _wrapped
+
+        # Tasks to execute in worker pool (at max 2 concurrent threads)
+        tasks = [
+            ("M365Apps", _track_task_wrapper(self._fetch_m365_apps_worker)),
+            ("ActiveUsers", _track_task_wrapper(self._fetch_active_users_worker)),
+            ("Mailbox", _track_task_wrapper(self._fetch_mailbox_worker)),
+            ("EmailClients", _track_task_wrapper(self._fetch_email_clients_worker)),
+            ("PSTFiles", _track_task_wrapper(self._fetch_pst_worker)),
+            ("SharePoint", _track_task_wrapper(self._fetch_sharepoint_worker)),
+            ("OneDrive", _track_task_wrapper(self._fetch_onedrive_worker)),
+            ("Teams", _track_task_wrapper(self._fetch_teams_worker)),
+            ("Calendar", _track_task_wrapper(self._fetch_calendar_worker)),
+        ]
+
+        def _orchestrator():
+            logger.info("Starting App Usage & Adoption orchestrator with ThreadPoolExecutor(max_workers=2)")
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(func) for _, func in tasks]
+                for f in futures:
+                    try:
+                        f.result()
+                    except Exception as e:
+                        logger.error(f"Task failed with error: {e}")
+
+            def _on_all_completed():
+                self.is_fetching = False
+                if self.progress_banner in self.cards_column.controls:
+                    self.cards_column.controls.remove(self.progress_banner)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_all_completed)
+
+        import threading
+        threading.Thread(target=_orchestrator, daemon=True).start()
+
+    def _fetch_m365_apps_worker(self, is_reload: bool = False):
+        """Fetches M365 Apps usage per client platform."""
+        start_time = time.time()
+        logger.info("Executing M365 Apps usage fetch task...")
+        try:
+            m365_data = run_m365_pipeline(self.client_id, self.secret, self.tenant)
+            columns = ["App / Platform", "Users Count"]
+            rows = [[platform, f"{count:,}"] for platform, count in m365_data]
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.m365_apps_card.set_data(columns, rows, execution_time=elapsed)
+                if self.m365_apps_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.m365_apps_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching M365 Apps Usage: {e}")
+            err_msg = str(e)
+
+            def _on_error():
+                self.m365_apps_card.set_error(f"Failed to fetch M365 App Usage: {err_msg}")
+                if self.m365_apps_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.m365_apps_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_active_users_worker(self, is_reload: bool = False):
+        """Fetches Active Users trend across 30, 90, and 180-day periods."""
+        start_time = time.time()
+        logger.info("Executing Active Users Trend fetch task...")
+        try:
+            active_data = run_o365_pipeline(self.client_id, self.secret, self.tenant)
+            columns = ["Workload / Product", "30-Day Active", "90-Day Active", "180-Day Active"]
+            rows = [
+                [product, f"{d30:,}", f"{d90:,}", f"{d180:,}"]
+                for product, d30, d90, d180 in active_data
+            ]
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.active_users_card.set_data(columns, rows, execution_time=elapsed)
+                if self.active_users_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.active_users_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching Active Users: {e}")
+            err_msg = str(e)
+
+            def _on_error():
+                self.active_users_card.set_error(f"Failed to fetch Active Users Trend: {err_msg}")
+                if self.active_users_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.active_users_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_mailbox_worker(self, is_reload: bool = False):
+        """Fetches Mailbox usage summary."""
+        start_time = time.time()
+        logger.info("Executing Mailbox usage fetch task...")
+        try:
+            mb_data = run_mailbox_usage_pipeline(self.client_id, self.secret, self.tenant)
+            columns = ["Metric Name", "Value"]
+            rows = [
+                ["Total Mailboxes", f"{mb_data.get('total_mailboxes', 0):,}"],
+                ["Total Storage Used", mb_data.get("total_storage_formatted", "0.00 Bytes")],
+                ["Average Mailbox Size", mb_data.get("average_mailbox_size_formatted", "0.00 Bytes")],
+                ["Total Emails / Items", f"{mb_data.get('total_emails', 0):,}"],
+                ["Shared Mailboxes Count", f"{mb_data.get('shared_mailboxes_count', 0):,}" if mb_data.get("shared_mailboxes_count") is not None else "Unavailable (PowerShell)"],
+                ["Shared Mailboxes Storage", mb_data.get("shared_mailboxes_total_formatted", "Unavailable")],
+                ["Public Folders Count", f"{mb_data.get('public_folders_count', 0):,}" if mb_data.get("public_folders_count") is not None else "Unavailable (PowerShell)"],
+                ["Public Folders Storage", mb_data.get("public_folders_total_formatted", "Unavailable")],
+            ]
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.mailbox_card.set_data(columns, rows, execution_time=elapsed)
+                if self.mailbox_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.mailbox_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching Mailbox usage: {e}")
+            err_msg = str(e)
+
+            def _on_error():
+                self.mailbox_card.set_error(f"Failed to fetch Mailbox Usage: {err_msg}")
+                if self.mailbox_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.mailbox_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_email_clients_worker(self, is_reload: bool = False):
+        """Fetches Email Client Support breakdown."""
+        start_time = time.time()
+        logger.info("Executing Email Client Support fetch task...")
+        try:
+            result = run_email_client_usage_pipeline(self.client_id, self.secret, self.tenant)
+            stats = result.get("client_stats", {})
+            columns = ["Client Category", "Active Users"]
+            rows = [
+                ["Outlook for Web (Browser)", f"{stats.get('browser_users', 0):,}"],
+                ["Outlook for Windows", f"{stats.get('desktop_win', 0):,}"],
+                ["Outlook for Mac", f"{stats.get('desktop_mac', 0):,}"],
+                ["Apple Mail (Mac)", f"{stats.get('desktop_mail_mac', 0):,}"],
+                ["Outlook for Mobile (iOS/Android)", f"{stats.get('mobile_outlook', 0):,}"],
+                ["Other Mobile Email Apps", f"{stats.get('mobile_other', 0):,}"],
+                ["POP3 Legacy Protocol", f"{stats.get('protocol_pop3', 0):,}"],
+                ["IMAP4 Legacy Protocol", f"{stats.get('protocol_imap4', 0):,}"],
+                ["SMTP Legacy Protocol", f"{stats.get('protocol_smtp', 0):,}"],
+            ]
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.email_clients_card.set_data(columns, rows, execution_time=elapsed)
+                if self.email_clients_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.email_clients_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching Email Clients: {e}")
+            err_msg = str(e)
+
+            def _on_error():
+                self.email_clients_card.set_error(f"Failed to fetch Email Client Support: {err_msg}")
+                if self.email_clients_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.email_clients_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_pst_worker(self, is_reload: bool = False):
+        """Fetches PST files and archive summary."""
+        start_time = time.time()
+        logger.info("Executing PST & Archive discovery task...")
+        try:
+            result = run_pst_discovery_pipeline(self.client_id, self.secret, self.tenant)
+            pst_data = result.get("pst_cloud_data", {})
+            columns = ["Metric Name", "Value / Status"]
+            rows = [
+                ["Total Cloud PST Files Discovered", f"{pst_data.get('total_pst_count', 0):,}"],
+                ["PST Total Storage", pst_data.get("total_pst_storage_formatted", "0.00 Bytes")],
+                ["Archive Mailboxes Status", pst_data.get("archive_status", "Inspected")],
+            ]
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.pst_card.set_data(columns, rows, execution_time=elapsed)
+                if self.pst_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.pst_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching PST files: {e}")
+            err_msg = str(e)
+
+            def _on_error():
+                self.pst_card.set_error(f"Failed to fetch PST Files: {err_msg}")
+                if self.pst_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.pst_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_sharepoint_worker(self, is_reload: bool = False):
+        """Fetches SharePoint site usage."""
+        start_time = time.time()
+        logger.info("Executing SharePoint Site Storage fetch task...")
+        try:
+            sp_data = run_sharepoint_pipeline(self.client_id, self.secret, self.tenant)
+            columns = ["Metric Name", "Value"]
+            rows = [
+                ["Total Site Collections", f"{sp_data.get('total_sites', 0):,}"],
+                ["Total Storage Used", sp_data.get("total_storage_formatted", "0.00 Bytes")],
+                ["Total Files Stored", f"{sp_data.get('total_files', 0):,}"],
+                ["Active Files", f"{sp_data.get('active_files', 0):,}"],
+                ["Active Files Percentage", f"{sp_data.get('active_files_pct', 0.0):.1f}%"],
+            ]
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.sharepoint_card.set_data(columns, rows, execution_time=elapsed)
+                if self.sharepoint_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.sharepoint_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching SharePoint: {e}")
+            err_msg = str(e)
+
+            def _on_error():
+                self.sharepoint_card.set_error(f"Failed to fetch SharePoint Site Storage: {err_msg}")
+                if self.sharepoint_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.sharepoint_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_onedrive_worker(self, is_reload: bool = False):
+        """Fetches OneDrive accounts and storage usage."""
+        start_time = time.time()
+        logger.info("Executing OneDrive usage fetch task...")
+        try:
+            od_data = run_onedrive_pipeline(self.client_id, self.secret, self.tenant)
+            columns = ["Metric Name", "Value"]
+            rows = [
+                ["Total User Accounts", f"{od_data.get('total_accounts', 0):,}"],
+                ["Total Storage Used", od_data.get("total_storage_formatted", "0.00 Bytes")],
+                ["Total Files Stored", f"{od_data.get('total_files', 0):,}"],
+                ["Active Files", f"{od_data.get('active_files', 0):,}"],
+                ["Active Sync Client Users", f"{od_data.get('sync_users', 0):,} ({od_data.get('sync_users_pct', 0.0):.1f}%)"],
+                ["OneNote Active Users", f"{od_data.get('onenote_users', 0):,}"],
+            ]
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.onedrive_card.set_data(columns, rows, execution_time=elapsed)
+                if self.onedrive_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.onedrive_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching OneDrive: {e}")
+            err_msg = str(e)
+
+            def _on_error():
+                self.onedrive_card.set_error(f"Failed to fetch OneDrive Usage: {err_msg}")
+                if self.onedrive_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.onedrive_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_teams_worker(self, is_reload: bool = False):
+        """Fetches Microsoft Teams activity telemetry."""
+        start_time = time.time()
+        logger.info("Executing Microsoft Teams fetch task...")
+        try:
+            csv_path = run_msteams_pipeline(self.client_id, self.secret, self.tenant)
+            
+            # Read and aggregate metrics from CSV
+            total_teams = 0
+            active_users = 0
+            guests = 0
+            active_channels = 0
+            channel_messages = 0
+            meetings_organized = 0
+
+            if os.path.exists(csv_path):
+                with open(csv_path, mode="r", encoding="utf-8-sig") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        team_name = row.get("Team Name") or row.get("TeamName")
+                        if team_name:
+                            total_teams += 1
+                            active_users += int(float(row.get("Active Users") or row.get("ActiveUsers") or 0))
+                            guests += int(float(row.get("Guests") or 0))
+                            active_channels += int(float(row.get("Active Channels") or row.get("ActiveChannels") or 0))
+                            channel_messages += int(float(row.get("Channel Messages") or row.get("ChannelMessages") or 0))
+                            meetings_organized += int(float(row.get("Meetings Organized") or row.get("MeetingsOrganized") or 0))
+
+            avg_users = f"{(active_users / active_channels):.1f}" if active_channels > 0 else "0"
+
+            columns = ["Teams Metric Description", "Value / Measurement"]
+            rows = [
+                ["Total Teams Count", f"{total_teams:,} Teams"],
+                ["Total Active Channels (180 days)", f"{active_channels:,} Channels"],
+                ["Total Channel Messages", f"{channel_messages:,} Messages"],
+                ["Total Active Users (180 days)", f"{active_users:,} Users"],
+                ["Average Users per Channel", avg_users],
+                ["Total Meetings Organized", f"{meetings_organized:,} Meetings"],
+                ["Total Guests", f"{guests:,} Guests"],
+            ]
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.teams_card.set_data(columns, rows, execution_time=elapsed)
+                if self.teams_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.teams_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching Teams activity: {e}")
+            err_msg = str(e)
+
+            def _on_error():
+                self.teams_card.set_error(f"Failed to fetch Microsoft Teams Activity: {err_msg}")
+                if self.teams_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.teams_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_calendar_worker(self, is_reload: bool = False):
+        """Fetches Calendar & Meeting telemetry."""
+        start_time = time.time()
+        logger.info("Executing Calendar telemetry fetch task...")
+        try:
+            cal_data = run_calendar_telemetry_pipeline(self.client_id, self.secret, self.tenant)
+            columns = ["Configuration Property", "Status / Value"]
+            rows = [
+                ["Room Mailboxes Count", f"{cal_data.get('rooms_count', 0):,}" if not cal_data.get("rooms_error") else f"Unavailable ({cal_data.get('rooms_error')})"],
+                ["Equipment Mailboxes Count", f"{cal_data.get('equipment_count', 0):,}" if not cal_data.get("equipment_error") else f"Unavailable ({cal_data.get('equipment_error')})"],
+                ["Calendar Attachment Sharing Allowed", "True" if cal_data.get("can_share_attachments") else "False"],
+                ["Organization Apps Permitted", f"{len(cal_data.get('organization_apps', [])):,} Apps"],
+            ]
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.calendar_card.set_data(columns, rows, execution_time=elapsed)
+                if self.calendar_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.calendar_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching Calendar telemetry: {e}")
+            err_msg = str(e)
+
+            def _on_error():
+                self.calendar_card.set_error(f"Failed to fetch Calendar Telemetry: {err_msg}")
+                if self.calendar_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.calendar_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
