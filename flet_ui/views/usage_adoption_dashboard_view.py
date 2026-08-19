@@ -133,7 +133,7 @@ class UsageAdoptionDashboardView(ft.Container):
             ],
         )
 
-        # Start real-time 3-second system performance monitor
+        # Start real-time 5-second system performance monitor
         self._start_metrics_monitor()
 
     def _safe_run_on_ui(self, callback: Callable):
@@ -148,7 +148,7 @@ class UsageAdoptionDashboardView(ft.Container):
             callback()
 
     def _start_metrics_monitor(self):
-        """Starts real-time system metrics monitoring thread updating every 3 seconds."""
+        """Starts real-time system metrics monitoring thread updating every 5 seconds."""
         self._stop_metrics = False
 
         # Prime CPU percent measurement
@@ -158,7 +158,7 @@ class UsageAdoptionDashboardView(ft.Container):
             import os
             root_path = os.path.abspath(os.sep)
             while not self._stop_metrics:
-                time.sleep(3)
+                time.sleep(5)
                 try:
                     ram_val = f"{psutil.virtual_memory().percent:.1f}%"
                     cpu_val = f"{psutil.cpu_percent(interval=None):.1f}%"
