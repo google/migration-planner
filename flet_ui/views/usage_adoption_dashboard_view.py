@@ -22,6 +22,10 @@ import logging
 import threading
 from typing import Callable, Dict, List, Optional
 import flet as ft
+from flet_ui.components import (
+    SectionStatus,
+    create_section_status_indicator,
+)
 from flet_ui.styles import (
     COLOR_APP_BG,
     COLOR_BORDER,
@@ -96,6 +100,12 @@ class UsageAdoptionDashboardView(ft.Container):
 
         self.selected_index = 0
         self._stop_metrics = False
+        self.section_statuses: Dict[int, str] = {
+            0: SectionStatus.IDLE,
+            1: SectionStatus.IDLE,
+            2: SectionStatus.IDLE,
+            3: SectionStatus.IDLE,
+        }
 
         # System performance metric value controls
         self.ram_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
@@ -108,24 +118,28 @@ class UsageAdoptionDashboardView(ft.Container):
             tenant=self.tenant,
             client=self.client,
             secret=self.secret,
+            on_status_change=lambda status: self._on_section_status_changed(0, status),
         )
         self.usage_view = AppUsageAdoptionView(
             page=self.page_ref,
             tenant=self.tenant,
             client=self.client,
             secret=self.secret,
+            on_status_change=lambda status: self._on_section_status_changed(1, status),
         )
         self.security_view = SecurityComplianceGovernanceView(
             page=self.page_ref,
             tenant=self.tenant,
             client=self.client,
             secret=self.secret,
+            on_status_change=lambda status: self._on_section_status_changed(2, status),
         )
         self.ecosystem_view = EcosystemIntegrationsAutomationView(
             page=self.page_ref,
             tenant=self.tenant,
             client=self.client,
             secret=self.secret,
+            on_status_change=lambda status: self._on_section_status_changed(3, status),
         )
 
         # Build UI Components
@@ -304,14 +318,52 @@ class UsageAdoptionDashboardView(ft.Container):
             content=sidebar_content,
         )
 
+    def _on_section_status_changed(self, index: int, status: str):
+        """Callback invoked when a section's fetch status changes."""
+        self.section_statuses[index] = status
+
+        def _update_nav():
+            self.nav_items_column.controls = [
+                self._create_nav_item(i, sec) for i, sec in enumerate(self.SECTIONS)
+            ]
+            try:
+                self.nav_items_column.update()
+            except Exception:
+                try:
+                    self.sidebar.update()
+                except Exception:
+                    try:
+                        self.update()
+                    except Exception:
+                        pass
+
+        self._safe_run_on_ui(_update_nav)
+
     def _create_nav_item(self, index: int, section: Dict[str, any]) -> ft.Container:
-        """Creates an individual navigation item with active / hover highlights."""
+        """Creates an individual navigation item with active / hover highlights and status icon."""
         is_selected = index == self.selected_index
+        status = self.section_statuses.get(index, SectionStatus.IDLE)
 
         bgcolor = COLOR_HERO_BG if is_selected else "transparent"
         text_color = COLOR_PRIMARY if is_selected else COLOR_TEXT_PRIMARY
         icon_color = COLOR_PRIMARY if is_selected else COLOR_TEXT_SECONDARY
         font_weight = ft.FontWeight.BOLD if is_selected else ft.FontWeight.W_500
+
+        # Status indicator control on the right end
+        status_control = create_section_status_indicator(status, is_selected=is_selected)
+
+        row_controls = [
+            ft.Icon(section["icon"], size=18, color=icon_color),
+            ft.Text(
+                section["title"],
+                size=13,
+                weight=font_weight,
+                color=text_color,
+                expand=True,
+            ),
+        ]
+        if status_control is not None:
+            row_controls.append(status_control)
 
         return ft.Container(
             border_radius=10,
@@ -320,18 +372,9 @@ class UsageAdoptionDashboardView(ft.Container):
             ink=True,
             on_click=lambda _: self._select_section(index),
             content=ft.Row(
-                spacing=12,
+                spacing=10,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                controls=[
-                    ft.Icon(section["icon"], size=18, color=icon_color),
-                    ft.Text(
-                        section["title"],
-                        size=13,
-                        weight=font_weight,
-                        color=text_color,
-                        expand=True,
-                    ),
-                ],
+                controls=row_controls,
             ),
         )
 
@@ -435,17 +478,14 @@ class UsageAdoptionDashboardView(ft.Container):
 
     def _handle_fetch_data(self):
         """Triggers data fetch for the active section placeholder."""
-        sec_name = self.SECTIONS[self.selected_index]["title"]
-        snack = ft.SnackBar(
-            content=ft.Text(f"Fetching telemetry data for {sec_name}..."),
-            open=True,
-        )
-        if hasattr(self.page_ref, "overlay"):
-            self.page_ref.overlay.append(snack)
-        try:
-            self.page_ref.update()
-        except Exception:
-            pass
+        if self.selected_index == 0:
+            self.identity_view.fetch_all_data()
+        elif self.selected_index == 1:
+            self.usage_view.fetch_all_data()
+        elif self.selected_index == 2:
+            self.security_view.fetch_all_data()
+        elif self.selected_index == 3:
+            self.ecosystem_view.fetch_all_data()
 
     def stop_metrics(self):
         """Stops the background real-time system metrics monitoring thread."""
