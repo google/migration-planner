@@ -164,7 +164,6 @@ class PowerAutomateScanner:
         active_tier_counts = {"Personal Productivity": 0, "Enterprise/Departmental": 0}
         premium_connectors_found = set()
         custom_connectors_found = set()
-        errors = []
         
         script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
         reports_dir = os.path.join(script_dir, "reports", f"{self.tenant_id}_{self.client_id}")
@@ -362,7 +361,6 @@ class PowerAutomateScanner:
                                 pass
                 except Exception as e:
                     self.logger.error(f"      [X] Failed to authenticate against Dataverse instance {dv_url}: {e}")
-                    errors.append(f"Failed to authenticate against Dataverse instance {dv_url}: {e}")
 
         complex_active_count = 0
         complex_inactive_count = 0
@@ -384,8 +382,7 @@ class PowerAutomateScanner:
             "custom_connectors": list(custom_connectors_found),
             "complex_logic_flows_path": complex_logic_flows_path,
             "complex_active_count": complex_active_count,
-            "complex_inactive_count": complex_inactive_count,
-            "errors": errors,
+            "complex_inactive_count": complex_inactive_count
         }
 
         self.logger.info("Step End: Analysis complete.")
