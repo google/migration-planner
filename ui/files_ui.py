@@ -275,51 +275,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               widget_bar.stop()
               widget_bar.configure(mode="determinate")
               widget_bar.set(1.0)
-      elif mtype == "drive_discovery":
-        count = msg.get("count", 0)
-        folder_count = msg.get("folderCount", 0)
-        file_count = msg.get("fileCount", 0)
-        shortcut_count = msg.get("shortcutCount", 0)
-        version_count = msg.get("versionCount", 0)
-        encrypted_file_count = msg.get("encryptedFileCount", 0)
-        status = msg.get("status", "Scanning...")
-        if "drives" in self.prog_widgets:
-          widget = self.prog_widgets["drives"]["lbl"]
-          bar = self.prog_widgets["drives"]["bar"]
-          if status == "Fetching...":
-            bar.configure(mode="indeterminate")
-            bar.start()
-          text = f"Drives: {count}"
-          if folder_count > 0:
-            text += f" | Folders: {folder_count}"
-          if file_count > 0:
-            text += f" | Files: {file_count}"
-          if shortcut_count > 0:
-            text += f" | Shortcuts: {shortcut_count}"
-          if version_count > 0:
-            text += f" | Versions: {version_count}"
-          if encrypted_file_count > 0:
-            text += f" | Encrypted Files: {encrypted_file_count}"
-          if widget.winfo_exists():
-            widget.configure(
-                text=text
-            )
-          if not self.spinners_active.get("drives"):
-            self.spinners_active["drives"] = True
-            self.animate_spinner("drives")
-        if status == "Done":
-          self.spinners_active["drives"] = False
-          if "drives" in self.prog_widgets:
-            widget_icon = self.prog_widgets["drives"]["icon"]
-            if widget_icon.winfo_exists():
-              widget_icon.configure(
-                  text="✓", text_color=COLOR_SUCCESS
-              )
-            widget_bar = self.prog_widgets["drives"]["bar"]
-            if widget_bar.winfo_exists():
-              widget_bar.stop()
-              widget_bar.configure(mode="determinate")
-              widget_bar.set(1.0)
+
       elif mtype == "phase_status":
         source = msg.get("source")
         status = msg.get("status")
@@ -368,7 +324,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           widget = self.prog_widgets[source]["bar"]
           if widget.winfo_exists():
             widget.set(val)
-          if source == "drive_parsing":
+          if source == "drive_processing":
             folder_count = msg.get("folderCount", 0)
             file_count = msg.get("fileCount", 0)
             max_depth = msg.get("maxDepth", 0)
@@ -588,9 +544,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       else:
         estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
         self.ui_update("site_discovery", status="Done", count=file_metrics.get("siteCount", 0))
-        self.ui_update("drive_discovery", status="Done", count=sum(file_metrics.get("driveCounts", {}).values()))
-        self.ui_update("scan_progress", source="drive_parsing", progress=1.0)
-        self.ui_update("phase_status", source="drive_parsing", status="complete")
+        self.ui_update("scan_progress", source="drive_processing", progress=1.0, processed=sum(file_metrics.get("driveCounts", {}).values()), entity_type="Drives")
+        self.ui_update("phase_status", source="drive_processing", status="complete")
 
       self.log_msg("\n" + "=" * 60)
       self.log_msg("📊 Failures and Warnings:")
@@ -1690,8 +1645,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.prog_widgets = {}
 
     self.create_progress_row(self.scan_container, "sites", "Site Discovery", mode="determinate")
-    self.create_progress_row(self.scan_container, "drives", "Drive Discovery", mode="determinate")
-    self.create_progress_row(self.scan_container, "drive_parsing", "Metrics Calculation", mode="determinate")
+    self.create_progress_row(self.scan_container, "drive_processing", "Drive Processing", mode="determinate")
 
     if self.show_eta:
       plan_text = "Generating Migration Plan"

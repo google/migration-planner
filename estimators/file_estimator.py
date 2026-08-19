@@ -219,21 +219,32 @@ class FileEstimator(Estimator):
 
                 self.logger("Site Scanning is finished!!!!")
 
-            # get adjacency lists and parent references for each drive
-            self.progress_update_callback("drive_discovery", status="Fetching...", count=0)
+            # Calculate metrics for all drives
+            drive_metrics = {}
+            self.all_resource_metrics = ThreadSafeMap() # Store for AMR map generation
+            drive_id_to_total_size = {}
+
             drive_discovery_progress_metrics = ThreadSafeMap()
             drive_discovery_progress_metrics.update("folderCount", 0)
             drive_discovery_progress_metrics.update("fileCount", 0)
             drive_discovery_progress_metrics.update("shortcutCount", 0)
             drive_discovery_progress_metrics.update("versionCount", 0)
+            drive_discovery_progress_metrics.update("encryptedFileCount", 0)
 
-            drive_id_to_adj_list, parent_references, resource_id_to_details, drive_id_to_total_size = self._create_in_memory_tree([drive["id"] for drive in drives], drive_discovery_progress_metrics, failures)
-            self.progress_update_callback("drive_discovery", status="Done", count=len(drives), **drive_discovery_progress_metrics.get_all())
+            if self.config.generate_folder_amr_map:
+                # Legacy Path: Create all trees in memory first
+                drive_id_to_adj_list, parent_references, resource_id_to_details, drive_id_to_total_size = self._create_in_memory_tree(
+                    [drive["id"] for drive in drives], 
+                    drive_discovery_progress_metrics, 
+                    failures,
+                    global_progress_offset=0.0,
+                    global_progress_weight=0.5
+                )
+            else:
+                drive_id_to_adj_list = {}
+                parent_references = {}
+                resource_id_to_details = {}
 
-            # Calculate metrics for all drives
-            drive_metrics = {}
-            self.all_resource_metrics = ThreadSafeMap() # Store for AMR map generation
-            
             batch_size = max(1, self.config.concurrency // 10)
             total_drives = len(drives)
             processed = 0
@@ -242,12 +253,29 @@ class FileEstimator(Estimator):
             total_resource_count = 0
 
             idx = 0
-            self.progress_update_callback("phase_status", source="drive_parsing", status="running")
+            self.progress_update_callback("phase_status", source="drive_processing", status="running")
             while idx < total_drives:
                 batch = drives[idx: idx + batch_size]
                 idx += batch_size
+                batch_parent_refs = {}
                 try:
-                    batch_metrics = self._calculate_drive_metrics([drive["id"] for drive in batch], drive_id_to_adj_list, parent_references, resource_id_to_details, failures)
+                    if not self.config.generate_folder_amr_map:
+                        # Optimized Path: Create tree for this batch only
+                        batch_adj_list, batch_parent_refs, batch_res_details, batch_total_size = self._create_in_memory_tree(
+                            [drive["id"] for drive in batch], 
+                            drive_discovery_progress_metrics, 
+                            failures,
+                            global_progress_offset=processed / total_drives if total_drives > 0 else 0.0,
+                            global_progress_weight=0.0 # Don't advance progress bar during batch discovery
+                        )
+                        
+                        batch_resource_metrics = ThreadSafeMap()
+                        batch_metrics = self._calculate_drive_metrics([drive["id"] for drive in batch], batch_adj_list, batch_parent_refs, batch_res_details, failures, batch_resource_metrics)
+                        drive_id_to_total_size.update(batch_total_size)
+                    else:
+                        # Legacy Path: use pre-created trees
+                        batch_metrics = self._calculate_drive_metrics([drive["id"] for drive in batch], drive_id_to_adj_list, parent_references, resource_id_to_details, failures, self.all_resource_metrics)
+
                     drive_metrics.update(batch_metrics)
                     processed += len(batch)
                     success += len(batch)
@@ -263,8 +291,8 @@ class FileEstimator(Estimator):
 
                     self.progress_update_callback(
                         "scan_progress",
-                        source="drive_parsing",
-                        progress=processed / total_drives if total_drives > 0 else 0,
+                        source="drive_processing",
+                        progress=0.5 + (processed / total_drives) * 0.5 if self.config.generate_folder_amr_map else processed / total_drives if total_drives > 0 else 0,
                         cumulative=self.global_file_count + self.global_folder_count,
                         folderCount=self.global_folder_count,
                         fileCount=self.global_file_count,
@@ -282,14 +310,19 @@ class FileEstimator(Estimator):
                     failed += len(batch)
                     processed += len(batch)
                     prog = processed / total_drives if total_drives > 0 else 0
+                    
+                    # In optimized path, parent_references might be empty for failed batch if _create_in_memory_tree failed
+                    # But we can still try to estimate resource count or just log failure
+                    batch_parent_refs_for_fail = batch_parent_refs if not self.config.generate_folder_amr_map else parent_references
                     for drive in batch:
-                        total_resource_count += len(parent_references[drive["id"]]) + 1
+                        if drive["id"] in batch_parent_refs_for_fail:
+                            total_resource_count += len(batch_parent_refs_for_fail[drive["id"]]) + 1
                         
                     # print("Batch Failed!!!!")
                     self.progress_update_callback(
                         "scan_progress",
-                        source="drive_parsing",
-                        progress=prog,
+                        source="drive_processing",
+                        progress=0.5 + prog * 0.5 if self.config.generate_folder_amr_map else prog,
                         cumulative=total_resource_count,
                         folderCount=self.global_folder_count,
                         fileCount=self.global_file_count,
@@ -304,7 +337,7 @@ class FileEstimator(Estimator):
                     self._log_and_fail(e, "_calculate_drive_metrics", failures)
 
             time.sleep(5)
-            self.progress_update_callback("phase_status", source="drive_parsing", status="complete")
+            self.progress_update_callback("phase_status", source="drive_processing", status="complete")
 
             self.progress_update_callback("phase_status", source="plan_generation", status="running")
             metrics["driveMetrics"] = drive_metrics
@@ -1279,8 +1312,7 @@ class FileEstimator(Estimator):
         file_size: int,
         failures: List[Dict[str, str]],
         drive_discovery_progress_metrics: ThreadSafeMap,
-        completed_drives: AtomicInt,
-        total_drives: int
+        report_progress: Callable[[], None]
     ):
         if self.is_hard_stop_requested():
             return
@@ -1315,12 +1347,7 @@ class FileEstimator(Estimator):
 
             self.processed_encryption_count.increment()
             if self.processed_encryption_count.get_value() % 10 == 0:
-                self.progress_update_callback(
-                    "drive_discovery",
-                    count=completed_drives.get_value(),
-                    total_drives=total_drives,
-                    **drive_discovery_progress_metrics.get_all()
-                )
+                report_progress()
 
         except Exception as e:
             # Log exception
@@ -1332,8 +1359,7 @@ class FileEstimator(Estimator):
         item_id: str,
         failures: List[Dict[str, str]],
         drive_discovery_progress_metrics: ThreadSafeMap,
-        completed_drives: AtomicInt,
-        total_drives: int
+        report_progress: Callable[[], None]
     ):
         if self.is_hard_stop_requested():
             return
@@ -1401,12 +1427,7 @@ class FileEstimator(Estimator):
 
             self.processed_versions_count.increment()
             if self.processed_versions_count.get_value() % 10 == 0:
-                self.progress_update_callback(
-                    "drive_discovery",
-                    count=completed_drives.get_value(),
-                    total_drives=total_drives,
-                    **drive_discovery_progress_metrics.get_all()
-                )
+                report_progress()
 
         except Exception as e:
             print(f"DEBUG: Exception in _fetch_file_versions_size for item {item_id}: {str(e)}")
@@ -1420,7 +1441,9 @@ class FileEstimator(Estimator):
         self, 
         drive_ids: List[str], 
         drive_discovery_progress_metrics: ThreadSafeMap,
-        failures: List[Dict[str, str]]
+        failures: List[Dict[str, str]],
+        global_progress_offset: float = 0.0,
+        global_progress_weight: float = 0.0
     ):
         completed_drives = AtomicInt(0)
         self.processed_versions_count = AtomicInt(0)
@@ -1429,6 +1452,18 @@ class FileEstimator(Estimator):
         adj_list = {}
         parent_references: Dict[str, Dict[str, str]] = {}
         resource_id_to_details: Dict[str, Dict[str, Any]] = {}
+        
+        def report_progress():
+            self.progress_update_callback(
+                "scan_progress",
+                source="drive_processing",
+                progress=global_progress_offset + (completed_drives.get_value() / total_drives) * global_progress_weight if total_drives > 0 else global_progress_offset,
+                folderCount=drive_discovery_progress_metrics.get("folderCount", 0),
+                fileCount=drive_discovery_progress_metrics.get("fileCount", 0),
+                shortcutCount=drive_discovery_progress_metrics.get("shortcutCount", 0),
+                versionCount=drive_discovery_progress_metrics.get("versionCount", 0),
+                encryptedFileCount=drive_discovery_progress_metrics.get("encryptedFileCount", 0)
+            )
         
         for drive_id in drive_ids:
             adj_list[drive_id] = {}
@@ -1493,23 +1528,18 @@ class FileEstimator(Estimator):
                         
                         if self.config.include_file_versions and self.versions_executor:
                             item_id = curr_response["id"]
-                            self.versions_executor.submit(self._fetch_file_versions_size, drive_id, item_id, failures, drive_discovery_progress_metrics, completed_drives, total_drives)
+                            self.versions_executor.submit(self._fetch_file_versions_size, drive_id, item_id, failures, drive_discovery_progress_metrics, report_progress)
                         
                         if self.config.scan_encrypted_files and self.encryption_executor:
                             item_id = curr_response["id"]
                             file_size = curr_response.get("size", 0)
-                            self.encryption_executor.submit(self._check_file_encryption, drive_id, item_id, file_size, failures, drive_discovery_progress_metrics, completed_drives, total_drives)
+                            self.encryption_executor.submit(self._check_file_encryption, drive_id, item_id, file_size, failures, drive_discovery_progress_metrics, report_progress)
                             
                     elif "remoteItem" in curr_response:
                         drive_discovery_progress_metrics.increment("shortcutCount")
                 
 
-                self.progress_update_callback(
-                    "drive_discovery",
-                    count=completed_drives.get_value(),
-                    total_drives=total_drives,
-                    **drive_discovery_progress_metrics.get_all()
-                )
+                report_progress()
 
             for future in as_completed(futures_map.values()):
                 batch_id = future_to_batch_id[future]
@@ -1603,7 +1633,8 @@ class FileEstimator(Estimator):
         drive_id_to_adj_list: Dict[str, List[str]], 
         parent_references: Dict[str, Dict[str, str]], 
         resource_id_to_details: Dict[str, Dict[str, Any]],
-        failures: List[Dict[str, str]]
+        failures: List[Dict[str, str]],
+        resource_metrics: ThreadSafeMap
     ) -> Dict[str, Any]:
 
         drive_metrics = self._calculate_metrics_using_upside_down_parsing(
@@ -1612,7 +1643,7 @@ class FileEstimator(Estimator):
             parent_references,
             resource_id_to_details,
             failures,
-            self.all_resource_metrics
+            resource_metrics
         )
 
         additional_metrics = self._calculate_metrics_using_regular_parsing(
