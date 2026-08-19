@@ -31,6 +31,7 @@ from core.graph.files.sharepoint import run_sharepoint_pipeline
 from core.graph.files.onedrive import run_onedrive_pipeline
 from core.graph.files.msteams_overview import run_msteams_pipeline
 from core.graph.exchange.calendar import run_calendar_telemetry_pipeline
+from flet_ui.views.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
     COLOR_PRIMARY,
@@ -42,7 +43,7 @@ from flet_ui.styles import (
 logger = logging.getLogger("M365TelemetryAsyncLogger.AppUsageAdoptionView")
 
 
-class AppUsageAdoptionView(ft.Container):
+class AppUsageAdoptionView(BaseSectionView):
     """View rendering all App Usage, Adoption & Collaboration telemetry cards with max 2 concurrency."""
 
     def __init__(
@@ -51,16 +52,15 @@ class AppUsageAdoptionView(ft.Container):
         tenant: str = "",
         client: str = "",
         secret: str = "",
+        on_status_change: Optional[Callable[[str], None]] = None,
     ):
-        super().__init__()
-        self.page_ref = page
-        self.tenant = tenant
-        self.client_id = client
-        self.secret = secret
-
-        self.expand = True
-        self.is_fetched = False
-        self.is_fetching = False
+        super().__init__(
+            page=page,
+            tenant=tenant,
+            client=client,
+            secret=secret,
+            on_status_change=on_status_change,
+        )
 
         # Card container with vertical scrolling
         self.cards_column = ft.Column(
@@ -169,6 +169,19 @@ class AppUsageAdoptionView(ft.Container):
             on_reload=lambda: self._reload_card(self._fetch_calendar_worker),
         )
 
+        # Register cards with base class for error status tracking
+        self.register_cards(
+            self.m365_apps_card,
+            self.active_users_card,
+            self.mailbox_card,
+            self.email_clients_card,
+            self.pst_card,
+            self.sharepoint_card,
+            self.onedrive_card,
+            self.teams_card,
+            self.calendar_card,
+        )
+
         # Initial Placeholder State
         self.placeholder = self._build_placeholder()
 
@@ -233,22 +246,6 @@ class AppUsageAdoptionView(ft.Container):
             ],
         )
 
-    def _safe_run_on_ui(self, callback: Callable):
-        """Dispatches UI updates safely on the event loop."""
-        try:
-            loop = getattr(self.page_ref, "loop", None)
-            if loop and callable(getattr(loop, "is_running", None)) and loop.is_running() and not isinstance(loop, ft.Page):
-                loop.call_soon_threadsafe(callback)
-            else:
-                callback()
-        except Exception:
-            callback()
-
-    def _reload_card(self, worker_func: Callable):
-        """Asynchronously executes single card reload in a daemon thread."""
-        import threading
-        threading.Thread(target=lambda: worker_func(is_reload=True), daemon=True).start()
-
     def fetch_all_data(self):
         """Initiates concurrent data fetch with maximum 2 parallel worker threads."""
         if self.is_fetching:
@@ -256,6 +253,7 @@ class AppUsageAdoptionView(ft.Container):
 
         self.is_fetching = True
         self.is_fetched = True
+        self._notify_status("loading")
 
         self.cards_column.controls.clear()
 
@@ -362,6 +360,7 @@ class AppUsageAdoptionView(ft.Container):
                     self.update()
                 except Exception:
                     pass
+                self._notify_status(self._check_completion_status())
 
             self._safe_run_on_ui(_on_all_completed)
 
