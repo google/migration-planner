@@ -35,6 +35,7 @@ from core.graph.intune.mobile_apps import run_mobile_apps_pipeline
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
     COLOR_PRIMARY,
+    COLOR_SURFACE,
     COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
 )
@@ -62,12 +63,11 @@ class SecurityComplianceGovernanceView(ft.Container):
         self.is_fetched = False
         self.is_fetching = False
 
-        # Card container with vertical scrolling and 18px right padding for scrollbar clearance
+        # Card container with vertical scrolling
         self.cards_column = ft.Column(
             expand=True,
             spacing=20,
             scroll=ft.ScrollMode.ADAPTIVE,
-            controls=[],
         )
 
         # 1. Purview Retention Policies (Paginated listing)
@@ -299,21 +299,6 @@ class SecurityComplianceGovernanceView(ft.Container):
         self.is_fetching = True
         self.is_fetched = True
 
-        all_cards = [
-            self.retention_card,
-            self.dlp_card,
-            self.sensitivity_card,
-            self.sit_card,
-            self.auth_policies_card,
-            self.ca_card,
-            self.mail_security_card,
-            self.device_compliance_card,
-            self.device_configs_card,
-            self.managed_devices_card,
-            self.mobile_apps_card,
-            self.cloud_pc_card,
-        ]
-
         self.cards_column.controls.clear()
 
         self.progress_bar = ft.ProgressBar(
@@ -344,8 +329,21 @@ class SecurityComplianceGovernanceView(ft.Container):
                 ],
             ),
         )
-        # Initially only display the progress banner; tables will appear one by one as they finish fetching
         self.cards_column.controls.append(self.progress_banner)
+
+        # Set individual cards to loading state
+        self.retention_card.set_loading("Fetching retention policies...")
+        self.dlp_card.set_loading("Fetching DLP policies...")
+        self.sensitivity_card.set_loading("Fetching sensitivity labels...")
+        self.sit_card.set_loading("Fetching sensitive info types...")
+        self.auth_policies_card.set_loading("Fetching authentication policies...")
+        self.ca_card.set_loading("Fetching conditional access...")
+        self.mail_security_card.set_loading("Fetching mail security rules...")
+        self.device_compliance_card.set_loading("Fetching device compliance...")
+        self.device_configs_card.set_loading("Fetching device configs...")
+        self.managed_devices_card.set_loading("Fetching managed devices...")
+        self.mobile_apps_card.set_loading("Fetching mobile applications...")
+        self.cloud_pc_card.set_loading("Fetching Cloud PC status...")
 
         self.content = self.cards_column
         try:
@@ -355,63 +353,65 @@ class SecurityComplianceGovernanceView(ft.Container):
 
         completed_count = 0
         total_tasks = 12
-        completed_cards = set()
 
-        def _track_task_wrapper(func, card):
+        def _track_task_wrapper(func):
             def _wrapped():
                 nonlocal completed_count
                 try:
                     func()
                 finally:
                     completed_count += 1
-                    completed_cards.add(card)
                     pct = min(completed_count / total_tasks, 1.0)
 
-                    def _update_ui():
+                    def _update_progress():
                         self.progress_bar.value = pct
-                        self.progress_text.value = f"Fetching Security, Compliance & Governance telemetry ({completed_count} of {total_tasks} completed)..."
-                        
-                        # Show only tables whose data has been fetched, in catalog order
-                        visible_cards = [c for c in all_cards if c in completed_cards]
-                        if completed_count >= total_tasks:
-                            self.progress_banner.visible = False
-                            self.is_fetching = False
-                            self.cards_column.controls = visible_cards
-                        else:
-                            self.cards_column.controls = [self.progress_banner] + visible_cards
-
+                        self.progress_text.value = (
+                            f"Fetching Security, Compliance & Governance telemetry ({completed_count} of {total_tasks} completed)..."
+                        )
                         try:
-                            self.update()
+                            self.progress_banner.update()
                         except Exception:
                             pass
 
-                    self._safe_run_on_ui(_update_ui)
+                    self._safe_run_on_ui(_update_progress)
             return _wrapped
 
-        workers = [
-            _track_task_wrapper(self._fetch_retention_worker, self.retention_card),
-            _track_task_wrapper(self._fetch_dlp_worker, self.dlp_card),
-            _track_task_wrapper(self._fetch_sensitivity_worker, self.sensitivity_card),
-            _track_task_wrapper(self._fetch_sit_worker, self.sit_card),
-            _track_task_wrapper(self._fetch_auth_policies_worker, self.auth_policies_card),
-            _track_task_wrapper(self._fetch_ca_worker, self.ca_card),
-            _track_task_wrapper(self._fetch_mail_security_worker, self.mail_security_card),
-            _track_task_wrapper(self._fetch_device_compliance_worker, self.device_compliance_card),
-            _track_task_wrapper(self._fetch_device_configs_worker, self.device_configs_card),
-            _track_task_wrapper(self._fetch_managed_devices_worker, self.managed_devices_card),
-            _track_task_wrapper(self._fetch_mobile_apps_worker, self.mobile_apps_card),
-            _track_task_wrapper(self._fetch_cloud_pc_worker, self.cloud_pc_card),
+        # Tasks to execute in worker pool (at max 2 concurrent threads)
+        tasks = [
+            ("Retention", _track_task_wrapper(self._fetch_retention_worker)),
+            ("DLP", _track_task_wrapper(self._fetch_dlp_worker)),
+            ("Sensitivity", _track_task_wrapper(self._fetch_sensitivity_worker)),
+            ("SITs", _track_task_wrapper(self._fetch_sit_worker)),
+            ("AuthPolicies", _track_task_wrapper(self._fetch_auth_policies_worker)),
+            ("ConditionalAccess", _track_task_wrapper(self._fetch_ca_worker)),
+            ("MailSecurity", _track_task_wrapper(self._fetch_mail_security_worker)),
+            ("DeviceCompliance", _track_task_wrapper(self._fetch_device_compliance_worker)),
+            ("DeviceConfigs", _track_task_wrapper(self._fetch_device_configs_worker)),
+            ("ManagedDevices", _track_task_wrapper(self._fetch_managed_devices_worker)),
+            ("MobileApps", _track_task_wrapper(self._fetch_mobile_apps_worker)),
+            ("CloudPC", _track_task_wrapper(self._fetch_cloud_pc_worker)),
         ]
 
         def _orchestrate():
             logger.info("Starting Security & Governance orchestrator with ThreadPoolExecutor(max_workers=2)")
             with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = [executor.submit(w) for w in workers]
+                futures = [executor.submit(func) for _, func in tasks]
                 for f in futures:
                     try:
                         f.result()
                     except Exception as e:
                         logger.error(f"Task failed with error: {e}")
+
+            def _on_all_completed():
+                self.is_fetching = False
+                if self.progress_banner in self.cards_column.controls:
+                    self.cards_column.controls.remove(self.progress_banner)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_all_completed)
 
         import threading
         threading.Thread(target=_orchestrate, daemon=True).start()
@@ -420,10 +420,12 @@ class SecurityComplianceGovernanceView(ft.Container):
 
     def _fetch_retention_worker(self, is_reload: bool = False):
         """1. Purview Retention Policies Worker."""
+        start_time = time.time()
+        logger.info("Executing Purview Retention Policies fetch task...")
         headers = ["Policy Name", "Workload / Scope", "Retention Action", "Retention Duration", "Status"]
         try:
             policies = run_retention_policies_pipeline(self.client_id, self.secret, self.tenant)
-            rows = []
+            rows: List[List[Any]] = []
             if isinstance(policies, list):
                 for p in policies:
                     if isinstance(p, dict):
@@ -435,24 +437,41 @@ class SecurityComplianceGovernanceView(ft.Container):
                         status_str = "Enabled" if str(status).lower() in ["true", "enabled", "1"] else "Disabled"
                         rows.append([name, workload, action, duration, status_str])
 
-            if not rows:
-                rows = [["No Purview Retention Policies found in tenant", "N/A", "N/A", "N/A", "N/A"]]
+            elapsed = time.time() - start_time
 
-            def _update():
-                self.retention_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            def _on_success():
+                self.retention_card.set_data(headers, rows, execution_time=elapsed)
+                if self.retention_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.retention_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Retention Policies: {e}")
-            def _error():
-                self.retention_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.retention_card.set_error(f"Failed to fetch Retention Policies: {err_msg}")
+                if self.retention_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.retention_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_dlp_worker(self, is_reload: bool = False):
         """2. Data Loss Prevention (DLP) Policies Worker."""
+        start_time = time.time()
+        logger.info("Executing DLP Policies fetch task...")
         headers = ["Policy Name", "Enforcement Mode", "Target Workloads", "Rules Count"]
         try:
             policies = run_dlp_policies_pipeline(self.client_id, self.secret, self.tenant)
-            rows = []
+            rows: List[List[Any]] = []
             if isinstance(policies, list):
                 for p in policies:
                     if isinstance(p, dict):
@@ -462,20 +481,37 @@ class SecurityComplianceGovernanceView(ft.Container):
                         rules_cnt = str(p.get("RuleCount") or len(p.get("Rules") or []) or "1")
                         rows.append([name, mode, workloads, rules_cnt])
 
-            if not rows:
-                rows = [["No DLP Policies configured in tenant", "N/A", "N/A", "0"]]
+            elapsed = time.time() - start_time
 
-            def _update():
-                self.dlp_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            def _on_success():
+                self.dlp_card.set_data(headers, rows, execution_time=elapsed)
+                if self.dlp_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.dlp_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching DLP policies: {e}")
-            def _error():
-                self.dlp_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.dlp_card.set_error(f"Failed to fetch DLP Policies: {err_msg}")
+                if self.dlp_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.dlp_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_sensitivity_worker(self, is_reload: bool = False):
         """3. Sensitivity Labels Worker."""
+        start_time = time.time()
+        logger.info("Executing Sensitivity Labels fetch task...")
         headers = ["Label Name", "Description", "Protection Type", "Application Mode", "Priority", "Status"]
         try:
             collected_labels = []
@@ -489,7 +525,7 @@ class SecurityComplianceGovernanceView(ft.Container):
                 on_page_callback=_on_page,
             )
 
-            rows = []
+            rows: List[List[Any]] = []
             for lbl in collected_labels:
                 name = lbl.get("name") or "N/A"
                 desc = lbl.get("description") or lbl.get("toolTip") or "None"
@@ -508,24 +544,41 @@ class SecurityComplianceGovernanceView(ft.Container):
                     sub_stat = "Enabled" if sub.get("isEnabled", True) else "Disabled"
                     rows.append([sub_name, sub_desc, sub_prot, sub_mode, sub_prio, sub_stat])
 
-            if not rows:
-                rows = [["No Sensitivity Labels configured in Purview", "None", "None", "Standard", "0", "N/A"]]
+            elapsed = time.time() - start_time
 
-            def _update():
-                self.sensitivity_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            def _on_success():
+                self.sensitivity_card.set_data(headers, rows, execution_time=elapsed)
+                if self.sensitivity_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.sensitivity_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Sensitivity Labels: {e}")
-            def _error():
-                self.sensitivity_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.sensitivity_card.set_error(f"Failed to fetch Sensitivity Labels: {err_msg}")
+                if self.sensitivity_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.sensitivity_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_sit_worker(self, is_reload: bool = False):
         """4. Sensitive Information Types (SITs) Worker."""
+        start_time = time.time()
+        logger.info("Executing Sensitive Information Types fetch task...")
         headers = ["SIT Name", "Publisher", "Confidence Level", "Category"]
         try:
             sits = run_sensitive_info_types_pipeline(self.client_id, self.secret, self.tenant)
-            rows = []
+            rows: List[List[Any]] = []
             if isinstance(sits, list):
                 for s in sits:
                     if isinstance(s, dict):
@@ -535,20 +588,37 @@ class SecurityComplianceGovernanceView(ft.Container):
                         cat = s.get("Category") or s.get("Classification") or "Standard SIT"
                         rows.append([name, pub, str(conf), cat])
 
-            if not rows:
-                rows = [["Standard Microsoft Built-in SITs Active", "Microsoft Corporation", "High", "Default Rule Pack"]]
+            elapsed = time.time() - start_time
 
-            def _update():
-                self.sit_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            def _on_success():
+                self.sit_card.set_data(headers, rows, execution_time=elapsed)
+                if self.sit_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.sit_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Sensitive Information Types: {e}")
-            def _error():
-                self.sit_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.sit_card.set_error(f"Failed to fetch Sensitive Information Types: {err_msg}")
+                if self.sit_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.sit_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_auth_policies_worker(self, is_reload: bool = False):
         """5. User Authentication Policies Worker."""
+        start_time = time.time()
+        logger.info("Executing Authentication Policies fetch task...")
         headers = ["Policy Name", "State / Enforcement", "Policy Type"]
         try:
             policies_list = []
@@ -562,7 +632,7 @@ class SecurityComplianceGovernanceView(ft.Container):
                 on_page_callback=_on_page,
             )
 
-            rows = []
+            rows: List[List[Any]] = []
             for p in policies_list:
                 name = p.get("displayName") or "N/A"
                 state = p.get("state") or "Enabled"
@@ -573,17 +643,37 @@ class SecurityComplianceGovernanceView(ft.Container):
             rows.append(["Self-Service Password Reset (SSPR)", "Enabled", "Authentication Policy"])
             rows.append(["MFA Registration Campaign", "Targeted", "Entra ID Policy"])
 
-            def _update():
-                self.auth_policies_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.auth_policies_card.set_data(headers, rows, execution_time=elapsed)
+                if self.auth_policies_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.auth_policies_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Authentication Policies: {e}")
-            def _error():
-                self.auth_policies_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.auth_policies_card.set_error(f"Failed to fetch Authentication Policies: {err_msg}")
+                if self.auth_policies_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.auth_policies_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_ca_worker(self, is_reload: bool = False):
         """6. Conditional Access Policies Worker."""
+        start_time = time.time()
+        logger.info("Executing Conditional Access Policies fetch task...")
         headers = ["Policy Name", "State", "Target Users", "Grant Controls", "Client Apps"]
         try:
             policies_list = []
@@ -597,7 +687,7 @@ class SecurityComplianceGovernanceView(ft.Container):
                 on_page_callback=_on_page,
             )
 
-            rows = []
+            rows: List[List[Any]] = []
             for p in policies_list:
                 name = p.get("displayName") or "N/A"
                 state = p.get("state") or "N/A"
@@ -613,24 +703,41 @@ class SecurityComplianceGovernanceView(ft.Container):
                 app_str = "All Cloud Apps" if "All" in inc_apps else "Targeted Apps"
                 rows.append([name, state, user_target, ctrl_str, app_str])
 
-            if not rows:
-                rows = [["No Conditional Access Policies detected", "Disabled", "None", "None", "None"]]
+            elapsed = time.time() - start_time
 
-            def _update():
-                self.ca_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            def _on_success():
+                self.ca_card.set_data(headers, rows, execution_time=elapsed)
+                if self.ca_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.ca_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Conditional Access policies: {e}")
-            def _error():
-                self.ca_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.ca_card.set_error(f"Failed to fetch Conditional Access: {err_msg}")
+                if self.ca_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.ca_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_mail_security_worker(self, is_reload: bool = False):
         """7. Exchange Mail Security & Transport Rules Worker."""
+        start_time = time.time()
+        logger.info("Executing Exchange Mail Security fetch task...")
         headers = ["Security Component / Rule", "Target Scope", "Protection Status", "License / Mode"]
         try:
             data = run_mail_security_pipeline(self.client_id, self.secret, self.tenant)
-            rows = []
+            rows: List[List[Any]] = []
             defender_users = data.get("defender_users", 0)
             eop_users = data.get("eop_users", 0)
 
@@ -659,21 +766,41 @@ class SecurityComplianceGovernanceView(ft.Container):
                 "Enforced",
             ])
 
-            def _update():
-                self.mail_security_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.mail_security_card.set_data(headers, rows, execution_time=elapsed)
+                if self.mail_security_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.mail_security_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Mail Security: {e}")
-            def _error():
-                self.mail_security_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.mail_security_card.set_error(f"Failed to fetch Mail Security: {err_msg}")
+                if self.mail_security_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.mail_security_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_device_compliance_worker(self, is_reload: bool = False):
         """8. Device Compliance Summary Worker."""
+        start_time = time.time()
+        logger.info("Executing Device Compliance fetch task...")
         headers = ["Platform", "Compliant Devices", "Non-Compliant Devices", "Grace Period Devices", "Total Managed"]
         try:
             policies = run_device_compliance_pipeline(self.client_id, self.secret, self.tenant)
-            rows = [
+            rows: List[List[Any]] = [
                 ["Windows 10 / 11", "0", "0", "0", "0"],
                 ["iOS & iPadOS", "0", "0", "0", "0"],
                 ["macOS", "0", "0", "0", "0"],
@@ -682,21 +809,41 @@ class SecurityComplianceGovernanceView(ft.Container):
             if isinstance(policies, list) and policies:
                 pass
 
-            def _update():
-                self.device_compliance_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.device_compliance_card.set_data(headers, rows, execution_time=elapsed)
+                if self.device_compliance_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.device_compliance_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Device Compliance: {e}")
-            def _error():
-                self.device_compliance_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.device_compliance_card.set_error(f"Failed to fetch Device Compliance: {err_msg}")
+                if self.device_compliance_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.device_compliance_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_device_configs_worker(self, is_reload: bool = False):
         """9. Device Configuration Profiles Worker."""
+        start_time = time.time()
+        logger.info("Executing Device Configurations fetch task...")
         headers = ["Profile Name", "Platform", "Ownership Scope", "Status"]
         try:
             configs = run_byod_configs_pipeline(self.client_id, self.secret, self.tenant)
-            rows = []
+            rows: List[List[Any]] = []
             if isinstance(configs, list):
                 for c in configs:
                     if isinstance(c, dict):
@@ -706,28 +853,41 @@ class SecurityComplianceGovernanceView(ft.Container):
                         status = "Assigned"
                         rows.append([name, plat, scope, status])
 
-            if not rows:
-                rows = [
-                    ["Default MDM Enrollment Profile", "All Platforms", "Corporate / BYOD", "Active"],
-                    ["Windows BitLocker Encryption Baseline", "Windows 10/11", "Corporate", "Assigned"],
-                    ["iOS Configuration & Wi-Fi Profile", "iOS / iPadOS", "Corporate", "Assigned"],
-                ]
+            elapsed = time.time() - start_time
 
-            def _update():
-                self.device_configs_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            def _on_success():
+                self.device_configs_card.set_data(headers, rows, execution_time=elapsed)
+                if self.device_configs_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.device_configs_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Device Configurations: {e}")
-            def _error():
-                self.device_configs_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.device_configs_card.set_error(f"Failed to fetch Device Configurations: {err_msg}")
+                if self.device_configs_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.device_configs_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_managed_devices_worker(self, is_reload: bool = False):
         """10. Intune Managed Devices Worker."""
+        start_time = time.time()
+        logger.info("Executing Managed Devices fetch task...")
         headers = ["Device Name", "Operating System", "Compliance State", "Ownership", "Last Sync Date"]
         try:
             devices = run_managed_devices_pipeline(self.client_id, self.secret, self.tenant)
-            rows = []
+            rows: List[List[Any]] = []
             if isinstance(devices, list):
                 for d in devices:
                     if isinstance(d, dict):
@@ -738,20 +898,37 @@ class SecurityComplianceGovernanceView(ft.Container):
                         sync_dt = (d.get("lastSyncDateTime") or "")[:10] or "N/A"
                         rows.append([name, os_name, comp, owner, sync_dt])
 
-            if not rows:
-                rows = [["No enrolled Intune Managed Devices detected", "N/A", "N/A", "N/A", "N/A"]]
+            elapsed = time.time() - start_time
 
-            def _update():
-                self.managed_devices_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            def _on_success():
+                self.managed_devices_card.set_data(headers, rows, execution_time=elapsed)
+                if self.managed_devices_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.managed_devices_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Managed Devices: {e}")
-            def _error():
-                self.managed_devices_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.managed_devices_card.set_error(f"Failed to fetch Managed Devices: {err_msg}")
+                if self.managed_devices_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.managed_devices_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_mobile_apps_worker(self, is_reload: bool = False):
         """11. Mobile & Managed Applications Worker."""
+        start_time = time.time()
+        logger.info("Executing Mobile Applications fetch task...")
         headers = ["Application Name", "Publisher", "Platform", "Installed Devices", "License Type"]
         try:
             tmp_csv = f"/tmp/mobile_apps_{int(time.time())}.csv"
@@ -767,7 +944,7 @@ class SecurityComplianceGovernanceView(ft.Container):
                 on_page_callback=_on_page,
             )
 
-            rows = []
+            rows: List[List[Any]] = []
             for a in apps_list:
                 name = a.get("displayName") or "N/A"
                 pub = a.get("publisher") or "Microsoft"
@@ -780,38 +957,68 @@ class SecurityComplianceGovernanceView(ft.Container):
                 except Exception:
                     pass
 
-            if not rows:
-                rows = [
-                    ["Microsoft Outlook", "Microsoft Corporation", "iOS / Android / Windows", "0", "Assigned"],
-                    ["Microsoft Teams", "Microsoft Corporation", "iOS / Android / Windows", "0", "Assigned"],
-                    ["OneDrive for Business", "Microsoft Corporation", "iOS / Android / Windows", "0", "Assigned"],
-                    ["Microsoft Edge", "Microsoft Corporation", "iOS / Android", "0", "Assigned"],
-                ]
+            elapsed = time.time() - start_time
 
-            def _update():
-                self.mobile_apps_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            def _on_success():
+                self.mobile_apps_card.set_data(headers, rows, execution_time=elapsed)
+                if self.mobile_apps_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.mobile_apps_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Mobile Apps: {e}")
-            def _error():
-                self.mobile_apps_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.mobile_apps_card.set_error(f"Failed to fetch Mobile Apps: {err_msg}")
+                if self.mobile_apps_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.mobile_apps_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
 
     def _fetch_cloud_pc_worker(self, is_reload: bool = False):
         """12. Cloud PCs & Virtual Desktops Worker."""
+        start_time = time.time()
+        logger.info("Executing Cloud PC telemetry fetch task...")
         headers = ["Policy / Cloud PC", "Image Type", "Provisioned Count", "Status"]
         try:
-            rows = [
+            rows: List[List[Any]] = [
                 ["Windows 365 Enterprise Provisioning", "Windows 11 Enterprise (Gallery)", "0", "Active"],
                 ["Cloud PC Standard Baseline", "Windows 10/11 Enterprise", "0", "Assigned"],
                 ["Virtual Desktop Infrastructure (AVD)", "Multi-Session Windows 11", "0", "Standby"],
             ]
 
-            def _update():
-                self.cloud_pc_card.set_data(headers, rows)
-            self._safe_run_on_ui(_update)
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.cloud_pc_card.set_data(headers, rows, execution_time=elapsed)
+                if self.cloud_pc_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.cloud_pc_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
         except Exception as e:
             logger.error(f"Error fetching Cloud PC telemetry: {e}")
-            def _error():
-                self.cloud_pc_card.set_error(str(e))
-            self._safe_run_on_ui(_error)
+            err_msg = str(e)
+
+            def _on_error():
+                self.cloud_pc_card.set_error(f"Failed to fetch Cloud PC telemetry: {err_msg}")
+                if self.cloud_pc_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.cloud_pc_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
