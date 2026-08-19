@@ -12,8 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Usage & Adoption Dashboard view and layout skeleton."""
+"""Usage & Adoption Dashboard view and layout skeleton with real-time system performance monitor."""
 
+import time
+import socket
+import shutil
+import psutil
+import logging
+import threading
 from typing import Callable, Dict, List, Optional
 import flet as ft
 from flet_ui.styles import (
@@ -27,6 +33,8 @@ from flet_ui.styles import (
     COLOR_TEXT_SECONDARY,
 )
 from flet_ui.views.sections import IdentityLicensingView, AppUsageAdoptionView
+
+logger = logging.getLogger("M365TelemetryAsyncLogger.DashboardView")
 
 
 class UsageAdoptionDashboardView(ft.Container):
@@ -82,6 +90,12 @@ class UsageAdoptionDashboardView(ft.Container):
         self.padding = ft.Padding(36, 18, 36, 22)
 
         self.selected_index = 0
+        self._stop_metrics = False
+
+        # System performance metric value controls
+        self.ram_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
+        self.cpu_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
+        self.disk_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
 
         # Section View Instances (Lazy/Persistent)
         self.identity_view = IdentityLicensingView(
@@ -118,6 +132,53 @@ class UsageAdoptionDashboardView(ft.Container):
                 ),
             ],
         )
+
+        # Start real-time 3-second system performance monitor
+        self._start_metrics_monitor()
+
+    def _safe_run_on_ui(self, callback: Callable):
+        """Dispatches UI updates safely on the event loop."""
+        try:
+            loop = getattr(self.page_ref, "loop", None)
+            if loop and callable(getattr(loop, "is_running", None)) and loop.is_running() and not isinstance(loop, ft.Page):
+                loop.call_soon_threadsafe(callback)
+            else:
+                callback()
+        except Exception:
+            callback()
+
+    def _start_metrics_monitor(self):
+        """Starts real-time system metrics monitoring thread updating every 3 seconds."""
+        self._stop_metrics = False
+
+        # Prime CPU percent measurement
+        psutil.cpu_percent(interval=None)
+
+        def _monitor_loop():
+            import os
+            root_path = os.path.abspath(os.sep)
+            while not self._stop_metrics:
+                time.sleep(3)
+                try:
+                    ram_val = f"{psutil.virtual_memory().percent:.1f}%"
+                    cpu_val = f"{psutil.cpu_percent(interval=None):.1f}%"
+                    free_gb = shutil.disk_usage(root_path).free / (10**9)
+                    disk_val = f"{free_gb:.1f} GB"
+
+                    def _update_ui():
+                        self.ram_text.value = ram_val
+                        self.cpu_text.value = cpu_val
+                        self.disk_text.value = disk_val
+                        try:
+                            self.system_metrics_box.update()
+                        except Exception:
+                            pass
+
+                    self._safe_run_on_ui(_update_ui)
+                except Exception as e:
+                    logger.debug(f"Error reading system metrics: {e}")
+
+        threading.Thread(target=_monitor_loop, daemon=True).start()
 
     def _build_header(self) -> ft.Container:
         """Constructs the top header bar with Back to Hub and Export data buttons."""
@@ -167,7 +228,7 @@ class UsageAdoptionDashboardView(ft.Container):
         )
 
     def _build_sidebar(self) -> ft.Container:
-        """Constructs the non-collapsible left navigation panel with system metrics card."""
+        """Constructs the non-collapsible left navigation panel with system performance card."""
         self.nav_items_column = ft.Column(
             spacing=6,
             controls=[self._create_nav_item(i, sec) for i, sec in enumerate(self.SECTIONS)],
@@ -179,38 +240,17 @@ class UsageAdoptionDashboardView(ft.Container):
             padding=ft.Padding(0, 16, 0, 0),
         )
 
-        # Bottom System Info Box with 3-dots popup menu
-        disconnect_menu = ft.PopupMenuButton(
-            icon=ft.Icons.MORE_VERT_ROUNDED,
-            icon_size=18,
-            icon_color=COLOR_TEXT_SECONDARY,
-            tooltip="Options",
-            items=[
-                ft.PopupMenuItem(
-                    content=ft.Row(
-                        tight=True,
-                        spacing=8,
-                        controls=[
-                            ft.Icon(ft.Icons.LOGOUT_ROUNDED, color=COLOR_ERROR, size=16),
-                            ft.Text("Disconnect", color=COLOR_ERROR, weight=ft.FontWeight.W_600, size=13),
-                        ],
-                    ),
-                    on_click=lambda _: self._handle_disconnect(),
-                ),
-            ],
-        )
-
-        def create_metric_row(label: str, value: str) -> ft.Row:
+        def create_metric_row(label: str, value_control: ft.Text) -> ft.Row:
             return ft.Row(
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 controls=[
                     ft.Text(label, size=12, color=COLOR_TEXT_SECONDARY),
-                    ft.Text(value, size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY),
+                    value_control,
                 ],
             )
 
         # Shifted upwards with bottom margin for visibility
-        system_metrics_box = ft.Container(
+        self.system_metrics_box = ft.Container(
             bgcolor=COLOR_SURFACE,
             border=ft.Border.all(1, COLOR_BORDER),
             border_radius=12,
@@ -220,42 +260,16 @@ class UsageAdoptionDashboardView(ft.Container):
                 spacing=10,
                 tight=True,
                 controls=[
-                    # Active connection badge + 3 dots menu
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        controls=[
-                            ft.Container(
-                                content=ft.Row(
-                                    tight=True,
-                                    spacing=6,
-                                    controls=[
-                                        ft.Container(
-                                            width=8,
-                                            height=8,
-                                            border_radius=4,
-                                            bgcolor="#10B981",
-                                        ),
-                                        ft.Text(
-                                            "Active connection",
-                                            size=11,
-                                            weight=ft.FontWeight.W_600,
-                                            color="#15803D",
-                                        ),
-                                    ],
-                                ),
-                                bgcolor="#DCFCE7",
-                                border_radius=12,
-                                padding=ft.Padding(8, 4, 8, 4),
-                            ),
-                            disconnect_menu,
-                        ],
+                    ft.Text(
+                        "System Performance",
+                        size=12,
+                        weight=ft.FontWeight.BOLD,
+                        color=COLOR_TEXT_PRIMARY,
                     ),
                     ft.Divider(height=1, color=COLOR_BORDER),
-                    # System Info parameters (hard-coded N/A)
-                    create_metric_row("RAM used", "N/A"),
-                    create_metric_row("Network Strength", "N/A"),
-                    create_metric_row("Available Disk Space", "N/A"),
+                    create_metric_row("RAM utilization", self.ram_text),
+                    create_metric_row("CPU utilization", self.cpu_text),
+                    create_metric_row("Available Disk Space", self.disk_text),
                 ],
             ),
         )
@@ -264,7 +278,7 @@ class UsageAdoptionDashboardView(ft.Container):
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             controls=[
                 nav_container,
-                system_metrics_box,
+                self.system_metrics_box,
             ],
         )
 
@@ -334,7 +348,6 @@ class UsageAdoptionDashboardView(ft.Container):
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=16,
             controls=[
-                # Section Icon Badge
                 ft.Container(
                     width=80,
                     height=80,
@@ -347,16 +360,14 @@ class UsageAdoptionDashboardView(ft.Container):
                         color=COLOR_PRIMARY,
                     ),
                 ),
-                # Section Title
                 ft.Text(
                     current_sec["title"],
                     size=22,
                     weight=ft.FontWeight.BOLD,
                     color=COLOR_TEXT_PRIMARY,
                 ),
-                # Section Description
                 ft.Container(
-                    width=520,
+                    width=500,
                     content=ft.Text(
                         current_sec["description"],
                         size=14,
@@ -365,7 +376,6 @@ class UsageAdoptionDashboardView(ft.Container):
                     ),
                 ),
                 ft.Container(height=8),
-                # Fetch Data Action Button
                 ft.ElevatedButton(
                     content=ft.Row(
                         tight=True,
@@ -388,10 +398,10 @@ class UsageAdoptionDashboardView(ft.Container):
         )
 
     def _select_section(self, index: int):
-        """Switches active section and updates sidebar and main content area."""
-        if self.selected_index != index:
+        """Updates the selected section index and refreshes UI."""
+        if index != self.selected_index:
             self.selected_index = index
-            # Rebuild nav items
+            # Update sidebar active highlights
             self.nav_items_column.controls = [
                 self._create_nav_item(i, sec) for i, sec in enumerate(self.SECTIONS)
             ]
@@ -407,28 +417,44 @@ class UsageAdoptionDashboardView(ft.Container):
         sec_name = self.SECTIONS[self.selected_index]["title"]
         snack = ft.SnackBar(
             content=ft.Text(f"Fetching telemetry data for {sec_name}..."),
-            bgcolor=ft.Colors.BLUE_GREY_800,
+            open=True,
         )
-        self.page_ref.overlay.append(snack)
-        snack.open = True
-        self.page_ref.update()
+        if hasattr(self.page_ref, "overlay"):
+            self.page_ref.overlay.append(snack)
+        try:
+            self.page_ref.update()
+        except Exception:
+            pass
 
-    def _handle_export_data(self):
-        """Handles export data trigger."""
-        snack = ft.SnackBar(
-            content=ft.Text("Exporting tenant telemetry report..."),
-            bgcolor=ft.Colors.BLUE_GREY_800,
-        )
-        self.page_ref.overlay.append(snack)
-        snack.open = True
-        self.page_ref.update()
+    def stop_metrics(self):
+        """Stops the background real-time system metrics monitoring thread."""
+        self._stop_metrics = True
+
+    def will_unmount(self):
+        """Lifecycle hook invoked when the control is unmounted from the page."""
+        self.stop_metrics()
 
     def _handle_back_to_hub(self):
-        """Redirects back to the Hub landing page."""
+        """Navigates back to the main Hub."""
+        self.stop_metrics()
         if self.on_back_to_hub:
             self.on_back_to_hub()
 
     def _handle_disconnect(self):
-        """Redirects back to the Usage & Adoption authentication view."""
+        """Disconnects active tenant and redirects to Auth screen."""
+        self.stop_metrics()
         if self.on_disconnect:
             self.on_disconnect()
+
+    def _handle_export_data(self):
+        """Exports gathered telemetry data."""
+        snack = ft.SnackBar(
+            content=ft.Text("Preparing and exporting telemetry data..."),
+            open=True,
+        )
+        if hasattr(self.page_ref, "overlay"):
+            self.page_ref.overlay.append(snack)
+        try:
+            self.page_ref.update()
+        except Exception:
+            pass
