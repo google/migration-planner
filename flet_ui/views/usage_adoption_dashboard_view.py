@@ -36,6 +36,7 @@ from flet_ui.views.sections import (
     IdentityLicensingView,
     AppUsageAdoptionView,
     SecurityComplianceGovernanceView,
+    EcosystemIntegrationsAutomationView,
 )
 
 logger = logging.getLogger("M365TelemetryAsyncLogger.DashboardView")
@@ -115,6 +116,12 @@ class UsageAdoptionDashboardView(ft.Container):
             secret=self.secret,
         )
         self.security_view = SecurityComplianceGovernanceView(
+            page=self.page_ref,
+            tenant=self.tenant,
+            client=self.client,
+            secret=self.secret,
+        )
+        self.ecosystem_view = EcosystemIntegrationsAutomationView(
             page=self.page_ref,
             tenant=self.tenant,
             client=self.client,
@@ -349,6 +356,8 @@ class UsageAdoptionDashboardView(ft.Container):
             return self.usage_view
         elif self.selected_index == 2:
             return self.security_view
+        elif self.selected_index == 3:
+            return self.ecosystem_view
         return self._render_active_section_placeholder()
 
     def _render_active_section_placeholder(self) -> ft.Control:
