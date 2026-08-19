@@ -16,8 +16,10 @@
 
 from flet_ui.views.sections.identity_licensing_view import IdentityLicensingView
 from flet_ui.views.sections.app_usage_adoption_view import AppUsageAdoptionView
+from flet_ui.views.sections.security_compliance_view import SecurityComplianceGovernanceView
 
 __all__ = [
     "IdentityLicensingView",
     "AppUsageAdoptionView",
+    "SecurityComplianceGovernanceView",
 ]
