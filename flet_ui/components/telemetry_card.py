@@ -282,16 +282,15 @@ class TelemetryCard(ft.Container):
             pass
 
     def set_error(self, error_message: str):
-        """Displays error banner above table and unlocks grayed-out state."""
+        """Displays error banner above table and hides table on failure."""
         self.is_loading = False
         self.initial_loading_container.visible = False
         self.refresh_indicator.visible = False
         self.reload_btn.disabled = False
 
-        # Restore table interactivity
-        self.table_container.opacity = 1.0
-        self.table_container.disabled = False
-        self.pagination_row.disabled = False
+        # Hide table and pagination completely on failure
+        self.table_container.visible = False
+        self.pagination_row.visible = False
 
         self.error_message = error_message
         self.error_banner.content.controls[1].value = error_message
@@ -307,6 +306,7 @@ class TelemetryCard(ft.Container):
         rows: List[List[Any]],
         execution_time: Optional[float] = None,
         column_weights: Optional[List[int]] = None,
+        error_message: Optional[str] = None,
     ):
         """Populates full-width data table, unlocks locked state, and updates execution timer."""
         self.is_loading = False
@@ -316,9 +316,15 @@ class TelemetryCard(ft.Container):
         self.table_container.opacity = 1.0
         self.table_container.disabled = False
         self.pagination_row.disabled = False
-        self.error_banner.visible = False
-        self.error_message = None
         self.reload_btn.disabled = False
+
+        if error_message:
+            self.error_message = error_message
+            self.error_banner.content.controls[1].value = error_message
+            self.error_banner.visible = True
+        else:
+            self.error_banner.visible = False
+            self.error_message = None
 
         self.columns = columns
         self.all_rows = rows
