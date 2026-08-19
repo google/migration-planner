@@ -6,11 +6,19 @@ from flet_ui.components.dialogs import (
     show_delegated_auth_learn_more_dialog,
     show_upload_certificate_dialog,
 )
+from flet_ui.components.section_status_indicator import (
+    SectionStatus,
+    SectionStatusIndicator,
+    create_section_status_indicator,
+)
 from flet_ui.components.telemetry_card import TelemetryCard
 
 __all__ = [
     "AppCard",
     "TelemetryCard",
+    "SectionStatus",
+    "SectionStatusIndicator",
+    "create_section_status_indicator",
     "show_upload_certificate_dialog",
     "show_cert_decryption_error_dialog",
     "show_delegated_auth_learn_more_dialog",

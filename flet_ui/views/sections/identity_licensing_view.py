@@ -25,6 +25,7 @@ from core.graph.directory.domains import DomainsService
 from core.graph.directory.organization import OrganizationService
 from core.graph.directory.subscribed_skus import SubscribedSKUsService
 from core.graph.directory.users_groups import UsersGroupsService
+from flet_ui.views.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
     COLOR_BORDER,
@@ -37,7 +38,7 @@ from flet_ui.styles import (
 logger = logging.getLogger("M365TelemetryAsyncLogger.IdentityLicensingView")
 
 
-class IdentityLicensingView(ft.Container):
+class IdentityLicensingView(BaseSectionView):
     """View rendering all Identity & Licensing telemetry cards with full-width layout and max 2 concurrency."""
 
     def __init__(
@@ -46,16 +47,15 @@ class IdentityLicensingView(ft.Container):
         tenant: str = "",
         client: str = "",
         secret: str = "",
+        on_status_change: Optional[Callable[[str], None]] = None,
     ):
-        super().__init__()
-        self.page_ref = page
-        self.tenant = tenant
-        self.client_id = client
-        self.secret = secret
-
-        self.expand = True
-        self.is_fetched = False
-        self.is_fetching = False
+        super().__init__(
+            page=page,
+            tenant=tenant,
+            client=client,
+            secret=secret,
+            on_status_change=on_status_change,
+        )
 
         # Card instances configured with full-width column weights
         self.cards_column = ft.Column(
@@ -103,6 +103,14 @@ class IdentityLicensingView(ft.Container):
             paginate=False,
             column_weights=[3, 1],
             on_reload=lambda: self._reload_card(self._fetch_users_groups_worker),
+        )
+
+        # Register cards with base class for error status tracking
+        self.register_cards(
+            self.org_card,
+            self.sku_card,
+            self.domains_card,
+            self.users_groups_card,
         )
 
         # Placeholder / Initial state
@@ -169,22 +177,6 @@ class IdentityLicensingView(ft.Container):
             ],
         )
 
-    def _safe_run_on_ui(self, callback: Callable):
-        """Dispatches UI updates safely on the event loop."""
-        try:
-            loop = getattr(self.page_ref, "loop", None)
-            if loop and callable(getattr(loop, "is_running", None)) and loop.is_running() and not isinstance(loop, ft.Page):
-                loop.call_soon_threadsafe(callback)
-            else:
-                callback()
-        except Exception:
-            callback()
-
-    def _reload_card(self, worker_func: Callable):
-        """Asynchronously executes single card reload in a daemon thread."""
-        import threading
-        threading.Thread(target=lambda: worker_func(is_reload=True), daemon=True).start()
-
     def fetch_all_data(self):
         """Initiates concurrent data fetch with maximum 2 parallel worker threads."""
         if self.is_fetching:
@@ -192,6 +184,7 @@ class IdentityLicensingView(ft.Container):
 
         self.is_fetching = True
         self.is_fetched = True
+        self._notify_status("loading")
 
         # Switch to cards layout with active fetching progress banner
         self.cards_column.controls.clear()
@@ -287,6 +280,7 @@ class IdentityLicensingView(ft.Container):
                     self.update()
                 except Exception:
                     pass
+                self._notify_status(self._check_completion_status())
 
             self._safe_run_on_ui(_on_all_completed)
 
