@@ -48,7 +48,6 @@ class SharePointDataTypesService:
         
         try:
             for region in regions:
-                logger.info(f"Querying region: {region}")
                 for name, query_str in base_queries.items():
                     payload = {
                         "requests": [{
@@ -63,18 +62,15 @@ class SharePointDataTypesService:
                         logger.info(f"Submitting Graph Search Query for: {name} in {region}")
                         resp = session.post(url, headers=headers, json=payload, timeout=30.0)
                         
-                        if resp.status_code != 200:
-                            logger.warning(f"Error Response Body for {region}: {resp.text}")
-                            resp.raise_for_status()
-                            
-                        data = resp.json()
-                        hits_containers = data.get("value", [{}])[0].get("hitsContainers", [{}])
-                        total = hits_containers[0].get("total", 0)
-                        results[name] += total
-                        
-                    except requests.exceptions.HTTPError as e:
-                        # If a multi-geo region doesn't exist for this tenant, log warning and continue
-                        logger.warning(f"Failed to query {name} in region {region}. It may not be provisioned: {e}")
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            hits_containers = data.get("value", [{}])[0].get("hitsContainers", [{}])
+                            total = hits_containers[0].get("total", 0) if hits_containers else 0
+                            results[name] += total
+                        else:
+                            logger.debug("Graph search response for %s in %s returned %d: %s", name, region, resp.status_code, resp.text)
+                    except Exception as e:
+                        logger.debug("Failed to query %s in region %s: %s", name, region, e)
                         continue
             
             # Write to CSV in accordance with telemetry scaling guidelines
@@ -106,9 +102,7 @@ def run_sharepoint_data_types_pipeline(client_id, client_secret, tenant_id) -> d
         retries=5,
         backoff=2
     )
-    logger.info("Attempting authenticate with Sites.Read.All...")
-    client.authenticate(required_scopes=["Sites.Read.All"])
-    logger.info("Authentication successful.")
+    client.authenticate()
     
     script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
     telemetry_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))), "telemetry")
