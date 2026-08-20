@@ -14,6 +14,9 @@
 
 """Identity & Licensing Section view implementation for Flet UI."""
 
+import os
+import csv
+import json
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -23,7 +26,9 @@ import flet as ft
 from core.graph.client import GraphClient
 from core.graph.directory.domains import DomainsService
 from core.graph.directory.organization import OrganizationService
+from core.graph.directory.provisioning_logs import ProvisioningLogsService
 from core.graph.directory.subscribed_skus import SubscribedSKUsService
+from core.graph.directory.user_logs import UserLogsService
 from core.graph.directory.users_groups import UsersGroupsService
 from flet_ui.views.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
@@ -64,6 +69,7 @@ class IdentityLicensingView(BaseSectionView):
             scroll=ft.ScrollMode.ADAPTIVE,
         )
 
+        # 1. Directory Summary (Organization)
         self.org_card = TelemetryCard(
             title="Directory Summary",
             link_text="Organization API Reference",
@@ -75,6 +81,7 @@ class IdentityLicensingView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_org_worker),
         )
 
+        # 2. Subscribed SKUs
         self.sku_card = TelemetryCard(
             title="Subscribed SKUs",
             link_text="Service Plan Reference",
@@ -86,23 +93,51 @@ class IdentityLicensingView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_skus_worker),
         )
 
+        # 3. Verified Domains
         self.domains_card = TelemetryCard(
             title="Verified Domains",
             link_text="Domains API Reference",
             link_url="https://learn.microsoft.com/en-us/graph/api/resources/domain",
+            subtitle="Tenant domain names, authentication types, and federation configuration",
             paginate=True,
             page_size=5,
-            column_weights=[3, 1, 1, 1, 2],
+            column_weights=[3, 2, 1, 1, 1, 3],
             on_reload=lambda: self._reload_card(self._fetch_domains_worker),
         )
 
+        # 4. Users & Groups Breakdown
         self.users_groups_card = TelemetryCard(
             title="Users & Groups Breakdown",
             link_text="Users & Groups API Reference",
             link_url="https://learn.microsoft.com/en-us/graph/api/resources/user",
+            subtitle="Directory object counts across account states and group types",
             paginate=False,
             column_weights=[3, 1],
             on_reload=lambda: self._reload_card(self._fetch_users_groups_worker),
+        )
+
+        # 5. User Creation & Deletion Logs
+        self.user_logs_card = TelemetryCard(
+            title="User Creation & Deletion Logs",
+            link_text="Directory Audit API Reference",
+            link_url="https://learn.microsoft.com/en-us/graph/api/resources/directoryaudit?view=graph-rest-1.0",
+            subtitle="Recent user creation and deletion events from directory audit logs",
+            paginate=True,
+            page_size=5,
+            column_weights=[2, 5],
+            on_reload=lambda: self._reload_card(self._fetch_user_logs_worker),
+        )
+
+        # 6. Directory Provisioning Logs
+        self.provisioning_logs_card = TelemetryCard(
+            title="Directory Provisioning Logs",
+            link_text="Provisioning Logs API Reference",
+            link_url="https://learn.microsoft.com/en-us/graph/api/resources/provisioningobjectsummary",
+            subtitle="SCIM and inbound/outbound directory identity synchronization logs",
+            paginate=True,
+            page_size=5,
+            column_weights=[2, 3, 2, 2, 2],
+            on_reload=lambda: self._reload_card(self._fetch_provisioning_logs_worker),
         )
 
         # Register cards with base class for error status tracking
@@ -111,6 +146,8 @@ class IdentityLicensingView(BaseSectionView):
             self.sku_card,
             self.domains_card,
             self.users_groups_card,
+            self.user_logs_card,
+            self.provisioning_logs_card,
         )
 
         # Placeholder / Initial state
@@ -198,7 +235,7 @@ class IdentityLicensingView(BaseSectionView):
             border_radius=3,
         )
         self.progress_text = ft.Text(
-            "Fetching Identity & Licensing telemetry (0 of 4 completed)...",
+            "Fetching Identity & Licensing telemetry (0 of 6 completed)...",
             size=13,
             weight=ft.FontWeight.W_500,
             color="#166534",
@@ -224,6 +261,8 @@ class IdentityLicensingView(BaseSectionView):
         self.sku_card.set_loading("Fetching subscribed SKUs...")
         self.domains_card.set_loading("Fetching verified domains...")
         self.users_groups_card.set_loading("Fetching user & group counts...")
+        self.user_logs_card.set_loading("Fetching user creation & deletion logs...")
+        self.provisioning_logs_card.set_loading("Fetching provisioning logs...")
 
         self.content = self.cards_column
         try:
@@ -232,7 +271,7 @@ class IdentityLicensingView(BaseSectionView):
             pass
 
         completed_count = 0
-        total_tasks = 4
+        total_tasks = 6
 
         def _track_task_wrapper(func):
             def _wrapped():
@@ -260,6 +299,8 @@ class IdentityLicensingView(BaseSectionView):
             ("SKUs", _track_task_wrapper(self._fetch_skus_worker)),
             ("Domains", _track_task_wrapper(self._fetch_domains_worker)),
             ("UsersGroups", _track_task_wrapper(self._fetch_users_groups_worker)),
+            ("UserLogs", _track_task_wrapper(self._fetch_user_logs_worker)),
+            ("ProvisioningLogs", _track_task_wrapper(self._fetch_provisioning_logs_worker)),
         ]
 
         def _orchestrator():
@@ -300,6 +341,28 @@ class IdentityLicensingView(BaseSectionView):
         client.authenticate(required_scopes=scopes or ["Organization.Read.All", "Directory.Read.All"])
         return client
 
+    def _format_initiated_by(self, raw_val: Any) -> str:
+        """Helper to format initiatedBy json/dict into human-readable text."""
+        if not raw_val:
+            return "-"
+        if isinstance(raw_val, str):
+            try:
+                raw_val = json.loads(raw_val)
+            except Exception:
+                return raw_val
+        if isinstance(raw_val, dict):
+            user_info = raw_val.get("user") or {}
+            if user_info:
+                upn = user_info.get("userPrincipalName")
+                disp = user_info.get("displayName")
+                if upn and disp and upn != disp:
+                    return f"{disp} ({upn})"
+                return disp or upn or "User"
+            app_info = raw_val.get("app") or {}
+            if app_info:
+                return f"App: {app_info.get('displayName') or app_info.get('servicePrincipalName') or 'Application'}"
+        return str(raw_val)
+
     def _fetch_org_worker(self, is_reload: bool = False):
         """Fetches Organization properties from Graph API."""
         start_time = time.time()
@@ -321,6 +384,8 @@ class IdentityLicensingView(BaseSectionView):
                     org.get("isMultipleDataLocationsForServicesEnabled", "null"),
                 ])
                 rows.append(["onPremisesSyncEnabled", org.get("onPremisesSyncEnabled", "null")])
+                rows.append(["onPremisesLastSyncDateTime", org.get("onPremisesLastSyncDateTime", "null")])
+                rows.append(["partnerTenantType", org.get("partnerTenantType", "null")])
                 rows.append(["tenantType", org.get("tenantType", "AAD")])
 
                 # Deduplicate provisioned plans for active/warning services
@@ -429,16 +494,19 @@ class IdentityLicensingView(BaseSectionView):
             domains_list = domains_service.get_domains()
             client.close()
 
-            columns = ["Domain Name", "Status", "Is Default", "Is Initial", "Authentication Type"]
+            columns = ["Domain Name", "Authentication Type", "Default", "Initial", "Verified", "Supported Services"]
             rows: List[List[Any]] = []
 
             for d in domains_list:
+                services = d.get("supportedServices", [])
+                services_str = ", ".join(services) if services else "-"
                 rows.append([
                     d.get("id", "Unknown"),
-                    d.get("status", "Verified"),
-                    str(d.get("isDefault", False)),
-                    str(d.get("isInitial", False)),
                     d.get("authenticationType", "Managed"),
+                    "Yes" if d.get("isDefault") else "No",
+                    "Yes" if d.get("isInitial") else "No",
+                    "Yes" if d.get("isVerified", True) else "No",
+                    services_str,
                 ])
 
             elapsed = time.time() - start_time
@@ -524,3 +592,148 @@ class IdentityLicensingView(BaseSectionView):
                     pass
 
             self._safe_run_on_ui(_on_error)
+
+    def _fetch_user_logs_worker(self, is_reload: bool = False):
+        """Fetches User Creation & Deletion audit logs from Graph API."""
+        start_time = time.time()
+        logger.info("Executing User Creation & Deletion Logs fetch task...")
+        try:
+            client = self._get_client(["AuditLog.Read.All", "Directory.Read.All"])
+            reports_dir = os.path.join(os.getcwd(), "reports", f"{self.tenant}_{self.client_id}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, "directory_user_creation_logs.csv")
+
+            user_logs_service = UserLogsService(client)
+            collected_rows: List[Dict[str, Any]] = []
+
+            def _on_page(page_items):
+                collected_rows.extend(page_items)
+
+            user_logs_service.fetch_user_creation_logs(
+                csv_path=csv_path,
+                max_rows=50,
+                on_page_callback=_on_page,
+            )
+            client.close()
+
+            columns = ["Activity", "Initiated By"]
+            rows: List[List[Any]] = []
+
+            for item in collected_rows:
+                activity = item.get("activity") or ""
+                raw_init = item.get("initiatedBy") or ""
+                if activity == "ERROR":
+                    raise Exception(str(raw_init))
+                initiated_by = self._format_initiated_by(raw_init)
+                rows.append([activity, initiated_by])
+
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.user_logs_card.set_data(columns, rows, execution_time=elapsed)
+                if self.user_logs_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.user_logs_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+
+        except Exception as e:
+            logger.error(f"Error fetching User Creation logs: {e}")
+            err_msg = str(e)
+            if "401" in err_msg or "403" in err_msg or "AuditLog.Read.All" in err_msg:
+                err_msg = "AuditLog.Read.All permission required. Please grant 'AuditLog.Read.All' in Microsoft Entra ID App Registration."
+
+            def _on_error():
+                self.user_logs_card.set_error(f"Failed to fetch user logs: {err_msg}")
+                if self.user_logs_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.user_logs_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_provisioning_logs_worker(self, is_reload: bool = False):
+        """Fetches Directory Provisioning Logs from Graph API."""
+        start_time = time.time()
+        logger.info("Executing Directory Provisioning Logs fetch task...")
+        try:
+            client = self._get_client(["AuditLog.Read.All", "Directory.Read.All"])
+            reports_dir = os.path.join(os.getcwd(), "reports", f"{self.tenant}_{self.client_id}")
+            os.makedirs(reports_dir, exist_ok=True)
+            csv_path = os.path.join(reports_dir, "directory_provisioning_logs.csv")
+
+            prov_service = ProvisioningLogsService(client)
+            collected_rows: List[Dict[str, Any]] = []
+
+            def _on_page(page_items):
+                collected_rows.extend(page_items)
+
+            prov_service.fetch_provisioning_logs(
+                csv_path=csv_path,
+                max_rows=50,
+                on_page_callback=_on_page,
+            )
+            client.close()
+
+            columns = ["Action", "Initiated By", "Target System", "Source System", "Status"]
+            rows: List[List[Any]] = []
+
+            for item in collected_rows:
+                raw_init = item.get("initiatedBy") or ""
+                action = item.get("provisioningAction") or "-"
+                if raw_init == "ERROR":
+                    raise Exception(str(action))
+                
+                initiated_by = self._format_initiated_by(raw_init)
+                target_sys = item.get("targetSystem") or "-"
+                source_sys = item.get("sourceSystem") or "-"
+                
+                status_raw = item.get("provisioningStatusInfo") or "-"
+                status_str = "-"
+                if status_raw:
+                    try:
+                        status_obj = json.loads(status_raw) if isinstance(status_raw, str) else status_raw
+                        if isinstance(status_obj, dict):
+                            status_str = status_obj.get("status") or status_obj.get("result") or str(status_raw)
+                        else:
+                            status_str = str(status_raw)
+                    except Exception:
+                        status_str = str(status_raw)
+
+                rows.append([action, initiated_by, target_sys, source_sys, status_str])
+
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.provisioning_logs_card.set_data(columns, rows, execution_time=elapsed)
+                if self.provisioning_logs_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.provisioning_logs_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+
+        except Exception as e:
+            logger.error(f"Error fetching Provisioning logs: {e}")
+            err_msg = str(e)
+            if "401" in err_msg or "403" in err_msg or "AuditLog.Read.All" in err_msg:
+                err_msg = "AuditLog.Read.All permission required. Please grant 'AuditLog.Read.All' in Microsoft Entra ID App Registration."
+
+            def _on_error():
+                self.provisioning_logs_card.set_error(f"Failed to fetch provisioning logs: {err_msg}")
+                if self.provisioning_logs_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.provisioning_logs_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
