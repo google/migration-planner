@@ -18,16 +18,18 @@ import os
 import csv
 import time
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 import flet as ft
 
 from core.graph.m365_apps.app_usage import run_m365_pipeline
 from core.graph.m365_apps.active_users import run_o365_pipeline
-from core.graph.exchange.mailbox import run_mailbox_usage_pipeline
+from core.graph.exchange.mailbox import run_mailbox_usage_pipeline, format_bytes
 from core.graph.exchange.email_clients import run_email_client_usage_pipeline
 from core.graph.exchange.pst_files import run_pst_discovery_pipeline
 from core.graph.files.sharepoint import run_sharepoint_pipeline
+from core.graph.files.sharepoint_data_types import run_sharepoint_data_types_pipeline
 from core.graph.files.onedrive import run_onedrive_pipeline
 from core.graph.files.msteams_overview import run_msteams_pipeline
 from core.graph.exchange.calendar import run_calendar_telemetry_pipeline
@@ -61,6 +63,10 @@ class AppUsageAdoptionView(BaseSectionView):
             secret=secret,
             on_status_change=on_status_change,
         )
+
+        self._sp_ready_event = threading.Event()
+        self._cached_sp_data: Optional[Dict[str, Any]] = None
+        self._sp_fetch_lock = threading.Lock()
 
         # Card container with vertical scrolling
         self.cards_column = ft.Column(
@@ -103,9 +109,9 @@ class AppUsageAdoptionView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_mailbox_worker),
         )
 
-        # 4. Email Client Support (Summary)
+        # 4. Email Client Classification (Summary)
         self.email_clients_card = TelemetryCard(
-            title="Email Client Support",
+            title="Email Client Classification",
             link_text="Email Apps API",
             link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getemailappusagedetail",
             subtitle="Adoption across browser, desktop Outlook, mobile, and legacy mail protocols",
@@ -114,14 +120,15 @@ class AppUsageAdoptionView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_email_clients_worker),
         )
 
-        # 5. Exchange PST & Archive Files (Summary)
+        # 5. PST Files (Location-based summary)
         self.pst_card = TelemetryCard(
-            title="Exchange PST & Archive Files",
-            link_text="In-Place Archiving API",
-            link_url="https://learn.microsoft.com/en-us/exchange/policy-and-compliance/in-place-archiving/in-place-archiving",
-            subtitle="Cloud-detected PST files and archive mailbox utilization",
+            title="PST Files",
+            link_text="Search API Reference",
+            link_url="https://learn.microsoft.com/en-us/graph/api/resources/search-api-overview",
+            subtitle="Discovered PST files across SharePoint and OneDrive",
+            footnote="* Note: There may be more than 2,000 files in the tenant; this tool only checks up to 2,000 files.",
             paginate=False,
-            column_weights=[3, 2],
+            column_weights=[2, 5],
             on_reload=lambda: self._reload_card(self._fetch_pst_worker),
         )
 
@@ -130,15 +137,27 @@ class AppUsageAdoptionView(BaseSectionView):
             title="SharePoint Site Storage",
             link_text="SharePoint Usage API",
             link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getsharepointsiteusagedetail",
-            subtitle="Site collections, storage consumption, total files, and heavy sites",
+            subtitle="Site collections, storage consumption, total files, and data types",
             paginate=False,
             column_weights=[3, 2],
             on_reload=lambda: self._reload_card(self._fetch_sharepoint_worker),
         )
 
-        # 7. OneDrive Accounts & Storage (Summary)
+        # 6b. Heavy Sites Inventory (Paginated)
+        self.heavy_sites_card = TelemetryCard(
+            title="Heavy Sites Inventory",
+            link_text="SharePoint Usage API",
+            link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getsharepointsiteusagedetail",
+            subtitle="Top storage-consuming SharePoint sites across tenant",
+            paginate=True,
+            page_size=5,
+            column_weights=[4, 4, 2],
+            on_reload=lambda: self._reload_card(self._fetch_heavy_sites_worker),
+        )
+
+        # 7. OneDrive Accounts & Storage (180D)
         self.onedrive_card = TelemetryCard(
-            title="OneDrive Accounts & Storage",
+            title="OneDrive Accounts & Storage (180D)",
             link_text="OneDrive Usage API",
             link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getonedriveusageaccountdetail",
             subtitle="Personal accounts, storage used, active sync clients, and OneNote users",
@@ -158,9 +177,9 @@ class AppUsageAdoptionView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_teams_worker),
         )
 
-        # 9. Calendar & Meeting Telemetry (Summary)
+        # 9. Exchange Online Calendar Environment
         self.calendar_card = TelemetryCard(
-            title="Calendar & Meeting Telemetry",
+            title="Exchange Online Calendar Environment",
             link_text="Calendar API Reference",
             link_url="https://learn.microsoft.com/en-us/graph/api/resources/event",
             subtitle="Room mailboxes, equipment resources, and calendar sharing policies",
@@ -177,6 +196,7 @@ class AppUsageAdoptionView(BaseSectionView):
             self.email_clients_card,
             self.pst_card,
             self.sharepoint_card,
+            self.heavy_sites_card,
             self.onedrive_card,
             self.teams_card,
             self.calendar_card,
@@ -246,6 +266,15 @@ class AppUsageAdoptionView(BaseSectionView):
             ],
         )
 
+    def _ensure_card_position(self, card: ft.Control, after_card: Optional[ft.Control] = None):
+        """Ensures a card is present in cards_column in its deterministic order."""
+        if card not in self.cards_column.controls:
+            if after_card and after_card in self.cards_column.controls:
+                idx = self.cards_column.controls.index(after_card) + 1
+                self.cards_column.controls.insert(idx, card)
+            else:
+                self.cards_column.controls.append(card)
+
     def fetch_all_data(self):
         """Initiates concurrent data fetch with maximum 2 parallel worker threads."""
         if self.is_fetching:
@@ -292,8 +321,9 @@ class AppUsageAdoptionView(BaseSectionView):
         self.active_users_card.set_loading("Fetching active users trend...")
         self.mailbox_card.set_loading("Fetching mailbox usage...")
         self.email_clients_card.set_loading("Fetching email client breakdown...")
-        self.pst_card.set_loading("Searching PST & archive files...")
-        self.sharepoint_card.set_loading("Fetching SharePoint site storage...")
+        self.pst_card.set_loading("Searching PST files in SharePoint and OneDrive...")
+        self.sharepoint_card.set_loading("Fetching SharePoint site storage & data types...")
+        self.heavy_sites_card.set_loading("Fetching top heavy SharePoint sites...")
         self.onedrive_card.set_loading("Fetching OneDrive usage...")
         self.teams_card.set_loading("Fetching Teams activity...")
         self.calendar_card.set_loading("Fetching calendar telemetry...")
@@ -364,7 +394,6 @@ class AppUsageAdoptionView(BaseSectionView):
 
             self._safe_run_on_ui(_on_all_completed)
 
-        import threading
         threading.Thread(target=_orchestrator, daemon=True).start()
 
     def _fetch_m365_apps_worker(self, is_reload: bool = False):
@@ -446,16 +475,31 @@ class AppUsageAdoptionView(BaseSectionView):
         logger.info("Executing Mailbox usage fetch task...")
         try:
             mb_data = run_mailbox_usage_pipeline(self.client_id, self.secret, self.tenant)
-            columns = ["Metric Name", "Value"]
+            
+            s_count = mb_data.get("shared_mailboxes_count")
+            s_count_str = f"{s_count:,} Shared Mailboxes" if s_count is not None else "Error/Unavailable"
+            s_size_str = mb_data.get("shared_mailboxes_total_formatted", "Error/Unavailable")
+            
+            pf_count = mb_data.get("public_folders_count")
+            pf_count_str = f"{pf_count:,} Public Folders" if pf_count is not None else "Error/Unavailable"
+            
+            mail_pf_count = mb_data.get("mail_public_folders_count")
+            mail_pf_count_str = f"{mail_pf_count:,} Public Folders" if mail_pf_count is not None else "Error/Unavailable"
+            
+            pf_size_str = mb_data.get("public_folders_total_formatted", "Error/Unavailable")
+
+            columns = ["Mailbox Metric Description", "Value / Measurement"]
             rows = [
-                ["Total Mailboxes", f"{mb_data.get('total_mailboxes', 0):,}"],
-                ["Total Storage Used", mb_data.get("total_storage_formatted", "0.00 Bytes")],
+                ["Total Mailboxes Analyzed", f"{mb_data.get('total_mailboxes', 0):,} Mailboxes"],
+                ["Total Size of All Mailboxes", mb_data.get("total_storage_formatted", "0.00 Bytes")],
                 ["Average Mailbox Size", mb_data.get("average_mailbox_size_formatted", "0.00 Bytes")],
-                ["Total Emails / Items", f"{mb_data.get('total_emails', 0):,}"],
-                ["Shared Mailboxes Count", f"{mb_data.get('shared_mailboxes_count', 0):,}" if mb_data.get("shared_mailboxes_count") is not None else "Unavailable (PowerShell)"],
-                ["Shared Mailboxes Storage", mb_data.get("shared_mailboxes_total_formatted", "Unavailable")],
-                ["Public Folders Count", f"{mb_data.get('public_folders_count', 0):,}" if mb_data.get("public_folders_count") is not None else "Unavailable (PowerShell)"],
-                ["Public Folders Storage", mb_data.get("public_folders_total_formatted", "Unavailable")],
+                ["Total Number of Emails", f"{mb_data.get('total_emails', 0):,} Emails"],
+                ["Average Emails per User", f"{mb_data.get('average_emails', 0.0):,.0f} Emails"],
+                ["Shared Mailboxes Count", s_count_str],
+                ["Total Shared Mailbox Size", s_size_str],
+                ["Public Folders Count", pf_count_str],
+                ["Mail-enabled Public Folders Count", mail_pf_count_str],
+                ["Total Public Folder Size", pf_size_str],
             ]
             elapsed = time.time() - start_time
 
@@ -485,13 +529,13 @@ class AppUsageAdoptionView(BaseSectionView):
             self._safe_run_on_ui(_on_error)
 
     def _fetch_email_clients_worker(self, is_reload: bool = False):
-        """Fetches Email Client Support breakdown."""
+        """Fetches Email Client Classification breakdown."""
         start_time = time.time()
-        logger.info("Executing Email Client Support fetch task...")
+        logger.info("Executing Email Client Classification fetch task...")
         try:
             result = run_email_client_usage_pipeline(self.client_id, self.secret, self.tenant)
             stats = result.get("client_stats", {})
-            columns = ["Client Category", "Active Users"]
+            columns = ["Client Category", "Active Users (180 Days)"]
             rows = [
                 ["Outlook for Web (Browser)", f"{stats.get('browser_users', 0):,}"],
                 ["Outlook for Windows", f"{stats.get('desktop_win', 0):,}"],
@@ -520,7 +564,7 @@ class AppUsageAdoptionView(BaseSectionView):
             err_msg = str(e)
 
             def _on_error():
-                self.email_clients_card.set_error(f"Failed to fetch Email Client Support: {err_msg}")
+                self.email_clients_card.set_error(f"Failed to fetch Email Client Classification: {err_msg}")
                 if self.email_clients_card not in self.cards_column.controls:
                     self.cards_column.controls.append(self.email_clients_card)
                 try:
@@ -531,17 +575,32 @@ class AppUsageAdoptionView(BaseSectionView):
             self._safe_run_on_ui(_on_error)
 
     def _fetch_pst_worker(self, is_reload: bool = False):
-        """Fetches PST files and archive summary."""
+        """Fetches PST files discovery in cloud locations."""
         start_time = time.time()
-        logger.info("Executing PST & Archive discovery task...")
+        logger.info("Executing PST discovery task...")
         try:
             result = run_pst_discovery_pipeline(self.client_id, self.secret, self.tenant)
-            pst_data = result.get("pst_cloud_data", {})
-            columns = ["Metric Name", "Value / Status"]
+            pst_err = result.get("pst_error")
+            cloud_count = 0
+            
+            if pst_err:
+                cloud_str = f"✖ Error: {pst_err}"
+            else:
+                pst_cloud = result.get("pst_cloud_data", {})
+                cloud_bytes = 0
+                if pst_cloud and "value" in pst_cloud:
+                    for item in pst_cloud.get("value", []):
+                        for hc in item.get("hitsContainers", []):
+                            cloud_count += hc.get("total", 0)
+                            for hit in hc.get("hits", []):
+                                cloud_bytes += int(hit.get("resource", {}).get("size", 0))
+
+                cloud_size_str = f" ({format_bytes(cloud_bytes)})" if cloud_bytes > 0 else ""
+                cloud_str = f"{cloud_count:,} Files{cloud_size_str}" if cloud_count > 0 else "None Detected"
+
+            columns = ["PST Storage Location", "Discovered File Count & Size"]
             rows = [
-                ["Total Cloud PST Files Discovered", f"{pst_data.get('total_pst_count', 0):,}"],
-                ["PST Total Storage", pst_data.get("total_pst_storage_formatted", "0.00 Bytes")],
-                ["Archive Mailboxes Status", pst_data.get("archive_status", "Inspected")],
+                ["Cloud (SharePoint & OneDrive)", cloud_str]
             ]
             elapsed = time.time() - start_time
 
@@ -571,25 +630,54 @@ class AppUsageAdoptionView(BaseSectionView):
             self._safe_run_on_ui(_on_error)
 
     def _fetch_sharepoint_worker(self, is_reload: bool = False):
-        """Fetches SharePoint site usage."""
+        """Fetches SharePoint site usage, data types, and heavy sites inventory."""
         start_time = time.time()
-        logger.info("Executing SharePoint Site Storage fetch task...")
+        logger.info("Executing SharePoint Site Storage & Data Types fetch task...")
         try:
-            sp_data = run_sharepoint_pipeline(self.client_id, self.secret, self.tenant)
-            columns = ["Metric Name", "Value"]
-            rows = [
-                ["Total Site Collections", f"{sp_data.get('total_sites', 0):,}"],
-                ["Total Storage Used", sp_data.get("total_storage_formatted", "0.00 Bytes")],
-                ["Total Files Stored", f"{sp_data.get('total_files', 0):,}"],
-                ["Active Files", f"{sp_data.get('active_files', 0):,}"],
-                ["Active Files Percentage", f"{sp_data.get('active_files_pct', 0.0):.1f}%"],
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                usage_future = executor.submit(run_sharepoint_pipeline, self.client_id, self.secret, self.tenant)
+                datatypes_future = executor.submit(run_sharepoint_data_types_pipeline, self.client_id, self.secret, self.tenant)
+                
+                usage_data = usage_future.result()
+                datatypes_data = datatypes_future.result()
+
+            combined_data = {**usage_data, **datatypes_data}
+
+            # Summary Card
+            columns_sp = ["SharePoint Metric Description", "Value / Measurement"]
+            rows_sp = [
+                ["Total Sites Count", f"{combined_data.get('total_sites', 0):,} Sites"],
+                ["Total Storage Used", combined_data.get("total_storage_formatted", "0.00 Bytes")],
+                ["Total Files Stored", f"{combined_data.get('total_files', 0):,} Files"],
+                ["Active Files (180D)", f"{combined_data.get('active_files', 0):,} Files ({combined_data.get('active_files_pct', 0.0):.1f}%)"],
+                ["Document Libraries", f"{combined_data.get('Document Libraries', 0):,}"],
+                ["Lists", f"{combined_data.get('Lists', 0):,}"],
+                ["Web Pages", f"{combined_data.get('Web Pages', 0):,}"]
             ]
+
+            # Heavy Sites Card
+            columns_heavy = ["URL", "Site ID", "Storage (GB)"]
+            rows_heavy: List[List[Any]] = []
+            heavy_sites_list = combined_data.get("heavy_sites", [])
+            for site in heavy_sites_list:
+                bytes_val = float(site.get("Storage Used (Byte)", 0))
+                gb_val = bytes_val / (1024 ** 3)
+                rows_heavy.append([
+                    site.get("Site URL", "Unknown"),
+                    site.get("Site Id", "-"),
+                    f"{gb_val:.2f} GB"
+                ])
+
             elapsed = time.time() - start_time
 
             def _on_success():
-                self.sharepoint_card.set_data(columns, rows, execution_time=elapsed)
+                self.sharepoint_card.set_data(columns_sp, rows_sp, execution_time=elapsed)
+                self.heavy_sites_card.set_data(columns_heavy, rows_heavy, execution_time=elapsed)
+
                 if self.sharepoint_card not in self.cards_column.controls:
                     self.cards_column.controls.append(self.sharepoint_card)
+                if self.heavy_sites_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.heavy_sites_card)
                 try:
                     self.update()
                 except Exception:
@@ -602,8 +690,11 @@ class AppUsageAdoptionView(BaseSectionView):
 
             def _on_error():
                 self.sharepoint_card.set_error(f"Failed to fetch SharePoint Site Storage: {err_msg}")
+                self.heavy_sites_card.set_error(f"Failed to fetch Heavy Sites Inventory: {err_msg}")
                 if self.sharepoint_card not in self.cards_column.controls:
                     self.cards_column.controls.append(self.sharepoint_card)
+                if self.heavy_sites_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.heavy_sites_card)
                 try:
                     self.update()
                 except Exception:
@@ -617,14 +708,14 @@ class AppUsageAdoptionView(BaseSectionView):
         logger.info("Executing OneDrive usage fetch task...")
         try:
             od_data = run_onedrive_pipeline(self.client_id, self.secret, self.tenant)
-            columns = ["Metric Name", "Value"]
+            columns = ["OneDrive Metric Description", "Value / Measurement"]
             rows = [
-                ["Total User Accounts", f"{od_data.get('total_accounts', 0):,}"],
+                ["Total User Accounts", f"{od_data.get('total_accounts', 0):,} Accounts"],
                 ["Total Storage Used", od_data.get("total_storage_formatted", "0.00 Bytes")],
-                ["Total Files Stored", f"{od_data.get('total_files', 0):,}"],
-                ["Active Files", f"{od_data.get('active_files', 0):,}"],
+                ["Total Files Stored", f"{od_data.get('total_files', 0):,} Files"],
+                ["Active Files (180D)", f"{od_data.get('active_files', 0):,} Files"],
                 ["Active Sync Client Users", f"{od_data.get('sync_users', 0):,} ({od_data.get('sync_users_pct', 0.0):.1f}%)"],
-                ["OneNote Active Users", f"{od_data.get('onenote_users', 0):,}"],
+                ["OneNote Active Users", f"{od_data.get('onenote_users', 0):,} Users"],
             ]
             elapsed = time.time() - start_time
 
@@ -721,17 +812,47 @@ class AppUsageAdoptionView(BaseSectionView):
             self._safe_run_on_ui(_on_error)
 
     def _fetch_calendar_worker(self, is_reload: bool = False):
-        """Fetches Calendar & Meeting telemetry."""
+        """Fetches Exchange Online Calendar Environment telemetry."""
         start_time = time.time()
         logger.info("Executing Calendar telemetry fetch task...")
         try:
             cal_data = run_calendar_telemetry_pipeline(self.client_id, self.secret, self.tenant)
-            columns = ["Configuration Property", "Status / Value"]
+            
+            rooms_err = cal_data.get("RoomsError")
+            devs_err = cal_data.get("DevicesError")
+            rooms_count = cal_data.get("RoomsCount", 0)
+            equip_count = cal_data.get("EquipmentCount", 0)
+
+            if rooms_err and devs_err:
+                res_val = str(rooms_err)
+            else:
+                r_str = "Error" if rooms_err else str(rooms_count)
+                e_str = "Error" if devs_err else str(equip_count)
+                tot = "Error" if (rooms_err or devs_err) else str(rooms_count + equip_count)
+                res_val = f"Total: {tot} ({r_str} Rooms, {e_str} Equipment)"
+
+            reserve_val = cal_data.get("CanUsersReserveRooms")
+            if isinstance(reserve_val, bool):
+                reserve_val = "Yes" if reserve_val else "No"
+            elif reserve_val is None:
+                reserve_val = "No"
+
+            att_val = cal_data.get("CanShareAttachments")
+            if isinstance(att_val, bool):
+                attachments_val = "Yes" if att_val else "No"
+            elif att_val is None:
+                attachments_val = "Yes"
+            else:
+                attachments_val = str(att_val)
+
+            naming = cal_data.get("NamingConvention") or "None found"
+
+            columns = ["Calendar Configuration / Metric", "Value / Configuration"]
             rows = [
-                ["Room Mailboxes Count", f"{cal_data.get('rooms_count', 0):,}" if not cal_data.get("rooms_error") else f"Unavailable ({cal_data.get('rooms_error')})"],
-                ["Equipment Mailboxes Count", f"{cal_data.get('equipment_count', 0):,}" if not cal_data.get("equipment_error") else f"Unavailable ({cal_data.get('equipment_error')})"],
-                ["Calendar Attachment Sharing Allowed", "True" if cal_data.get("can_share_attachments") else "False"],
-                ["Organization Apps Permitted", f"{len(cal_data.get('organization_apps', [])):,} Apps"],
+                ["Room & Resource Reservation", str(reserve_val)],
+                ["Calendar Resources", res_val],
+                ["Resource Naming Convention", str(naming)],
+                ["Calendar Attachments Enabled", str(attachments_val)],
             ]
             elapsed = time.time() - start_time
 
@@ -759,3 +880,5 @@ class AppUsageAdoptionView(BaseSectionView):
                     pass
 
             self._safe_run_on_ui(_on_error)
+
+

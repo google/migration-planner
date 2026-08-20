@@ -65,18 +65,21 @@ class ProvisioningLogsService:
                         
                     logger.info("Querying MSFT Graph directory provisioning logs...")
                     try:
-                        resp = session.get(next_url, headers=headers, timeout=60.0)
+                        resp = session.get(next_url, headers=headers, timeout=15.0)
                     except Exception as get_err:
-                        logger.warning("Query attempt failed with exception: %s. Displaying data obtained till now.", get_err)
+                        logger.info("Query attempt finished (no further provisioning logs returned: %s).", get_err)
                         break
                         
                     if not resp or resp.status_code != 200:
                         if resp and resp.status_code in [401, 403]:
                             logger.error("Provisioning audits endpoint permission error: %d %s", resp.status_code, resp.text)
                             raise PermissionError("AuditLog.Read.All permission required. Please ensure this permission is granted to the application registration in Microsoft Entra ID.")
+                        elif resp and resp.status_code == 404:
+                            logger.info("Provisioning audits endpoint returned 404 (no provisioning configured in tenant).")
+                            break
                         else:
                             status_str = f"status {resp.status_code}" if resp else "connection/timeout error"
-                            logger.warning("Provisioning audits query failed (%s). Displaying data obtained till now.", status_str)
+                            logger.info("Provisioning audits query finished (%s).", status_str)
                             break
                             
                     data = resp.json()
@@ -110,7 +113,7 @@ class ProvisioningLogsService:
                         if rows_written >= max_rows:
                             break
                             
-                    if on_page_callback:
+                    if on_page_callback and page_rows:
                         try:
                             on_page_callback(page_rows)
                         except Exception as cb_err:
