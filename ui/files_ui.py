@@ -1634,7 +1634,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         warning_msg = (
             "Enabling 'Include Historical File Versions in Corpus Size' will cause severe performance degradation "
             "as it requires fetching versions for every single file. "
-            "It is highly recommended to only enable this for a very small corpus (e.g., one SharePoint site or OneDrive site)."
+            "It is highly recommended to only enable this for a very small corpus (e.g., one SharePoint site or OneDrive site).\n\n"
+            "Would you still like to continue?"
         )
         should_continue = messagebox.askyesno(
             title="Performance Warning",
@@ -1649,7 +1650,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         warning_msg = (
             "Enabling 'Scan for Encrypted Files (RMS/MIP)' will cause performance degradation "
             "as it requires fetching content headers for every single file to detect encryption. "
-            "It is highly recommended to only enable this if you need to identify RMS/MIP protected files."
+            "It is highly recommended to only enable this if you need to identify RMS/MIP protected files.\n\n"
+            "Would you still like to continue?"
         )
         should_continue = messagebox.askyesno(
             title="Performance Warning",
