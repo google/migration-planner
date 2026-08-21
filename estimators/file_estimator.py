@@ -1890,9 +1890,6 @@ class FileEstimator(Estimator):
             if not node or not drive_id:
                 return
 
-            if not node.parent_id:
-                return
-
             subtree_count = node.direct_file_count + node.direct_shortcut_count
             max_depth = 1 if (node.direct_file_count > 0 or node.direct_shortcut_count > 0) else 0
 
@@ -2091,32 +2088,34 @@ class FileEstimator(Estimator):
         drive_metric: Dict[str, Any]
     ):
         with self.condition:
-            drive_metric["maxEffectiveDepth"] = max(drive_metric["maxEffectiveDepth"], resource_metric.get("maxDepth", 0))
-            drive_metric["folderCount"] += 1
+            if node.parent_id:
+                drive_metric["maxEffectiveDepth"] = max(drive_metric["maxEffectiveDepth"], resource_metric.get("maxDepth", 0))
+                drive_metric["folderCount"] += 1
             drive_metric["fileCount"] += node.direct_file_count
             drive_metric["shortcutCount"] += node.direct_shortcut_count
 
-            if resource_metric.get("subTreeCount", 0) >= self.config.large_resource_count_limit:
-                drive_metric["largeResources"].append({
-                    "type": ResourceType.FOLDER.value,
-                    "id": node.id,
-                    "subTreeCount": resource_metric["subTreeCount"],
-                    "Limit": self.config.large_resource_count_limit,
-                    "webUrl": node.web_url
-                })
-                if node.web_url:
-                    self.id_to_display[node.id] = node.web_url
+            if node.parent_id:
+                if resource_metric.get("subTreeCount", 0) >= self.config.large_resource_count_limit:
+                    drive_metric["largeResources"].append({
+                        "type": ResourceType.FOLDER.value,
+                        "id": node.id,
+                        "subTreeCount": resource_metric["subTreeCount"],
+                        "Limit": self.config.large_resource_count_limit,
+                        "webUrl": node.web_url
+                    })
+                    if node.web_url:
+                        self.id_to_display[node.id] = node.web_url
 
-            if resource_metric.get("subTreeCount", 0) >= self.config.warning_resource_count_limit:
-                drive_metric["warningResources"].append({
-                    "type": ResourceType.FOLDER.value,
-                    "id": node.id,
-                    "subTreeCount": resource_metric["subTreeCount"],
-                    "Limit": self.config.warning_resource_count_limit,
-                    "webUrl": node.web_url
-                })
-                if node.web_url:
-                    self.id_to_display[node.id] = node.web_url
+                if resource_metric.get("subTreeCount", 0) >= self.config.warning_resource_count_limit:
+                    drive_metric["warningResources"].append({
+                        "type": ResourceType.FOLDER.value,
+                        "id": node.id,
+                        "subTreeCount": resource_metric["subTreeCount"],
+                        "Limit": self.config.warning_resource_count_limit,
+                        "webUrl": node.web_url
+                    })
+                    if node.web_url:
+                        self.id_to_display[node.id] = node.web_url
 
     def _log_and_fail(self, message: str, e: Exception, failures: List[Dict[str, str]]):
         if self.logger:
