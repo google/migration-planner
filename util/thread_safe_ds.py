@@ -1,5 +1,9 @@
 import threading
-from sortedcontainers import SortedSet
+try:
+    from sortedcontainers import SortedSet
+except ImportError:
+    class SortedSet(set):
+        pass
 
 # To-Do: Use finer grained locking
 class AtomicInt():
