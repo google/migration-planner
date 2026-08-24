@@ -530,7 +530,7 @@ class UsageAdoptionDashboardView(ft.Container):
             # Show success message
             self.page_ref.snack_bar = ft.SnackBar(
                 content=ft.Text(f"Success! Report exported to {filepath}"),
-                bgcolor=ft.colors.GREEN_700
+                bgcolor="green700"
             )
             self.page_ref.snack_bar.open = True
             self.page_ref.update()
@@ -538,7 +538,7 @@ class UsageAdoptionDashboardView(ft.Container):
             # Show error message
             self.page_ref.snack_bar = ft.SnackBar(
                 content=ft.Text(f"Error generating PDF: {str(e)}"),
-                bgcolor=ft.colors.RED_700
+                bgcolor="red700"
             )
             self.page_ref.snack_bar.open = True
             self.page_ref.update()
