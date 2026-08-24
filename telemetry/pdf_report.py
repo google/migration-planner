@@ -880,7 +880,8 @@ def _add_entra_suite_section(story, data, custom_styles, primary_color, secondar
         else:
             mode_counts = Counter()
             for app in sso_apps:
-                mode = app.get("preferredSingleSignOnMode", "").strip() or "None"
+                raw_mode = app.get("preferredSingleSignOnMode")
+                mode = (raw_mode.strip() if raw_mode else "None") or "None"
                 mode_counts[mode] += 1
                 
             sso_table_data = [[
