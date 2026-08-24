@@ -1,0 +1,5 @@
+[console_scripts]
+flet = flet.cli:main
+
+[pytest11]
+flet = flet.pytest_plugin

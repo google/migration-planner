@@ -1,0 +1,259 @@
+from dataclasses import field
+from typing import Optional
+
+from flet.controls.alignment import Alignment
+from flet.controls.base_control import control
+from flet.controls.buttons import OutlinedBorder
+from flet.controls.control import Control
+from flet.controls.dialog_control import DialogControl
+from flet.controls.padding import PaddingValue
+from flet.controls.text_style import TextStyle
+from flet.controls.types import (
+    ClipBehavior,
+    ColorValue,
+    MainAxisAlignment,
+    Number,
+    StrOrControl,
+)
+from flet.utils.validation import V, ValidationRules
+
+__all__ = ["AlertDialog"]
+
+
+@control("AlertDialog")
+class AlertDialog(DialogControl):
+    """
+    Can be used to inform the user about situations that require acknowledgement.
+
+    It has an optional :attr:`title` and an optional list of :attr:`actions` . The
+    `title` is displayed above the :attr:`content` and the `actions` are displayed
+    below the `content`.
+
+    Example:
+    ```python
+    ft.AlertDialog(
+        title=ft.Text("Session expired"),
+        content=ft.Text("Please sign in again to continue."),
+        actions=[ft.TextButton("Dismiss")],
+        open=True,
+    )
+    ```
+    """
+
+    content: Optional[Control] = None
+    """
+    The content of this dialog is displayed in the center of this dialog in a lighter \
+    font.
+
+    Typically this is a :class:`~flet.Column`
+    that contains this dialog's :class:`~flet.Text` message.
+    """
+
+    modal: bool = False
+    """
+    Whether dialog can be dismissed/closed by clicking the area outside of it.
+    """
+
+    title: Optional[StrOrControl] = None
+    """
+    The title of this dialog is displayed in a large font at its top.
+
+    Typically a :class:`~flet.Text` control.
+    """
+
+    actions: list[Control] = field(default_factory=list)
+    """
+    A set of actions that are displayed at the bottom of this dialog.
+
+    Typically this is a list of :class:`~flet.TextButton` controls.
+
+    Raises:
+        ValueError: If none of :attr:`title`, :attr:`content`, or
+            :attr:`actions` are provided, as the dialog would have nothing to display.
+    """
+
+    bgcolor: Optional[ColorValue] = None
+    """
+    The background color of this dialog's surface.
+    """
+
+    elevation: Optional[Number] = None
+    """
+    Defines the elevation (z-coordinate) at which this dialog should appear.
+    """
+
+    icon: Optional[Control] = None
+    """
+    A control that is displayed at the top of this dialog.
+
+    Typically a :class:`~flet.Icon` control.
+    """
+
+    title_padding: Optional[PaddingValue] = None
+    """
+    Padding around the :attr:`title`.
+
+    If there is no title, no padding will be provided. Otherwise, this padding is used.
+
+    Defaults to `24` pixels on the top, left, and right of the :attr:`title`.
+    If the :attr:`content` is not `None`, then no bottom padding
+    is provided (see :attr:`content_padding`).
+    If it is not set, then an extra `20` pixels of bottom padding is added to separate
+    the :attr:`title` from the :attr:`actions`.
+    """
+
+    content_padding: Optional[PaddingValue] = None
+    """
+    Padding around the :attr:`content`.
+
+    If there is no `content`, no padding will be provided. Otherwise, padding of `20`
+    pixels is provided above the content to separate the :attr:`content` from
+    the :attr:`title`, and padding of `24` pixels is provided on the left, right,
+    and bottom to separate the :attr:`content` from the other edges of this dialog.
+    """
+
+    actions_padding: Optional[PaddingValue] = None
+    """
+    Padding around the set of :attr:`actions` at the bottom of this dialog.
+
+    Typically used to provide padding to the button bar between the button bar and the
+    edges of this dialog.
+
+    If are no actions, then no padding will be included. The padding around the button
+    bar defaults to zero.
+    """
+
+    actions_alignment: Optional[MainAxisAlignment] = None
+    """
+    Defines the horizontal layout of the actions.
+
+    Internally defaults to :attr:`flet.MainAxisAlignment.END`.
+    """
+
+    shape: Optional[OutlinedBorder] = None
+    """
+    The shape of this dialog.
+
+    If `None`, defaults to :attr:`flet.DialogTheme.shape`.
+    If it is also `None`, it defaults to `RoundedRectangleBorder(radius=4.0)`.
+    """
+
+    inset_padding: Optional[PaddingValue] = None
+    """
+    Padding around this dialog itself.
+
+    Defaults to `Padding.symmetric(vertical=40, horizontal=24)` - `40` pixels
+    horizontally and `24` pixels vertically outside of this dialog box.
+    """
+
+    icon_padding: Optional[PaddingValue] = None
+    """
+    Padding around the :attr:`icon`.
+    """
+
+    action_button_padding: Optional[PaddingValue] = None
+    """
+    The padding that surrounds each button in :attr:`actions`.
+    """
+
+    shadow_color: Optional[ColorValue] = None
+    """
+    The color used to paint a drop shadow under this dialog, which reflects this \
+    dialog's :attr:`elevation`.
+    """
+
+    icon_color: Optional[ColorValue] = None
+    """
+    The color for the Icon in the :attr:`icon` of this dialog.
+
+    If `None`, :attr:`flet.DialogTheme.icon_color` is used.
+    If that is null, defaults to color scheme's :attr:`flet.ColorScheme.secondary` if
+    :attr:`flet.Theme.use_material3` is `True`, `Colors.BLACK` otherwise.
+    """
+
+    scrollable: bool = False
+    """
+    Determines whether the :attr:`title` and :attr:`content` controls are wrapped in a \
+    scrollable.
+
+    This configuration is used when the `title` and `content` are expected to overflow.
+    Both `title` and `content` are wrapped in a scroll view, allowing all overflowed
+    content to be visible while still showing the button bar.
+    """
+
+    actions_overflow_button_spacing: Optional[Number] = None
+    """
+    The spacing between :attr:`actions` when the `OverflowBar` switches to a column \
+    layout because the actions don't fit horizontally.
+
+    If the controls in `actions` do not fit into a single row, they are arranged into a
+    column. This parameter provides additional vertical space between buttons when it
+    does overflow.
+    """
+
+    alignment: Optional[Alignment] = None
+    """
+    How to align this dialog.
+
+    If `None`, then :attr:`flet.DialogTheme.alignment` is used.
+    If that is also `None`, the default is :attr:`flet.Alignment.CENTER`.
+    """
+
+    content_text_style: Optional[TextStyle] = None
+    """
+    The style for the text in the :attr:`content` of this dialog.
+
+    If `None`, :attr:`flet.DialogTheme.content_text_style` is used.
+    If that's is also `None`, defaults to
+    :attr:`flet.TextTheme.body_medium` (if :attr:`flet.Theme.use_material3` is `True`;
+    :attr:`flet.TextTheme.title_medium` otherwise) of
+    :attr:`flet.Theme.text_theme`.
+    """
+
+    title_text_style: Optional[TextStyle] = None
+    """
+    The text style for the :attr:`title` of this dialog.
+
+    If `None`, :attr:`flet.DialogTheme.title_text_style` is used.
+    If that is also `None`, the default comes from the active dialog theme.
+    """
+
+    clip_behavior: ClipBehavior = ClipBehavior.NONE
+    """
+    Defines how the contents of this dialog are clipped (or not) to the given \
+    :attr:`shape`.
+    """
+
+    semantics_label: Optional[str] = None
+    """
+    The semantic label of this dialog used by accessibility frameworks to announce \
+    screen transitions when this dialog is opened and closed.
+
+    On iOS, if this label is not provided, a semantic label will be inferred from the
+    :attr:`title` if it is not `None`.
+    """
+
+    barrier_color: Optional[ColorValue] = None
+    """
+    The color of the modal barrier below this dialog.
+
+    If `None`, then :attr:`flet.DialogTheme.barrier_color` is used.
+    If that is also `None`, the default is `Colors.BLACK_54`.
+    """
+
+    __validation_rules__: ValidationRules = (
+        V.ensure(
+            lambda ctrl: (
+                (
+                    isinstance(ctrl.title, str)
+                    or (isinstance(ctrl.title, Control) and ctrl.title.visible)
+                )
+                or (isinstance(ctrl.content, Control) and ctrl.content.visible)
+                or any(action.visible for action in ctrl.actions)
+            ),
+            message=(
+                "AlertDialog has nothing to display. Provide at minimum one of the "
+                "following: title, content, actions"
+            ),
+        ),
+    )

@@ -1,0 +1,154 @@
+from typing import Annotated, Optional
+
+from flet.controls.base_control import control
+from flet.controls.control import Control
+from flet.controls.control_event import ControlEventHandler
+from flet.controls.dialog_control import DialogControl
+from flet.controls.margin import MarginValue
+from flet.controls.padding import PaddingValue
+from flet.controls.text_style import TextStyle
+from flet.controls.types import (
+    ColorValue,
+    IconDataOrControl,
+    Number,
+    StrOrControl,
+)
+from flet.utils.validation import V
+
+__all__ = ["Banner"]
+
+
+@control("Banner")
+class Banner(DialogControl):
+    """
+    A banner displays an important, succinct message, and provides actions for users \
+    to address (or dismiss the banner). A user action is required for it to be \
+    dismissed.
+
+    Banners are displayed at the top of the screen, below a top app bar. They are
+    persistent and non-modal, allowing the user to either ignore them or interact with
+    them at any time.
+
+    Example:
+    ```python
+    banner = ft.Banner(
+        leading=ft.Icon(ft.Icons.INFO_OUTLINED, color=ft.Colors.PRIMARY),
+        content=ft.Text("Backup completed successfully."),
+        actions=[ft.TextButton("Dismiss")],
+        bgcolor=ft.Colors.SURFACE_CONTAINER_LOW,
+        open=True,
+    )
+    page.show_dialog(banner)
+    ```
+    """
+
+    content: Annotated[
+        StrOrControl,
+        V.str_or_visible_control(),
+    ]
+    """
+    The content of this banner.
+
+    Typically a :class:`~flet.Text` control.
+
+    Raises:
+        ValueError: If :attr:`content` is not visible.
+    """
+
+    actions: Annotated[
+        list[Control],
+        V.visible_controls(min_count=1),
+    ]
+    """
+    The set of actions that are displayed at the bottom or trailing side of this \
+    banner.
+
+    Typically this is a list of :class:`~flet.TextButton`
+    controls.
+
+    Raises:
+        ValueError: If it does not contain at least one visible `Control`.
+    """
+
+    leading: Optional[IconDataOrControl] = None
+    """
+    The leading Control of this banner.
+
+    Typically an :class:`~flet.Icon` control.
+    """
+
+    leading_padding: Optional[PaddingValue] = None
+    """
+    The amount of space by which to inset the :attr:`leading` control.
+
+    Defaults to :attr:`flet.BannerTheme.leading_padding`,
+    or if that is `None`, falls back to `Padding.only(end=16)`.
+    """
+
+    content_padding: Optional[PaddingValue] = None
+    """
+    The amount of space by which to inset the :attr:`content`.
+
+    If the actions are below the content, this defaults to
+    `Padding.only(left=16.0, top=24.0, right=16.0, bottom=4.0)`.
+
+    If the actions are trailing the `content`, this defaults to
+    `Padding.only(left=16.0, top=2.0)`.
+    """
+
+    force_actions_below: bool = False
+    """
+    An override to force the :attr:`actions` to be below the :attr:`content` \
+    regardless of how many there are.
+
+    If this is `True`, the :attr:`actions` will be placed below the content.
+    If this is `False`, the :attr:`actions` will be placed on the trailing side
+    of the :attr:`content` if `actions` length is `1` and below the `content`
+    if greater than `1`.
+    """
+
+    bgcolor: Optional[ColorValue] = None
+    """
+    The color of the surface of this banner.
+    """
+
+    shadow_color: Optional[ColorValue] = None
+    """
+    The color of the shadow below this banner.
+    """
+
+    divider_color: Optional[ColorValue] = None
+    """
+    The color of the divider.
+    """
+
+    elevation: Annotated[
+        Optional[Number],
+        V.ge(0),
+    ] = None
+    """
+    The elevation of this banner.
+
+    Raises:
+        ValueError: If it is not greater than or equal to `0`.
+    """
+
+    margin: Optional[MarginValue] = None
+    """
+    The amount of space surrounding this banner.
+    """
+
+    content_text_style: Optional[TextStyle] = None
+    """
+    The style to be used for the :class:`~flet.Text` controls in the :attr:`content`.
+    """
+
+    min_action_bar_height: Number = 52.0
+    """
+    The minimum action bar height.
+    """
+
+    on_visible: Optional[ControlEventHandler["Banner"]] = None
+    """
+    Called when this banner is shown or made visible for the first time.
+    """

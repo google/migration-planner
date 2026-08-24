@@ -1,0 +1,136 @@
+from dataclasses import field
+from enum import Enum
+from typing import Optional
+
+from flet.controls.base_control import control
+from flet.controls.box import BoxShadowValue, DecorationImage
+from flet.controls.gradients import Gradient
+from flet.controls.material.textfield import TextField
+from flet.controls.padding import Padding, PaddingValue
+from flet.controls.text_style import TextStyle
+from flet.controls.types import BlendMode
+
+__all__ = ["CupertinoTextField", "OverlayVisibilityMode"]
+
+
+class OverlayVisibilityMode(Enum):
+    """
+    Visibility of text field overlays based on the state of the current text entry.
+    """
+
+    NEVER = "never"
+    """
+    Overlay will never appear regardless of the text entry state.
+    """
+
+    EDITING = "editing"
+    """
+    Overlay will only appear when the current text entry is not empty.
+
+    This includes prefilled text that the user did not type in manually.
+    But does not include text in placeholders.
+    """
+
+    NOT_EDITING = "notEditing"
+    """
+    Overlay will only appear when the current text entry is empty.
+
+    This also includes not having prefilled text that the user did not type
+    in manually. Texts in placeholders are ignored.
+    """
+
+    ALWAYS = "always"
+    """
+    Always show the overlay regardless of the text entry state.
+    """
+
+
+@control("CupertinoTextField")
+class CupertinoTextField(TextField):
+    """
+    An iOS-style text field.
+
+    ```python
+    ft.CupertinoTextField(placeholder_text="Search")
+    ```
+    """
+
+    placeholder_text: Optional[str] = None
+    """
+    A lighter colored placeholder hint that appears on the first line of the text \
+    field when the text entry is empty.
+
+    Defaults to an empty string.
+    """
+
+    placeholder_style: Optional[TextStyle] = None
+    """
+    The :class:`~flet.TextStyle` to use for :attr:`placeholder_text`.
+    """
+
+    gradient: Optional[Gradient] = None
+    """
+    Configures the gradient background.
+    """
+
+    blend_mode: Optional[BlendMode] = None
+    """
+    The blend mode applied to the :attr:`flet.FormFieldControl.bgcolor`
+    or :attr:`gradient` background.
+    """
+
+    shadows: Optional[BoxShadowValue] = None
+    """
+    A list of shadows behind this text field.
+    """
+
+    prefix_visibility_mode: OverlayVisibilityMode = OverlayVisibilityMode.ALWAYS
+    """
+    Defines the visibility of the :attr:`flet.FormFieldControl.prefix`
+    control based on the state of text entry.
+
+    Note:
+        Has no effect if
+        :attr:`flet.FormFieldControl.prefix`
+        is not specified.
+    """
+
+    suffix_visibility_mode: OverlayVisibilityMode = OverlayVisibilityMode.ALWAYS
+    """
+    Defines the visibility of the :attr:`flet.FormFieldControl.suffix`
+    control based on the state of text entry.
+
+    Note:
+        Has no effect if
+        :attr:`flet.FormFieldControl.suffix`
+        is not specified.
+    """
+
+    clear_button_visibility_mode: OverlayVisibilityMode = OverlayVisibilityMode.NEVER
+    """
+    Defines the visibility of the clear button based on the state of text entry.
+
+    Will appear only if no :attr:`flet.FormFieldControl.suffix` is provided.
+    """
+
+    clear_button_semantics_label: Optional[str] = "Clear"
+    """
+    The semantic label for the clear button used by screen readers.
+
+    This will be used by screen reading software to identify the clear button widget.
+    """
+
+    image: Optional[DecorationImage] = None
+    """
+    An image to paint above the :attr:`flet.FormFieldControl.bgcolor`
+    or :attr:`gradient` background.
+    """
+
+    padding: PaddingValue = field(default_factory=lambda: Padding.all(7))
+    """
+    The padding around the text entry area between the \
+    :attr:`flet.FormFieldControl.prefix`
+    and :attr:`flet.FormFieldControl.suffix`
+    or the clear button when :attr:`clear_button_visibility_mode`
+    is not :attr:`flet.OverlayVisibilityMode.NEVER`.
+    """

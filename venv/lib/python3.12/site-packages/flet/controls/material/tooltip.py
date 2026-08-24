@@ -1,0 +1,218 @@
+from typing import Optional, Union
+
+from flet.controls.base_control import value
+from flet.controls.box import BoxConstraints, BoxDecoration
+from flet.controls.duration import DurationValue
+from flet.controls.margin import MarginValue
+from flet.controls.padding import PaddingValue
+from flet.controls.text_style import TextStyle
+from flet.controls.types import (
+    ColorValue,
+    MouseCursor,
+    Number,
+    TextAlign,
+)
+
+
+class TooltipTriggerMode:
+    """
+    The method of interaction that will trigger a tooltip.
+    Used in :attr:`flet.Tooltip.trigger_mode` and
+    :attr:`flet.TooltipTheme.trigger_mode`.
+
+    On desktop, a tooltip will be shown as soon as a pointer hovers over
+    the widget, regardless of the value of :attr:`flet.Tooltip.trigger_mode`.
+    """
+
+    MANUAL = "manual"
+
+    TAP = "tap"
+    """
+    Tooltip will be shown after a single tap.
+    """
+
+    LONG_PRESS = "long_press"
+    """
+    Tooltip will be shown after a long press.
+    """
+
+
+@value
+class Tooltip:
+    """
+    Provide text labels which help explain the function of a button
+    or other user interface action.
+    """
+
+    message: str
+    """
+    The text to display in this tooltip.
+    """
+
+    decoration: Optional[BoxDecoration] = None
+    """
+    The background decoration of this tooltip.
+
+    If `None`, :attr:`flet.TooltipTheme.decoration` is used.
+    If that is also `None`, a default decoration will be picked based
+    on the current theme mode:
+
+    In light theme mode:
+
+    ```python
+    ft.BoxDecoration(
+        border_radius=ft.BorderRadius.all(4.0),
+        bgcolor=ft.Colors.with_opacity(0.9, ft.Colors.GREY_700),
+    )
+    ```
+
+    In dark theme mode:
+
+    ```python
+    ft.BoxDecoration(
+        border_radius=ft.BorderRadius.all(4.0),
+        bgcolor=ft.Colors.with_opacity(0.9, ft.Colors.WHITE),
+    )
+    ```
+    """
+
+    enable_feedback: Optional[bool] = None
+    """
+    When `True` (default) the tooltip should provide acoustic and/or haptic feedback.
+
+    For example, on Android a tap will produce a clicking sound and a long-press
+    will produce a short vibration, when feedback is enabled.
+    """
+
+    vertical_offset: Optional[Number] = None
+    """
+    The vertical gap between the control and the displayed tooltip.
+
+    When :attr:`prefer_below` is set to `True`
+    and tooltips have sufficient space to
+    display themselves, this property defines how much vertical space
+    tooltips will position themselves under their corresponding controls.
+    Otherwise, tooltips will position themselves above their corresponding
+    controls with the given offset.
+    """
+
+    margin: Optional[MarginValue] = None
+    """
+    The empty space that surrounds the tooltip.
+
+    If `None`, :attr:`flet.TooltipTheme.margin` is used.
+    If that's is also `None`, defaults to `Margin.all(0.0)`.
+    """
+
+    padding: Optional[PaddingValue] = None
+    """
+    The amount of space by which to inset the tooltip's content.
+
+    It has the following default values based on the current platform:
+
+    - On mobile platforms: `Padding.symmetric(horizontal=16.0, vertical=4.0)`
+    - On desktop platforms: `Padding.symmetric(horizontal=8.0, vertical=4.0)`
+    """
+
+    bgcolor: Optional[ColorValue] = None
+    """
+    Background color of the tooltip.
+    """
+
+    text_style: Optional[TextStyle] = None
+    """
+    The :class:`~flet.TextStyle` to use for the message of the tooltip.
+    """
+
+    text_align: Optional[TextAlign] = None
+    """
+    How the message of the tooltip is aligned horizontally.
+
+    If `None`, :attr:`flet.TooltipTheme.text_align` is used.
+    If that's is also `None`, defaults to :attr:`flet.TextAlign.START`.
+    """
+
+    prefer_below: Optional[bool] = None
+    """
+    Whether the tooltip defaults to being displayed below the control.
+
+    If there is insufficient space to display the tooltip in the preferred
+    direction, the tooltip will be displayed in the opposite direction.
+
+    If `None`, :attr:`flet.TooltipTheme.prefer_below` is used.
+    If that's is also `None`, defaults to `True`.
+    """
+
+    show_duration: Optional[DurationValue] = None
+    """
+    The length of time that the tooltip will be shown after a long press is released \
+    (if triggerMode is :attr:`flet.TooltipTriggerMode.LONG_PRESS`) or a tap is \
+    released (if triggerMode is :attr:`flet.TooltipTriggerMode.TAP`).
+    This property does not affect mouse pointer devices.
+
+    If `None`, :attr:`flet.TooltipTheme.show_duration` is used.
+    If that's is also `None`, defaults to `1.5` seconds for long press and tap released
+    """
+
+    wait_duration: Optional[DurationValue] = None
+    """
+    The length of time, in milliseconds, that a pointer must hover over a tooltip's \
+    control before the tooltip will be shown.
+
+    If `None`, :attr:`flet.TooltipTheme.wait_duration` is used.
+    If that's is also `None`, defaults to `100` milliseconds.
+    """
+
+    exit_duration: Optional[DurationValue] = None
+    """
+    The length of time that the tooltip will be shown after a long press is released \
+    or a tap is released or mouse pointer exits the control.
+
+    If `None`, :attr:`flet.TooltipTheme.exit_duration` is used.
+    If that's is also `None`, defaults to 0 milliseconds - no delay.
+    """
+
+    tap_to_dismiss: bool = True
+    """
+    Whether the tooltip can be dismissed by tapping on it.
+    """
+
+    exclude_from_semantics: Optional[bool] = False
+    """
+    Whether the tooltip's message should be excluded from the semantics tree.
+    """
+
+    trigger_mode: Optional[TooltipTriggerMode] = None
+    """
+    The mode of the tooltip's trigger.
+
+    If `None`, :attr:`flet.TooltipTheme.trigger_mode` is used.
+    If that's is also `None`, defaults to
+    :attr:`flet.TooltipTriggerMode.LONG_PRESS`.
+    """
+
+    mouse_cursor: Optional[MouseCursor] = None
+    """
+    The cursor for a mouse pointer when it enters or is hovering over the content.
+    """
+
+    size_constraints: Optional[BoxConstraints] = None
+    """
+    Defines the constraints on the size of this tooltip.
+
+    If `None`, :attr:`flet.TooltipTheme.size_constraints` is used.
+    If that's is also `None`, then a default value will be picked
+    based on the current platform:
+
+    - on desktop platforms: `BoxConstraints(min_height=24.0)`
+    - on mobile platforms: `BoxConstraints(min_height=32.0)`
+    """
+
+
+TooltipValue = Union[str, Tooltip]
+"""Type alias for tooltip values.
+
+Represents a tooltip as either:
+- a `str` message,
+- or a :class:`~flet.Tooltip`.
+"""

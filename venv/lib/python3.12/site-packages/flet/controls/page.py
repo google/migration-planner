@@ -1,0 +1,1511 @@
+import asyncio
+import inspect
+import logging
+import sys
+import threading
+import weakref
+from collections.abc import Awaitable, Coroutine
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
+from dataclasses import InitVar, dataclass, field
+from functools import partial
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Optional,
+    ParamSpec,
+    TypeVar,
+    Union,
+)
+from urllib.parse import urlparse
+
+from flet.components.public_utils import unwrap_component
+from flet.controls.base_control import BaseControl, control
+from flet.controls.base_page import BasePage
+from flet.controls.context import _context_page, context
+from flet.controls.control import Control
+from flet.controls.control_event import (
+    ControlEvent,
+    ControlEventHandler,
+    Event,
+    EventHandler,
+)
+from flet.controls.core.view import View
+from flet.controls.core.window import Window
+from flet.controls.device_info import (
+    AndroidDeviceInfo,
+    DeviceInfo,
+    IosDeviceInfo,
+    LinuxDeviceInfo,
+    MacOsDeviceInfo,
+    WebDeviceInfo,
+    WindowsDeviceInfo,
+)
+from flet.controls.exceptions import FletUnsupportedPlatformException
+from flet.controls.multi_view import MultiView
+from flet.controls.query_string import QueryString
+from flet.controls.ref import Ref
+from flet.controls.services.service import Service
+from flet.controls.services.url_launcher import UrlLauncher
+from flet.controls.types import (
+    AppLifecycleState,
+    Brightness,
+    DeviceOrientation,
+    Locale,
+    PagePlatform,
+    Url,
+    UrlTarget,
+    Wrapper,
+)
+from flet.utils import is_pyodide
+from flet.utils.deprecated import deprecated
+from flet.utils.from_dict import from_dict
+from flet.utils.strings import random_string
+
+if TYPE_CHECKING:
+    from flet.auth.authorization import Authorization
+    from flet.auth.oauth_provider import OAuthProvider
+    from flet.messaging.session import Session
+    from flet.pubsub.pubsub_client import PubSubClient
+
+
+def _default_authorization_impl() -> "type[Authorization]":
+    """Resolve the default `Authorization` implementation lazily.
+
+    Deferring these imports keeps the auth subsystem out of the cold-start
+    import graph for apps that never call `Page.login`.
+    """
+    if not is_pyodide():
+        from flet.auth.authorization_service import AuthorizationService
+
+        return AuthorizationService
+    from flet.auth.authorization import Authorization
+
+    return Authorization
+
+
+logger = logging.getLogger("flet")
+
+
+AT = TypeVar("AT", bound="Authorization")
+InputT = ParamSpec("InputT")
+RetT = TypeVar("RetT")
+
+
+@control("ServiceRegistry")
+class ServiceRegistry(Service):
+    """
+    Internal container that hosts page-level service controls.
+
+    Services register themselves through this registry so they can be mounted
+    under :class:`~flet.Page` and synchronized with the frontend service
+    bindings.
+    """
+
+    _services: list[Service] = field(default_factory=list)
+    """
+    Tracked service instances currently attached to this page.
+    """
+
+    def __post_init__(self, ref: Optional[Ref[Any]]):
+        super().__post_init__(ref)
+        self._internals["uid"] = random_string(10)
+        self._lock: threading.Lock = threading.Lock()
+
+    def init(self):
+        # Deliberately skips Service.init(), which registers the instance into
+        # `context.page._services`. A registry is the *container* for services,
+        # not a service itself, and self-registering leaks across pages: when a
+        # second Page is constructed while another page is still the current
+        # context — an embedded `FletApp` inside a host app — the new page's
+        # registry is registered inside the HOST's registry. The client has no
+        # service binding for type "ServiceRegistry", so building it throws
+        # "Unknown service" inside the host's service loop, and every service
+        # registered after it is never built: invoking one then fails with
+        # "Timeout waiting for invoke method listener".
+        BaseControl.init(self)
+
+    def register_service(self, service: Service):
+        """
+        Registers a service in this registry and pushes an update.
+
+        Args:
+            service: Service instance to register.
+        """
+        with self._lock:
+            logger.debug(
+                f"Registering service {service._c}({service._i}) to registry {self._i}"
+            )
+            self._services.append(service)
+            self.__internal_update()
+
+    def unregister_services(self):
+        """
+        Unregisters services that are no longer strongly referenced.
+
+        This keeps the registry aligned with live Python references by removing
+        service instances whose reference count indicates they are no longer in
+        active use, then updating the control tree if removals happened.
+        """
+        with self._lock:
+            original_len = len(self._services)
+            min_refs = 3 if sys.version_info >= (3, 14) else 4
+            self._services = [
+                service
+                for service in self._services
+                if sys.getrefcount(service) > min_refs
+            ]
+            removed_count = original_len - len(self._services)
+            if removed_count > 0:
+                logger.debug("Removed %s services from the registry", removed_count)
+                self.__internal_update()
+
+    def __internal_update(self):
+        """
+        Push an update without marking the handler's update-called flag.
+
+        Why: service (un)registration is internal bookkeeping, not a user-driven
+        `.update()`. Leaving the flag untouched keeps the auto-update behavior
+        based solely on whether the user called `.update()` themselves.
+        """
+        was_called = context.was_update_called()
+        self.update()
+        if not was_called:
+            context.reset_update_called()
+
+
+@dataclass
+class RouteChangeEvent(Event["Page"]):
+    """
+    Event payload for :attr:`flet.Page.on_route_change`.
+    """
+
+    route: str
+    """
+    New route value after navigation state changed.
+    """
+
+
+@dataclass
+class PlatformBrightnessChangeEvent(Event["Page"]):
+    """
+    Event payload for platform brightness changes.
+
+    Delivered to
+    :attr:`flet.Page.on_platform_brightness_change`.
+    """
+
+    brightness: Brightness
+    """
+    Current platform brightness mode.
+    """
+
+
+@dataclass
+class LocaleChangeEvent(Event["Page"]):
+    """
+    Event payload describing a change in the host platform's locale preferences.
+
+    See also:
+    - :attr:`flet.Page.on_locale_change`: event called when locale preferences/settings
+        of the host platform have changed.
+    """
+
+    locales: list[Locale]
+    """
+    The full, ordered list of locales reported by the host platform.
+
+    The first item represents the highest-priority locale.
+    """
+
+
+@dataclass
+class ViewPopEvent(Event["Page"]):
+    """
+    Event payload for view-pop navigation actions.
+
+    Delivered to :attr:`flet.Page.on_view_pop` when the top view
+    is being popped by system or app-bar back behavior.
+    """
+
+    route: str
+    """
+    Route of the view being popped.
+    """
+
+    view: Optional[View] = None
+    """
+    Matched :class:`~flet.View` instance for `route`, if found on the page.
+    """
+
+
+@dataclass
+class ViewsPopUntilEvent(Event["Page"]):
+    """
+    Event payload delivered when :meth:`~flet.Page.pop_views_until` completes \
+    navigation.
+
+    Carries the result value back to the destination view.
+    """
+
+    route: str
+    """
+    Route of the destination view that remained on the stack.
+    """
+
+    result: Any = None
+    """
+    The result value passed from the caller of
+    :meth:`~flet.Page.pop_views_until`.
+    """
+
+    view: Optional[View] = None
+    """
+    Matched :class:`~flet.View` instance for `route`, if found on the page.
+    """
+
+
+@dataclass
+class KeyboardEvent(Event["Page"]):
+    """
+    Event payload for keyboard key-down notifications.
+
+    Delivered to :attr:`flet.Page.on_keyboard_event`.
+    """
+
+    key: str
+    """
+    Human-readable key label for the pressed key.
+    """
+
+    shift: bool
+    """
+    Whether Shift was pressed when the key event was emitted.
+    """
+
+    ctrl: bool
+    """
+    Whether Control was pressed when the key event was emitted.
+    """
+
+    alt: bool
+    """
+    Whether Alt was pressed when the key event was emitted.
+    """
+
+    meta: bool
+    """
+    Whether Meta (Command/Windows) was pressed when the key event was emitted.
+    """
+
+
+@dataclass
+class LoginEvent(Event["Page"]):
+    """
+    Event payload for OAuth login completion.
+
+    Emitted to :attr:`flet.Page.on_login` for both successful and
+    failed authorization attempts.
+    """
+
+    error: Optional[str]
+    """
+    Error code or message when login failed; empty/`None` on success.
+    """
+
+    error_description: Optional[str]
+    """
+    Provider-specific error details when login failed.
+    """
+
+
+@dataclass
+class InvokeMethodResults:
+    """
+    Result envelope for a control invoke-method response.
+
+    Stores the correlation identifier and either a serialized result payload or
+    an error string.
+    """
+
+    method_id: str
+    """
+    Identifier of the invoke-method call this response belongs to.
+    """
+
+    result: Optional[str]
+    """
+    Serialized method result payload when the call succeeded.
+    """
+
+    error: Optional[str]
+    """
+    Error message when the invoke-method call failed.
+    """
+
+
+@dataclass
+class AppLifecycleStateChangeEvent(Event["Page"]):
+    """
+    Event payload for app lifecycle transitions.
+
+    Delivered to
+    :attr:`flet.Page.on_app_lifecycle_state_change`.
+    """
+
+    state: AppLifecycleState
+    """
+    New application lifecycle state.
+    """
+
+
+@dataclass
+class MultiViewAddEvent(Event["Page"]):
+    """
+    Event payload emitted when a new multi-view is created.
+
+    Delivered to :attr:`flet.Page.on_multi_view_add`.
+    """
+
+    view_id: int
+    """
+    Unique identifier of the newly created view.
+    """
+
+    initial_data: Any
+    """
+    Optional initial payload provided when the view was opened.
+    """
+
+
+@dataclass
+class MultiViewRemoveEvent(Event["Page"]):
+    """
+    Event payload emitted when a multi-view is removed.
+
+    Delivered to :attr:`flet.Page.on_multi_view_remove`.
+    """
+
+    view_id: int
+    """
+    Unique identifier of the removed view.
+    """
+
+
+@control("Page", isolated=True, post_init_args=2)
+class Page(BasePage):
+    """
+    Page is a container for :class:`~flet.View` controls.
+
+    A page instance and the root view are automatically created when a new
+    user session started.
+    """
+
+    sess: InitVar["Session"]
+    """
+    The session that this page belongs to.
+    """
+
+    multi_views: list[MultiView] = field(default_factory=list)
+    """
+    The list of multi-views associated with this page.
+    """
+
+    window: Window = field(default_factory=lambda: Window())
+    """
+    Provides properties/methods/events to monitor and control the app's native OS \
+    window.
+    """
+
+    route: str = "/"
+    """
+    Gets current app route.
+
+    Note:
+        This property is read-only.
+    """
+
+    web: bool = False
+    """
+    `True` if the application is running in the web browser.
+
+    Note:
+        This property is read-only.
+    """
+
+    pwa: bool = False
+    """
+    `True` if the application is running as Progressive Web App (PWA).
+
+    Note:
+        This property is read-only.
+    """
+    debug: bool = False
+    """
+    `True` if Flutter client of Flet app is running in debug mode.
+
+    Note:
+        This property is read-only.
+    """
+
+    wasm: bool = False
+    """
+    `True` if the application is running in WebAssembly (WASM) mode.
+
+    Note:
+        This property is read-only.
+    """
+
+    test: bool = False
+    """
+    `True` if the application is running with test mode.
+
+    Note:
+        This property is read-only.
+    """
+
+    multi_view: bool = False
+    """
+    `True` if the application is running with multi-view support.
+
+    Note:
+        This property is read-only.
+    """
+
+    pyodide: bool = False
+    """
+    `True` if the application is running in Pyodide (WebAssembly) mode.
+
+    Note:
+        This property is read-only.
+    """
+
+    platform_brightness: Optional[Brightness] = None
+    """
+    The current brightness mode of the host platform.
+
+    Note:
+        This property is read-only.
+    """
+
+    client_ip: Optional[str] = None
+    """
+    IP address of the connected user.
+
+    Note:
+        This property is web- and read-only only.
+    """
+
+    client_user_agent: Optional[str] = None
+    """
+    Browser details of the connected user.
+
+    Note:
+        This property is web- and read-only only.
+    """
+
+    platform: Optional[PagePlatform] = None
+    """
+    The operating system the application is running on.
+    """
+
+    fonts: Optional[dict[str, str]] = None
+    """
+    Defines the custom fonts to be used in the application.
+
+    Value is a dictionary, in which the keys represent the font family name
+    used for reference and the values:
+    - Key: The font family name used for reference.
+    - Value: The font source, either an absolute URL or a relative path to a
+        local asset. The following font file formats are supported `.ttc`, `.ttf`
+        and `.otf`.
+
+    Usage example [here](https://flet.dev/docs/cookbook/fonts#importing-fonts).
+    """
+
+    on_platform_brightness_change: Optional[
+        EventHandler[PlatformBrightnessChangeEvent]
+    ] = None
+    """
+    Called when brightness of app host platform has changed.
+    """
+
+    on_locale_change: Optional[EventHandler[LocaleChangeEvent]] = None
+    """
+    Called when the locale preferences/settings of the host platform have changed.
+
+    For example, when the user updates device language
+    settings or browser preferred languages.
+    """
+
+    on_app_lifecycle_state_change: Optional[
+        EventHandler[AppLifecycleStateChangeEvent]
+    ] = None
+    """
+    Called when app lifecycle state changes.
+    """
+
+    on_route_change: Optional[EventHandler[RouteChangeEvent]] = None
+    """
+    Called when page route changes either programmatically, by editing application URL \
+    or using browser Back/Forward buttons.
+    """
+
+    on_view_pop: Optional[EventHandler[ViewPopEvent]] = None
+    """
+    Called when the user clicks automatic "Back" button in :class:`~flet.AppBar` \
+    control.
+    """
+
+    on_views_pop_until: Optional[EventHandler[ViewsPopUntilEvent]] = None
+    """
+    Called when :meth:`pop_views_until` reaches the destination view.
+
+    The event carries the result value passed by the caller.
+    """
+
+    on_keyboard_event: Optional[EventHandler[KeyboardEvent]] = None
+    """
+    Called when a keyboard key is pressed.
+    """
+
+    on_connect: Optional[ControlEventHandler["Page"]] = None
+    """
+    Called when a web user (re-)connects to a page session.
+
+    It is not triggered when an app page is first opened, but is triggered when
+    the page is refreshed, or Flet web client has re-connected after computer
+    was unlocked. This event could be used to detect when a web user becomes
+    "online".
+    """
+
+    on_disconnect: Optional[ControlEventHandler["Page"]] = None
+    """
+    Called when a web user disconnects from a page session, i.e. closes browser \
+    tab/window.
+    """
+
+    on_close: Optional[ControlEventHandler["Page"]] = None
+    """
+    Called when a session has expired after configured amount of time (60 minutes by \
+    default).
+    """
+
+    on_login: Optional[EventHandler[LoginEvent]] = None
+    """
+    Called upon successful or failed OAuth authorization flow.
+
+    See [Authentication](https://flet.dev/docs/cookbook/authentication#checking-authentication-results)
+    guide for more information and examples.
+    """  # noqa: E501
+
+    on_logout: Optional[ControlEventHandler["Page"]] = None
+    """
+    Called after `page.logout()` call.
+    """
+
+    on_error: Optional[ControlEventHandler["Page"]] = None
+    """
+    Called when unhandled exception occurs.
+    """
+
+    on_multi_view_add: Optional[EventHandler[MultiViewAddEvent]] = None
+    """
+    Called when a new multi-view is created.
+
+    The event payload includes the new view's identifier and any initial data passed
+    when opening the view.
+    """
+
+    on_multi_view_remove: Optional[EventHandler[MultiViewRemoveEvent]] = None
+    """
+    Called when a multi-view is removed.
+
+    The event payload includes the identifier of the removed view.
+    """
+    _services: ServiceRegistry = field(default_factory=ServiceRegistry)
+
+    def __post_init__(
+        self,
+        ref,
+        sess: "Session",
+    ) -> None:
+        BasePage.__post_init__(self, ref)
+        self._i = 1
+        self.__session = weakref.ref(sess)
+        self.__last_route = None
+        self.__query: QueryString = QueryString(self)
+        self.__authorization: Optional[Authorization] = None
+        # App/window visibility, driven by `on_app_lifecycle_state_change`.
+        # Producer loops (e.g. `RawImage.render`) await `wait_until_visible`
+        # to park while the tab is backgrounded instead of streaming frames a
+        # suspended client can only pile up. Starts visible; the event is set
+        # while visible and cleared while hidden.
+        self.__app_visible = True
+        self.__app_visible_event = asyncio.Event()
+        self.__app_visible_event.set()
+
+    def get_control(self, id: int) -> Optional[BaseControl]:
+        """
+        Get a control by its `id`.
+
+        Example:
+            ```python
+            def main(page: ft.Page):
+                x = ft.IconButton(ft.Icons.ADD)
+                page.add(x)
+                print(type(page.get_control(x._i)))
+            ```
+        """
+        return self.session.index.get(id)
+
+    def render(
+        self,
+        component: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
+    ):
+        """
+        Render a component tree into controls of the root view.
+
+        The rendered result replaces `page.views[0].controls`, then triggers
+        initial page update and component update scheduler startup.
+
+        Args:
+            component: Component function to render.
+            *args: Positional arguments passed to `component`.
+            **kwargs: Keyword arguments passed to `component`.
+        """
+
+        from flet.components.component import Renderer
+
+        logger.debug("Page.render()")
+        self._notify = self.__notify
+        self.views[0].controls = Renderer().render(component, *args, **kwargs)
+        self.__render()
+
+    def render_views(
+        self,
+        component: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
+    ):
+        """
+        Render a component tree as the full list of page views.
+
+        The rendered result replaces `page.views`, then triggers initial page
+        update and component update scheduler startup.
+
+        Args:
+            component: Component function to render.
+            *args: Positional arguments passed to `component`.
+            **kwargs: Keyword arguments passed to `component`.
+        """
+
+        from flet.components.component import Renderer
+
+        logger.debug("Page.render_views()")
+        self._notify = self.__notify
+        self.views = Renderer().render(component, *args, **kwargs)
+        self.__render()
+
+    def __render(self):
+        """
+        Finalize component rendering setup.
+
+        Performs initial page update, enables components mode, and starts
+        batched updates scheduler for component-driven state changes.
+        """
+
+        self.update()
+        context.enable_components_mode()
+        self.session.start_updates_scheduler()
+
+    def schedule_update(self):
+        """
+        Queue this page for a deferred batched update.
+        """
+
+        self.session.schedule_update(self)
+
+    def update(self, *controls: Control) -> None:
+        """
+        Push pending state changes to the client.
+
+        Args:
+            *controls: Specific controls to patch. When omitted, patches the
+                whole page state.
+        """
+        context.mark_update_called()
+
+        if len(controls) == 0:
+            self.__update(self)
+        else:
+            self.__update(*controls)
+
+    def __notify(self, name: str, value: Any):
+        """
+        Schedule page update when reactive component state changes.
+
+        Args:
+            name: Changed value identifier.
+            value: New value.
+        """
+
+        self.schedule_update()
+
+    def __update(self, *controls: Control):
+        """
+        Send control patches for the provided controls.
+
+        Args:
+            *controls: Controls whose updates should be sent to the client.
+        """
+
+        for c in controls:
+            self.session.patch_control(c)
+
+    def error(self, message: str) -> None:
+        """
+        Report an application error to the current session/client.
+
+        Args:
+            message: Error message to send.
+        """
+
+        self.session.error(message)
+
+    def before_event(self, e: ControlEvent):
+        if isinstance(e, RouteChangeEvent):
+            if self.__last_route == e.route:
+                return False
+            self.__last_route = e.route
+            self.query()
+
+        elif isinstance(e, ViewPopEvent | ViewsPopUntilEvent):
+            for v in unwrap_component(self.views):
+                v = unwrap_component(v)
+                if v.route == e.route:
+                    e.view = v
+                    break
+
+        elif isinstance(e, AppLifecycleStateChangeEvent):
+            # `HIDE`/`PAUSE` are the only states where the client cannot
+            # display frames (backgrounded tab, minimized/paused window).
+            # `DETACH` unparks so loops don't hang on teardown.
+            self.__set_app_visible(
+                e.state not in (AppLifecycleState.HIDE, AppLifecycleState.PAUSE)
+            )
+
+        return super().before_event(e)
+
+    def __set_app_visible(self, visible: bool) -> None:
+        self.__app_visible = visible
+        if visible:
+            self.__app_visible_event.set()
+        else:
+            self.__app_visible_event.clear()
+
+    @property
+    def app_visible(self) -> bool:
+        """
+        Whether the app window (or browser tab) is currently visible.
+
+        Driven by `on_app_lifecycle_state_change`: `False` while the
+        state is `HIDE` or `PAUSE`, `True` otherwise. Distinct from the
+        control-level `visible` property, which hides the page itself.
+        """
+        return self.__app_visible
+
+    async def wait_until_visible(self) -> None:
+        """
+        Suspend until the app window (or browser tab) is visible.
+
+        Returns immediately when already visible. While hidden, the client's
+        render pipeline is suspended, so a producer loop that keeps pushing
+        frames only builds a backlog that floods the client on resume.
+        Awaiting this at the top of such a loop parks the producer until the
+        tab returns:
+
+        ```python
+        while True:
+            await page.wait_until_visible()
+            await raw_image.render(produce_frame())
+        ```
+
+        The streaming controls (`RawImage`, `MatplotlibChart`) already gate
+        their sends on this internally.
+        """
+        await self.__app_visible_event.wait()
+
+    def run_task(
+        self,
+        handler: Callable[InputT, Awaitable[RetT]],
+        *args: InputT.args,
+        **kwargs: InputT.kwargs,
+    ) -> Future[RetT]:
+        """
+        Run `handler` coroutine as a new Task in the event loop associated with the \
+        current page.
+        """
+        _context_page.set(self)
+        if not inspect.iscoroutinefunction(handler):
+            raise TypeError("handler must be a coroutine function")
+
+        future = asyncio.run_coroutine_threadsafe(
+            handler(*args, **kwargs), self.session.connection.loop
+        )
+
+        def _on_completion(f):
+            """
+            Surface background task exceptions to default error handling.
+
+            Args:
+                f: Completed future returned by `run_coroutine_threadsafe()`.
+            """
+
+            try:
+                exception = f.exception()
+                if exception:
+                    raise exception
+            except CancelledError:
+                pass
+
+        future.add_done_callback(_on_completion)
+
+        return future
+
+    def __context_wrapper(self, handler: Callable[..., Any]) -> Wrapper:
+        """
+        Wrap a callable to execute with this page bound to context vars.
+
+        Args:
+            handler: Handler function to wrap.
+
+        Returns:
+            Wrapped callable that restores page context before invocation.
+        """
+
+        def wrapper(*args, **kwargs):
+            """
+            Execute wrapped handler with page context initialized.
+
+            Args:
+                *args: Positional arguments forwarded to wrapped handler.
+                **kwargs: Keyword arguments forwarded to wrapped handler.
+            """
+
+            _context_page.set(self)
+            handler(*args, **kwargs)
+
+        return wrapper
+
+    def run_thread(
+        self,
+        handler: Callable[InputT, Any],
+        *args: InputT.args,
+        **kwargs: InputT.kwargs,
+    ) -> None:
+        """
+        Run `handler` function as a new Thread in the executor associated with the \
+        current page.
+        """
+        handler_with_context = self.__context_wrapper(handler)
+        if is_pyodide():
+            handler_with_context(*args, **kwargs)
+        else:
+            loop = self.session.connection.loop
+            loop.call_soon_threadsafe(
+                loop.run_in_executor,
+                self.executor,
+                partial(handler_with_context, *args, **kwargs),
+            )
+
+    @deprecated(
+        "Use push_route() instead.",
+        version="0.80.0",
+        delete_version="0.90.0",
+        show_parentheses=True,
+    )
+    def go(
+        self, route: str, skip_route_change_event: bool = False, **kwargs: Any
+    ) -> None:
+        """
+        A helper method that updates [`page.route`](#route), calls \
+        [`page.on_route_change`](#on_route_change) event handler to update views and \
+        finally calls `page.update()`.
+        """
+
+        asyncio.create_task(self.push_route(route, **kwargs))
+
+    async def push_route(self, route: str, **kwargs: Any) -> None:
+        """
+        Pushes a new navigation route to the browser history stack.
+        Changing route will fire [`page.on_route_change`](#on_route_change) event
+        handler.
+
+        Example:
+            ```python
+            import asyncio
+
+            import flet as ft
+
+
+            def main(page: ft.Page):
+                page.title = "Routes Example"
+
+                def route_change():
+                    page.views.clear()
+                    page.views.append(
+                        ft.View(
+                            route="/",
+                            controls=[
+                                ft.AppBar(
+                                    title=ft.Text("Flet app"),
+                                ),
+                                ft.Button(
+                                    "Visit Store",
+                                    on_click=lambda: asyncio.create_task(
+                                        page.push_route("/store")
+                                    ),
+                                ),
+                            ],
+                        )
+                    )
+                    if page.route == "/store":
+                        page.views.append(
+                            ft.View(
+                                route="/store",
+                                controls=[
+                                    ft.AppBar(
+                                        title=ft.Text("Store"),
+                                    ),
+                                    ft.Button(
+                                        "Go Home",
+                                        on_click=lambda: asyncio.create_task(
+                                            page.push_route("/")
+                                        ),
+                                    ),
+                                ],
+                            )
+                        )
+                    page.update()
+
+                async def view_pop(e):
+                    if e.view is not None:
+                        print("View pop:", e.view)
+                        page.views.remove(e.view)
+                        top_view = page.views[-1]
+                        await page.push_route(top_view.route)
+
+                page.on_route_change = route_change
+                page.on_view_pop = view_pop
+
+                route_change()
+
+
+            if __name__ == "__main__":
+                ft.run(main)
+            ```
+
+        Args:
+            route: New navigation route.
+            **kwargs: Additional query string parameters to be added to the route.
+        """
+
+        new_route = route if not kwargs else route + self.query.post(kwargs)
+        await self._invoke_method(
+            "push_route",
+            arguments={"route": new_route},
+        )
+
+    def navigate(self, route: str, **kwargs: Any) -> None:
+        """
+        Navigate to a new route (sync convenience wrapper).
+
+        Equivalent to `asyncio.create_task(page.push_route(route, **kwargs))`.
+        Use this in synchronous callbacks (e.g. `on_click`) where awaiting
+        is not possible.
+
+        Args:
+            route: New navigation route.
+            **kwargs: Additional query string parameters to be added to the route.
+        """
+        asyncio.create_task(self.push_route(route, **kwargs))
+
+    async def pop_views_until(self, route: str, result: Any = None) -> None:
+        """
+        Pops views from the navigation stack until a view with the given
+        `route` is found, then delivers `result` via the
+        :attr:`on_views_pop_until` event.
+
+        Example:
+            ```python
+            import flet as ft
+
+
+            def main(page: ft.Page):
+                def on_pop_result(e: ft.ViewsPopUntilEvent):
+                    page.show_dialog(ft.SnackBar(ft.Text(f"Result: {e.result}")))
+
+                page.on_views_pop_until = on_pop_result
+
+                # ... later, from a deeply nested view:
+                async def go_back(ev):
+                    await page.pop_views_until("/", result="Done!")
+            ```
+
+        Args:
+            route: Target route to navigate back to. Must match the `route`
+                of an existing :class:`~flet.View` in :attr:`~flet.Page.views`.
+            result: Optional value delivered to
+                :attr:`on_views_pop_until` on the destination view.
+
+        Raises:
+            ValueError: If no view with the given `route` exists in
+                :attr:`~flet.Page.views`.
+        """
+        views = unwrap_component(self.views)
+
+        # Find the target view (first match from bottom of the stack)
+        target_idx = None
+        for i, v in enumerate(views):
+            v = unwrap_component(v)
+            if v.route == route:
+                target_idx = i
+                break
+
+        if target_idx is None:
+            raise ValueError(f"No view found with route '{route}' in page.views")
+
+        # Remove views above the target
+        del self.views[target_idx + 1 :]
+
+        # Update browser URL
+        await self.push_route(route)
+
+        # Fire on_views_pop_until for the destination view
+        if self.on_views_pop_until:
+            target_view = unwrap_component(views[target_idx])
+            e = ViewsPopUntilEvent(
+                name="views_pop_until",
+                control=self,
+                route=route,
+                result=result,
+                view=target_view,
+            )
+            await self._trigger_event("views_pop_until", event_data=None, e=e)
+
+        self.update()
+
+    def get_upload_url(self, file_name: str, expires: int) -> str:
+        """
+        Generates presigned upload URL for built-in upload storage:
+
+        * `file_name` - a relative to upload storage path.
+        * `expires` - a URL time-to-live in seconds.
+
+        Example:
+            ```python
+            upload_url = page.get_upload_url("dir/filename.ext", 60)
+            ```
+
+            To enable built-in upload storage, provide the `upload_dir `
+            argument to `ft.run()` call:
+
+            ```python
+            ft.run(main, upload_dir="uploads")
+            ```
+        """
+        return self.session.connection.get_upload_url(file_name, expires)
+
+    async def login(
+        self,
+        provider: "OAuthProvider",
+        fetch_user: bool = True,
+        fetch_groups: bool = False,
+        scope: Optional[list[str]] = None,
+        saved_token: Optional[str] = None,
+        on_open_authorization_url: Optional[
+            Callable[[str], Coroutine[Any, Any, None]]
+        ] = None,
+        complete_page_html: Optional[str] = None,
+        redirect_to_page: Optional[bool] = False,
+        authorization: "Optional[type[AT]]" = None,
+    ) -> "AT":
+        """
+        Starts OAuth flow.
+
+        See [Authentication](https://flet.dev/docs/cookbook/authentication)
+        guide for more information and examples.
+        """
+        if authorization is None:
+            authorization = _default_authorization_impl()
+        self.__authorization = authorization(
+            provider,
+            fetch_user=fetch_user,
+            fetch_groups=fetch_groups,
+            scope=scope,
+        )
+        if saved_token is None:
+            authorization_url, state = self.__authorization.get_authorization_data()
+            auth_attrs = {"state": state}
+            if complete_page_html:
+                auth_attrs["completePageHtml"] = complete_page_html
+            if redirect_to_page:
+                up = urlparse(provider.redirect_url)
+                auth_attrs["completePageUrl"] = up._replace(
+                    path=f"{self.session.connection.page_name}{self.route}"
+                ).geturl()
+            self.session.connection.oauth_authorize(auth_attrs)
+            if on_open_authorization_url:
+                await on_open_authorization_url(authorization_url)
+            else:
+                if self.web:
+                    await UrlLauncher().open_window(
+                        authorization_url, title="flet_oauth_signin"
+                    )
+                else:
+                    await UrlLauncher().launch_url(authorization_url)
+        else:
+            await self.__authorization.dehydrate_token(saved_token)
+
+            e = LoginEvent(name="login", control=self, error="", error_description="")
+            if self.on_login:
+                asyncio.create_task(self._trigger_event("login", event_data=None, e=e))
+
+        return self.__authorization
+
+    async def _authorize_callback(self, data: dict[str, Optional[str]]) -> None:
+        """
+        Complete OAuth flow using callback payload returned by provider.
+
+        Validates state token, optionally closes/foregrounds app UI, exchanges
+        authorization code for access token, and raises `login` event with
+        success or failure details.
+
+        Args:
+            data: OAuth callback query payload (e.g. `state`, `code`,
+                `error`, `error_description`).
+        """
+
+        assert self.__authorization
+        state = data.get("state")
+        assert state == self.__authorization.state
+
+        if not self.web:
+            if self.platform in ["ios", "android"]:
+                # close web view on mobile
+                await self.close_in_app_web_view()
+            else:
+                # activate desktop window
+                await self.window.to_front()
+        e = LoginEvent(
+            error=data.get("error"),
+            error_description=data.get("error_description"),
+            control=self,
+            name="login",
+        )
+        if not e.error:
+            # perform token request
+
+            code = data.get("code")
+            assert code not in [None, ""]
+            try:
+                await self.__authorization.request_token(code)
+            except Exception as ex:
+                e.error = str(ex)
+        if self.on_login:
+            asyncio.create_task(self._trigger_event("login", event_data=None, e=e))
+
+    def logout(self) -> None:
+        """
+        Clears current authentication context. See \
+        [Authentication](https://flet.dev/docs/cookbook/authentication#signing-out) \
+        guide for more information and examples.
+        """  # noqa: E501
+        self.__authorization = None
+        e = ControlEvent(name="logout", control=self)
+        if self.on_logout:
+            asyncio.create_task(self._trigger_event("logout", event_data=None, e=e))
+
+    @deprecated(
+        "Use UrlLauncher().launch_url() instead.",
+        version="0.90.0",
+        show_parentheses=True,
+    )
+    async def launch_url(
+        self,
+        url: Union[str, Url],
+        *,
+        web_popup_window_name: Optional[Union[str, UrlTarget]] = None,
+        web_popup_window: bool = False,
+        web_popup_window_width: Optional[int] = None,
+        web_popup_window_height: Optional[int] = None,
+    ) -> None:
+        """
+        Opens a web browser or popup window to a given `url`.
+
+        Args:
+            url: The URL to open.
+            web_popup_window_name: Window tab/name to open URL in. Use
+                :attr:`flet.UrlTarget.SELF` for the same browser tab,
+                :attr:`flet.UrlTarget.BLANK` for a new browser tab (or in external
+                application on a mobile device), or a custom name for a named tab.
+            web_popup_window: Display the URL in a browser popup window.
+            web_popup_window_width: Popup window width.
+            web_popup_window_height: Popup window height.
+        """
+        if web_popup_window:
+            await UrlLauncher().open_window(
+                url,
+                title=web_popup_window_name,
+                width=web_popup_window_width,
+                height=web_popup_window_height,
+            )
+        else:
+            await UrlLauncher().launch_url(url)
+
+    @deprecated(
+        "Use UrlLauncher().can_launch_url() instead.",
+        version="0.90.0",
+        show_parentheses=True,
+    )
+    async def can_launch_url(self, url: str) -> bool:
+        """
+        Checks whether the specified URL can be handled by some app installed on the \
+        device.
+
+        Args:
+            url: The URL to check.
+
+        Returns:
+            `True` if it is possible to verify that there is a handler available.
+                `False` if there is no handler available, or the application does not
+                have permission to check. For example:
+
+                - On recent versions of Android and iOS, this will always return `False`
+                    unless the application has been configuration to allow querying the
+                    system for launch support.
+                - In web mode, this will always return `False` except for a few specific
+                    schemes that are always assumed to be supported (such as http(s)),
+                    as web pages are never allowed to query installed applications.
+        """
+        return await UrlLauncher().can_launch_url(url)
+
+    @deprecated(
+        "Use UrlLauncher().close_in_app_web_view() instead.",
+        version="0.90.0",
+        show_parentheses=True,
+    )
+    async def close_in_app_web_view(self) -> None:
+        """
+        Closes in-app web view opened with `launch_url()`.
+
+        📱 Mobile only.
+        """
+        await UrlLauncher().close_in_app_web_view()
+
+    @property
+    def session(self) -> "Session":
+        """
+        The session that this page belongs to.
+        """
+        if sess := self.__session():
+            return sess
+        raise RuntimeError("An attempt to fetch destroyed session.")
+
+    @property
+    def query(self) -> QueryString:
+        """
+        The query parameters of the current page.
+        """
+        return self.__query
+
+    @property
+    def url(self) -> Optional[str]:
+        """
+        The URL of the current page.
+        """
+        return self.session.connection.page_url
+
+    @property
+    def name(self) -> str:
+        """
+        The name of the current page.
+        """
+        return self.session.connection.page_name
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        """
+        The event loop for the current page.
+        """
+        return self.session.connection.loop
+
+    @property
+    def executor(self) -> Optional[ThreadPoolExecutor]:
+        """
+        The executor for the current page.
+        """
+        return self.session.connection.executor
+
+    @property
+    def auth(self) -> "Optional[Authorization]":
+        """
+        The current authorization context, or `None` if the user is not authorized.
+        """
+        return self.__authorization
+
+    @property
+    def pubsub(self) -> "PubSubClient":
+        """
+        The PubSub client for the current page.
+        """
+        return self.session.pubsub_client
+
+    @property
+    @deprecated(
+        reason="Use UrlLauncher() instead.",
+        docs_reason="Use :class:`~flet.UrlLauncher` instead.",
+        version="0.80.0",
+        delete_version="0.90.0",
+    )
+    def url_launcher(self) -> UrlLauncher:
+        """
+        The UrlLauncher service for the current page.
+        """
+        return UrlLauncher()
+
+    @property
+    @deprecated(
+        reason="Use BrowserContextMenu() instead.",
+        docs_reason="Use :class:`~flet.BrowserContextMenu` instead.",
+        version="0.80.0",
+        delete_version="0.90.0",
+    )
+    def browser_context_menu(self):
+        """
+        The BrowserContextMenu service for the current page.
+        """
+        from flet.controls.services.browser_context_menu import BrowserContextMenu
+
+        return BrowserContextMenu()
+
+    @property
+    @deprecated(
+        reason="Use SharedPreferences() instead.",
+        docs_reason="Use :class:`~flet.SharedPreferences` instead.",
+        version="0.80.0",
+        delete_version="0.90.0",
+    )
+    def shared_preferences(self):
+        """
+        The SharedPreferences service for the current page.
+        """
+        from flet.controls.services.shared_preferences import SharedPreferences
+
+        return SharedPreferences()
+
+    @property
+    @deprecated(
+        reason="Use Clipboard() instead.",
+        docs_reason="Use :class:`~flet.Clipboard` instead.",
+        version="0.80.0",
+        delete_version="0.90.0",
+    )
+    def clipboard(self):
+        """
+        The Clipboard service for the current page.
+        """
+        from flet.controls.services.clipboard import Clipboard
+
+        return Clipboard()
+
+    @property
+    @deprecated(
+        reason="Use StoragePaths() instead.",
+        docs_reason="Use :class:`~flet.StoragePaths` instead.",
+        version="0.80.0",
+        delete_version="0.90.0",
+    )
+    def storage_paths(self):
+        """
+        The StoragePaths service for the current page.
+        """
+        from flet.controls.services.storage_paths import StoragePaths
+
+        return StoragePaths()
+
+    async def get_device_info(self) -> Optional[DeviceInfo]:
+        """
+        Returns device information.
+
+        Returns:
+            The device information object for the current platform,
+                or `None` if unavailable.
+        """
+        info = await self._invoke_method("get_device_info")
+
+        if self.web:
+            return from_dict(WebDeviceInfo, info)
+        elif self.platform in [PagePlatform.ANDROID, PagePlatform.ANDROID_TV]:
+            return from_dict(AndroidDeviceInfo, info)
+        elif self.platform == PagePlatform.IOS:
+            return from_dict(IosDeviceInfo, info)
+        elif self.platform == PagePlatform.MACOS:
+            return from_dict(MacOsDeviceInfo, info)
+        elif self.platform == PagePlatform.LINUX:
+            return from_dict(LinuxDeviceInfo, info)
+        elif self.platform == PagePlatform.WINDOWS:
+            return from_dict(WindowsDeviceInfo, info)
+        else:
+            return None
+
+    async def set_allowed_device_orientations(
+        self, orientations: list[DeviceOrientation]
+    ) -> None:
+        """
+        Constrains the allowed orientations for the app when running on a mobile \
+        device.
+
+        Args:
+            orientations: A list of allowed device orientations.
+                Set to an empty list to use the system default behavior.
+
+        Raises:
+            FletUnsupportedPlatformException: If the method is called
+                on a non-mobile platform.
+
+        Limitations:
+            - **Android**: On Android 16 (API 36) or later, this method won't be able to
+                change the orientation of **devices with a display width ≥ 600 dp**
+                cannot change orientation. For more details see Android 16 docs
+                [here](https://developer.android.com/about/versions/16/behavior-changes-16#ignore-orientation).
+                Also, Android limits the [orientations](https://developer.android.com/reference/android/R.attr#screenOrientation) to the following combinations:
+                    - `[]` → `unspecified`
+                    - `[PORTRAIT_UP]` → `portrait`
+                    - `[LANDSCAPE_LEFT]` → `landscape`
+                    - `[PORTRAIT_DOWN]` → `reversePortrait`
+                    - `[PORTRAIT_UP, PORTRAIT_DOWN]` → `userPortrait`
+                    - `[LANDSCAPE_RIGHT]` → `reverseLandscape`
+                    - `[LANDSCAPE_LEFT, LANDSCAPE_RIGHT]` → `userLandscape`
+                    - `[PORTRAIT_UP, LANDSCAPE_LEFT, LANDSCAPE_RIGHT]` → `user`
+                    - `[PORTRAIT_UP, PORTRAIT_DOWN, LANDSCAPE_LEFT, LANDSCAPE_RIGHT]` →
+                    `fullUser`
+
+            - **iOS**: This setting will only be respected on iPad if multitasking is
+            disabled.
+                You can decide to opt out of multitasking on iPad, then this will work
+                but your app will not support Slide Over and Split View multitasking
+                anymore. Should you decide to opt out of multitasking you can do this by
+                setting "Requires full screen" to true in the Xcode Deployment Info.
+        """  # noqa: E501
+        if not self.platform.is_mobile():
+            raise FletUnsupportedPlatformException(
+                "set_allowed_device_orientations is only supported on mobile platforms"
+            )
+        await self._invoke_method(
+            "set_allowed_device_orientations",
+            arguments={"orientations": orientations},
+        )
