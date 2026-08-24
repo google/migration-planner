@@ -112,6 +112,9 @@ class UsageAdoptionDashboardView(ft.Container):
         self.cpu_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
         self.disk_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
 
+        # File picker for exporting PDF
+        self.save_pdf_dialog = ft.FilePicker(on_result=self._on_save_pdf_result)
+
         # Section View Instances (Lazy/Persistent)
         self.identity_view = IdentityLicensingView(
             page=self.page_ref,
@@ -141,6 +144,8 @@ class UsageAdoptionDashboardView(ft.Container):
             secret=self.secret,
             on_status_change=lambda status: self._on_section_status_changed(3, status),
         )
+
+        self.page_ref.overlay.append(self.save_pdf_dialog)
 
         # Build UI Components
         self.header = self._build_header()
@@ -509,12 +514,131 @@ class UsageAdoptionDashboardView(ft.Container):
 
     def _handle_export_data(self):
         """Exports gathered telemetry data."""
+        self.save_pdf_dialog.save_file(
+            dialog_title="Save PDF Report",
+            file_name="M365_Telemetry_Report.pdf",
+            allowed_extensions=["pdf"],
+        )
+
+    def _collect_all_telemetry_data(self) -> dict:
+        import os
+        import csv
+        
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Get path to telemetry/reports/tenant_client
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
+        reports_dir = os.path.join(repo_root, "telemetry", "reports", f"{self.tenant}_{self.client}")
+        
+        def load_csv(filename):
+            path = os.path.join(reports_dir, filename)
+            if not os.path.exists(path):
+                return []
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return list(csv.DictReader(f))
+            except Exception:
+                return []
+        
+        identity_data = getattr(self.identity_view, "cached_data", {})
+        usage_data = getattr(self.usage_view, "cached_data", {})
+        security_data = getattr(self.security_view, "cached_data", {})
+        eco_data = getattr(self.ecosystem_view, "cached_data", {})
+        
+        # Build Intune Data
+        intune_data = security_data.get("intune", {})
+        if not intune_data.get("mobile_apps"):
+            intune_data["mobile_apps"] = [r.get("displayName") for r in load_csv("intune_apps.csv") if r.get("displayName")]
+        if not intune_data.get("detected_apps"):
+            intune_data["detected_apps"] = load_csv("intune_detected_apps.csv")
+        if not intune_data.get("managed_devices"):
+            intune_data["managed_devices"] = load_csv("intune_managed_devices.csv")
+        if not intune_data.get("vc_devices"):
+            intune_data["vc_devices"] = load_csv("intune_vc_devices.csv")
+        if not intune_data.get("android_compliance"):
+            intune_data["android_compliance"] = load_csv("intune_android_compliance.csv")
+        if not intune_data.get("ios_compliance"):
+            intune_data["ios_compliance"] = load_csv("intune_ios_compliance.csv")
+        if not intune_data.get("mdm_policies"):
+            intune_data["mdm_policies"] = load_csv("intune_mdm_policies.csv")
+        if not intune_data.get("byod_configs"):
+            intune_data["byod_configs"] = load_csv("intune_byod_configs.csv")
+            
+        combined_data = {
+            "tenant_id": self.tenant,
+            "skus": identity_data.get("skus", []),
+            "directory": {
+                "organization": identity_data.get("organization", []),
+                "domains": identity_data.get("domains", []),
+                "user_creation_logs": identity_data.get("user_creation_logs", []),
+                "provisioning_logs": identity_data.get("provisioning_logs", []),
+                "group_counts": identity_data.get("group_counts", {}),
+                "user_counts": identity_data.get("user_counts", {})
+            },
+            "o365_usage": usage_data.get("o365_usage", []),
+            "o365_trend": usage_data.get("o365_usage", []), # Used as trend if formatted right
+            "m365_apps": usage_data.get("m365_apps", []),
+            "mailbox": usage_data.get("mailbox", {}),
+            "calendar": usage_data.get("calendar", {}),
+            "mail_security": security_data.get("mail_security", {}),
+            "connectors": security_data.get("connectors", []),
+            "email_clients": usage_data.get("email_clients", {}),
+            "pst_files": usage_data.get("pst_files", {}),
+            "exchange_connectors": eco_data.get("exchange_connectors", []),
+            "transport_rules": security_data.get("transport_rules", []),
+            "sharepoint": usage_data.get("sharepoint", {}),
+            "onedrive": usage_data.get("onedrive", {}),
+            "devices_apps": usage_data.get("devices_apps", {}),
+            "intune": intune_data,
+            "network_security": {
+                "filtering_policies": load_csv("network_filtering_policies.csv"),
+                "conditional_access": load_csv("network_conditional_access.csv"),
+                "firewall_policies": load_csv("network_firewall_policies.csv")
+            },
+            "security_labels": security_data.get("security_labels", []),
+            "retention_policies": security_data.get("retention_policies", []),
+            "dlp_policies": security_data.get("dlp_policies", []),
+            "sensitive_info_types": {
+                "standard": security_data.get("sensitive_info_types", []),
+                "custom": load_csv("custom_sits.csv"),
+                "edm": load_csv("edm_schemas.csv")
+            },
+            "service_principals_sso": security_data.get("service_principals_sso", []),
+            "conditional_access": security_data.get("conditional_access", []),
+            "ediscovery_cases": load_csv("ediscovery_cases.csv"),
+            "power_automate": eco_data.get("power_automate", {}),
+            "msteams_activity": load_csv("msteams_activity.csv")
+        }
+            
+        return combined_data
+
+    def _on_save_pdf_result(self, e: ft.FilePickerResultEvent):
+        if not e.path:
+            return  # User canceled
+            
         snack = ft.SnackBar(
             content=ft.Text("Preparing and exporting telemetry data..."),
             open=True,
         )
         if hasattr(self.page_ref, "overlay"):
             self.page_ref.overlay.append(snack)
+        try:
+            self.page_ref.update()
+        except Exception:
+            pass
+            
+        try:
+            from telemetry.pdf_report import generate_pdf_report
+            data = self._collect_all_telemetry_data()
+            generate_pdf_report(data, e.path)
+            
+            snack.content = ft.Text(f"PDF successfully exported to {e.path}")
+            snack.bgcolor = ft.colors.GREEN_800
+        except Exception as ex:
+            import logging
+            logging.error(f"Failed to generate PDF: {ex}")
+            snack.content = ft.Text(f"Failed to generate PDF: {ex}")
+            snack.bgcolor = ft.colors.RED_800
+            
         try:
             self.page_ref.update()
         except Exception:

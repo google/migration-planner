@@ -63,6 +63,7 @@ class IdentityLicensingView(BaseSectionView):
         )
 
         # Card instances configured with full-width column weights
+        self.cached_data: Dict[str, Any] = {}
         self.cards_column = ft.Column(
             expand=True,
             spacing=20,
@@ -371,6 +372,7 @@ class IdentityLicensingView(BaseSectionView):
             client = self._get_client(["Organization.Read.All", "Directory.Read.All"])
             org_service = OrganizationService(client)
             org_list = org_service.get_organization_info()
+            self.cached_data["organization"] = org_list
             client.close()
 
             columns = ["Property", "Value"]
@@ -433,6 +435,7 @@ class IdentityLicensingView(BaseSectionView):
             client = self._get_client(["Organization.Read.All", "Directory.Read.All"])
             sku_service = SubscribedSKUsService(client)
             sku_data = sku_service.get_subscribed_skus()
+            self.cached_data["skus"] = sku_data
             client.close()
 
             columns = ["SKU Part Number", "Units", "Consumed Units"]
@@ -492,6 +495,7 @@ class IdentityLicensingView(BaseSectionView):
             client = self._get_client(["Organization.Read.All", "Directory.Read.All"])
             domains_service = DomainsService(client)
             domains_list = domains_service.get_domains()
+            self.cached_data["domains"] = domains_list
             client.close()
 
             columns = ["Domain Name", "Authentication Type", "Default", "Initial", "Verified", "Supported Services"]
@@ -545,6 +549,7 @@ class IdentityLicensingView(BaseSectionView):
             client = self._get_client(["Directory.Read.All", "User.Read.All", "Group.Read.All"])
             ug_service = UsersGroupsService(client)
             counts = ug_service.get_users_groups_counts()
+            self.cached_data["user_groups"] = counts
             client.close()
 
             user_c = counts.get("user_counts", {})
@@ -604,9 +609,11 @@ class IdentityLicensingView(BaseSectionView):
             csv_path = os.path.join(reports_dir, "directory_user_creation_logs.csv")
 
             user_logs_service = UserLogsService(client)
+            self.cached_data["user_creation_logs"] = []
             collected_rows: List[Dict[str, Any]] = []
 
             def _on_page(page_items):
+                self.cached_data["user_creation_logs"].extend(page_items)
                 collected_rows.extend(page_items)
 
             user_logs_service.fetch_user_creation_logs(
@@ -668,9 +675,11 @@ class IdentityLicensingView(BaseSectionView):
             csv_path = os.path.join(reports_dir, "directory_provisioning_logs.csv")
 
             prov_service = ProvisioningLogsService(client)
+            self.cached_data["provisioning_logs"] = []
             collected_rows: List[Dict[str, Any]] = []
 
             def _on_page(page_items):
+                self.cached_data["provisioning_logs"].extend(page_items)
                 collected_rows.extend(page_items)
 
             prov_service.fetch_provisioning_logs(
