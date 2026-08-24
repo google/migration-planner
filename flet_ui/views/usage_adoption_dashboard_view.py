@@ -113,7 +113,8 @@ class UsageAdoptionDashboardView(ft.Container):
         self.disk_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
 
         # File picker for exporting PDF
-        self.save_pdf_dialog = ft.FilePicker(on_result=self._on_save_pdf_result)
+        self.save_pdf_dialog = ft.FilePicker()
+        self.save_pdf_dialog.on_result = self._on_save_pdf_result
 
         # Section View Instances (Lazy/Persistent)
         self.identity_view = IdentityLicensingView(
