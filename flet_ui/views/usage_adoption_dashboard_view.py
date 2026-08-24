@@ -598,7 +598,7 @@ class UsageAdoptionDashboardView(ft.Container):
                 "user_counts": identity_data.get("user_counts", {})
             },
             "o365_usage": usage_data.get("o365_usage", []),
-            "o365_trend": usage_data.get("o365_usage", []), # Used as trend if formatted right
+            "o365_trend": usage_data.get("o365_trend", {}),
             "m365_apps": usage_data.get("m365_apps", []),
             "mailbox": usage_data.get("mailbox", {}),
             "calendar": usage_data.get("calendar", {}),

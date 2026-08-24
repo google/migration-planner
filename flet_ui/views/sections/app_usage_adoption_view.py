@@ -25,6 +25,7 @@ import flet as ft
 
 from core.graph.m365_apps.app_usage import run_m365_pipeline
 from core.graph.m365_apps.active_users import run_o365_pipeline
+from core.graph.m365_apps.active_users_trend import run_o365_trend_pipeline
 from core.graph.exchange.mailbox import run_mailbox_usage_pipeline, format_bytes
 from core.graph.exchange.email_clients import run_email_client_usage_pipeline
 from core.graph.exchange.pst_files import run_pst_discovery_pipeline
@@ -440,6 +441,13 @@ class AppUsageAdoptionView(BaseSectionView):
         try:
             active_data = run_o365_pipeline(self.client_id, self.secret, self.tenant)
             self.cached_data["o365_usage"] = active_data
+            try:
+                trend_data = run_o365_trend_pipeline(self.client_id, self.secret, self.tenant)
+                self.cached_data["o365_trend"] = trend_data
+            except Exception as trend_e:
+                logger.error(f"Error fetching trend data: {trend_e}")
+                self.cached_data["o365_trend"] = {}
+                
             columns = ["Workload / Product", "30-Day Active", "90-Day Active", "180-Day Active"]
             rows = [
                 [product, f"{d30:,}", f"{d90:,}", f"{d180:,}"]
