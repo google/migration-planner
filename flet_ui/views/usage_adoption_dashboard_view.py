@@ -611,7 +611,7 @@ class UsageAdoptionDashboardView(ft.Container):
             
         return combined_data
 
-    def _on_save_pdf_result(self, e: ft.FilePickerResultEvent):
+    def _on_save_pdf_result(self, e):
         if not e.path:
             return  # User canceled
             
