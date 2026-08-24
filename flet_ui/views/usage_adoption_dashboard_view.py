@@ -521,7 +521,9 @@ class UsageAdoptionDashboardView(ft.Container):
         reports_dir = os.path.join(repo_root, "telemetry", "reports")
         os.makedirs(reports_dir, exist_ok=True)
         
-        filename = f"{self.tenant}_M365_Telemetry_Report.pdf"
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{self.tenant}_M365_Telemetry_Report_{timestamp}.pdf"
         filepath = os.path.join(reports_dir, filename)
         
         try:
