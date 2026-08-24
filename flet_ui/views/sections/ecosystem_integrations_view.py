@@ -55,6 +55,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
             secret=secret,
             on_status_change=on_status_change,
         )
+        self.cached_data: Dict[str, Any] = {}
 
         # Card container with vertical scrolling
         self.cards_column = ft.Column(
