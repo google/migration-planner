@@ -1511,9 +1511,8 @@ class FileEstimator(Estimator):
                     completed_drives.increment()
                 for curr_response in responses:
                     res_id = curr_response.get("id")
-                    if not res_id or res_id in seen_ids:
+                    if not res_id:
                         continue
-                    seen_ids.add(res_id)
 
                     parent_ref = curr_response.get("parentReference", {})
                     drive_id = parent_ref.get("driveId")
@@ -1521,6 +1520,11 @@ class FileEstimator(Estimator):
 
                     if not drive_id or drive_id not in folder_nodes:
                         continue
+
+                    item_key = (drive_id, res_id)
+                    if item_key in seen_ids:
+                        continue
+                    seen_ids.add(item_key)
 
                     if _is_root(curr_response):
                         with self.tree_lock:
@@ -1819,29 +1823,33 @@ class FileEstimator(Estimator):
                 if drive_id in parent_references:
                     edges = parent_references[drive_id]
                     for folder_id, parent_id in edges.items():
-                        curr_value = resource_to_dependency_count.get(parent_id, 0)
-                        resource_to_dependency_count.update(parent_id, curr_value + 1)
-                        if not resource_to_dependency_count.contains(folder_id):
-                            resource_to_dependency_count.update(folder_id, 0)
+                        key = (drive_id, parent_id)
+                        curr_value = resource_to_dependency_count.get(key, 0)
+                        resource_to_dependency_count.update(key, curr_value + 1)
+                        child_key = (drive_id, folder_id)
+                        if not resource_to_dependency_count.contains(child_key):
+                            resource_to_dependency_count.update(child_key, 0)
                 if drive_id in folder_nodes:
                     for folder_id in folder_nodes[drive_id]:
-                        if not resource_to_dependency_count.contains(folder_id):
-                            resource_to_dependency_count.update(folder_id, 0)
+                        key = (drive_id, folder_id)
+                        if not resource_to_dependency_count.contains(key):
+                            resource_to_dependency_count.update(key, 0)
 
             active_thread_count = AtomicInt(0)
 
             leaves = []
-            for folder_id, count in resource_to_dependency_count.get_all().items():
+            for (d_id, f_id), count in resource_to_dependency_count.get_all().items():
                 if count == 0:
-                    leaves.append(folder_id)
+                    leaves.append((d_id, f_id))
                 else:
-                    dependency_set.add((count, folder_id))
+                    dependency_set.add((count, (d_id, f_id)))
 
-            for leaf_id in leaves:
+            for d_id, leaf_id in leaves:
                 try:
                     active_thread_count.increment()
                     self.tree_executor.submit(
                         self._extract_metrics_from_subtrees, 
+                        d_id,
                         leaf_id, 
                         drive_id_to_adj_list, 
                         parent_references, 
@@ -1868,6 +1876,7 @@ class FileEstimator(Estimator):
     
     def _extract_metrics_from_subtrees(
         self, 
+        drive_id: str,
         folder_id: str,
         drive_id_to_adj_list: Dict[str, Dict[str, List[str]]],
         parent_references: Dict[str, Dict[str, str]],
@@ -1879,13 +1888,7 @@ class FileEstimator(Estimator):
         active_thread_count: AtomicInt
     ):       
         try:
-            node = None
-            drive_id = None
-            for d_id in folder_nodes:
-                if folder_id in folder_nodes[d_id]:
-                    node = folder_nodes[d_id][folder_id]
-                    drive_id = d_id
-                    break
+            node = folder_nodes.get(drive_id, {}).get(folder_id)
 
             if not node or not drive_id:
                 return
@@ -1895,7 +1898,7 @@ class FileEstimator(Estimator):
 
             if folder_id in drive_id_to_adj_list.get(drive_id, {}):
                 for child_id in drive_id_to_adj_list[drive_id][folder_id]:
-                    child_metrics = resource_metrics.get(child_id, None)
+                    child_metrics = resource_metrics.get((drive_id, child_id), None)
                     if child_metrics:
                         subtree_count += child_metrics["subTreeCount"]
                         max_depth = max(max_depth, child_metrics["maxDepth"] + 1)
@@ -1904,30 +1907,32 @@ class FileEstimator(Estimator):
             node.sub_tree_count = subtree_count
             node.max_depth = max_depth
 
-            resource_metrics.update(folder_id, {
+            resource_metrics.update((drive_id, folder_id), {
                 "subTreeCount": subtree_count,
                 "maxDepth": max_depth
             })
 
-            self._update_drive_metrics_from_resource(node, resource_metrics.get(folder_id, {}), drive_metrics[drive_id])
+            self._update_drive_metrics_from_resource(node, resource_metrics.get((drive_id, folder_id), {}), drive_metrics[drive_id])
 
             parent_resource_id = parent_references.get(drive_id, {}).get(folder_id)
 
             if not parent_resource_id:
                 return
 
+            parent_key = (drive_id, parent_resource_id)
             with self.condition:
-                dependency_count_of_par = resource_to_dependency_count.get(parent_resource_id, 0)
-                dependency_set.remove((dependency_count_of_par, parent_resource_id))
+                dependency_count_of_par = resource_to_dependency_count.get(parent_key, 0)
+                dependency_set.remove((dependency_count_of_par, parent_key))
 
                 dependency_count_of_par -= 1
-                resource_to_dependency_count.update(parent_resource_id, dependency_count_of_par)
+                resource_to_dependency_count.update(parent_key, dependency_count_of_par)
 
                 if dependency_count_of_par > 0:
-                    dependency_set.add((dependency_count_of_par, parent_resource_id))
+                    dependency_set.add((dependency_count_of_par, parent_key))
                 else:
                     self.tree_executor.submit(
                         self._extract_metrics_from_subtrees, 
+                        drive_id,
                         parent_resource_id, 
                         drive_id_to_adj_list, 
                         parent_references, 
@@ -1941,7 +1946,7 @@ class FileEstimator(Estimator):
                     active_thread_count.increment()
 
         except Exception as e:
-            self._log_and_fail(f"Error while extracting metrics from subtrees for folder {folder_id}", e, failures)
+            self._log_and_fail(f"Error while extracting metrics from subtrees for folder {folder_id} in drive {drive_id}", e, failures)
         finally:
             active_thread_count.decrement()
             with self.condition:
