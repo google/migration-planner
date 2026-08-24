@@ -517,7 +517,7 @@ class UsageAdoptionDashboardView(ft.Container):
         
         # Determine save path
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
+        repo_root = os.path.dirname(os.path.dirname(script_dir))
         reports_dir = os.path.join(repo_root, "telemetry", "reports")
         os.makedirs(reports_dir, exist_ok=True)
         
@@ -527,21 +527,19 @@ class UsageAdoptionDashboardView(ft.Container):
         try:
             generate_pdf_report(data, filepath)
             
-            # Show success message
-            self.page_ref.snack_bar = ft.SnackBar(
-                content=ft.Text(f"Success! Report exported to {filepath}"),
-                bgcolor="green700"
-            )
-            self.page_ref.snack_bar.open = True
-            self.page_ref.update()
+            snack = ft.SnackBar(content=ft.Text(f"Success! Report exported to {filepath}"), bgcolor="green700", open=True)
+            if hasattr(self.page_ref, "open"):
+                self.page_ref.open(snack)
+            else:
+                self.page_ref.overlay.append(snack)
+                self.page_ref.update()
         except Exception as e:
-            # Show error message
-            self.page_ref.snack_bar = ft.SnackBar(
-                content=ft.Text(f"Error generating PDF: {str(e)}"),
-                bgcolor="red700"
-            )
-            self.page_ref.snack_bar.open = True
-            self.page_ref.update()
+            snack = ft.SnackBar(content=ft.Text(f"Error generating PDF: {str(e)}"), bgcolor="red700", open=True)
+            if hasattr(self.page_ref, "open"):
+                self.page_ref.open(snack)
+            else:
+                self.page_ref.overlay.append(snack)
+                self.page_ref.update()
 
     def _collect_all_telemetry_data(self) -> dict:
         import os
@@ -549,7 +547,7 @@ class UsageAdoptionDashboardView(ft.Container):
         
         script_dir = os.path.dirname(os.path.abspath(__file__))
         # Get path to telemetry/reports/tenant_client
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
+        repo_root = os.path.dirname(os.path.dirname(script_dir))
         reports_dir = os.path.join(repo_root, "telemetry", "reports", f"{self.tenant}_{self.client}")
         
         def load_csv(filename):

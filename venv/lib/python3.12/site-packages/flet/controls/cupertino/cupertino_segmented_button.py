@@ -1,0 +1,112 @@
+from typing import Annotated, Optional
+
+from flet.controls.base_control import control
+from flet.controls.control import Control
+from flet.controls.control_event import ControlEventHandler
+from flet.controls.layout_control import LayoutControl
+from flet.controls.padding import PaddingValue
+from flet.controls.types import ColorValue
+from flet.utils.validation import V
+
+__all__ = ["CupertinoSegmentedButton"]
+
+
+@control("CupertinoSegmentedButton")
+class CupertinoSegmentedButton(LayoutControl):
+    """
+    An iOS-style segmented button.
+
+    Example:
+    ```python
+    ft.CupertinoSegmentedButton(
+        selected_index=1,
+        controls=[
+            ft.Text("One"),
+            ft.Text("Two"),
+            ft.Text("Three"),
+        ],
+    )
+    ```
+    """
+
+    controls: Annotated[
+        list[Control],
+        V.visible_controls(min_count=2),
+    ]
+    """
+    The list of segments to be displayed.
+
+    Raises:
+        ValueError: If it does not contain at least two visible `Control`s.
+    """
+
+    selected_index: int = 0
+    """
+    The index (starting from 0) of the selected segment in the :attr:`controls` list.
+
+    Raises:
+        IndexError: If :attr:`selected_index` is out of range relative to the
+            visible controls.
+    """
+
+    selected_color: Optional[ColorValue] = None
+    """
+    The color of this button when it is selected.
+    """
+
+    unselected_color: Optional[ColorValue] = None
+    """
+    The color of this button when it is not selected.
+    """
+
+    border_color: Optional[ColorValue] = None
+    """
+    The color of this button's border.
+    """
+
+    padding: Optional[PaddingValue] = None
+    """
+    This button's padding.
+    """
+
+    click_color: Optional[ColorValue] = None
+    """
+    The color used to fill the background of this control when temporarily interacting \
+    with through a long press or drag.
+
+    Defaults to the :attr:`selected_color`
+    with 20% opacity.
+    """
+
+    disabled_color: Optional[ColorValue] = None
+    """
+    The color used to fill the background of the segment when it is disabled.
+
+    If `None`, this color will be 50% opacity of the
+    :attr:`selected_color` when
+    the segment is selected. If the segment is unselected, this color will be
+    set to the :attr:`unselected_color`.
+    """
+
+    disabled_text_color: Optional[ColorValue] = None
+    """
+    The color used for the text of the segment when it is disabled.
+    """
+
+    on_change: Optional[ControlEventHandler["CupertinoSegmentedButton"]] = None
+    """
+    Called when the state of the button is changed - when one of the `controls` is \
+    clicked.
+    """
+
+    def before_update(self):
+        super().before_update()
+        visible_controls_count = len([c for c in self.controls if c.visible])
+        if visible_controls_count >= 2 and not (
+            0 <= self.selected_index < visible_controls_count
+        ):
+            raise IndexError(
+                f"selected_index ({self.selected_index}) is out of range. "
+                f"Expected a value between 0 and {visible_controls_count - 1}, "
+                "inclusive."
+            )

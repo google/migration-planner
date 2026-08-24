@@ -1,0 +1,349 @@
+■ Deal Assistant
+Microsoft 365 Tenant
+Audit & Telemetry Report
+A comprehensive assessment of license allocations, workload adoption patterns,
+security configurations, and workflow automation.
+Tenant Name / ID: a8a95e4b-10a6-4526-a2cb-db7682eba2e6
+Report Generated: June 17, 2026 at 03:35 PM
+Assessment Status: ■ Audit Completed Successfully
+Report Context: Usage & Adoption Inventory
+1. Subscribed SKUs
+This section outlines the licensing packages (SKUs) currently configured and active in your Microsoft Entra ID tenant scope,
+displaying total enabled vs. consumed license counts.
+SKU Part Number Allocated Units Status Consumed Units
+SPE_E5 Enabled: 25 1
+DEVELOPERPACK Enabled: 25 25
+MICROSOFT_365_COPILOT_FOR_BUSINESS Enabled: 1 1
+FLOW_FREE Enabled: 10,000 22
+1b. Directory Summary
+Organization Details
+This section outlines general configuration parameters, tenant types, sync properties, and active services/plans configured
+for the tenant organization.
+Property Value
+displayName acme1000
+isMultipleDataLocationsForServicesEnabled null
+onPremisesSyncEnabled null
+onPremisesLastSyncDateTime null
+partnerTenantType null
+tenantType AAD
+provisionedPlans Adallom, CRM, MicrosoftCommunicationsOnline, ProjectWorkManagement,
+RMSOnline, SCO, SharePoint, YammerEnterprise, exchange
+Domains
+This section displays the configured internet domains associated with the tenant and their verified statuses.
+Domain ID Auth Type Admin Managed Default Verified Supported Services
+acme1001.onmicrosoft.
+com
+Managed Yes No No -
+newacmedomain.com Managed Yes No No -
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 2 of 14
+acme1000.onmicrosoft.
+com
+Managed Yes Yes Yes Email, OfficeCommunicationsOnline
+acme79999.onmicrosoft
+.com
+Managed Yes No Yes Email, OfficeCommunicationsOnline,
+MoeraDomain
+Groups & Users
+This section displays counts of different directory user and group categories configured in Microsoft Entra ID.
+Category Count
+Total Users 119
+Enabled Users 115
+Disabled Users 4
+Member Users 106
+Guest Users 13
+Total Groups 4,863
+Microsoft 365 Groups (Unified) 4,854
+Security Groups (Static, non-mail-enabled) 5
+Mail-enabled Security Groups 3
+Distribution Groups 1
+Dynamic Groups (Dynamic Membership) 0
+2. App Usage Summary
+Active Users Usage
+A breakdown of user activity across major Microsoft 365 services over the last 30, 90, and 180 days, representing actual
+adoption levels.
+Service / License 30 Days Active 90 Days Active 180 Days Active
+Exchange Online 7 7 8
+OneDrive 0 0 0
+SharePoint 0 0 0
+Teams 1 1 1
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 3 of 14
+O365 30-Day Active User Trend
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 4 of 14
+Microsoft 365 Client Applications Usage (180 Days)
+Displays the unique counts of active users on client applications (Outlook, Word, Excel, PowerPoint, OneNote, Teams)
+segmented by system platforms.
+App / Platform Active Users App / Platform Active Users
+Windows 0 Word (Mac) 0
+Mac 1 Excel (Mac) 0
+Mobile 0 PowerPoint (Mac) 0
+Web 9 OneNote (Mac) 0
+Outlook 9 Teams (Mac) 0
+Word 1 Outlook (Mobile) 0
+Excel 2 Word (Mobile) 0
+PowerPoint 0 Excel (Mobile) 0
+OneNote 0 PowerPoint (Mobile) 0
+Teams 1 OneNote (Mobile) 0
+Outlook (Windows) 0 Teams (Mobile) 0
+Word (Windows) 0 Outlook (Web) 9
+Excel (Windows) 0 Word (Web) 1
+PowerPoint (Windows) 0 Excel (Web) 2
+OneNote (Windows) 0 PowerPoint (Web) 0
+Teams (Windows) 0 OneNote (Web) 0
+Outlook (Mac) 1 Teams (Web) 1
+3. Workload Storage & Environmental Telemetry
+A compiled summary of storage consumption, item counts, and device statistics across Exchange Online, SharePoint, and
+OneDrive workloads.
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 5 of 14
+Exchange Online Mailbox & Resource Configurations
+Metric / Telemetry Property Exchange Mailbox Value
+Total Mailboxes Analyzed 31 Mailboxes
+Total Size of All Mailboxes 10.07 GB
+Average Mailbox Size 332.71 MB
+Total Emails Volume 276,832 Emails
+Average Emails per Mailbox 8,930 Emails
+Shared Mailboxes Count 5 Shared Mailboxes
+Total Shared Mailbox Size 892.16 MB
+Public Folders Count 3 Public Folders
+Mail-enabled Public Folders Count 1 Public Folders
+Total Public Folder Size 0.00 Bytes
+Room & Resource Reservation Enabled Yes
+Calendar Resource Pools (Rooms/Devices) Test room 01, Test room 02, Test room source 03, Test
+room source 04
+Calendar Attachment Link Permissions Yes
+Integrated Apps
+This section lists all organization-wide apps deployed in Exchange Online by administrators and their enabled status.
+App Display Name Status App Display Name Status
+Viva Insights Enabled My Templates Enabled
+Viva Insights Enabled Suggested Meetings Enabled
+Action Items Enabled Unsubscribe Enabled
+Bing Maps Enabled
+Exchange Connectors
+This section displays mail routing connectors configured in Exchange Online.
+No Exchange connectors configured.
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 6 of 14
+Email Clients & PST Environment
+Overview of email client adoption and PST configuration.
+Client Type Active Users
+Outlook on the Web (OWA) 8 Users
+Outlook for Windows 0 Users
+Outlook for Mac 1 Users
+Apple Mail (macOS) 0 Users
+Outlook Mobile (iOS/Android) 0 Users
+IMAP4 Apps 0 Users
+POP3 Apps 0 Users
+PST Metric Value
+pst_cloud_data
+{'value': [{'@odata.type': None,
+'searchTerms': [], 'hitsContainers':
+[{'@odata.type': None, 'total': 0,
+'moreResultsAvailable': False, 'hits':
+[]}]}]}
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 7 of 14
+SharePoint & OneDrive Environment Telemetry
+A comparison of file volume, storage consumption, site activity, and active synchronization clients.
+Metric Property Description SharePoint Sites (180d) OneDrive Personal (180d)
+Total Scope Count (Sites / Accounts) 5,453 Sites 20 Accounts
+Total Storage Consumed 145.16 GB 1.92 TB
+Total Stored File Count 97,533 Files 197 Files
+Active Files Count (Active %) 0 (0.0%) 0 (0.0%)
+Users with Sync Client Active N/A (SharePoint level) 0 Users (0.0%)
+Active OneNote Users N/A (SharePoint level) 0 Users
+Microsoft Entra Data
+This section outlines application sign-in metrics and authentication methods configuration summaries.
+App Sign Ins
+App Name Successful Sign Ins
+Microsoft Exchange REST API Based Powershell 1
+Microsoft 365 Support Service 1
+Google Business Migration 6
+Graph Explorer 47
+Azure Portal 3601
+M365ChatClient 5
+Google Workspace Migrate 1
+One Outlook Web 38
+My Profile 1
+Office365 Shell WCSS-Client 49
+Microsoft 365 Security and Compliance Center 2
+Microsoft Account Controls V2 11
+MultiTenantTest 2
+Microsoft 365 Admin portal 4
+Microsoft Teams Web Client 9
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 8 of 14
+OfficeHome 3
+Microsoft Todo web app 1
+Google Workspace Migrate 2
+My Signins 2
+Cascade Authentication 2
+Microsoft Office 365 Portal 2
+Authentication Methods
+Authentication Method Success Activity Count
+password 4
+sms 6
+smsSignIn 0
+mobilePhone 0
+alternateMobilePhone 0
+officePhone 0
+microsoftAuthenticatorPush 0
+oneTimePasscode 0
+microsoftAuthenticatorPasswordless 0
+windowsHelloForBusiness 0
+fido2SecurityKey 0
+temporaryAccessPass 0
+macOsSecureEnclaveKey 0
+passKeyDeviceBound 0
+passKeySynced 0
+externalAuthMethod 0
+Microsoft Intune Data
+This section contains mobile applications and device configuration policies managed and distributed via Microsoft Intune.
+Managed Mobile Apps:
+App ioS/ipados, Flipkart
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 9 of 14
+Device Configurations
+Platform Policy Type Number of Policies
+Windows Kiosk Configuration 1
+Windows Wifi Configuration 1
+Windows Wired Network Configuration 1
+Windows 10 Eas Email Profile Configuration 1
+Windows 10 Vpn Configuration 1
+macOS Settings Catalog 1
+* Based on sample data collected from Intune.
+4. Data Security, Governance & Compliance
+A summary of classification sensitivity labels and data retention lifecycle policies configured within Microsoft Purview to
+protect corporate properties.
+Microsoft Purview Sensitivity Labels
+Sensitivity Label Description Shield Mode Priority Status
+Data Classification
+Data Classification labels align with
+Data Classification Guidelines in order
+to determine if this content is
+Need-to-Know, Confidential, or Public.
+Learn more
+Yes N/a 0 Enabled
+■ Confidentiall Confidential Yes N/a 3 Enabled
+■ Need to know Need to know Yes N/a 2 Enabled
+■ Public Public Yes N/a 1 Enabled
+ded some new label Yes N/a 4 Enabled
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 10 of 14
+Microsoft Purview Retention Compliance Policies
+Policy Name Workloads Involved Retention Duration
+Basis Distribution Status Status
+Policy2
+Exchange, SharePoint,
+OneDriveForBusiness,
+Skype, ModernGroup,
+DynamicScope
+Keep Forever Pending Enabled
+policy44
+Exchange, SharePoint,
+OneDriveForBusiness,
+Skype, ModernGroup,
+DynamicScope
+10 Years (3650 days) Pending Enabled
+Mandatory-Policy
+Exchange, SharePoint,
+OneDriveForBusiness,
+Skype, ModernGroup,
+DynamicScope
+7 Years (2555 days) Pending Enabled
+policy244
+Exchange, SharePoint,
+OneDriveForBusiness,
+Skype, ModernGroup,
+DynamicScope
+Keep Forever Pending Enabled
+4.5 Mail Security (Exchange)
+This section displays configured email filtering and threat protection policies.
+No mail security policies found.
+4.6 Enterprise SAML SSO Apps
+This section displays Enterprise Applications configured for SAML Single Sign-On.
+Application Name SSO Mode
+Google Meet Add-In
+Azure Virtual Desktop ARM Provider
+O365DataApp.Office365App
+Messaging Bot API Application
+Data Classification Service
+Centralized Deployment
+ViewPoint
+Microsoft 365 Admin portal
+ChatMigrationService1P
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 11 of 14
+Customer Experience Platform PROD
+Azure AD Application Proxy
+Office365 Shell SS-Server Default
+Exchange Online Test App (Email,Calendar,Contact)
+new test app - parallel waves
+Microsoft Information Protection Sync Service
+Workspace Migration App
+Microsoft Intune Enrollment
+Microsoft Graph Connectors Core
+Microsoft Teams Connector
+Azure Multi-Factor Auth Client
+testApp
+Teams NRT DLP Ingestion Service
+Microsoft Flow CDS Integration Service TIP1
+BYOA_TEST_APP
+business users test app - subhadip
+Marketplace Rating and Reviews PROD
+inplace-test1
+Skype for Business
+Microsoft Intune
+Microsoft Exact Data Match Service
+Group Configuration Processor
+MS-PIM
+Power Platform Data Analytics
+MCAPI Authorization Prod
+PowerPlatform-a365copilotchatmcp-Connector
+Intune Mobile Application Management Client
+DevilFish
+Azure Files
+Polly
+Microsoft Teams UIS
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 12 of 14
+Microsoft Teams Templates Service
+Skype for Business Online
+Meeting Migration Service
+AssistAPI
+PowerPlatform-a365memcp-Connector
+Office 365 Outlook Connector
+t8
+test app AI
+Marketplace SaaS v2
+CloudLicensingSystem
+4.7 Conditional Access Policies
+This section displays Azure AD Auth Policies governing conditional access.
+Policy Name State Created Date
+-
+enabledForReportingB
+utNotEnforced -
+- disabled -
+- disabled -
+- disabled -
+- disabled -
+- disabled -
+- disabled -
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 13 of 14
+5. Power Platform & Automate Flows Analytics
+An analysis of low-code cloud and desktop workflows configured inside the tenant environments, identifying complex
+workflows and premium connectors.
+Power Platform Telemetry Property Scanned Value
+Total Environments Scanned 1
+Total Flows (Active + Inactive) 8 Flows
+Active Cloud Flows Count 5 Cloud Flows
+Active Desktop Flows Count 0 Desktop Flows
+Premium Connectors In Use 0
+Custom Connectors In Use 0
+Complex Business-Logic Flows Identified 0 Flows
+Power Automate Flows Breakdown Chart
+DEAL ASSISTANT M365 Tenant Telemetry & Audit Report
+Confidential - Tenant Audit Assessment Page 14 of 14

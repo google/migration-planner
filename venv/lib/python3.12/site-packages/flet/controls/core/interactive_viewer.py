@@ -1,0 +1,248 @@
+from dataclasses import field
+from typing import Annotated, Optional
+
+from flet.controls.alignment import Alignment
+from flet.controls.base_control import control
+from flet.controls.control import Control
+from flet.controls.control_event import EventHandler
+from flet.controls.duration import DurationValue
+from flet.controls.events import (
+    ScaleEndEvent,
+    ScaleStartEvent,
+    ScaleUpdateEvent,
+)
+from flet.controls.layout_control import LayoutControl
+from flet.controls.margin import Margin, MarginValue
+from flet.controls.types import ClipBehavior, Number
+from flet.utils.validation import V
+
+__all__ = ["InteractiveViewer"]
+
+
+@control("InteractiveViewer")
+class InteractiveViewer(LayoutControl):
+    """
+    Allows you to pan, zoom, and rotate its :attr:`content`.
+    """
+
+    content: Annotated[
+        Control,
+        V.visible_control(),
+    ]
+    """
+    The `Control` to be transformed.
+
+    Raises:
+        ValueError: If it is not visible.
+    """
+
+    pan_enabled: bool = True
+    """
+    Whether panning is enabled.
+    """
+
+    scale_enabled: bool = True
+    """
+    Whether scaling is enabled.
+    """
+
+    trackpad_scroll_causes_scale: bool = False
+    """
+    Whether scrolling up/down on a trackpad should cause scaling instead of panning.
+    """
+
+    constrained: bool = True
+    """
+    Whether the normal size constraints at this point in the control tree are applied \
+    to the :attr:`content`.
+
+    If set to `False`, then the content will be given infinite constraints. This
+    is often useful when a content should be bigger than this `InteractiveViewer`.
+
+    For example, for a content which is bigger than the viewport but can be
+    panned to reveal parts that were initially offscreen, `constrained` must
+    be set to `False` to allow it to size itself properly. If `constrained` is
+    `True` and the content can only size itself to the viewport, then areas
+    initially outside of the viewport will not be able to receive user
+    interaction events. If experiencing regions of the content that are not
+    receptive to user gestures, make sure `constrained` is `False` and the content
+    is sized properly.
+    """
+
+    max_scale: Annotated[
+        Number,
+        V.gt(0),
+        V.ge_field("min_scale"),
+    ] = 2.5
+    """
+    The maximum allowed scale.
+
+    Raises:
+        ValueError: If it is not strictly greater than `0`.
+        ValueError: If it is not greater than or equal to :attr:`min_scale`.
+    """
+
+    min_scale: Annotated[
+        Number,
+        V.gt(0),
+        V.le_field("max_scale"),
+    ] = 0.8
+    """
+    The minimum allowed scale.
+
+    The effective scale is limited by the value of :attr:`boundary_margin`.
+    If scaling would cause the content to be displayed outside the defined boundary,
+    it is prevented. By default, `boundary_margin` is set to `Margin.all(0)`,
+    so scaling below `1.0` is typically not possible unless you increase the
+    `boundary_margin` value.
+
+    Raises:
+        ValueError: If it is not strictly greater than `0`.
+        ValueError: If it is not less than or equal to :attr:`max_scale`.
+    """
+
+    interaction_end_friction_coefficient: Annotated[
+        Number,
+        V.gt(0),
+    ] = 0.0000135
+    """
+    Changes the deceleration behavior after a gesture.
+
+    Raises:
+        ValueError: If it is not strictly greater than `0`.
+    """
+
+    scale_factor: Number = 200
+    """
+    The amount of scale to be performed per pointer scroll.
+
+    Increasing this value above the default causes scaling to feel slower,
+    while decreasing it causes scaling to feel faster.
+
+    Note:
+        Has effect only on pointer device scrolling, not pinch to zoom.
+    """
+
+    clip_behavior: ClipBehavior = ClipBehavior.HARD_EDGE
+    """
+    Defines how to clip the :attr:`content`.
+
+    If set to :attr:`flet.ClipBehavior.NONE`, the :attr:`content` can visually overflow
+    the bounds of this `InteractiveViewer`, but gesture events (such as pan or zoom)
+    will only be recognized within the viewer's area. Ensure this `InteractiveViewer`
+    is sized appropriately when using :attr:`flet.ClipBehavior.NONE`.
+    """
+
+    alignment: Optional[Alignment] = None
+    """
+    The alignment of the :attr:`content` within this viewer.
+    """
+
+    boundary_margin: MarginValue = field(default_factory=lambda: Margin.all(0))
+    """
+    A margin for the visible boundaries of the :attr:`content`.
+
+    Any transformation that results in the viewport being able to view outside
+    of the boundaries will be stopped at the boundary. The boundaries do not
+    rotate with the rest of the scene, so they are always aligned with the
+    viewport.
+
+    To produce no boundaries at all, pass an infinite value.
+
+    Defaults to `Margin.all(0)`, which results in boundaries that are the
+    exact same size and position as the :attr:`content`.
+    """
+
+    interaction_update_interval: int = 200
+    """
+    The interval (in milliseconds) at which the :attr:`on_interaction_update` event is \
+    fired.
+    """
+
+    on_interaction_start: Optional[
+        EventHandler[ScaleStartEvent["InteractiveViewer"]]
+    ] = None
+    """
+    Called when the user begins a pan or scale gesture.
+    """
+
+    on_interaction_update: Optional[
+        EventHandler[ScaleUpdateEvent["InteractiveViewer"]]
+    ] = None
+    """
+    Called when the user updates a pan or scale gesture.
+    """
+
+    on_interaction_end: Optional[EventHandler[ScaleEndEvent["InteractiveViewer"]]] = (
+        None
+    )
+    """
+    Called when the user ends a pan or scale gesture.
+    """
+
+    async def reset(self, animation_duration: Optional[DurationValue] = None):
+        """
+        Resets the current transform matrix to identity.
+
+        Args:
+            animation_duration: Optional animation duration for the reset
+                transition. If `None`, the reset is applied immediately.
+
+        Notes:
+            When `animation_duration` is provided, Flutter interpolates from
+            the current transform to identity using a matrix tween.
+        """
+        await self._invoke_method(
+            "reset", arguments={"animation_duration": animation_duration}
+        )
+
+    async def save_state(self):
+        """
+        Saves a snapshot of the current transform matrix.
+
+        The saved state can later be restored using
+        :meth:`restore_state`. Calling this method again
+        overwrites the previously saved snapshot.
+        """
+        await self._invoke_method("save_state")
+
+    async def restore_state(self):
+        """
+        Restores the transform matrix previously captured by
+        :meth:`save_state`.
+
+        If no state has been saved yet, this method has no effect.
+        """
+        await self._invoke_method("restore_state")
+
+    async def zoom(self, factor: Number):
+        """
+        Applies multiplicative zoom to the current transform.
+
+        Args:
+            factor: Scale multiplier relative to the current scale.
+                Values greater than `1` zoom in, values between `0` and `1`
+                zoom out.
+
+        Note:
+            The resulting scale is clamped to :attr:`min_scale` and
+            :attr:`max_scale`. Additional boundary clamping is applied so the
+            visible viewport remains within :attr:`boundary_margin` limits.
+        """
+        await self._invoke_method("zoom", arguments={"factor": factor})
+
+    async def pan(self, dx: Number, dy: Number = 0, dz: Number = 0):
+        """
+        Translates the current transform matrix.
+
+        Args:
+            dx: Horizontal translation delta in logical pixels.
+            dy: Vertical translation delta in logical pixels.
+            dz: Z-axis translation delta applied to the transform matrix.
+
+        Note:
+            XY translation is clamped to the same interaction boundaries used
+            for gesture-driven panning. `dz` is applied directly to the matrix
+            and defaults to `0`.
+        """
+        await self._invoke_method("pan", arguments={"dx": dx, "dy": dy, "dz": dz})
