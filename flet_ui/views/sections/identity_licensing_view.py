@@ -435,7 +435,7 @@ class IdentityLicensingView(BaseSectionView):
             client = self._get_client(["Organization.Read.All", "Directory.Read.All"])
             sku_service = SubscribedSKUsService(client)
             sku_data = sku_service.get_subscribed_skus()
-            self.cached_data["skus"] = sku_data
+            self.cached_data["skus"] = sku_data.get("value", []) if isinstance(sku_data, dict) else sku_data
             client.close()
 
             columns = ["SKU Part Number", "Units", "Consumed Units"]
