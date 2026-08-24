@@ -585,6 +585,16 @@ class UsageAdoptionDashboardView(ft.Container):
             intune_data["mdm_policies"] = load_csv("intune_mdm_policies.csv")
         if not intune_data.get("byod_configs"):
             intune_data["byod_configs"] = load_csv("intune_byod_configs.csv")
+        if not intune_data.get("table_rows"):
+            configs = load_csv("intune_device_configs.csv")
+            policies = load_csv("intune_config_policies.csv")
+            counts = {}
+            for r in configs + policies:
+                plat, p_type = r.get("platform"), r.get("policyType")
+                if plat and p_type: counts[(plat, p_type)] = counts.get((plat, p_type), 0) + 1
+            intune_data["table_rows"] = [(p, pt, str(c)) for (p, pt), c in sorted(counts.items())]
+        if not intune_data.get("byod_configs"):
+            intune_data["byod_configs"] = load_csv("intune_byod_configs.csv")
             
         combined_data = {
             "tenant_id": self.tenant,
@@ -594,8 +604,8 @@ class UsageAdoptionDashboardView(ft.Container):
                 "domains": identity_data.get("domains", []),
                 "user_creation_logs": identity_data.get("user_creation_logs", []),
                 "provisioning_logs": identity_data.get("provisioning_logs", []),
-                "group_counts": identity_data.get("group_counts", {}),
-                "user_counts": identity_data.get("user_counts", {})
+                "group_counts": identity_data.get("user_groups", {}).get("group_counts", {}),
+                "user_counts": identity_data.get("user_groups", {}).get("user_counts", {})
             },
             "o365_usage": usage_data.get("o365_usage", []),
             "o365_trend": usage_data.get("o365_trend", {}),
@@ -609,6 +619,7 @@ class UsageAdoptionDashboardView(ft.Container):
             "exchange_connectors": eco_data.get("exchange_connectors", []),
             "transport_rules": security_data.get("transport_rules", []),
             "sharepoint": usage_data.get("sharepoint", {}),
+            "sharepoint_data_types": usage_data.get("sharepoint", {}),
             "onedrive": usage_data.get("onedrive", {}),
             "devices_apps": usage_data.get("devices_apps", {}),
             "intune": intune_data,
@@ -625,7 +636,7 @@ class UsageAdoptionDashboardView(ft.Container):
                 "custom": load_csv("custom_sits.csv"),
                 "edm": load_csv("edm_schemas.csv")
             },
-            "service_principals_sso": security_data.get("service_principals_sso", []),
+            "service_principals_sso": eco_data.get("service_principals_sso", []),
             "conditional_access": security_data.get("conditional_access", []),
             "ediscovery_cases": load_csv("ediscovery_cases.csv"),
             "power_automate": eco_data.get("power_automate", {}),

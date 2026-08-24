@@ -465,6 +465,8 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
 
             sp_service.fetch_service_principals_sso(on_page_callback=_on_page)
             client.close()
+            
+            self.cached_data["service_principals_sso"] = collected_sps
 
             columns = ["Display Name", "App ID", "Single Sign-On Mode", "Account State"]
             rows: List[List[Any]] = []
