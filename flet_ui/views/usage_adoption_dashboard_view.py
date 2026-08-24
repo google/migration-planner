@@ -111,11 +111,8 @@ class UsageAdoptionDashboardView(ft.Container):
         self.ram_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
         self.cpu_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
         self.disk_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
-
-        # File picker for exporting PDF
-        self.save_pdf_dialog = ft.FilePicker()
-        self.save_pdf_dialog.on_result = self._on_save_pdf_result
-
+        self.disk_text = ft.Text("Loading...", size=12, weight=ft.FontWeight.W_600, color=COLOR_TEXT_PRIMARY)
+        
         # Section View Instances (Lazy/Persistent)
         self.identity_view = IdentityLicensingView(
             page=self.page_ref,
@@ -145,8 +142,6 @@ class UsageAdoptionDashboardView(ft.Container):
             secret=self.secret,
             on_status_change=lambda status: self._on_section_status_changed(3, status),
         )
-
-        self.page_ref.overlay.append(self.save_pdf_dialog)
 
         # Build UI Components
         self.header = self._build_header()
@@ -514,12 +509,39 @@ class UsageAdoptionDashboardView(ft.Container):
             self.on_disconnect()
 
     def _handle_export_data(self):
-        """Exports gathered telemetry data."""
-        self.save_pdf_dialog.save_file(
-            dialog_title="Save PDF Report",
-            file_name="M365_Telemetry_Report.pdf",
-            allowed_extensions=["pdf"],
-        )
+        """Exports gathered telemetry data automatically without FilePicker."""
+        import os
+        from telemetry.pdf_report import generate_pdf_report
+        
+        data = self._collect_all_telemetry_data()
+        
+        # Determine save path
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
+        reports_dir = os.path.join(repo_root, "telemetry", "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        
+        filename = f"{self.tenant}_M365_Telemetry_Report.pdf"
+        filepath = os.path.join(reports_dir, filename)
+        
+        try:
+            generate_pdf_report(data, filepath)
+            
+            # Show success message
+            self.page_ref.snack_bar = ft.SnackBar(
+                content=ft.Text(f"Success! Report exported to {filepath}"),
+                bgcolor=ft.colors.GREEN_700
+            )
+            self.page_ref.snack_bar.open = True
+            self.page_ref.update()
+        except Exception as e:
+            # Show error message
+            self.page_ref.snack_bar = ft.SnackBar(
+                content=ft.Text(f"Error generating PDF: {str(e)}"),
+                bgcolor=ft.colors.RED_700
+            )
+            self.page_ref.snack_bar.open = True
+            self.page_ref.update()
 
     def _collect_all_telemetry_data(self) -> dict:
         import os
@@ -611,36 +633,3 @@ class UsageAdoptionDashboardView(ft.Container):
         }
             
         return combined_data
-
-    def _on_save_pdf_result(self, e):
-        if not e.path:
-            return  # User canceled
-            
-        snack = ft.SnackBar(
-            content=ft.Text("Preparing and exporting telemetry data..."),
-            open=True,
-        )
-        if hasattr(self.page_ref, "overlay"):
-            self.page_ref.overlay.append(snack)
-        try:
-            self.page_ref.update()
-        except Exception:
-            pass
-            
-        try:
-            from telemetry.pdf_report import generate_pdf_report
-            data = self._collect_all_telemetry_data()
-            generate_pdf_report(data, e.path)
-            
-            snack.content = ft.Text(f"PDF successfully exported to {e.path}")
-            snack.bgcolor = ft.colors.GREEN_800
-        except Exception as ex:
-            import logging
-            logging.error(f"Failed to generate PDF: {ex}")
-            snack.content = ft.Text(f"Failed to generate PDF: {ex}")
-            snack.bgcolor = ft.colors.RED_800
-            
-        try:
-            self.page_ref.update()
-        except Exception:
-            pass
