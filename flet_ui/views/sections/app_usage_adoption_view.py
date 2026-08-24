@@ -630,7 +630,7 @@ class AppUsageAdoptionView(BaseSectionView):
             self._safe_run_on_ui(_on_error)
 
     def _fetch_sharepoint_worker(self, is_reload: bool = False):
-        """Fetches SharePoint site usage, data types, and heavy sites inventory."""
+        """Fetches SharePoint site usage and data types summary metrics."""
         start_time = time.time()
         logger.info("Executing SharePoint Site Storage & Data Types fetch task...")
         try:
@@ -655,28 +655,30 @@ class AppUsageAdoptionView(BaseSectionView):
                 ["Web Pages", f"{combined_data.get('Web Pages', 0):,}"]
             ]
 
-            # Heavy Sites Card
+            # Heavy Sites Card (only populated during initial batch fetch if not reload)
             columns_heavy = ["URL", "Site ID", "Storage (GB)"]
             rows_heavy: List[List[Any]] = []
-            heavy_sites_list = combined_data.get("heavy_sites", [])
-            for site in heavy_sites_list:
-                bytes_val = float(site.get("Storage Used (Byte)", 0))
-                gb_val = bytes_val / (1024 ** 3)
-                rows_heavy.append([
-                    site.get("Site URL", "Unknown"),
-                    site.get("Site Id", "-"),
-                    f"{gb_val:.2f} GB"
-                ])
+            if not is_reload:
+                heavy_sites_list = combined_data.get("heavy_sites", [])
+                for site in heavy_sites_list:
+                    bytes_val = float(site.get("Storage Used (Byte)", 0))
+                    gb_val = bytes_val / (1024 ** 3)
+                    rows_heavy.append([
+                        site.get("Site URL", "Unknown"),
+                        site.get("Site Id", "-"),
+                        f"{gb_val:.2f} GB"
+                    ])
 
             elapsed = time.time() - start_time
 
             def _on_success():
                 self.sharepoint_card.set_data(columns_sp, rows_sp, execution_time=elapsed)
-                self.heavy_sites_card.set_data(columns_heavy, rows_heavy, execution_time=elapsed)
+                if not is_reload:
+                    self.heavy_sites_card.set_data(columns_heavy, rows_heavy, execution_time=elapsed)
 
                 if self.sharepoint_card not in self.cards_column.controls:
                     self.cards_column.controls.append(self.sharepoint_card)
-                if self.heavy_sites_card not in self.cards_column.controls:
+                if not is_reload and self.heavy_sites_card not in self.cards_column.controls:
                     self.cards_column.controls.append(self.heavy_sites_card)
                 try:
                     self.update()
@@ -690,9 +692,55 @@ class AppUsageAdoptionView(BaseSectionView):
 
             def _on_error():
                 self.sharepoint_card.set_error(f"Failed to fetch SharePoint Site Storage: {err_msg}")
-                self.heavy_sites_card.set_error(f"Failed to fetch Heavy Sites Inventory: {err_msg}")
+                if not is_reload:
+                    self.heavy_sites_card.set_error(f"Failed to fetch Heavy Sites Inventory: {err_msg}")
                 if self.sharepoint_card not in self.cards_column.controls:
                     self.cards_column.controls.append(self.sharepoint_card)
+                if not is_reload and self.heavy_sites_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.heavy_sites_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_heavy_sites_worker(self, is_reload: bool = False):
+        """Fetches Heavy Sites Inventory specifically."""
+        start_time = time.time()
+        logger.info("Executing Heavy Sites Inventory fetch task...")
+        try:
+            usage_data = run_sharepoint_pipeline(self.client_id, self.secret, self.tenant)
+            columns_heavy = ["URL", "Site ID", "Storage (GB)"]
+            rows_heavy: List[List[Any]] = []
+            heavy_sites_list = usage_data.get("heavy_sites", [])
+            for site in heavy_sites_list:
+                bytes_val = float(site.get("Storage Used (Byte)", 0))
+                gb_val = bytes_val / (1024 ** 3)
+                rows_heavy.append([
+                    site.get("Site URL", "Unknown"),
+                    site.get("Site Id", "-"),
+                    f"{gb_val:.2f} GB"
+                ])
+
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.heavy_sites_card.set_data(columns_heavy, rows_heavy, execution_time=elapsed)
+                if self.heavy_sites_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.heavy_sites_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching Heavy Sites: {e}")
+            err_msg = str(e)
+
+            def _on_error():
+                self.heavy_sites_card.set_error(f"Failed to fetch Heavy Sites Inventory: {err_msg}")
                 if self.heavy_sites_card not in self.cards_column.controls:
                     self.cards_column.controls.append(self.heavy_sites_card)
                 try:
