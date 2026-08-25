@@ -62,6 +62,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             secret=secret,
             on_status_change=on_status_change,
         )
+        self.cached_data: Dict[str, Any] = {}
 
         # Card container with vertical scrolling
         self.cards_column = ft.Column(
@@ -439,6 +440,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                         status_str = "Enabled" if str(status).lower() in ["true", "enabled", "1"] else "Disabled"
                         rows.append([name, workload, action, duration, status_str])
 
+            self.cached_data["retention_policies"] = policies
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -483,6 +485,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                         rules_cnt = str(p.get("RuleCount") or len(p.get("Rules") or []) or "1")
                         rows.append([name, mode, workloads, rules_cnt])
 
+            self.cached_data["dlp_policies"] = policies
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -546,6 +549,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                     sub_stat = "Enabled" if sub.get("isEnabled", True) else "Disabled"
                     rows.append([sub_name, sub_desc, sub_prot, sub_mode, sub_prio, sub_stat])
 
+            self.cached_data["security_labels"] = collected_labels
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -590,6 +594,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                         cat = s.get("Category") or s.get("Classification") or "Standard SIT"
                         rows.append([name, pub, str(conf), cat])
 
+            self.cached_data["sensitive_info_types"] = sits
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -645,6 +650,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             rows.append(["Self-Service Password Reset (SSPR)", "Enabled", "Authentication Policy"])
             rows.append(["MFA Registration Campaign", "Targeted", "Entra ID Policy"])
 
+            self.cached_data["authentication_methods"] = policies_list
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -705,6 +711,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 app_str = "All Cloud Apps" if "All" in inc_apps else "Targeted Apps"
                 rows.append([name, state, user_target, ctrl_str, app_str])
 
+            self.cached_data["conditional_access"] = policies_list
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -768,6 +775,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 "Enforced",
             ])
 
+            self.cached_data["mail_security"] = data
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -811,6 +819,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             if isinstance(policies, list) and policies:
                 pass
 
+            self.cached_data["device_compliance"] = policies
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -855,6 +864,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                         status = "Assigned"
                         rows.append([name, plat, scope, status])
 
+            self.cached_data["byod_configs"] = configs
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -900,6 +910,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                         sync_dt = (d.get("lastSyncDateTime") or "")[:10] or "N/A"
                         rows.append([name, os_name, comp, owner, sync_dt])
 
+            self.cached_data["managed_devices"] = devices
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -953,6 +964,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 plat = a.get("@odata.type", "").replace("#microsoft.graph.", "") or "All Platforms"
                 rows.append([name, pub, plat, "0", "Assigned"])
 
+            self.cached_data["mobile_apps"] = apps_list
             if os.path.exists(tmp_csv):
                 try:
                     os.remove(tmp_csv)
