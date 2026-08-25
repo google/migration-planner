@@ -513,6 +513,20 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
         logger.info("Executing Exchange Connectors & Mail Flow fetch task...")
         try:
             data = fetch_exchange_connectors_data(self.client_id, self.secret, self.tenant)
+            inbound = data.get("InboundConnectors", [])
+            outbound = data.get("OutboundConnectors", [])
+            
+            flat_connectors = []
+            if isinstance(inbound, list):
+                for c in inbound:
+                    c["Direction"] = "Inbound"
+                    flat_connectors.append(c)
+            if isinstance(outbound, list):
+                for c in outbound:
+                    c["Direction"] = "Outbound"
+                    flat_connectors.append(c)
+            self.cached_data["exchange_connectors"] = flat_connectors
+            
             if not isinstance(data, dict):
                 raise Exception("Failed to retrieve Exchange connectors data.")
 
