@@ -128,6 +128,7 @@ def main(page: ft.Page):
         page.session.store.set("client", "")
         page.session.store.set("secret", "")
         page.session.store.set("use_delegated", False)
+        page.session.store.set("delegated_token", "")
 
     def show_home():
         """Navigate back to the main Hub (Home Screen) and clear credentials."""
@@ -257,6 +258,8 @@ def main(page: ft.Page):
                                 current_auth_view.set_loading(False, "Authentication timed out or browser was closed.", is_error=True)
                         safe_run_on_ui(on_failed)
                         return
+
+                    page.session.store.set("delegated_token", token)
 
                     def on_success():
                         if isinstance(current_auth_view, AuthView):

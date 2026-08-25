@@ -87,3 +87,30 @@ class BaseSectionView(ft.Container):
                 self._safe_run_on_ui(_done)
 
         threading.Thread(target=_wrapper, daemon=True).start()
+
+    def get_delegated_token(self) -> Optional[str]:
+        """Retrieves the active delegated token from session store or silent MSAL cache.
+        Guarantees that no secondary browser authentication popup will open."""
+        if not self.page_ref:
+            return None
+        try:
+            # 1. Check if token was saved directly in session during initial authentication
+            token = self.page_ref.session.store.get("delegated_token")
+            if token:
+                return token
+
+            # 2. Check if delegated auth was enabled and acquire silently from MSAL in-memory cache
+            use_delegated = self.page_ref.session.store.get("use_delegated") or False
+            if use_delegated and self.tenant and self.client_id and self.secret:
+                from core.graph.delegated_auth import DelegatedAuthClient
+                auth_client = DelegatedAuthClient(self.tenant, self.client_id, self.secret)
+                token = auth_client.get_token(
+                    scopes=["https://graph.microsoft.com/.default"],
+                    force_interactive=False,
+                )
+                if token:
+                    self.page_ref.session.store.set("delegated_token", token)
+                    return token
+        except Exception:
+            pass
+        return None
