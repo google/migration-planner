@@ -460,7 +460,10 @@ This tab brings you to the workload selector, mirroring the standalone Migration
     *   **Scan All Users**: Automatically fetches every user in your tenant.
     *   **Upload CSV**: Allows you to scan a specific subset of users or pre-load existing counts.
     *   **CSV Format**: Must contain a header **Email Id** (e.g., `user@domain.com`). Also if Group Mailbox estimation is required then a column called `"Type"` is needed to segregate group mailbox IDs from user mailbox IDs. The correct values for Type column are `"User"`, `"Group Mailbox"`.
-    *   **Smart Delta Scan**: If your CSV already contains columns like `Email Count`, `Contact Count`, `Calendar Count`, `Calendar Event Count`, `In-Place Archive Count` or `Group Mail Count`, `Group Thread Count`, the tool will skip scanning those specific items and use your provided numbers, speeding up the process significantly.
+    *   **Understanding Smart Delta Scans**: When using the CSV upload feature, the tool intelligently analyzes the provided columns to determine if a live scan is necessary.
+        *   **Full Data Provided (No Scan Required)**: If your CSV contains all the count columns (e.g., `Email Count`, `Contact Count`, etc.) for the workloads you selected in the UI, the tool completely skips the scanning phase and immediately calculates the ETAs. **In this scenario, no Microsoft App ID credentials are required** (you can leave Tenant ID, Client ID, and Client Secret blank).
+        *   **Partial Data Provided (Delta Scan)**: If you select workloads to scan (e.g., Contacts and In-Place Archives) but your CSV is missing those specific columns, the tool performs a "Delta Scan." It will use your CSV data for the columns provided and only run a live Microsoft Graph scan for the missing data types.
+        *   **Credential Requirements**: Because a Delta Scan requires communicating with Microsoft Graph to fetch the missing data, **you must provide valid App ID credentials**. If you upload a CSV with missing columns and do not provide credentials, the tool will return an error: `Missing Credentials for Delta Scan (CSV missing some columns).`
 
 ##### 2. Advanced Settings (Exchange)
 Click **"Show Advanced Settings"** to tune the performance:
