@@ -25,6 +25,7 @@ import flet as ft
 
 from core.graph.m365_apps.app_usage import run_m365_pipeline
 from core.graph.m365_apps.active_users import run_o365_pipeline
+from core.graph.m365_apps.active_users_trend import run_o365_trend_pipeline
 from core.graph.exchange.mailbox import run_mailbox_usage_pipeline, format_bytes
 from core.graph.exchange.email_clients import run_email_client_usage_pipeline
 from core.graph.exchange.pst_files import run_pst_discovery_pipeline
@@ -65,6 +66,7 @@ class AppUsageAdoptionView(BaseSectionView):
         )
 
         self._sp_ready_event = threading.Event()
+        self.cached_data: Dict[str, Any] = {}
         self._cached_sp_data: Optional[Dict[str, Any]] = None
         self._sp_fetch_lock = threading.Lock()
 
@@ -402,6 +404,7 @@ class AppUsageAdoptionView(BaseSectionView):
         logger.info("Executing M365 Apps usage fetch task...")
         try:
             m365_data = run_m365_pipeline(self.client_id, self.secret, self.tenant)
+            self.cached_data["m365_apps"] = m365_data
             columns = ["App / Platform", "Users Count"]
             rows = [[platform, f"{count:,}"] for platform, count in m365_data]
             elapsed = time.time() - start_time
@@ -437,6 +440,14 @@ class AppUsageAdoptionView(BaseSectionView):
         logger.info("Executing Active Users Trend fetch task...")
         try:
             active_data = run_o365_pipeline(self.client_id, self.secret, self.tenant)
+            self.cached_data["o365_usage"] = active_data
+            try:
+                trend_data = run_o365_trend_pipeline(self.client_id, self.secret, self.tenant)
+                self.cached_data["o365_trend"] = trend_data
+            except Exception as trend_e:
+                logger.error(f"Error fetching trend data: {trend_e}")
+                self.cached_data["o365_trend"] = {}
+                
             columns = ["Workload / Product", "30-Day Active", "90-Day Active", "180-Day Active"]
             rows = [
                 [product, f"{d30:,}", f"{d90:,}", f"{d180:,}"]
@@ -475,6 +486,7 @@ class AppUsageAdoptionView(BaseSectionView):
         logger.info("Executing Mailbox usage fetch task...")
         try:
             mb_data = run_mailbox_usage_pipeline(self.client_id, self.secret, self.tenant)
+            self.cached_data["mailbox"] = mb_data
             
             s_count = mb_data.get("shared_mailboxes_count")
             s_count_str = f"{s_count:,} Shared Mailboxes" if s_count is not None else "Error/Unavailable"
@@ -534,6 +546,7 @@ class AppUsageAdoptionView(BaseSectionView):
         logger.info("Executing Email Client Classification fetch task...")
         try:
             result = run_email_client_usage_pipeline(self.client_id, self.secret, self.tenant)
+            self.cached_data["email_clients"] = result.get("client_stats", {})
             stats = result.get("client_stats", {})
             columns = ["Client Category", "Active Users (180 Days)"]
             rows = [
@@ -642,6 +655,7 @@ class AppUsageAdoptionView(BaseSectionView):
                 datatypes_data = datatypes_future.result()
 
             combined_data = {**usage_data, **datatypes_data}
+            self.cached_data["sharepoint"] = combined_data
 
             # Summary Card
             columns_sp = ["SharePoint Metric Description", "Value / Measurement"]
@@ -756,6 +770,7 @@ class AppUsageAdoptionView(BaseSectionView):
         logger.info("Executing OneDrive usage fetch task...")
         try:
             od_data = run_onedrive_pipeline(self.client_id, self.secret, self.tenant)
+            self.cached_data["onedrive"] = od_data
             columns = ["OneDrive Metric Description", "Value / Measurement"]
             rows = [
                 ["Total User Accounts", f"{od_data.get('total_accounts', 0):,} Accounts"],

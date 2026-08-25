@@ -21,3 +21,5 @@ telemetry/*/reports/
 .DS_Store
 .DS_Store?
 ._*
+venv/
+*.pyc

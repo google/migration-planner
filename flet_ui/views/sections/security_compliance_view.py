@@ -70,6 +70,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         )
 
         # Card container with vertical scrolling
+        self.cached_data = {}
         self.cards_column = ft.Column(
             expand=True,
             spacing=20,
@@ -611,6 +612,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 csv_path=csv_path,
                 on_page_callback=_on_page,
             )
+            self.cached_data["security_labels"] = collected_labels
 
             self._cache_to_sqlite_safe(csv_path, db_path, "sensitivity_labels")
 
@@ -671,7 +673,9 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         csv_path = os.path.join(reports_dir, "retention_policies.csv")
 
         try:
-            policies = run_retention_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies_raw = run_retention_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies = policies_raw.get("value", []) if isinstance(policies_raw, dict) else policies_raw
+            self.cached_data["retention_policies"] = policies
             rows: List[List[Any]] = []
             
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
@@ -732,7 +736,9 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         csv_path = os.path.join(reports_dir, "dlp_policies.csv")
 
         try:
-            policies = run_dlp_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies_raw = run_dlp_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies = policies_raw.get("value", []) if isinstance(policies_raw, dict) else policies_raw
+            self.cached_data["dlp_policies"] = policies
             rows: List[List[Any]] = []
             
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
@@ -812,6 +818,10 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 if isinstance(edm_schemas, dict): edm_schemas = [edm_schemas]
             elif isinstance(sit_data, list):
                 sit_list = sit_data
+
+            self.cached_data["sensitive_info_types"] = sit_list
+            self.cached_data["custom_sits"] = custom_sits
+            self.cached_data["edm_schemas"] = edm_schemas
 
             standard_sits = []
             for sit in sit_list:
@@ -928,6 +938,8 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             if not res.get("success", False):
                 err = res.get("error", "Unknown error fetching eDiscovery cases")
                 raise Exception(err)
+
+            self.cached_data["ediscovery_cases"] = res.get("data", [])
 
             rows: List[List[Any]] = []
             for c in res.get("data", []):
@@ -1143,6 +1155,8 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
         try:
             sec_data = run_mail_security_pipeline(self.client_id, self.secret, self.tenant)
+            self.cached_data["mail_security"] = sec_data
+            self.cached_data["encryption_posture"] = sec_data.get("encryption_posture", [])
             defender_skus = sec_data.get("defender", {}).get("skus", [])
             defender_users = sec_data.get("defender", {}).get("users", 0)
             eop_skus = sec_data.get("eop", {}).get("skus", [])
