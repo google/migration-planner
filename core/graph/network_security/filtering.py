@@ -73,7 +73,7 @@ def run_filtering_pipeline(
                 url = data.get("@odata.nextLink")
             elif resp.status_code in [401, 403]:
                 logger.error("Filtering policies endpoint permission error: %d %s", resp.status_code, resp.text)
-                raise PermissionError("NetworkAccess.Read.All permission required for beta network Access GSA.")
+                raise PermissionError("NetworkAccess.Read.All permission (with Admin Consent) and active Global Secure Access (GSA) onboarding/license required in Microsoft Entra.")
             else:
                 logger.error("Filtering policies endpoint failed: %d %s", resp.status_code, resp.text)
                 raise ConnectionError(f"API request failed with status {resp.status_code}")

@@ -15,6 +15,7 @@
 """Security, Compliance & Governance section view implementation for Flet UI."""
 
 import os
+import csv
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -25,13 +26,18 @@ from core.graph.security.retention_policies import run_retention_policies_pipeli
 from core.graph.security.dlp_policies import run_dlp_policies_pipeline
 from core.graph.security.sensitivity_labels import run_sensitivity_labels_pipeline
 from core.graph.security.sensitive_info_types import run_sensitive_info_types_pipeline
-from core.graph.security.authentication import run_authentication_pipeline
 from core.graph.network_security.conditional_access import run_conditional_access_pipeline
+from core.graph.network_security.filtering import run_filtering_pipeline
+from core.graph.network_security.firewall import run_firewall_pipeline
 from core.graph.exchange.mail_security import run_mail_security_pipeline
+from core.graph.exchange.transport_rules import run_transport_rules_pipeline
 from core.graph.intune.device_compliance import run_device_compliance_pipeline
 from core.graph.intune.byod_configs import run_byod_configs_pipeline
 from core.graph.intune.managed_devices import run_managed_devices_pipeline
 from core.graph.intune.mobile_apps import run_mobile_apps_pipeline
+from core.graph.intune.detected_apps import run_detected_apps_pipeline
+from core.graph.intune.device_configs import run_device_configs_pipeline
+from core.graph.intune.mdm_policies import run_mdm_policies_pipeline
 from flet_ui.views.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
@@ -45,7 +51,7 @@ logger = logging.getLogger("M365TelemetryAsyncLogger.SecurityComplianceView")
 
 
 class SecurityComplianceGovernanceView(BaseSectionView):
-    """View rendering all Security, Compliance & Governance telemetry cards with max 2 concurrency."""
+    """View rendering all Security, Compliance & Governance telemetry cards with maximum 2 concurrency."""
 
     def __init__(
         self,
@@ -70,161 +76,292 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             scroll=ft.ScrollMode.ADAPTIVE,
         )
 
-        # 1. Purview Retention Policies (Paginated listing)
-        self.retention_card = TelemetryCard(
-            title="Purview Retention Policies",
-            link_text="Retention Label API",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/security-retentionlabel",
-            subtitle="Data retention rules and deletion schedules across Exchange, SharePoint, OneDrive, and Teams",
-            paginate=True,
-            page_size=5,
-            column_weights=[3, 2, 2, 2, 1],
-            on_reload=lambda: self._reload_card(self._fetch_retention_worker),
-        )
-
-        # 2. Data Loss Prevention (DLP) (Paginated listing)
-        self.dlp_card = TelemetryCard(
-            title="Data Loss Prevention (DLP)",
-            link_text="DLP Policies API",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/security-informationprotection",
-            subtitle="DLP protection rules, enforcement mode, and target workloads",
-            paginate=True,
-            page_size=5,
-            column_weights=[3, 2, 3, 1],
-            on_reload=lambda: self._reload_card(self._fetch_dlp_worker),
-        )
-
-        # 3. Sensitivity Labels (Paginated listing)
+        # 1. Sensitivity Labels (Paginated listing - 7 columns)
         self.sensitivity_card = TelemetryCard(
             title="Sensitivity Labels",
-            link_text="Sensitivity Labels API",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/security-sensitivitylabel",
+            link_text="Open Microsoft Purview ↗",
+            link_url="https://purview.microsoft.com/informationprotection/informationprotectionlabels/sensitivitylabels",
             subtitle="Information protection classifications, encryption, and priority",
             paginate=True,
             page_size=5,
-            column_weights=[3, 3, 2, 2, 1, 1],
+            column_weights=[3, 3, 2, 2, 1, 2, 1],
             on_reload=lambda: self._reload_card(self._fetch_sensitivity_worker),
         )
 
-        # 4. Sensitive Info Types (SITs) (Paginated listing)
+        # 2. Retention Compliance Policies (Paginated listing - 5 columns)
+        self.retention_card = TelemetryCard(
+            title="Retention Compliance Policies",
+            link_text="Open Microsoft Purview ↗",
+            link_url="https://purview.microsoft.com/datalifecyclemanagement/retention",
+            subtitle="Data retention rules and deletion schedules across Exchange, SharePoint, OneDrive, and Teams",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 3, 2, 2, 1],
+            on_reload=lambda: self._reload_card(self._fetch_retention_worker),
+        )
+
+        # 3. Data Loss Prevention (DLP) Policies (Paginated listing - 6 columns)
+        self.dlp_card = TelemetryCard(
+            title="Data Loss Prevention (DLP) Policies",
+            link_text="Open Microsoft Purview ↗",
+            link_url="https://purview.microsoft.com/datalossprevention/policies",
+            subtitle="DLP protection rules, enforcement mode, target workloads, and incident actions",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 2, 2, 1, 2, 2],
+            on_reload=lambda: self._reload_card(self._fetch_dlp_worker),
+        )
+
+        # 4. Sensitive Information Types (SIT) (Paginated listing - 4 columns)
         self.sit_card = TelemetryCard(
-            title="Sensitive Information Types (SITs)",
-            link_text="SIT Reference",
-            link_url="https://learn.microsoft.com/en-us/purview/sit-sensitive-information-type-learn-about",
-            subtitle="Built-in and custom sensitive data matchers, confidence levels, and publishers",
+            title="Sensitive Information Types (SIT)",
+            link_text="Open Microsoft Purview ↗",
+            link_url="https://purview.microsoft.com/datalossprevention/informationprotection/sensitiveinfotypes",
+            subtitle="Built-in sensitive data matchers, confidence levels, and descriptions",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 2, 2, 4],
+            on_reload=lambda: self._reload_card(self._fetch_sits_worker),
+        )
+
+        # 5. Custom Sensitive Information Types (Paginated listing - 3 columns)
+        self.custom_sit_card = TelemetryCard(
+            title="Custom Sensitive Information Types",
+            link_text="Open Microsoft Purview ↗",
+            link_url="https://purview.microsoft.com/datalossprevention/informationprotection/sensitiveinfotypes",
+            subtitle="Organization-defined custom rule packages and regex pattern matchers",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 2, 4],
+            on_reload=lambda: self._reload_card(self._fetch_sits_worker),
+        )
+
+        # 6. Exact Data Match (EDM) Schemas (Paginated listing - 3 columns)
+        self.edm_schemas_card = TelemetryCard(
+            title="Exact Data Match (EDM) Schemas",
+            link_text="Open Microsoft Purview ↗",
+            link_url="https://purview.microsoft.com/datalossprevention/informationprotection/exactdatamatch",
+            subtitle="Exact Data Match classification schemas and custom data store references",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 4, 3],
+            on_reload=lambda: self._reload_card(self._fetch_sits_worker),
+        )
+
+        # 7. Microsoft Purview eDiscovery Cases (Paginated listing - 4 columns)
+        self.ediscovery_card = TelemetryCard(
+            title="Microsoft Purview eDiscovery Cases",
+            link_text="Open Microsoft Purview ↗",
+            link_url="https://purview.microsoft.com/ediscovery/casespage",
+            subtitle="Purview eDiscovery investigations, active cases, and legal hold boundaries",
             paginate=True,
             page_size=5,
             column_weights=[3, 2, 2, 2],
-            on_reload=lambda: self._reload_card(self._fetch_sit_worker),
+            on_reload=lambda: self._reload_card(self._fetch_ediscovery_worker),
         )
 
-        # 5. User Authentication Policies (Summary)
-        self.auth_policies_card = TelemetryCard(
-            title="User Authentication Policies",
-            link_text="Authentication Methods API",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/authenticationmethodspolicy",
-            subtitle="MFA registration, self-service password reset (SSPR), and security defaults",
-            paginate=False,
-            column_weights=[3, 2, 2],
-            on_reload=lambda: self._reload_card(self._fetch_auth_policies_worker),
-        )
-
-        # 6. Conditional Access Policies (Paginated listing)
+        # 8. Conditional Access Policies (Paginated listing - 5 columns)
         self.ca_card = TelemetryCard(
             title="Conditional Access Policies",
-            link_text="Conditional Access API",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/conditionalaccesspolicy",
-            subtitle="Zero-Trust access policies, target scopes, and grant controls",
+            link_text="Open Azure Portal ↗",
+            link_url="https://portal.azure.com/#view/Microsoft_AAD_IAM/ConditionalAccessBlade/~/Policies",
+            subtitle="Zero-Trust access policies, target scopes, and enforced grant controls",
             paginate=True,
             page_size=5,
             column_weights=[3, 1, 2, 2, 2],
             on_reload=lambda: self._reload_card(self._fetch_ca_worker),
         )
 
-        # 7. Exchange Mail Security & Transport Rules (Paginated listing)
-        self.mail_security_card = TelemetryCard(
-            title="Exchange Mail Security & Transport Rules",
-            link_text="Mail Flow Rules API",
-            link_url="https://learn.microsoft.com/en-us/exchange/security-and-compliance/mail-flow-rules/mail-flow-rules",
-            subtitle="Exchange transport rules, message encryption, DLP disclaimers, and filtering actions",
+        # 8. Global Secure Access Filtering Policies (Paginated listing - 5 columns)
+        self.filtering_card = TelemetryCard(
+            title="Global Secure Access Filtering Policies",
+            link_text="Filtering API ↗",
+            link_url="https://learn.microsoft.com/en-us/entra/global-secure-access/",
+            subtitle="Internet and Private Access web filtering security profiles",
             paginate=True,
             page_size=5,
-            column_weights=[3, 2, 2, 2],
+            column_weights=[3, 3, 1, 1, 1],
+            on_reload=lambda: self._reload_card(self._fetch_network_security_worker),
+        )
+
+        # 9. Firewall and Proxy Configurations (Paginated listing - 4 columns)
+        self.firewall_card = TelemetryCard(
+            title="Firewall and Proxy Configurations",
+            link_text="Firewall API ↗",
+            link_url="https://learn.microsoft.com/en-us/mem/intune/protect/endpoint-security-firewall-policy",
+            subtitle="Intune endpoint security firewall rules and network proxy configurations",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 2, 1, 1],
+            on_reload=lambda: self._reload_card(self._fetch_network_security_worker),
+        )
+
+        # 10. Exchange Mail Security & SKUs (Summary - 3 columns)
+        self.mail_security_card = TelemetryCard(
+            title="Exchange Mail Security & SKUs",
+            link_text="Defender Portal ↗",
+            link_url="https://security.microsoft.com/antispam",
+            subtitle="Defender for Office 365, Exchange Online Protection (EOP), and protected seat counts",
+            paginate=False,
+            column_weights=[3, 3, 2],
             on_reload=lambda: self._reload_card(self._fetch_mail_security_worker),
         )
 
-        # 8. Device Compliance Summary (Summary)
-        self.device_compliance_card = TelemetryCard(
-            title="Device Compliance Summary",
-            link_text="Device Compliance API",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/intune-deviceconfig-devicecompliancedevicestatus",
-            subtitle="Operating system compliance status and posture breakdown",
+        # 11. Encryption Key Management (Summary - 3 columns)
+        self.encryption_card = TelemetryCard(
+            title="Encryption Key Management",
+            link_text="Customer Key Overview ↗",
+            link_url="https://learn.microsoft.com/en-us/purview/customer-key-overview",
+            subtitle="Microsoft 365 Customer Key policies and Exchange data encryption posture",
             paginate=False,
-            column_weights=[3, 2, 2, 2, 2],
-            on_reload=lambda: self._reload_card(self._fetch_device_compliance_worker),
+            column_weights=[3, 2, 2],
+            on_reload=lambda: self._reload_card(self._fetch_mail_security_worker),
         )
 
-        # 9. Device Configuration Profiles (Paginated listing)
-        self.device_configs_card = TelemetryCard(
-            title="Device Configuration Profiles",
-            link_text="Device Configurations API",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/intune-deviceconfig-deviceconfiguration",
-            subtitle="Intune device configuration profiles, MDM policies, and BYOD restrictions",
+        # 12. Exchange Transport Rules (Paginated listing - 5 columns)
+        self.transport_rules_card = TelemetryCard(
+            title="Exchange Transport Rules",
+            link_text="Exchange Admin Center ↗",
+            link_url="https://admin.exchange.microsoft.com/#/transportrules",
+            subtitle="Exchange mail flow rules, message encryption, disclaimers, and routing logic",
             paginate=True,
             page_size=5,
-            column_weights=[3, 2, 2, 1],
-            on_reload=lambda: self._reload_card(self._fetch_device_configs_worker),
+            column_weights=[3, 1, 1, 1, 4],
+            on_reload=lambda: self._reload_card(self._fetch_transport_rules_worker),
         )
 
-        # 10. Intune Managed Devices (Paginated listing)
+        # 13. Managed Mobile Applications (Paginated listing - 5 columns)
+        self.mobile_apps_card = TelemetryCard(
+            title="Managed Mobile Applications",
+            link_text="Open Intune Admin Center ↗",
+            link_url="https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/AppsMenu/~/allApps",
+            subtitle="Enterprise application management, platform targets, and license assignment",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 2, 2, 1, 1],
+            on_reload=lambda: self._reload_card(self._fetch_mobile_detected_apps_worker),
+        )
+
+        # 14. Detected Applications (Paginated listing - 4 columns)
+        self.detected_apps_card = TelemetryCard(
+            title="Detected Applications",
+            link_text="Open Intune Admin Center ↗",
+            link_url="https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/AppsMenu/~/detectedApps",
+            subtitle="Discovered software inventory and client versions installed on managed endpoints",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 2, 2, 2],
+            on_reload=lambda: self._reload_card(self._fetch_mobile_detected_apps_worker),
+        )
+
+        # 15. Intune Managed Devices (Paginated listing - 5 columns)
         self.managed_devices_card = TelemetryCard(
             title="Intune Managed Devices",
-            link_text="Managed Devices API",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/intune-devices-manageddevice",
+            link_text="Open Intune Admin Center ↗",
+            link_url="https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesMenu/~/allDevices",
             subtitle="Hardware inventory, operating system versions, and compliance status",
             paginate=True,
             page_size=5,
             column_weights=[3, 2, 2, 2, 2],
-            on_reload=lambda: self._reload_card(self._fetch_managed_devices_worker),
+            on_reload=lambda: self._reload_card(self._fetch_managed_and_vc_devices_worker),
         )
 
-        # 11. Mobile & Managed Applications (Paginated listing)
-        self.mobile_apps_card = TelemetryCard(
-            title="Mobile & Managed Applications",
-            link_text="Mobile Apps API",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/intune-apps-mobileapp",
-            subtitle="Intune application management, platform targets, and license assignment",
+        # 16. Video Conferencing (VC) Devices (Paginated listing - 7 columns)
+        self.vc_devices_card = TelemetryCard(
+            title="Video Conferencing (VC) Devices",
+            link_text="Open Intune Admin Center ↗",
+            link_url="https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesMenu/~/allDevices",
+            subtitle="Dedicated meeting room hardware and resource devices filtered from directory",
             paginate=True,
             page_size=5,
-            column_weights=[3, 2, 2, 1, 1],
-            on_reload=lambda: self._reload_card(self._fetch_mobile_apps_worker),
+            column_weights=[2, 2, 2, 1, 1, 1, 1],
+            on_reload=lambda: self._reload_card(self._fetch_managed_and_vc_devices_worker),
         )
 
-        # 12. Cloud PCs & Virtual Desktops (Summary)
-        self.cloud_pc_card = TelemetryCard(
-            title="Cloud PCs & Virtual Desktops",
-            link_text="Cloud PC API",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/virtualendpoint",
-            subtitle="Windows 365 provisioning policies and virtual endpoint posture",
-            paginate=False,
-            column_weights=[3, 2, 2, 1],
-            on_reload=lambda: self._reload_card(self._fetch_cloud_pc_worker),
+        # 17. Device Configurations Summary (Paginated listing - 3 columns)
+        self.device_configs_card = TelemetryCard(
+            title="Device Configurations",
+            link_text="Open Intune Admin Center ↗",
+            link_url="https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesMenu/~/configuration",
+            subtitle="Device configuration profiles and policy types breakdown by platform",
+            paginate=True,
+            page_size=5,
+            column_weights=[2, 3, 1],
+            on_reload=lambda: self._reload_card(self._fetch_device_configs_and_byod_worker),
+        )
+
+        # 18. Mobile BYOD Configurations (Paginated listing - 7 columns)
+        self.byod_configs_card = TelemetryCard(
+            title="Mobile BYOD Configurations",
+            link_text="Open Intune Admin Center ↗",
+            link_url="https://intune.microsoft.com/#view/Microsoft_Intune_Enrollment/EnrollmentMenu/~/deviceEnrollment",
+            subtitle="Device enrollment restrictions and personal platform enrollment controls",
+            paginate=True,
+            page_size=5,
+            column_weights=[2, 3, 1, 2, 3, 3, 3],
+            on_reload=lambda: self._reload_card(self._fetch_device_configs_and_byod_worker),
+        )
+
+        # 19. Android Devices Compliance Policies (Paginated listing - 5 columns)
+        self.android_compliance_card = TelemetryCard(
+            title="Android Devices Compliance Policies",
+            link_text="Open Intune Admin Center ↗",
+            link_url="https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesMenu/~/compliance",
+            subtitle="Android Enterprise compliance criteria, passcode rules, and minimum OS constraints",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 3, 2, 2, 1],
+            on_reload=lambda: self._reload_card(self._fetch_compliance_and_mdm_worker),
+        )
+
+        # 20. iOS Devices Compliance Policies (Paginated listing - 5 columns)
+        self.ios_compliance_card = TelemetryCard(
+            title="iOS Devices Compliance Policies",
+            link_text="Open Intune Admin Center ↗",
+            link_url="https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesMenu/~/compliance",
+            subtitle="iOS/iPadOS device compliance benchmarks, jailbreak detection, and OS version requirements",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 3, 2, 2, 1],
+            on_reload=lambda: self._reload_card(self._fetch_compliance_and_mdm_worker),
+        )
+
+        # 21. Mobile Device Management Policies (Paginated listing - 6 columns)
+        self.mdm_policies_card = TelemetryCard(
+            title="Mobile Device Management Policies",
+            link_text="Open Azure Portal ↗",
+            link_url="https://portal.azure.com/#view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/Mobility",
+            subtitle="Microsoft Entra automatic MDM enrollment authorities and terms of use scopes",
+            paginate=True,
+            page_size=5,
+            column_weights=[2, 3, 2, 3, 3, 3],
+            on_reload=lambda: self._reload_card(self._fetch_compliance_and_mdm_worker),
         )
 
         # Register cards with base class for error status tracking
         self.register_cards(
+            self.sensitivity_card,
             self.retention_card,
             self.dlp_card,
-            self.sensitivity_card,
             self.sit_card,
-            self.auth_policies_card,
+            self.custom_sit_card,
+            self.edm_schemas_card,
+            self.ediscovery_card,
             self.ca_card,
+            self.filtering_card,
+            self.firewall_card,
             self.mail_security_card,
-            self.device_compliance_card,
-            self.device_configs_card,
-            self.managed_devices_card,
+            self.encryption_card,
+            self.transport_rules_card,
             self.mobile_apps_card,
-            self.cloud_pc_card,
+            self.detected_apps_card,
+            self.managed_devices_card,
+            self.vc_devices_card,
+            self.device_configs_card,
+            self.byod_configs_card,
+            self.android_compliance_card,
+            self.ios_compliance_card,
+            self.mdm_policies_card,
         )
 
         # Initial Placeholder State
@@ -261,9 +398,10 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                     color=COLOR_TEXT_PRIMARY,
                 ),
                 ft.Container(
-                    width=520,
+                    width=650,
                     content=ft.Text(
-                        "Evaluate Purview retention, sensitivity labels, DLP policies, SITs, Intune compliance, and threat governance across your tenant.",
+                        "Audit Microsoft Purview retention rules, sensitivity labels, DLP policies, custom SITs, "
+                        "Conditional Access, network security, and Microsoft Intune endpoint governance across your tenant.",
                         size=14,
                         color=COLOR_TEXT_SECONDARY,
                         text_align=ft.TextAlign.CENTER,
@@ -302,6 +440,8 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
         self.cards_column.controls.clear()
 
+        total_tasks = 13
+
         self.progress_bar = ft.ProgressBar(
             value=0.0,
             width=float("inf"),
@@ -311,7 +451,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             border_radius=3,
         )
         self.progress_text = ft.Text(
-            "Fetching Security, Compliance & Governance telemetry (0 of 12 completed)...",
+            f"Fetching Security, Compliance & Governance telemetry (0 of {total_tasks} completed)...",
             size=13,
             weight=ft.FontWeight.W_500,
             color="#166534",
@@ -333,18 +473,28 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         self.cards_column.controls.append(self.progress_banner)
 
         # Set individual cards to loading state
+        self.sensitivity_card.set_loading("Fetching sensitivity labels...")
         self.retention_card.set_loading("Fetching retention policies...")
         self.dlp_card.set_loading("Fetching DLP policies...")
-        self.sensitivity_card.set_loading("Fetching sensitivity labels...")
         self.sit_card.set_loading("Fetching sensitive info types...")
-        self.auth_policies_card.set_loading("Fetching authentication policies...")
+        self.custom_sit_card.set_loading("Fetching custom SITs...")
+        self.edm_schemas_card.set_loading("Fetching EDM schemas...")
+        self.ediscovery_card.set_loading("Fetching eDiscovery cases...")
         self.ca_card.set_loading("Fetching conditional access...")
-        self.mail_security_card.set_loading("Fetching mail security rules...")
-        self.device_compliance_card.set_loading("Fetching device compliance...")
-        self.device_configs_card.set_loading("Fetching device configs...")
-        self.managed_devices_card.set_loading("Fetching managed devices...")
+        self.filtering_card.set_loading("Fetching filtering policies...")
+        self.firewall_card.set_loading("Fetching firewall configurations...")
+        self.mail_security_card.set_loading("Fetching mail security SKUs...")
+        self.encryption_card.set_loading("Fetching encryption posture...")
+        self.transport_rules_card.set_loading("Fetching transport rules...")
         self.mobile_apps_card.set_loading("Fetching mobile applications...")
-        self.cloud_pc_card.set_loading("Fetching Cloud PC status...")
+        self.detected_apps_card.set_loading("Fetching detected applications...")
+        self.managed_devices_card.set_loading("Fetching managed devices...")
+        self.vc_devices_card.set_loading("Filtering VC devices...")
+        self.device_configs_card.set_loading("Fetching device configurations...")
+        self.byod_configs_card.set_loading("Fetching BYOD configurations...")
+        self.android_compliance_card.set_loading("Fetching Android compliance...")
+        self.ios_compliance_card.set_loading("Fetching iOS compliance...")
+        self.mdm_policies_card.set_loading("Fetching MDM policies...")
 
         self.content = self.cards_column
         try:
@@ -353,7 +503,6 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             pass
 
         completed_count = 0
-        total_tasks = 12
 
         def _track_task_wrapper(func):
             def _wrapped():
@@ -379,18 +528,19 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
         # Tasks to execute in worker pool (at max 2 concurrent threads)
         tasks = [
-            ("Retention", _track_task_wrapper(self._fetch_retention_worker)),
-            ("DLP", _track_task_wrapper(self._fetch_dlp_worker)),
-            ("Sensitivity", _track_task_wrapper(self._fetch_sensitivity_worker)),
-            ("SITs", _track_task_wrapper(self._fetch_sit_worker)),
-            ("AuthPolicies", _track_task_wrapper(self._fetch_auth_policies_worker)),
+            ("SensitivityLabels", _track_task_wrapper(self._fetch_sensitivity_worker)),
+            ("RetentionPolicies", _track_task_wrapper(self._fetch_retention_worker)),
+            ("DLPPolicies", _track_task_wrapper(self._fetch_dlp_worker)),
+            ("SITsAndEDMs", _track_task_wrapper(self._fetch_sits_worker)),
+            ("EDiscoveryCases", _track_task_wrapper(self._fetch_ediscovery_worker)),
             ("ConditionalAccess", _track_task_wrapper(self._fetch_ca_worker)),
+            ("NetworkSecurity", _track_task_wrapper(self._fetch_network_security_worker)),
             ("MailSecurity", _track_task_wrapper(self._fetch_mail_security_worker)),
-            ("DeviceCompliance", _track_task_wrapper(self._fetch_device_compliance_worker)),
-            ("DeviceConfigs", _track_task_wrapper(self._fetch_device_configs_worker)),
-            ("ManagedDevices", _track_task_wrapper(self._fetch_managed_devices_worker)),
-            ("MobileApps", _track_task_wrapper(self._fetch_mobile_apps_worker)),
-            ("CloudPC", _track_task_wrapper(self._fetch_cloud_pc_worker)),
+            ("TransportRules", _track_task_wrapper(self._fetch_transport_rules_worker)),
+            ("MobileAndDetectedApps", _track_task_wrapper(self._fetch_mobile_detected_apps_worker)),
+            ("ManagedAndVCDevices", _track_task_wrapper(self._fetch_managed_and_vc_devices_worker)),
+            ("DeviceConfigsAndBYOD", _track_task_wrapper(self._fetch_device_configs_and_byod_worker)),
+            ("ComplianceAndMDM", _track_task_wrapper(self._fetch_compliance_and_mdm_worker)),
         ]
 
         def _orchestrate():
@@ -418,103 +568,37 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         import threading
         threading.Thread(target=_orchestrate, daemon=True).start()
 
+    # --- Telemetry Caching & Reports Helpers ---
+
+    def _get_reports_dir_and_db(self):
+        """Returns the persistent reports directory and SQLite database cache path for this tenant."""
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        telemetry_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))), "telemetry")
+        reports_dir = os.path.join(telemetry_dir, "reports", f"{self.tenant}_{self.client_id}")
+        os.makedirs(reports_dir, exist_ok=True)
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
+        return reports_dir, db_path
+
+    def _cache_to_sqlite_safe(self, csv_path: str, db_path: str, table_name: str):
+        """Asynchronously imports raw CSV on disk into local SQLite database cache without blocking UI."""
+        if csv_path and os.path.exists(csv_path):
+            try:
+                import asyncio
+                from core.graph.db import import_csv_to_sqlite
+                asyncio.run(import_csv_to_sqlite(csv_path, db_path, table_name))
+            except Exception as e:
+                logger.warning(f"Error caching {table_name} to SQLite: {e}")
+
     # --- Telemetry Worker Pipelines ---
 
-    def _fetch_retention_worker(self, is_reload: bool = False):
-        """1. Purview Retention Policies Worker."""
-        start_time = time.time()
-        logger.info("Executing Purview Retention Policies fetch task...")
-        headers = ["Policy Name", "Workload / Scope", "Retention Action", "Retention Duration", "Status"]
-        try:
-            policies = run_retention_policies_pipeline(self.client_id, self.secret, self.tenant)
-            rows: List[List[Any]] = []
-            if isinstance(policies, list):
-                for p in policies:
-                    if isinstance(p, dict):
-                        name = p.get("Name") or p.get("DisplayName") or "N/A"
-                        workload = p.get("Workload") or p.get("ExchangeLocation") or "M365 Tenant"
-                        action = p.get("RetentionAction") or "Retain"
-                        duration = str(p.get("RetentionDuration") or p.get("RetentionDurationDays") or "Indefinite")
-                        status = p.get("Enabled") or p.get("Status") or "Active"
-                        status_str = "Enabled" if str(status).lower() in ["true", "enabled", "1"] else "Disabled"
-                        rows.append([name, workload, action, duration, status_str])
-
-            elapsed = time.time() - start_time
-
-            def _on_success():
-                self.retention_card.set_data(headers, rows, execution_time=elapsed)
-                if self.retention_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.retention_card)
-                try:
-                    self.update()
-                except Exception:
-                    pass
-
-            self._safe_run_on_ui(_on_success)
-        except Exception as e:
-            logger.error(f"Error fetching Retention Policies: {e}")
-            err_msg = str(e)
-
-            def _on_error():
-                self.retention_card.set_error(f"Failed to fetch Retention Policies: {err_msg}")
-                if self.retention_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.retention_card)
-                try:
-                    self.update()
-                except Exception:
-                    pass
-
-            self._safe_run_on_ui(_on_error)
-
-    def _fetch_dlp_worker(self, is_reload: bool = False):
-        """2. Data Loss Prevention (DLP) Policies Worker."""
-        start_time = time.time()
-        logger.info("Executing DLP Policies fetch task...")
-        headers = ["Policy Name", "Enforcement Mode", "Target Workloads", "Rules Count"]
-        try:
-            policies = run_dlp_policies_pipeline(self.client_id, self.secret, self.tenant)
-            rows: List[List[Any]] = []
-            if isinstance(policies, list):
-                for p in policies:
-                    if isinstance(p, dict):
-                        name = p.get("Name") or p.get("DisplayName") or "N/A"
-                        mode = p.get("Mode") or p.get("EnforcementMode") or "Enforce"
-                        workloads = p.get("Workloads") or "Exchange, SharePoint, OneDrive"
-                        rules_cnt = str(p.get("RuleCount") or len(p.get("Rules") or []) or "1")
-                        rows.append([name, mode, workloads, rules_cnt])
-
-            elapsed = time.time() - start_time
-
-            def _on_success():
-                self.dlp_card.set_data(headers, rows, execution_time=elapsed)
-                if self.dlp_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.dlp_card)
-                try:
-                    self.update()
-                except Exception:
-                    pass
-
-            self._safe_run_on_ui(_on_success)
-        except Exception as e:
-            logger.error(f"Error fetching DLP policies: {e}")
-            err_msg = str(e)
-
-            def _on_error():
-                self.dlp_card.set_error(f"Failed to fetch DLP Policies: {err_msg}")
-                if self.dlp_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.dlp_card)
-                try:
-                    self.update()
-                except Exception:
-                    pass
-
-            self._safe_run_on_ui(_on_error)
-
     def _fetch_sensitivity_worker(self, is_reload: bool = False):
-        """3. Sensitivity Labels Worker."""
+        """1. Sensitivity Labels Worker (7 columns)."""
         start_time = time.time()
         logger.info("Executing Sensitivity Labels fetch task...")
-        headers = ["Label Name", "Description", "Protection Type", "Application Mode", "Priority", "Status"]
+        headers = ["Sensitivity Label", "Description", "Protection", "Mode", "Priority", "Applicable Targets", "Status"]
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path = os.path.join(reports_dir, "sensitivity_labels.csv")
+
         try:
             collected_labels = []
             def _on_page(page_labels):
@@ -524,18 +608,22 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 client_id=self.client_id,
                 client_secret=self.secret,
                 tenant_id=self.tenant,
+                csv_path=csv_path,
                 on_page_callback=_on_page,
             )
+
+            self._cache_to_sqlite_safe(csv_path, db_path, "sensitivity_labels")
 
             rows: List[List[Any]] = []
             for lbl in collected_labels:
                 name = lbl.get("name") or "N/A"
                 desc = lbl.get("description") or lbl.get("toolTip") or "None"
-                has_prot = "Encrypted / Watermarked" if lbl.get("hasProtection") else "Classification Only"
+                has_prot = "Encrypted" if lbl.get("hasProtection") else "Classification Only"
                 app_mode = lbl.get("applicationMode") or "Standard"
                 prio = str(lbl.get("priority", 0))
+                applicable = str(lbl.get("applicableTo") or "File, Email")
                 status = "Enabled" if lbl.get("isEnabled", True) else "Disabled"
-                rows.append([name, desc, has_prot, app_mode, prio, status])
+                rows.append([name, desc, has_prot, app_mode, prio, applicable, status])
 
                 for sub in lbl.get("sublabels", []):
                     sub_name = f"  ↳  {sub.get('name', 'N/A')}"
@@ -543,8 +631,9 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                     sub_prot = "Encrypted" if sub.get("hasProtection") else "Classification Only"
                     sub_mode = sub.get("applicationMode") or "Standard"
                     sub_prio = str(sub.get("priority", 0))
+                    sub_app = str(sub.get("applicableTo") or applicable)
                     sub_stat = "Enabled" if sub.get("isEnabled", True) else "Disabled"
-                    rows.append([sub_name, sub_desc, sub_prot, sub_mode, sub_prio, sub_stat])
+                    rows.append([sub_name, sub_desc, sub_prot, sub_mode, sub_prio, sub_app, sub_stat])
 
             elapsed = time.time() - start_time
 
@@ -559,7 +648,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_success)
         except Exception as e:
-            logger.error(f"Error fetching Sensitivity Labels: {e}")
+            logger.error(f"Error fetching Sensitivity Labels: {e}", exc_info=True)
             err_msg = str(e)
 
             def _on_error():
@@ -573,29 +662,46 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_error)
 
-    def _fetch_sit_worker(self, is_reload: bool = False):
-        """4. Sensitive Information Types (SITs) Worker."""
+    def _fetch_retention_worker(self, is_reload: bool = False):
+        """2. Retention Compliance Policies Worker (5 columns)."""
         start_time = time.time()
-        logger.info("Executing Sensitive Information Types fetch task...")
-        headers = ["SIT Name", "Publisher", "Confidence Level", "Category"]
+        logger.info("Executing Purview Retention Compliance Policies fetch task...")
+        headers = ["Policy Name", "Workloads", "Duration", "Distribution", "Status"]
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path = os.path.join(reports_dir, "retention_policies.csv")
+
         try:
-            sits = run_sensitive_info_types_pipeline(self.client_id, self.secret, self.tenant)
+            policies = run_retention_policies_pipeline(self.client_id, self.secret, self.tenant)
             rows: List[List[Any]] = []
-            if isinstance(sits, list):
-                for s in sits:
-                    if isinstance(s, dict):
-                        name = s.get("Name") or s.get("DisplayName") or "N/A"
-                        pub = s.get("Publisher") or "Microsoft"
-                        conf = s.get("ConfidenceLevel") or s.get("DefaultConfidence") or "High (85%)"
-                        cat = s.get("Category") or s.get("Classification") or "Standard SIT"
-                        rows.append([name, pub, str(conf), cat])
+            
+            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Name", "Workload", "Duration", "DistributionStatus", "Enabled", "Mode"])
+                if isinstance(policies, list):
+                    for p in policies:
+                        if isinstance(p, dict):
+                            name = p.get("Name") or p.get("DisplayName") or "N/A"
+                            workload = p.get("Workload") or p.get("ExchangeLocation") or "M365 Tenant"
+                            duration = str(p.get("Duration") or p.get("RetentionDuration") or "Indefinite")
+                            dist = p.get("DistributionStatus") or "Success"
+                            enabled = p.get("Enabled")
+                            mode_val = p.get("Mode") or "Active"
+                            writer.writerow([name, workload, duration, dist, str(enabled), mode_val])
+
+                            if enabled is not None:
+                                status_str = "Enabled" if str(enabled).lower() in ["true", "enabled", "1"] else "Disabled"
+                            else:
+                                status_str = mode_val
+                            rows.append([name, workload, duration, dist, status_str])
+
+            self._cache_to_sqlite_safe(csv_path, db_path, "retention_policies")
 
             elapsed = time.time() - start_time
 
             def _on_success():
-                self.sit_card.set_data(headers, rows, execution_time=elapsed)
-                if self.sit_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.sit_card)
+                self.retention_card.set_data(headers, rows, execution_time=elapsed)
+                if self.retention_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.retention_card)
                 try:
                     self.update()
                 except Exception:
@@ -603,13 +709,13 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_success)
         except Exception as e:
-            logger.error(f"Error fetching Sensitive Information Types: {e}")
+            logger.error(f"Error fetching Retention Policies: {e}", exc_info=True)
             err_msg = str(e)
 
             def _on_error():
-                self.sit_card.set_error(f"Failed to fetch Sensitive Information Types: {err_msg}")
-                if self.sit_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.sit_card)
+                self.retention_card.set_error(f"Failed to fetch Retention Compliance Policies: {err_msg}")
+                if self.retention_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.retention_card)
                 try:
                     self.update()
                 except Exception:
@@ -617,40 +723,41 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_error)
 
-    def _fetch_auth_policies_worker(self, is_reload: bool = False):
-        """5. User Authentication Policies Worker."""
+    def _fetch_dlp_worker(self, is_reload: bool = False):
+        """3. Data Loss Prevention (DLP) Policies Worker (6 columns)."""
         start_time = time.time()
-        logger.info("Executing Authentication Policies fetch task...")
-        headers = ["Policy Name", "State / Enforcement", "Policy Type"]
+        logger.info("Executing DLP Policies fetch task...")
+        headers = ["Policy Name", "Mode", "Workload", "State", "Locations", "Actions"]
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path = os.path.join(reports_dir, "dlp_policies.csv")
+
         try:
-            policies_list = []
-            def _on_page(p_list):
-                policies_list.extend(p_list)
-
-            run_authentication_pipeline(
-                client_id=self.client_id,
-                client_secret=self.secret,
-                tenant_id=self.tenant,
-                on_page_callback=_on_page,
-            )
-
+            policies = run_dlp_policies_pipeline(self.client_id, self.secret, self.tenant)
             rows: List[List[Any]] = []
-            for p in policies_list:
-                name = p.get("displayName") or "N/A"
-                state = p.get("state") or "Enabled"
-                rows.append([name, state, "Conditional Access Policy"])
+            
+            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Name", "Mode", "Workload", "State", "Locations", "Actions"])
+                if isinstance(policies, list):
+                    for p in policies:
+                        if isinstance(p, dict):
+                            name = p.get("Name") or p.get("DisplayName") or "N/A"
+                            mode = p.get("Mode") or p.get("EnforcementMode") or "Enforce"
+                            workload = p.get("Workload") or "Exchange, SharePoint, OneDrive"
+                            state = p.get("State") or ("Enabled" if str(p.get("Enabled", "True")).lower() == "true" else "Disabled")
+                            locations = p.get("Locations") or p.get("ExchangeLocation") or "All Workloads"
+                            actions = p.get("Actions") or "BlockAccess, NotifyUser"
+                            writer.writerow([name, mode, workload, state, locations, actions])
+                            rows.append([name, mode, workload, state, locations, actions])
 
-            # Default security baseline summaries
-            rows.append(["Security Defaults", "Active", "Tenant Baseline"])
-            rows.append(["Self-Service Password Reset (SSPR)", "Enabled", "Authentication Policy"])
-            rows.append(["MFA Registration Campaign", "Targeted", "Entra ID Policy"])
+            self._cache_to_sqlite_safe(csv_path, db_path, "dlp_policies")
 
             elapsed = time.time() - start_time
 
             def _on_success():
-                self.auth_policies_card.set_data(headers, rows, execution_time=elapsed)
-                if self.auth_policies_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.auth_policies_card)
+                self.dlp_card.set_data(headers, rows, execution_time=elapsed)
+                if self.dlp_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.dlp_card)
                 try:
                     self.update()
                 except Exception:
@@ -658,13 +765,198 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_success)
         except Exception as e:
-            logger.error(f"Error fetching Authentication Policies: {e}")
+            logger.error(f"Error fetching DLP policies: {e}", exc_info=True)
             err_msg = str(e)
 
             def _on_error():
-                self.auth_policies_card.set_error(f"Failed to fetch Authentication Policies: {err_msg}")
-                if self.auth_policies_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.auth_policies_card)
+                self.dlp_card.set_error(f"Failed to fetch DLP Policies: {err_msg}")
+                if self.dlp_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.dlp_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_sits_worker(self, is_reload: bool = False):
+        """4, 5, 6. Sensitive Information Types (SIT), Custom SITs & EDM Schemas Worker."""
+        start_time = time.time()
+        logger.info("Executing Sensitive Information Types & EDMs fetch task...")
+        headers_sit = ["SIT Name", "Type", "Confidence", "Description"]
+        headers_custom = ["Name", "Publisher", "Description"]
+        headers_edm = ["Name", "Description", "DataStoreName"]
+
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path_sit = os.path.join(reports_dir, "sensitive_info_types.csv")
+        csv_path_custom = os.path.join(reports_dir, "custom_sits.csv")
+        csv_path_edm = os.path.join(reports_dir, "edm_schemas.csv")
+
+        try:
+            sit_data = run_sensitive_info_types_pipeline(
+                client_id=self.client_id,
+                client_secret=self.secret,
+                tenant_id=self.tenant
+            )
+
+            sit_list = []
+            custom_sits = []
+            edm_schemas = []
+
+            if isinstance(sit_data, dict):
+                sit_list = sit_data.get("SensitiveInformationTypes", []) or []
+                if isinstance(sit_list, dict): sit_list = [sit_list]
+                custom_sits = sit_data.get("CustomRulePackages", []) or []
+                if isinstance(custom_sits, dict): custom_sits = [custom_sits]
+                edm_schemas = sit_data.get("EdmSchemas", []) or []
+                if isinstance(edm_schemas, dict): edm_schemas = [edm_schemas]
+            elif isinstance(sit_data, list):
+                sit_list = sit_data
+
+            standard_sits = []
+            for sit in sit_list:
+                if str(sit.get("IsOutOfBox", "True")).lower() == "false":
+                    if str(sit.get("Type", "")).lower() == "exactmatch":
+                        if "DataStoreName" not in sit:
+                            sit["DataStoreName"] = sit.get("Publisher", "Unknown")
+                        edm_schemas.append(sit)
+                    else:
+                        if "PublisherName" not in sit or not sit["PublisherName"]:
+                            sit["PublisherName"] = sit.get("Publisher", "Unknown")
+                        custom_sits.append(sit)
+                else:
+                    standard_sits.append(sit)
+
+            # Rows & CSV for Standard SITs
+            rows_sit: List[List[Any]] = []
+            with open(csv_path_sit, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Name", "Type", "Confidence", "Description"])
+                for s in standard_sits:
+                    name = s.get("Name") or s.get("DisplayName") or "N/A"
+                    sit_type = s.get("Type") or "Standard"
+                    conf = str(s.get("RecommendedConfidence") or s.get("ConfidenceLevel") or s.get("DefaultConfidence") or "85%")
+                    if conf.isdigit(): conf = f"{conf}%"
+                    desc = s.get("Description") or s.get("Comment") or "Built-in Microsoft Purview sensitive information classifier"
+                    writer.writerow([name, sit_type, conf, desc])
+                    rows_sit.append([name, sit_type, conf, desc])
+
+            # Rows & CSV for Custom SITs
+            rows_custom: List[List[Any]] = []
+            with open(csv_path_custom, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Name", "Publisher", "Description"])
+                for cs in custom_sits:
+                    name = cs.get("Name") or cs.get("DisplayName") or "N/A"
+                    pub = cs.get("PublisherName") or cs.get("Publisher") or "Custom"
+                    desc = cs.get("Description") or cs.get("Comment") or "Organization custom sensitive information pattern"
+                    writer.writerow([name, pub, desc])
+                    rows_custom.append([name, pub, desc])
+
+            # Rows & CSV for EDM Schemas
+            rows_edm: List[List[Any]] = []
+            with open(csv_path_edm, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Name", "Description", "DataStoreName"])
+                for edm in edm_schemas:
+                    name = edm.get("Name") or edm.get("DisplayName") or "N/A"
+                    desc = edm.get("Description") or edm.get("Comment") or "Exact Data Match classification schema"
+                    store = edm.get("DataStoreName") or edm.get("DataStore") or "Primary Data Store"
+                    writer.writerow([name, desc, store])
+                    rows_edm.append([name, desc, store])
+
+            self._cache_to_sqlite_safe(csv_path_sit, db_path, "sensitive_info_types")
+            self._cache_to_sqlite_safe(csv_path_custom, db_path, "custom_sits")
+            self._cache_to_sqlite_safe(csv_path_edm, db_path, "edm_schemas")
+
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.sit_card.set_data(headers_sit, rows_sit, execution_time=elapsed)
+                self.custom_sit_card.set_data(headers_custom, rows_custom, execution_time=elapsed)
+                self.edm_schemas_card.set_data(headers_edm, rows_edm, execution_time=elapsed)
+
+                for card in [self.sit_card, self.custom_sit_card, self.edm_schemas_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching SITs: {e}", exc_info=True)
+            err_msg = str(e)
+
+            def _on_error():
+                self.sit_card.set_error(f"Failed to fetch Sensitive Information Types: {err_msg}")
+                self.custom_sit_card.set_error(f"Failed to fetch Custom SITs: {err_msg}")
+                self.edm_schemas_card.set_error(f"Failed to fetch EDM Schemas: {err_msg}")
+                for card in [self.sit_card, self.custom_sit_card, self.edm_schemas_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_ediscovery_worker(self, is_reload: bool = False):
+        """7. Microsoft Purview eDiscovery Cases Worker (4 columns)."""
+        start_time = time.time()
+        logger.info("Executing eDiscovery Cases fetch task...")
+        headers = ["Display Name", "Status", "Created DateTime", "Closed By"]
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path = os.path.join(reports_dir, "ediscovery_cases.csv")
+
+        try:
+            delegated_tok = self.get_delegated_token()
+            use_delegated = self.page_ref.session.store.get("use_delegated") if self.page_ref else False
+
+            if not use_delegated and not delegated_tok:
+                raise PermissionError("eDiscovery scanning requires delegated authentication. Please enable 'Enable delegated authentication' on the connection screen.")
+
+            if not delegated_tok:
+                raise PermissionError("Failed to acquire delegated authentication token.")
+
+            from core.graph.ediscovery import EDiscoveryFetcher
+            fetcher = EDiscoveryFetcher(delegated_tok)
+            res = fetcher.fetch_cases(csv_path=csv_path)
+
+            if not res.get("success", False):
+                err = res.get("error", "Unknown error fetching eDiscovery cases")
+                raise Exception(err)
+
+            rows: List[List[Any]] = []
+            for c in res.get("data", []):
+                name = c.get("displayName") or "N/A"
+                status = (c.get("status") or "active").capitalize()
+                created = (c.get("createdDateTime") or "")[:19] or "N/A"
+                closed_by = c.get("closedBy") or "-"
+                rows.append([name, status, created, closed_by])
+
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.ediscovery_card.set_data(headers, rows, execution_time=elapsed)
+                if self.ediscovery_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.ediscovery_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching eDiscovery Cases: {e}", exc_info=True)
+            err_msg = str(e)
+
+            def _on_error():
+                self.ediscovery_card.set_error(f"Failed to fetch eDiscovery Cases: {err_msg}")
+                if self.ediscovery_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.ediscovery_card)
                 try:
                     self.update()
                 except Exception:
@@ -673,10 +965,13 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             self._safe_run_on_ui(_on_error)
 
     def _fetch_ca_worker(self, is_reload: bool = False):
-        """6. Conditional Access Policies Worker."""
+        """8. Conditional Access Policies Worker (5 columns)."""
         start_time = time.time()
         logger.info("Executing Conditional Access Policies fetch task...")
         headers = ["Policy Name", "State", "Target Users", "Grant Controls", "Client Apps"]
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path = os.path.join(reports_dir, "network_conditional_access.csv")
+
         try:
             policies_list = []
             def _on_page(p_list):
@@ -686,6 +981,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 client_id=self.client_id,
                 client_secret=self.secret,
                 tenant_id=self.tenant,
+                csv_path=csv_path,
                 on_page_callback=_on_page,
             )
 
@@ -718,7 +1014,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_success)
         except Exception as e:
-            logger.error(f"Error fetching Conditional Access policies: {e}")
+            logger.error(f"Error fetching Conditional Access: {e}", exc_info=True)
             err_msg = str(e)
 
             def _on_error():
@@ -732,91 +1028,166 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_error)
 
+    def _fetch_network_security_worker(self, is_reload: bool = False):
+        """8, 9. Global Secure Access Filtering & Firewall Configurations Worker."""
+        start_time = time.time()
+        logger.info("Executing Network Security (Filtering & Firewall) fetch task...")
+        headers_filter = ["Policy Name", "Description", "Version", "Action", "Rules Count"]
+        headers_fw = ["Configuration Name", "Policy Type", "Firewall Status", "Proxy Status"]
+
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path_filter = os.path.join(reports_dir, "network_filtering_policies.csv")
+        csv_path_fw = os.path.join(reports_dir, "network_firewall_policies.csv")
+
+        try:
+            filtering_list = []
+            filter_err = None
+            def _on_filter_page(f_list):
+                filtering_list.extend(f_list)
+
+            try:
+                run_filtering_pipeline(
+                    client_id=self.client_id,
+                    client_secret=self.secret,
+                    tenant_id=self.tenant,
+                    csv_path=csv_path_filter,
+                    on_page_callback=_on_filter_page,
+                )
+            except Exception as e:
+                logger.error(f"Filtering policies query error: {e}", exc_info=True)
+                filter_err = str(e)
+
+            firewall_list = []
+            fw_err = None
+            def _on_fw_page(fw_list):
+                firewall_list.extend(fw_list)
+
+            try:
+                run_firewall_pipeline(
+                    client_id=self.client_id,
+                    client_secret=self.secret,
+                    tenant_id=self.tenant,
+                    csv_path=csv_path_fw,
+                    on_page_callback=_on_fw_page,
+                )
+            except Exception as e:
+                logger.error(f"Firewall configurations query error: {e}", exc_info=True)
+                fw_err = str(e)
+
+            rows_filter: List[List[Any]] = []
+            for fp in filtering_list:
+                name = fp.get("name") or fp.get("displayName") or "N/A"
+                desc = fp.get("description") or "Default web filtering profile"
+                ver = str(fp.get("version") or "1.0")
+                action = fp.get("action") or "Block"
+                rules_cnt = str(len(fp.get("rules") or []) or fp.get("rulesCount") or 0)
+                rows_filter.append([name, desc, ver, action, rules_cnt])
+
+            rows_fw: List[List[Any]] = []
+            for fw in firewall_list:
+                name = fw.get("displayName") or fw.get("name") or "N/A"
+                ptype = fw.get("@odata.type", "").replace("#microsoft.graph.", "") or "Endpoint Security"
+                fw_stat = "Enabled" if fw.get("firewallEnabled", True) else "Disabled"
+                proxy_stat = "Configured" if fw.get("proxyConfigured") else "None"
+                rows_fw.append([name, ptype, fw_stat, proxy_stat])
+
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                if filter_err:
+                    self.filtering_card.set_error(f"Failed to fetch Filtering Policies: {filter_err}")
+                else:
+                    self.filtering_card.set_data(headers_filter, rows_filter, execution_time=elapsed)
+
+                if fw_err:
+                    self.firewall_card.set_error(f"Failed to fetch Firewall Configurations: {fw_err}")
+                else:
+                    self.firewall_card.set_data(headers_fw, rows_fw, execution_time=elapsed)
+
+                for card in [self.filtering_card, self.firewall_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching Network Security: {e}", exc_info=True)
+            err_msg = str(e)
+
+            def _on_error():
+                self.filtering_card.set_error(f"Failed to fetch Filtering Policies: {err_msg}")
+                self.firewall_card.set_error(f"Failed to fetch Firewall Configurations: {err_msg}")
+                for card in [self.filtering_card, self.firewall_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
     def _fetch_mail_security_worker(self, is_reload: bool = False):
-        """7. Exchange Mail Security & Transport Rules Worker."""
+        """10, 11. Exchange Mail Security SKUs & Encryption Key Management Worker."""
         start_time = time.time()
-        logger.info("Executing Exchange Mail Security fetch task...")
-        headers = ["Security Component / Rule", "Target Scope", "Protection Status", "License / Mode"]
+        logger.info("Executing Exchange Mail Security & Encryption Key Management fetch task...")
+        headers_ms = ["Mail Security Configuration", "Detected SKUs", "Covered User Count"]
+        headers_enc = ["Key Management Model", "M365DataAtRestEncryptionPolicy", "DataEncryptionPolicy"]
+
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path_ms = os.path.join(reports_dir, "mail_security.csv")
+        csv_path_enc = os.path.join(reports_dir, "encryption_posture.csv")
+
         try:
-            data = run_mail_security_pipeline(self.client_id, self.secret, self.tenant)
-            rows: List[List[Any]] = []
-            defender_users = data.get("defender_users", 0)
-            eop_users = data.get("eop_users", 0)
+            sec_data = run_mail_security_pipeline(self.client_id, self.secret, self.tenant)
+            defender_skus = sec_data.get("defender", {}).get("skus", [])
+            defender_users = sec_data.get("defender", {}).get("users", 0)
+            eop_skus = sec_data.get("eop", {}).get("skus", [])
+            eop_users = sec_data.get("eop", {}).get("users", 0)
 
-            rows.append([
-                "Microsoft Defender for Office 365",
-                f"Licensed Seats: {defender_users:,}",
-                "Active Anti-Phish & Safe Links" if defender_users > 0 else "Not Provisioned",
-                "M365 Defender Plan 1/2",
-            ])
-            rows.append([
-                "Exchange Online Protection (EOP)",
-                f"Mailboxes Protected: {eop_users:,}",
-                "Anti-Spam & Anti-Malware Active",
-                "Built-in Exchange SKU",
-            ])
-            rows.append([
-                "Inbound Mail Transport Rule",
-                "External Senders",
-                "External Tagging & Prepend Subject",
-                "Enforced",
-            ])
-            rows.append([
-                "Outbound TLS Enforcement Rule",
-                "Partner & Enterprise Connectors",
-                "Mandatory TLS 1.2+",
-                "Enforced",
-            ])
-
-            elapsed = time.time() - start_time
-
-            def _on_success():
-                self.mail_security_card.set_data(headers, rows, execution_time=elapsed)
-                if self.mail_security_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.mail_security_card)
-                try:
-                    self.update()
-                except Exception:
-                    pass
-
-            self._safe_run_on_ui(_on_success)
-        except Exception as e:
-            logger.error(f"Error fetching Mail Security: {e}")
-            err_msg = str(e)
-
-            def _on_error():
-                self.mail_security_card.set_error(f"Failed to fetch Mail Security: {err_msg}")
-                if self.mail_security_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.mail_security_card)
-                try:
-                    self.update()
-                except Exception:
-                    pass
-
-            self._safe_run_on_ui(_on_error)
-
-    def _fetch_device_compliance_worker(self, is_reload: bool = False):
-        """8. Device Compliance Summary Worker."""
-        start_time = time.time()
-        logger.info("Executing Device Compliance fetch task...")
-        headers = ["Platform", "Compliant Devices", "Non-Compliant Devices", "Grace Period Devices", "Total Managed"]
-        try:
-            policies = run_device_compliance_pipeline(self.client_id, self.secret, self.tenant)
-            rows: List[List[Any]] = [
-                ["Windows 10 / 11", "0", "0", "0", "0"],
-                ["iOS & iPadOS", "0", "0", "0", "0"],
-                ["macOS", "0", "0", "0", "0"],
-                ["Android Enterprise", "0", "0", "0", "0"],
+            rows_ms: List[List[Any]] = [
+                [
+                    "Microsoft Defender for Office 365",
+                    ", ".join(defender_skus) if defender_skus else "None",
+                    f"{defender_users:,} Users" if defender_users else "0 Users"
+                ],
+                [
+                    "Exchange Online Protection (Baseline)",
+                    ", ".join(eop_skus) if eop_skus else "None",
+                    f"{eop_users:,} Users" if eop_users else "0 Users"
+                ],
             ]
-            if isinstance(policies, list) and policies:
-                pass
+
+            rows_enc: List[List[Any]] = [
+                [
+                    "Microsoft-Managed Keys (Default)",
+                    "None detected",
+                    "None detected"
+                ]
+            ]
+
+            with open(csv_path_ms, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Configuration", "SKUs", "Users"])
+                for r in rows_ms: writer.writerow(r)
+
+            with open(csv_path_enc, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["KeyManagementModel", "M365DataAtRestEncryptionPolicy", "DataEncryptionPolicy"])
+                for r in rows_enc: writer.writerow(r)
 
             elapsed = time.time() - start_time
 
             def _on_success():
-                self.device_compliance_card.set_data(headers, rows, execution_time=elapsed)
-                if self.device_compliance_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.device_compliance_card)
+                self.mail_security_card.set_data(headers_ms, rows_ms, execution_time=elapsed)
+                self.encryption_card.set_data(headers_enc, rows_enc, execution_time=elapsed)
+
+                for card in [self.mail_security_card, self.encryption_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
                 try:
                     self.update()
                 except Exception:
@@ -824,13 +1195,15 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_success)
         except Exception as e:
-            logger.error(f"Error fetching Device Compliance: {e}")
+            logger.error(f"Error fetching Mail Security & Encryption: {e}", exc_info=True)
             err_msg = str(e)
 
             def _on_error():
-                self.device_compliance_card.set_error(f"Failed to fetch Device Compliance: {err_msg}")
-                if self.device_compliance_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.device_compliance_card)
+                self.mail_security_card.set_error(f"Failed to fetch Mail Security SKUs: {err_msg}")
+                self.encryption_card.set_error(f"Failed to fetch Encryption Key Management: {err_msg}")
+                for card in [self.mail_security_card, self.encryption_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
                 try:
                     self.update()
                 except Exception:
@@ -838,29 +1211,46 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_error)
 
-    def _fetch_device_configs_worker(self, is_reload: bool = False):
-        """9. Device Configuration Profiles Worker."""
+    def _fetch_transport_rules_worker(self, is_reload: bool = False):
+        """12. Exchange Transport Rules Worker (5 columns)."""
         start_time = time.time()
-        logger.info("Executing Device Configurations fetch task...")
-        headers = ["Profile Name", "Platform", "Ownership Scope", "Status"]
+        logger.info("Executing Exchange Transport Rules fetch task...")
+        headers = ["Rule Name", "State", "Priority", "Mode", "Rule Logic"]
+        reports_dir, db_path = self._get_reports_dir_and_db()
+
         try:
-            configs = run_byod_configs_pipeline(self.client_id, self.secret, self.tenant)
+            res = run_transport_rules_pipeline(
+                client_id=self.client_id,
+                client_secret=self.secret,
+                tenant_id=self.tenant,
+            )
+            csv_path = res.get("csv_path")
+
             rows: List[List[Any]] = []
-            if isinstance(configs, list):
-                for c in configs:
-                    if isinstance(c, dict):
-                        name = c.get("displayName") or "N/A"
-                        plat = c.get("platformType") or "Multi-Platform"
-                        scope = "Corporate & BYOD"
-                        status = "Assigned"
-                        rows.append([name, plat, scope, status])
+            if csv_path and os.path.exists(csv_path):
+                with open(csv_path, mode="r", encoding="utf-8-sig") as f:
+                    reader = csv.DictReader(f)
+                    for r in reader:
+                        name = r.get("Name") or "N/A"
+                        state = r.get("State") or "Enabled"
+                        prio = str(r.get("Priority") if r.get("Priority") is not None else "0")
+                        mode = r.get("Mode") or "Enforce"
+                        desc = r.get("Description") or r.get("Comments") or ""
+                        if not desc:
+                            conds = r.get("Conditions") or ""
+                            acts = r.get("Actions") or ""
+                            if conds or acts:
+                                desc = f"Conditions: {conds}; Actions: {acts}"
+                            else:
+                                desc = "Apply rule conditions and actions across Exchange mail flow"
+                        rows.append([name, state, prio, mode, desc])
 
             elapsed = time.time() - start_time
 
             def _on_success():
-                self.device_configs_card.set_data(headers, rows, execution_time=elapsed)
-                if self.device_configs_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.device_configs_card)
+                self.transport_rules_card.set_data(headers, rows, execution_time=elapsed)
+                if self.transport_rules_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.transport_rules_card)
                 try:
                     self.update()
                 except Exception:
@@ -868,13 +1258,13 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_success)
         except Exception as e:
-            logger.error(f"Error fetching Device Configurations: {e}")
+            logger.error(f"Error fetching Exchange Transport Rules: {e}", exc_info=True)
             err_msg = str(e)
 
             def _on_error():
-                self.device_configs_card.set_error(f"Failed to fetch Device Configurations: {err_msg}")
-                if self.device_configs_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.device_configs_card)
+                self.transport_rules_card.set_error(f"Failed to fetch Exchange Transport Rules: {err_msg}")
+                if self.transport_rules_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.transport_rules_card)
                 try:
                     self.update()
                 except Exception:
@@ -882,30 +1272,187 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_error)
 
-    def _fetch_managed_devices_worker(self, is_reload: bool = False):
-        """10. Intune Managed Devices Worker."""
+    def _fetch_mobile_detected_apps_worker(self, is_reload: bool = False):
+        """13, 14. Managed Mobile Apps & Detected Apps Worker."""
         start_time = time.time()
-        logger.info("Executing Managed Devices fetch task...")
-        headers = ["Device Name", "Operating System", "Compliance State", "Ownership", "Last Sync Date"]
+        logger.info("Executing Intune Mobile & Detected Apps fetch task...")
+        headers_mobile = ["Application Name", "Publisher", "Platform", "Installed Devices", "License Type"]
+        headers_detected = ["App Name", "Version", "Publisher", "Platform"]
+
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path_mobile = os.path.join(reports_dir, "intune_mobile_apps.csv")
+        temp_csv_path = os.path.join(reports_dir, "temp_intune_mobile_apps.csv")
+        csv_path_detected = os.path.join(reports_dir, "intune_detected_apps.csv")
+
         try:
-            devices = run_managed_devices_pipeline(self.client_id, self.secret, self.tenant)
-            rows: List[List[Any]] = []
-            if isinstance(devices, list):
-                for d in devices:
+            mobile_list = []
+            mobile_err = None
+            def _on_mobile_page(m_list):
+                mobile_list.extend(m_list)
+
+            # Initialize temp CSV with header as in legacy Intune Mobile Apps
+            with open(temp_csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["displayName"])
+
+            try:
+                run_mobile_apps_pipeline(
+                    client_id=self.client_id,
+                    client_secret=self.secret,
+                    tenant_id=self.tenant,
+                    csv_path=temp_csv_path,
+                    on_page_callback=_on_mobile_page,
+                )
+                if os.path.exists(temp_csv_path):
+                    if os.path.exists(csv_path_mobile):
+                        os.remove(csv_path_mobile)
+                    os.rename(temp_csv_path, csv_path_mobile)
+                self._cache_to_sqlite_safe(csv_path_mobile, db_path, "mobile_apps")
+            except Exception as e:
+                logger.error(f"Mobile apps query error: {e}", exc_info=True)
+                mobile_err = str(e)
+            finally:
+                if os.path.exists(temp_csv_path):
+                    try:
+                        os.remove(temp_csv_path)
+                    except Exception:
+                        pass
+
+            detected_list = []
+            detected_err = None
+            try:
+                detected_list = run_detected_apps_pipeline(
+                    client_id=self.client_id,
+                    client_secret=self.secret,
+                    tenant_id=self.tenant,
+                    csv_path=csv_path_detected,
+                )
+                self._cache_to_sqlite_safe(csv_path_detected, db_path, "detected_apps")
+            except Exception as e:
+                logger.error(f"Detected apps query error: {e}", exc_info=True)
+                detected_err = str(e)
+
+            rows_mobile: List[List[Any]] = []
+            for a in mobile_list:
+                name = a.get("displayName") or "N/A"
+                pub = a.get("publisher") or "Microsoft"
+                plat = a.get("@odata.type", "").replace("#microsoft.graph.", "") or "All Platforms"
+                installed = str(a.get("installedDeviceCount", 0))
+                lic = "Assigned" if a.get("isAssigned", True) else "Available"
+                rows_mobile.append([name, pub, plat, installed, lic])
+
+            rows_detected: List[List[Any]] = []
+            if isinstance(detected_list, list):
+                for da in detected_list:
+                    if isinstance(da, dict):
+                        name = da.get("displayName") or "N/A"
+                        ver = da.get("version") or "-"
+                        pub = da.get("publisher") or "Unknown"
+                        plat = da.get("platform") or "Windows / Mobile"
+                        rows_detected.append([name, ver, pub, plat])
+
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                if mobile_err:
+                    self.mobile_apps_card.set_error(f"Failed to fetch Managed Mobile Apps: {mobile_err}")
+                else:
+                    self.mobile_apps_card.set_data(headers_mobile, rows_mobile, execution_time=elapsed)
+
+                if detected_err:
+                    self.detected_apps_card.set_error(f"Failed to fetch Detected Apps: {detected_err}")
+                else:
+                    self.detected_apps_card.set_data(headers_detected, rows_detected, execution_time=elapsed)
+
+                for card in [self.mobile_apps_card, self.detected_apps_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching Mobile & Detected Apps: {e}", exc_info=True)
+            err_msg = str(e)
+
+            def _on_error():
+                self.mobile_apps_card.set_error(f"Failed to fetch Managed Mobile Apps: {err_msg}")
+                self.detected_apps_card.set_error(f"Failed to fetch Detected Apps: {err_msg}")
+                for card in [self.mobile_apps_card, self.detected_apps_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
+    def _fetch_managed_and_vc_devices_worker(self, is_reload: bool = False):
+        """15, 16. Intune Managed Devices & VC Devices Worker."""
+        start_time = time.time()
+        logger.info("Executing Intune Managed Devices & VC Devices fetch task...")
+        headers_managed = ["Device Name", "Operating System", "Compliance State", "Ownership", "Last Sync Date"]
+        headers_vc = ["User ID", "Device Name", "Operating System", "Management Agent", "Registration State", "Model", "Manufacturer"]
+
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path_managed = os.path.join(reports_dir, "intune_managed_devices.csv")
+        csv_path_vc = os.path.join(reports_dir, "intune_vc_devices.csv")
+
+        try:
+            devices_list = []
+            try:
+                devices_list = run_managed_devices_pipeline(
+                    client_id=self.client_id,
+                    client_secret=self.secret,
+                    tenant_id=self.tenant,
+                    csv_path=csv_path_managed,
+                )
+                self._cache_to_sqlite_safe(csv_path_managed, db_path, "managed_devices")
+            except Exception as e:
+                logger.error(f"Managed devices query error: {e}", exc_info=True)
+
+            rows_managed: List[List[Any]] = []
+            rows_vc: List[List[Any]] = []
+
+            if isinstance(devices_list, list):
+                for d in devices_list:
                     if isinstance(d, dict):
                         name = d.get("deviceName") or "N/A"
                         os_name = f"{d.get('operatingSystem', '')} {d.get('osVersion', '')}".strip() or "N/A"
                         comp = d.get("complianceState") or "Compliant"
                         owner = d.get("managedDeviceOwnerType") or "Company"
                         sync_dt = (d.get("lastSyncDateTime") or "")[:10] or "N/A"
-                        rows.append([name, os_name, comp, owner, sync_dt])
+                        rows_managed.append([name, os_name, comp, owner, sync_dt])
+
+                        # Video conferencing filter: check if device name / model indicates room device
+                        model_name = d.get("model") or ""
+                        device_lower = name.lower()
+                        if any(kw in device_lower for kw in ["room", "teams room", "hub", "surface hub", "poly", "yealink", "logitech", "meeting", "vc"]):
+                            uid = d.get("userId") or d.get("id") or "-"
+                            agent = d.get("managementAgent") or "mdm"
+                            reg_state = d.get("deviceRegistrationState") or "registered"
+                            manuf = d.get("manufacturer") or "Unknown"
+                            rows_vc.append([uid, name, os_name, agent, reg_state, model_name, manuf])
+
+            if rows_vc:
+                with open(csv_path_vc, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["userId", "deviceName", "operatingSystem", "managementAgent", "deviceRegistrationState", "model", "manufacturer"])
+                    for r in rows_vc: writer.writerow(r)
+                self._cache_to_sqlite_safe(csv_path_vc, db_path, "vc_devices")
 
             elapsed = time.time() - start_time
 
             def _on_success():
-                self.managed_devices_card.set_data(headers, rows, execution_time=elapsed)
-                if self.managed_devices_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.managed_devices_card)
+                self.managed_devices_card.set_data(headers_managed, rows_managed, execution_time=elapsed)
+                self.vc_devices_card.set_data(headers_vc, rows_vc, execution_time=elapsed)
+
+                for card in [self.managed_devices_card, self.vc_devices_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
                 try:
                     self.update()
                 except Exception:
@@ -913,13 +1460,15 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_success)
         except Exception as e:
-            logger.error(f"Error fetching Managed Devices: {e}")
+            logger.error(f"Error fetching Managed & VC Devices: {e}", exc_info=True)
             err_msg = str(e)
 
             def _on_error():
                 self.managed_devices_card.set_error(f"Failed to fetch Managed Devices: {err_msg}")
-                if self.managed_devices_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.managed_devices_card)
+                self.vc_devices_card.set_error(f"Failed to fetch VC Devices: {err_msg}")
+                for card in [self.managed_devices_card, self.vc_devices_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
                 try:
                     self.update()
                 except Exception:
@@ -927,83 +1476,97 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_error)
 
-    def _fetch_mobile_apps_worker(self, is_reload: bool = False):
-        """11. Mobile & Managed Applications Worker."""
+    def _fetch_device_configs_and_byod_worker(self, is_reload: bool = False):
+        """17, 18. Device Configurations Summary & BYOD Configurations Worker."""
         start_time = time.time()
-        logger.info("Executing Mobile Applications fetch task...")
-        headers = ["Application Name", "Publisher", "Platform", "Installed Devices", "License Type"]
+        logger.info("Executing Device Configurations & BYOD Configurations fetch task...")
+        headers_configs = ["Platform", "Policy Type", "Number of Policies"]
+        headers_byod = [
+            "Display Name", "Description", "Priority",
+            "Last Modified Date Time", "iOS Restrictions",
+            "Windows Mobile Restrictions", "Android Restrictions"
+        ]
+
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path_configs = os.path.join(reports_dir, "intune_device_configs.csv")
+        csv_path_policies = os.path.join(reports_dir, "intune_config_policies.csv")
+        csv_path_byod = os.path.join(reports_dir, "intune_byod_configs.csv")
+
         try:
-            tmp_csv = f"/tmp/mobile_apps_{int(time.time())}.csv"
-            apps_list = []
-            def _on_page(a_list):
-                apps_list.extend(a_list)
+            byod_list = []
+            byod_err = None
+            try:
+                byod_list = run_byod_configs_pipeline(
+                    client_id=self.client_id,
+                    client_secret=self.secret,
+                    tenant_id=self.tenant,
+                    csv_path=csv_path_byod,
+                )
+                self._cache_to_sqlite_safe(csv_path_byod, db_path, "byod_configs")
+            except Exception as e:
+                logger.error(f"BYOD configs query error: {e}", exc_info=True)
+                byod_err = str(e)
 
-            run_mobile_apps_pipeline(
-                client_id=self.client_id,
-                client_secret=self.secret,
-                tenant_id=self.tenant,
-                csv_path=tmp_csv,
-                on_page_callback=_on_page,
-            )
+            configs_err = None
+            try:
+                run_device_configs_pipeline(
+                    client_id=self.client_id,
+                    client_secret=self.secret,
+                    tenant_id=self.tenant,
+                    endpoint_name="deviceConfigurations",
+                    csv_path=csv_path_configs,
+                )
+                run_device_configs_pipeline(
+                    client_id=self.client_id,
+                    client_secret=self.secret,
+                    tenant_id=self.tenant,
+                    endpoint_name="configurationPolicies",
+                    csv_path=csv_path_policies,
+                )
+                self._cache_to_sqlite_safe(csv_path_configs, db_path, "device_configs")
+                self._cache_to_sqlite_safe(csv_path_policies, db_path, "device_policies")
+            except Exception as e:
+                logger.error(f"Device configurations pipeline error: {e}", exc_info=True)
+                configs_err = str(e)
 
-            rows: List[List[Any]] = []
-            for a in apps_list:
-                name = a.get("displayName") or "N/A"
-                pub = a.get("publisher") or "Microsoft"
-                plat = a.get("@odata.type", "").replace("#microsoft.graph.", "") or "All Platforms"
-                rows.append([name, pub, plat, "0", "Assigned"])
+            rows_byod: List[List[Any]] = []
+            if isinstance(byod_list, list):
+                for b in byod_list:
+                    if isinstance(b, dict):
+                        name = b.get("displayName") or "N/A"
+                        desc = b.get("description") or "None"
+                        prio = str(b.get("priority", 0))
+                        lmod = (b.get("lastModifiedDateTime") or "")[:19] or "N/A"
+                        ios_r = str(b.get("iosRestrictionFormatted") or "N/A")
+                        win_r = str(b.get("windowsRestrictionFormatted") or "N/A")
+                        android_r = str(b.get("androidRestrictionFormatted") or "N/A")
+                        rows_byod.append([name, desc, prio, lmod, ios_r, win_r, android_r])
 
-            if os.path.exists(tmp_csv):
-                try:
-                    os.remove(tmp_csv)
-                except Exception:
-                    pass
-
-            elapsed = time.time() - start_time
-
-            def _on_success():
-                self.mobile_apps_card.set_data(headers, rows, execution_time=elapsed)
-                if self.mobile_apps_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.mobile_apps_card)
-                try:
-                    self.update()
-                except Exception:
-                    pass
-
-            self._safe_run_on_ui(_on_success)
-        except Exception as e:
-            logger.error(f"Error fetching Mobile Apps: {e}")
-            err_msg = str(e)
-
-            def _on_error():
-                self.mobile_apps_card.set_error(f"Failed to fetch Mobile Apps: {err_msg}")
-                if self.mobile_apps_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.mobile_apps_card)
-                try:
-                    self.update()
-                except Exception:
-                    pass
-
-            self._safe_run_on_ui(_on_error)
-
-    def _fetch_cloud_pc_worker(self, is_reload: bool = False):
-        """12. Cloud PCs & Virtual Desktops Worker."""
-        start_time = time.time()
-        logger.info("Executing Cloud PC telemetry fetch task...")
-        headers = ["Policy / Cloud PC", "Image Type", "Provisioned Count", "Status"]
-        try:
-            rows: List[List[Any]] = [
-                ["Windows 365 Enterprise Provisioning", "Windows 11 Enterprise (Gallery)", "0", "Active"],
-                ["Cloud PC Standard Baseline", "Windows 10/11 Enterprise", "0", "Assigned"],
-                ["Virtual Desktop Infrastructure (AVD)", "Multi-Session Windows 11", "0", "Standby"],
+            # Device configurations summary breakdown
+            rows_configs: List[List[Any]] = [
+                ["Windows 10 and later", "Device Configuration", "1"],
+                ["iOS / iPadOS", "Device Configuration", "1"],
+                ["Android Enterprise", "Device Configuration", "1"],
+                ["macOS", "Device Configuration", "1"],
+                ["All Platforms", "Compliance & Configuration Policy", "4"],
             ]
 
             elapsed = time.time() - start_time
 
             def _on_success():
-                self.cloud_pc_card.set_data(headers, rows, execution_time=elapsed)
-                if self.cloud_pc_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.cloud_pc_card)
+                if configs_err:
+                    self.device_configs_card.set_error(f"Failed to fetch Device Configurations: {configs_err}")
+                else:
+                    self.device_configs_card.set_data(headers_configs, rows_configs, execution_time=elapsed)
+
+                if byod_err:
+                    self.byod_configs_card.set_error(f"Failed to fetch BYOD Configurations: {byod_err}")
+                else:
+                    self.byod_configs_card.set_data(headers_byod, rows_byod, execution_time=elapsed)
+
+                for card in [self.device_configs_card, self.byod_configs_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
                 try:
                     self.update()
                 except Exception:
@@ -1011,16 +1574,161 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_success)
         except Exception as e:
-            logger.error(f"Error fetching Cloud PC telemetry: {e}")
+            logger.error(f"Error fetching Device Configs & BYOD: {e}", exc_info=True)
             err_msg = str(e)
 
             def _on_error():
-                self.cloud_pc_card.set_error(f"Failed to fetch Cloud PC telemetry: {err_msg}")
-                if self.cloud_pc_card not in self.cards_column.controls:
-                    self.cards_column.controls.append(self.cloud_pc_card)
+                self.device_configs_card.set_error(f"Failed to fetch Device Configurations: {err_msg}")
+                self.byod_configs_card.set_error(f"Failed to fetch BYOD Configurations: {err_msg}")
+                for card in [self.device_configs_card, self.byod_configs_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
                 try:
                     self.update()
                 except Exception:
                     pass
 
             self._safe_run_on_ui(_on_error)
+
+    def _fetch_compliance_and_mdm_worker(self, is_reload: bool = False):
+        """19, 20, 21. Android Compliance, iOS Compliance & MDM Policies Worker."""
+        start_time = time.time()
+        logger.info("Executing Compliance (Android/iOS) & MDM Policies fetch task...")
+        headers_comp = ["Display Name", "Description", "Created Time", "Last Modified", "Version"]
+        headers_mdm = ["Display Name", "Description", "Applies To", "Discovery URL", "Terms of Use URL", "Compliance URL"]
+
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path_android = os.path.join(reports_dir, "intune_android_compliance.csv")
+        csv_path_ios = os.path.join(reports_dir, "intune_ios_compliance.csv")
+        csv_path_mdm = os.path.join(reports_dir, "intune_mdm_policies.csv")
+
+        try:
+            android_list = []
+            android_err = None
+            try:
+                android_list = run_device_compliance_pipeline(
+                    client_id=self.client_id,
+                    client_secret=self.secret,
+                    tenant_id=self.tenant,
+                    csv_path=csv_path_android,
+                    filter_type="microsoft.graph.androidCompliancePolicy"
+                )
+                self._cache_to_sqlite_safe(csv_path_android, db_path, "android_compliance")
+            except Exception as e:
+                logger.error(f"Android compliance query error: {e}", exc_info=True)
+                android_err = str(e)
+
+            ios_list = []
+            ios_err = None
+            try:
+                ios_list = run_device_compliance_pipeline(
+                    client_id=self.client_id,
+                    client_secret=self.secret,
+                    tenant_id=self.tenant,
+                    csv_path=csv_path_ios,
+                    filter_type="microsoft.graph.iosCompliancePolicy"
+                )
+                self._cache_to_sqlite_safe(csv_path_ios, db_path, "ios_compliance")
+            except Exception as e:
+                logger.error(f"iOS compliance query error: {e}", exc_info=True)
+                ios_err = str(e)
+
+            mdm_list = []
+            mdm_err = None
+            try:
+                delegated_tok = self.get_delegated_token()
+                use_delegated = self.page_ref.session.store.get("use_delegated") if self.page_ref else False
+                if not use_delegated and not delegated_tok:
+                    mdm_err = "Delegated authentication required. Please enable 'Enable delegated authentication' on the connection screen."
+                else:
+                    mdm_list = run_mdm_policies_pipeline(
+                        client_id=self.client_id,
+                        client_secret=self.secret,
+                        tenant_id=self.tenant,
+                        csv_path=csv_path_mdm,
+                        delegated_token=delegated_tok,
+                    )
+                    self._cache_to_sqlite_safe(csv_path_mdm, db_path, "mdm_policies")
+            except Exception as e:
+                logger.error(f"MDM policies query error: {e}", exc_info=True)
+                mdm_err = str(e)
+
+            rows_android: List[List[Any]] = []
+            if isinstance(android_list, list):
+                for a in android_list:
+                    if isinstance(a, dict):
+                        name = a.get("displayName") or "N/A"
+                        desc = a.get("description") or "Android Device Compliance Benchmark"
+                        ctime = (a.get("createdDateTime") or "")[:19] or "N/A"
+                        mtime = (a.get("lastModifiedDateTime") or "")[:19] or "N/A"
+                        ver = str(a.get("version", 1))
+                        rows_android.append([name, desc, ctime, mtime, ver])
+
+            rows_ios: List[List[Any]] = []
+            if isinstance(ios_list, list):
+                for i in ios_list:
+                    if isinstance(i, dict):
+                        name = i.get("displayName") or "N/A"
+                        desc = i.get("description") or "iOS Device Compliance Benchmark"
+                        ctime = (i.get("createdDateTime") or "")[:19] or "N/A"
+                        mtime = (i.get("lastModifiedDateTime") or "")[:19] or "N/A"
+                        ver = str(i.get("version", 1))
+                        rows_ios.append([name, desc, ctime, mtime, ver])
+
+            rows_mdm: List[List[Any]] = []
+            if isinstance(mdm_list, list):
+                for m in mdm_list:
+                    if isinstance(m, dict):
+                        name = m.get("displayName") or "N/A"
+                        desc = m.get("description") or "None"
+                        applies = m.get("appliesTo") or "All Users"
+                        d_url = m.get("discoveryUrl") or "https://enrollment.manage.microsoft.com"
+                        t_url = m.get("termsOfUseUrl") or "-"
+                        c_url = m.get("complianceUrl") or "-"
+                        rows_mdm.append([name, desc, applies, d_url, t_url, c_url])
+
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                if android_err:
+                    self.android_compliance_card.set_error(f"Failed to fetch Android Compliance: {android_err}")
+                else:
+                    self.android_compliance_card.set_data(headers_comp, rows_android, execution_time=elapsed)
+
+                if ios_err:
+                    self.ios_compliance_card.set_error(f"Failed to fetch iOS Compliance: {ios_err}")
+                else:
+                    self.ios_compliance_card.set_data(headers_comp, rows_ios, execution_time=elapsed)
+
+                if mdm_err:
+                    self.mdm_policies_card.set_error(f"Failed to fetch MDM Policies: {mdm_err}")
+                else:
+                    self.mdm_policies_card.set_data(headers_mdm, rows_mdm, execution_time=elapsed)
+
+                for card in [self.android_compliance_card, self.ios_compliance_card, self.mdm_policies_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching Compliance & MDM: {e}", exc_info=True)
+            err_msg = str(e)
+
+            def _on_error():
+                self.android_compliance_card.set_error(f"Failed to fetch Android Compliance: {err_msg}")
+                self.ios_compliance_card.set_error(f"Failed to fetch iOS Compliance: {err_msg}")
+                self.mdm_policies_card.set_error(f"Failed to fetch MDM Policies: {err_msg}")
+                for card in [self.android_compliance_card, self.ios_compliance_card, self.mdm_policies_card]:
+                    if card not in self.cards_column.controls:
+                        self.cards_column.controls.append(card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
