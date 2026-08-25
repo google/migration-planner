@@ -316,6 +316,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
         logger.info("Executing Power Automate telemetry fetch task...")
         try:
             results = run_power_automate_pipeline(self.client_id, self.secret, self.tenant)
+            self.cached_data["power_automate"] = results
             if not isinstance(results, dict):
                 raise Exception("Failed to retrieve Power Automate flow data from tenant.")
 
@@ -424,6 +425,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
                         stat = "Enabled" if str(a.get("Enabled", True)).lower() in ["true", "enabled", "1"] else "Disabled"
                         rows.append([name, pub, scope, stat])
 
+            self.cached_data["integrated_apps"] = data.get("OrganizationApps", [])
             elapsed = time.time() - start_time
 
             def _on_success():
@@ -520,6 +522,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
                 raise Exception(f"Exchange Connectors retrieval failed: {data['error']}")
 
             conns_dict = data.get("connectors") or {}
+            self.cached_data["exchange_connectors"] = conns_dict
             ps_errs = conns_dict.get("Errors") or {}
             if ps_errs:
                 raise Exception("PowerShell Execution Error: " + "; ".join(f"{k}: {v}" for k, v in ps_errs.items()))

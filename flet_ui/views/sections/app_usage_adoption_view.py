@@ -594,6 +594,9 @@ class AppUsageAdoptionView(BaseSectionView):
         try:
             result = run_pst_discovery_pipeline(self.client_id, self.secret, self.tenant)
             pst_err = result.get("pst_error")
+            
+            self.cached_data["pst_files"] = result
+
             cloud_count = 0
             
             if pst_err:
@@ -832,6 +835,7 @@ class AppUsageAdoptionView(BaseSectionView):
         logger.info("Executing Calendar telemetry fetch task...")
         try:
             cal_data = run_calendar_telemetry_pipeline(self.client_id, self.secret, self.tenant)
+            self.cached_data["calendar"] = cal_data
             
             rooms_err = cal_data.get("RoomsError")
             devs_err = cal_data.get("DevicesError")
