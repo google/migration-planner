@@ -671,7 +671,9 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         csv_path = os.path.join(reports_dir, "retention_policies.csv")
 
         try:
-            policies = run_retention_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies_raw = run_retention_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies = policies_raw.get("value", []) if isinstance(policies_raw, dict) else policies_raw
+            self.cached_data["retention_policies"] = policies
             rows: List[List[Any]] = []
             
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
@@ -732,7 +734,9 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         csv_path = os.path.join(reports_dir, "dlp_policies.csv")
 
         try:
-            policies = run_dlp_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies_raw = run_dlp_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies = policies_raw.get("value", []) if isinstance(policies_raw, dict) else policies_raw
+            self.cached_data["dlp_policies"] = policies
             rows: List[List[Any]] = []
             
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
