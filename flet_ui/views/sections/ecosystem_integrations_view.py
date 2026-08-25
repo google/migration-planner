@@ -522,30 +522,42 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
                 raise Exception(f"Exchange Connectors retrieval failed: {data['error']}")
 
             conns_dict = data.get("connectors") or {}
-            self.cached_data["exchange_connectors"] = conns_dict
-            ps_errs = conns_dict.get("Errors") or {}
-            if ps_errs:
-                raise Exception("PowerShell Execution Error: " + "; ".join(f"{k}: {v}" for k, v in ps_errs.items()))
-
             columns = ["Direction", "Connector Name", "Status", "Target Domains", "Routing & Security"]
             rows: List[List[Any]] = []
+            flat_connectors = []
 
             inbound = conns_dict.get("InboundConnectors", [])
             outbound = conns_dict.get("OutboundConnectors", [])
 
             for conn in inbound:
                 name = conn.get("Name", "N/A")
-                status = "Enabled" if conn.get("Enabled") else "Disabled"
+                status_str = "Enabled" if conn.get("Enabled") else "Disabled"
                 domains = str(conn.get("SenderDomains") or "All External Domains")
                 routing = f"Type: {conn.get('ConnectorType', 'Partner')} | TLS: {'Required' if conn.get('RequireTls') else 'Optional'}"
-                rows.append(["📥 Inbound", name, status, domains, routing])
+                rows.append(["📥 Inbound", name, status_str, domains, routing])
+                flat_connectors.append({
+                    "Direction": "Inbound",
+                    "Name": name,
+                    "Status": status_str,
+                    "Domains": domains,
+                    "Routing": routing
+                })
 
             for conn in outbound:
                 name = conn.get("Name", "N/A")
-                status = "Enabled" if conn.get("Enabled") else "Disabled"
+                status_str = "Enabled" if conn.get("Enabled") else "Disabled"
                 domains = str(conn.get("RecipientDomains") or "All External Domains")
                 routing = f"SmartHosts: {conn.get('SmartHosts') or 'MX Routing'} | TLS: {'Enforced' if conn.get('TlsDomain') or conn.get('UseMxRecord') else 'Standard'}"
-                rows.append(["📤 Outbound", name, status, domains, routing])
+                rows.append(["📤 Outbound", name, status_str, domains, routing])
+                flat_connectors.append({
+                    "Direction": "Outbound",
+                    "Name": name,
+                    "Status": status_str,
+                    "Domains": domains,
+                    "Routing": routing
+                })
+
+            self.cached_data["exchange_connectors"] = flat_connectors
 
             elapsed = time.time() - start_time
 

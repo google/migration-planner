@@ -427,7 +427,8 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         logger.info("Executing Purview Retention Policies fetch task...")
         headers = ["Policy Name", "Workload / Scope", "Retention Action", "Retention Duration", "Status"]
         try:
-            policies = run_retention_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies_raw = run_retention_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies = policies_raw.get("value", []) if isinstance(policies_raw, dict) else policies_raw
             rows: List[List[Any]] = []
             if isinstance(policies, list):
                 for p in policies:
@@ -474,7 +475,8 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         logger.info("Executing DLP Policies fetch task...")
         headers = ["Policy Name", "Enforcement Mode", "Target Workloads", "Rules Count"]
         try:
-            policies = run_dlp_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies_raw = run_dlp_policies_pipeline(self.client_id, self.secret, self.tenant)
+            policies = policies_raw.get("value", []) if isinstance(policies_raw, dict) else policies_raw
             rows: List[List[Any]] = []
             if isinstance(policies, list):
                 for p in policies:
@@ -583,7 +585,8 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         logger.info("Executing Sensitive Information Types fetch task...")
         headers = ["SIT Name", "Publisher", "Confidence Level", "Category"]
         try:
-            sits = run_sensitive_info_types_pipeline(self.client_id, self.secret, self.tenant)
+            sits_raw = run_sensitive_info_types_pipeline(self.client_id, self.secret, self.tenant)
+            sits = sits_raw.get("value", []) if isinstance(sits_raw, dict) else sits_raw
             rows: List[List[Any]] = []
             if isinstance(sits, list):
                 for s in sits:
