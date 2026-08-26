@@ -151,6 +151,7 @@ class TelemetryCard(ft.Container):
             spacing=12,
             visible=False,
         )
+        self.extra_container = ft.Container(visible=False, expand=True)
 
         self._build_card_layout()
 
@@ -243,10 +244,25 @@ class TelemetryCard(ft.Container):
                 )
             )
 
+        card_content_controls.append(self.extra_container)
+
         self.content = ft.Column(
             spacing=10,
             controls=card_content_controls,
         )
+
+    def set_extra_content(self, control: Optional[ft.Control]):
+        """Sets custom extra controls below the table and pagination (e.g. charts, footnotes)."""
+        if control is not None:
+            self.extra_container.content = control
+            self.extra_container.visible = True
+        else:
+            self.extra_container.visible = False
+            self.extra_container.content = None
+        try:
+            self.update()
+        except Exception:
+            pass
 
     def set_loading(self, message: Optional[str] = None):
         """Displays loading state.
@@ -265,6 +281,7 @@ class TelemetryCard(ft.Container):
             self.table_container.visible = False
             self.pagination_row.visible = False
             self.refresh_indicator.visible = False
+            self.extra_container.visible = False
         else:
             # Reload state: Keep table in place, grayed out / locked
             display_msg = message or "Refetching data..."
@@ -291,6 +308,7 @@ class TelemetryCard(ft.Container):
         # Hide table and pagination completely on failure
         self.table_container.visible = False
         self.pagination_row.visible = False
+        self.extra_container.visible = False
 
         self.error_message = error_message
         self.error_banner.content.controls[1].value = error_message
