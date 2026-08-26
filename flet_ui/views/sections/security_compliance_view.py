@@ -104,12 +104,12 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         # 3. Data Loss Prevention (DLP) Policies (Paginated listing - 6 columns)
         self.dlp_card = TelemetryCard(
             title="Data Loss Prevention (DLP) Policies",
-            link_text="Open Microsoft Purview ↗",
+            link_text="Open Purview DLP Portal ↗",
             link_url="https://purview.microsoft.com/datalossprevention/policies",
             subtitle="DLP protection rules, enforcement mode, target workloads, and incident actions",
             paginate=True,
             page_size=5,
-            column_weights=[3, 2, 2, 1, 2, 2],
+            column_weights=[3, 1, 3, 1, 1, 2],
             on_reload=lambda: self._reload_card(self._fetch_dlp_worker),
         )
 
@@ -737,24 +737,42 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
         try:
             policies_raw = run_dlp_policies_pipeline(self.client_id, self.secret, self.tenant)
-            policies = policies_raw.get("value", []) if isinstance(policies_raw, dict) else policies_raw
-            self.cached_data["dlp_policies"] = policies
+            
+            # Unwrap dictionary response if needed
+            if isinstance(policies_raw, dict) and "value" in policies_raw:
+                policies_list = policies_raw["value"]
+            elif isinstance(policies_raw, list):
+                policies_list = policies_raw
+            elif isinstance(policies_raw, dict):
+                policies_list = [policies_raw]
+            else:
+                policies_list = []
+
+            if hasattr(self, "cached_data") and isinstance(self.cached_data, dict):
+                self.cached_data["dlp_policies"] = policies_list
             rows: List[List[Any]] = []
             
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(["Name", "Mode", "Workload", "State", "Locations", "Actions"])
-                if isinstance(policies, list):
-                    for p in policies:
-                        if isinstance(p, dict):
-                            name = p.get("Name") or p.get("DisplayName") or "N/A"
-                            mode = p.get("Mode") or p.get("EnforcementMode") or "Enforce"
-                            workload = p.get("Workload") or "Exchange, SharePoint, OneDrive"
-                            state = p.get("State") or ("Enabled" if str(p.get("Enabled", "True")).lower() == "true" else "Disabled")
-                            locations = p.get("Locations") or p.get("ExchangeLocation") or "All Workloads"
-                            actions = p.get("Actions") or "BlockAccess, NotifyUser"
-                            writer.writerow([name, mode, workload, state, locations, actions])
-                            rows.append([name, mode, workload, state, locations, actions])
+                for p in policies_list:
+                    if isinstance(p, dict):
+                        name = p.get("Name") or p.get("DisplayName") or "N/A"
+                        mode = p.get("Mode") or "N/A"
+                        workload = p.get("Workload") or "N/A"
+                        
+                        en_val = str(p.get("Enabled", "")).lower()
+                        state = "🟢 Enabled" if en_val in ("true", "1", "yes") else "🔴 Disabled"
+                        
+                        exc = "EX" if p.get("ExchangeLocation") else ""
+                        spo = "SPO" if p.get("SharePointLocation") else ""
+                        od = "OD" if p.get("OneDriveLocation") else ""
+                        locations = ", ".join([loc for loc in (exc, spo, od) if loc]) or "N/A"
+                        
+                        actions = p.get("Actions") or "None"
+                        
+                        writer.writerow([name, mode, workload, state, locations, actions])
+                        rows.append([name, mode, workload, state, locations, actions])
 
             self._cache_to_sqlite_safe(csv_path, db_path, "dlp_policies")
 
