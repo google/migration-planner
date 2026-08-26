@@ -846,14 +846,14 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
 
             for conn in inbound:
                 name = conn.get("Name", "N/A")
-                status = "🟢 Enabled" if conn.get("Enabled") else "🔴 Disabled"
+                status = "Enabled" if conn.get("Enabled") else "Disabled"
                 domains = str(conn.get("SenderDomains") or "All External Domains")
                 routing = f"Type: {conn.get('ConnectorType', 'N/A')}\nRequire TLS: {'Yes' if conn.get('RequireTls') else 'No'}"
                 rows.append(["Inbound", name, status, domains, routing])
 
             for conn in outbound:
                 name = conn.get("Name", "N/A")
-                status = "🟢 Enabled" if conn.get("Enabled") else "🔴 Disabled"
+                status = "Enabled" if conn.get("Enabled") else "Disabled"
                 domains = str(conn.get("RecipientDomains") or "All External Domains")
                 routing = f"SmartHosts: {conn.get('SmartHosts', 'N/A')}\nUse MX: {'Yes' if conn.get('UseMxRecord') else 'No'}"
                 rows.append(["Outbound", name, status, domains, routing])
