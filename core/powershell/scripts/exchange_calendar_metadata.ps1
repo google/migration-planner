@@ -32,7 +32,7 @@ try {
     try {
         $rooms = @(Get-EXOMailbox -RecipientTypeDetails RoomMailbox -ResultSize Unlimited)
         $roomsCount = $rooms.Count
-        $roomsNaming = if ($rooms) { (($rooms | Select-Object -First 5 -ExpandProperty Name) -join ", ") } else { $null }
+        $roomsNaming = if ($rooms) { (($rooms | Select-Object -First 5 | ForEach-Object { if ($_.DisplayName) { $_.DisplayName } else { $_.Name } }) -join ", ") } else { $null }
     } catch {
         $roomsError = $_.Exception.Message
     }

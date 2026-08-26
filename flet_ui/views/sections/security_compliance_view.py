@@ -273,6 +273,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             link_text="Open Intune Admin Center ↗",
             link_url="https://intune.microsoft.com/#view/Microsoft_Intune_DeviceSettings/DevicesMenu/~/allDevices",
             subtitle="Dedicated meeting room hardware and resource devices filtered from directory",
+            footnote="* Devices associated with room mailboxes or matching video conferencing hardware indicators are listed here. This serves as an estimated projection based on directory signals and is not a comprehensive, exact list of physical VC devices.",
             paginate=True,
             page_size=5,
             column_weights=[2, 2, 2, 1, 1, 1, 1],
