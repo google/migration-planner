@@ -763,7 +763,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                         workload = p.get("Workload") or "N/A"
                         
                         en_val = str(p.get("Enabled", "")).lower()
-                        state = "🟢 Enabled" if en_val in ("true", "1", "yes") else "🔴 Disabled"
+                        state = "Enabled" if en_val in ("true", "1", "yes") else "Disabled"
                         
                         exc = "EX" if p.get("ExchangeLocation") else ""
                         spo = "SPO" if p.get("SharePointLocation") else ""

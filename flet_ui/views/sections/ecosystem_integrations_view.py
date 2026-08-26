@@ -76,9 +76,9 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_power_automate_worker),
         )
 
-        # 2. Third-Party Apps & OAuth Scopes (Paginated listing)
+        # 2. Integrated Apps (Paginated listing)
         self.integrated_apps_card = TelemetryCard(
-            title="Third-Party Apps & OAuth Scopes",
+            title="Integrated Apps",
             link_text="Integrated Apps API",
             link_url="https://learn.microsoft.com/en-us/graph/api/resources/serviceprincipal",
             subtitle="Enterprise applications, organization-wide add-ins, and delegated consent permissions",
@@ -227,7 +227,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
 
         # Set individual cards to loading state
         self.power_automate_card.set_loading("Fetching Power Automate flows...")
-        self.integrated_apps_card.set_loading("Fetching third-party apps & add-ins...")
+        self.integrated_apps_card.set_loading("Fetching integrated apps & add-ins...")
         self.service_principals_card.set_loading("Fetching enterprise service principals & SSO...")
         self.connectors_card.set_loading("Fetching Exchange connectors...")
 
@@ -449,7 +449,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
                 self.cached_data["integrated_apps"] = {"AppsError": err_msg}
 
             def _on_error():
-                self.integrated_apps_card.set_error(f"Failed to fetch Third-Party Apps: {err_msg}")
+                self.integrated_apps_card.set_error(f"Failed to fetch Integrated Apps: {err_msg}")
                 if self.integrated_apps_card not in self.cards_column.controls:
                     self.cards_column.controls.append(self.integrated_apps_card)
                 try:
@@ -556,14 +556,14 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
                 status = "Enabled" if conn.get("Enabled") else "Disabled"
                 domains = str(conn.get("SenderDomains") or "All External Domains")
                 routing = f"Type: {conn.get('ConnectorType', 'Partner')} | TLS: {'Required' if conn.get('RequireTls') else 'Optional'}"
-                rows.append(["📥 Inbound", name, status, domains, routing])
+                rows.append(["Inbound", name, status, domains, routing])
 
             for conn in outbound:
                 name = conn.get("Name", "N/A")
                 status = "Enabled" if conn.get("Enabled") else "Disabled"
                 domains = str(conn.get("RecipientDomains") or "All External Domains")
                 routing = f"SmartHosts: {conn.get('SmartHosts') or 'MX Routing'} | TLS: {'Enforced' if conn.get('TlsDomain') or conn.get('UseMxRecord') else 'Standard'}"
-                rows.append(["📤 Outbound", name, status, domains, routing])
+                rows.append(["Outbound", name, status, domains, routing])
 
             elapsed = time.time() - start_time
 

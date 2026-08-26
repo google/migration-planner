@@ -404,14 +404,28 @@ class TelemetryCard(ft.Container):
             data_cells = []
             for c_idx, cell_val in enumerate(row_data):
                 cell_text = str(cell_val) if cell_val is not None else "null"
+                clean_text = cell_text.strip()
+                cell_color = COLOR_TEXT_PRIMARY
+                cell_weight = ft.FontWeight.NORMAL
+
+                if clean_text.lower() == "enabled":
+                    clean_text = "Enabled"
+                    cell_color = "#16A34A"  # Green matching left panel tick
+                    cell_weight = ft.FontWeight.W_600
+                elif clean_text.lower() == "disabled":
+                    clean_text = "Disabled"
+                    cell_color = "#DC2626"  # Red matching left panel error
+                    cell_weight = ft.FontWeight.W_600
+
                 data_cells.append(
                     ft.Container(
                         expand=weights[c_idx],
                         padding=ft.Padding(12, 10, 12, 10),
                         content=ft.Text(
-                            cell_text,
+                            clean_text,
                             size=12,
-                            color=COLOR_TEXT_PRIMARY,
+                            weight=cell_weight,
+                            color=cell_color,
                             no_wrap=False,  # Wrap text to new line (no horizontal scroll)
                             selectable=True,
                         ),
