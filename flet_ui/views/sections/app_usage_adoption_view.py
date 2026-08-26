@@ -157,9 +157,9 @@ class AppUsageAdoptionView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_heavy_sites_worker),
         )
 
-        # 7. OneDrive Accounts & Storage (180D)
+        # 7. OneDrive Accounts & Storage (180 Days)
         self.onedrive_card = TelemetryCard(
-            title="OneDrive Accounts & Storage (180D)",
+            title="OneDrive Accounts & Storage (180 Days)",
             link_text="OneDrive Usage API",
             link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getonedriveusageaccountdetail",
             subtitle="Personal accounts, storage used, active sync clients, and OneNote users",
@@ -663,7 +663,7 @@ class AppUsageAdoptionView(BaseSectionView):
                 ["Total Sites Count", f"{combined_data.get('total_sites', 0):,} Sites"],
                 ["Total Storage Used", combined_data.get("total_storage_formatted", "0.00 Bytes")],
                 ["Total Files Stored", f"{combined_data.get('total_files', 0):,} Files"],
-                ["Active Files (180D)", f"{combined_data.get('active_files', 0):,} Files ({combined_data.get('active_files_pct', 0.0):.1f}%)"],
+                ["Active Files (180 Days)", f"{combined_data.get('active_files', 0):,} Files ({combined_data.get('active_files_pct', 0.0):.1f}%)"],
                 ["Document Libraries", f"{combined_data.get('Document Libraries', 0):,}"],
                 ["Lists", f"{combined_data.get('Lists', 0):,}"],
                 ["Web Pages", f"{combined_data.get('Web Pages', 0):,}"]
@@ -776,7 +776,7 @@ class AppUsageAdoptionView(BaseSectionView):
                 ["Total User Accounts", f"{od_data.get('total_accounts', 0):,} Accounts"],
                 ["Total Storage Used", od_data.get("total_storage_formatted", "0.00 Bytes")],
                 ["Total Files Stored", f"{od_data.get('total_files', 0):,} Files"],
-                ["Active Files (180D)", f"{od_data.get('active_files', 0):,} Files"],
+                ["Active Files", f"{od_data.get('active_files', 0):,} Files"],
                 ["Active Sync Client Users", f"{od_data.get('sync_users', 0):,} ({od_data.get('sync_users_pct', 0.0):.1f}%)"],
                 ["OneNote Active Users", f"{od_data.get('onenote_users', 0):,} Users"],
             ]
@@ -840,9 +840,9 @@ class AppUsageAdoptionView(BaseSectionView):
             columns = ["Teams Metric Description", "Value / Measurement"]
             rows = [
                 ["Total Teams Count", f"{total_teams:,} Teams"],
-                ["Total Active Channels (180 days)", f"{active_channels:,} Channels"],
+                ["Total Active Channels (180 Days)", f"{active_channels:,} Channels"],
                 ["Total Channel Messages", f"{channel_messages:,} Messages"],
-                ["Total Active Users (180 days)", f"{active_users:,} Users"],
+                ["Total Active Users (180 Days)", f"{active_users:,} Users"],
                 ["Average Users per Channel", avg_users],
                 ["Total Meetings Organized", f"{meetings_organized:,} Meetings"],
                 ["Total Guests", f"{guests:,} Guests"],

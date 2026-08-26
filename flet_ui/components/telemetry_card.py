@@ -151,6 +151,7 @@ class TelemetryCard(ft.Container):
             spacing=12,
             visible=False,
         )
+        self.extra_container = ft.Container(visible=False, expand=True)
 
         self._build_card_layout()
 
@@ -243,10 +244,25 @@ class TelemetryCard(ft.Container):
                 )
             )
 
+        card_content_controls.append(self.extra_container)
+
         self.content = ft.Column(
             spacing=10,
             controls=card_content_controls,
         )
+
+    def set_extra_content(self, control: Optional[ft.Control]):
+        """Sets custom extra controls below the table and pagination (e.g. charts, footnotes)."""
+        if control is not None:
+            self.extra_container.content = control
+            self.extra_container.visible = True
+        else:
+            self.extra_container.visible = False
+            self.extra_container.content = None
+        try:
+            self.update()
+        except Exception:
+            pass
 
     def set_loading(self, message: Optional[str] = None):
         """Displays loading state.
@@ -265,6 +281,7 @@ class TelemetryCard(ft.Container):
             self.table_container.visible = False
             self.pagination_row.visible = False
             self.refresh_indicator.visible = False
+            self.extra_container.visible = False
         else:
             # Reload state: Keep table in place, grayed out / locked
             display_msg = message or "Refetching data..."
@@ -291,6 +308,7 @@ class TelemetryCard(ft.Container):
         # Hide table and pagination completely on failure
         self.table_container.visible = False
         self.pagination_row.visible = False
+        self.extra_container.visible = False
 
         self.error_message = error_message
         self.error_banner.content.controls[1].value = error_message
@@ -404,14 +422,28 @@ class TelemetryCard(ft.Container):
             data_cells = []
             for c_idx, cell_val in enumerate(row_data):
                 cell_text = str(cell_val) if cell_val is not None else "null"
+                clean_text = cell_text.strip()
+                cell_color = COLOR_TEXT_PRIMARY
+                cell_weight = ft.FontWeight.NORMAL
+
+                if clean_text.lower() == "enabled":
+                    clean_text = "Enabled"
+                    cell_color = "#16A34A"  # Green matching left panel tick
+                    cell_weight = ft.FontWeight.W_600
+                elif clean_text.lower() == "disabled":
+                    clean_text = "Disabled"
+                    cell_color = "#DC2626"  # Red matching left panel error
+                    cell_weight = ft.FontWeight.W_600
+
                 data_cells.append(
                     ft.Container(
                         expand=weights[c_idx],
                         padding=ft.Padding(12, 10, 12, 10),
                         content=ft.Text(
-                            cell_text,
+                            clean_text,
                             size=12,
-                            color=COLOR_TEXT_PRIMARY,
+                            weight=cell_weight,
+                            color=cell_color,
                             no_wrap=False,  # Wrap text to new line (no horizontal scroll)
                             selectable=True,
                         ),
