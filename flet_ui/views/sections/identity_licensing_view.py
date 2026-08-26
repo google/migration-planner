@@ -94,15 +94,16 @@ class IdentityLicensingView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_skus_worker),
         )
 
-        # 3. Verified Domains
+        # 3. Domains
         self.domains_card = TelemetryCard(
-            title="Verified Domains",
+            title="Domains",
             link_text="Domains API Reference",
-            link_url="https://learn.microsoft.com/en-us/graph/api/resources/domain",
+            link_url="https://learn.microsoft.com/en-us/graph/api/resources/domain?view=graph-rest-1.0#properties",
             subtitle="Tenant domain names, authentication types, and federation configuration",
+            footnote="* AuthenticationType=Managed indicates a cloud managed domain where Microsoft Entra ID performs user authentication. Federated indicates authentication is federated with an identity provider (eg. AD FS, Okta etc.)",
             paginate=True,
             page_size=5,
-            column_weights=[3, 2, 1, 1, 1, 3],
+            column_weights=[3, 2, 1, 1, 1, 2, 2, 3],
             on_reload=lambda: self._reload_card(self._fetch_domains_worker),
         )
 
@@ -260,7 +261,7 @@ class IdentityLicensingView(BaseSectionView):
         # Set individual cards to loading state
         self.org_card.set_loading("Fetching organization details...")
         self.sku_card.set_loading("Fetching subscribed SKUs...")
-        self.domains_card.set_loading("Fetching verified domains...")
+        self.domains_card.set_loading("Fetching domains...")
         self.users_groups_card.set_loading("Fetching user & group counts...")
         self.user_logs_card.set_loading("Fetching user creation & deletion logs...")
         self.provisioning_logs_card.set_loading("Fetching provisioning logs...")
@@ -493,9 +494,9 @@ class IdentityLicensingView(BaseSectionView):
             self._safe_run_on_ui(_on_error)
 
     def _fetch_domains_worker(self, is_reload: bool = False):
-        """Fetches Verified Domains from Graph API."""
+        """Fetches Domains from Graph API."""
         start_time = time.time()
-        logger.info("Executing Verified Domains fetch task...")
+        logger.info("Executing Domains fetch task...")
         try:
             client = self._get_client(["Organization.Read.All", "Directory.Read.All"])
             domains_service = DomainsService(client)
@@ -503,12 +504,28 @@ class IdentityLicensingView(BaseSectionView):
             self.cached_data["domains"] = domains_list
             client.close()
 
-            columns = ["Domain Name", "Authentication Type", "Default", "Initial", "Verified", "Supported Services"]
+            columns = [
+                "Domain Name",
+                "Authentication Type",
+                "Default",
+                "Initial",
+                "Verified",
+                "Supported Services",
+                "Federation Display Name",
+                "Federation Issuer URI",
+            ]
             rows: List[List[Any]] = []
 
             for d in domains_list:
                 services = d.get("supportedServices", [])
                 services_str = ", ".join(services) if services else "-"
+                fed_disp = d.get("federationDisplayName")
+                if not fed_disp or fed_disp == "-":
+                    fed_disp = "N/A"
+                fed_issuer = d.get("federationIssuerUri")
+                if not fed_issuer or fed_issuer == "-":
+                    fed_issuer = "N/A"
+
                 rows.append([
                     d.get("id", "Unknown"),
                     d.get("authenticationType", "Managed"),
@@ -516,6 +533,8 @@ class IdentityLicensingView(BaseSectionView):
                     "Yes" if d.get("isInitial") else "No",
                     "Yes" if d.get("isVerified", True) else "No",
                     services_str,
+                    fed_disp,
+                    fed_issuer,
                 ])
 
             elapsed = time.time() - start_time
