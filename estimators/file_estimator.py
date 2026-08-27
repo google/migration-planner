@@ -2005,7 +2005,8 @@ class FileEstimator(Estimator):
                 amr_list.append({
                     "Type": "SITE",
                     "URL": self.id_to_display.get(site_id, site_id),
-                    "Item Count": total_items
+                    "Item Count": total_items,
+                    "Is Large Resource": False
                 })
 
         def get_subsite_item_count(subsite_id):
@@ -2030,7 +2031,8 @@ class FileEstimator(Estimator):
                 amr_list.append({
                     "Type": "SUBSITE",
                     "URL": self.id_to_display.get(subsite_id, subsite_id),
-                    "Item Count": subsite_items
+                    "Item Count": subsite_items,
+                    "Is Large Resource": False
                 })
 
         # 3. Check DLs
@@ -2059,10 +2061,23 @@ class FileEstimator(Estimator):
                 amr_list.append({
                     "Type": "DL",
                     "URL": self.id_to_display.get(dl_id, dl_id),
-                    "Item Count": dl_items
+                    "Item Count": dl_items,
+                    "Is Large Resource": False
                 })
             else:
                 amr_list.extend(self.drive_id_to_amr_folders.get(dl_id, []))
+
+        # 4. Incorporate Warning Resources
+        for resource in metrics.get("tenantLevelWarningResources", []):
+            amr_list.append({
+                "Type": resource.get("type"),
+                "URL": resource.get("webUrl") or self.id_to_display.get(resource["id"], resource["id"]),
+                "Item Count": resource.get("subTreeCount"),
+                "Is Large Resource": True
+            })
+
+        # Sort by URL
+        amr_list.sort(key=lambda x: x.get("URL", ""))
 
         return amr_list
 
@@ -2099,7 +2114,8 @@ class FileEstimator(Estimator):
                     amr_list.append({
                         "Type": "FOLDER",
                         "URL": res_details.web_url if res_details.web_url else node_id,
-                        "Item Count": sub_tree_count
+                        "Item Count": sub_tree_count,
+                        "Is Large Resource": False
                     })
                 else:
                     for child in adj_list.get(node_id, []):

@@ -210,7 +210,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     ctk.CTkCheckBox(
         additional_settings_frame,
-        text="Generate Migration Map for Folder Level AMR",
+        text="Generate Depth Report for Large Resources",
         variable=self.generate_folder_amr_map,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
@@ -705,10 +705,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
       # Export AMR map if available
       if "folderAmrBatchSplit" in file_metrics and file_metrics["folderAmrBatchSplit"]:
-          amr_path = os.path.join(batches_dir, "folder_amr_batch_split.csv")
+          amr_path = os.path.join(batches_dir, "depth_report.csv")
           amr_df = pd.DataFrame(file_metrics["folderAmrBatchSplit"])
           amr_df.to_csv(amr_path, index=False)
-          self.log_msg(f"Folder AMR batch split exported to: {amr_path}")
+          self.log_msg(f"Depth report exported to: {amr_path}")
       
       if self.show_eta:
         unique_batches = df_output["Suggested Batch"].unique()
