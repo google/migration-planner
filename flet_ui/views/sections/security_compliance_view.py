@@ -27,6 +27,7 @@ from core.graph.security.retention_policies import run_retention_policies_pipeli
 from core.graph.security.dlp_policies import run_dlp_policies_pipeline
 from core.graph.security.sensitivity_labels import run_sensitivity_labels_pipeline
 from core.graph.security.sensitive_info_types import run_sensitive_info_types_pipeline
+from core.graph.security.legal_holds import run_legal_holds_pipeline
 from core.graph.network_security.conditional_access import run_conditional_access_pipeline
 from core.graph.network_security.filtering import run_filtering_pipeline
 from core.graph.network_security.firewall import run_firewall_pipeline
@@ -162,7 +163,19 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_ediscovery_worker),
         )
 
-        # 8. Conditional Access Policies (Paginated listing - 5 columns)
+        # 8. Mailboxes on Legal Hold (Paginated listing - 3 columns)
+        self.legal_holds_card = TelemetryCard(
+            title="Mailboxes on Legal Hold",
+            link_text="Open Exchange Admin Center ↗",
+            link_url="https://admin.exchange.microsoft.com/#/mailboxes",
+            subtitle="Exchange Online user and shared mailboxes placed on Litigation Holds, eDiscovery holds, or retention policies",
+            paginate=True,
+            page_size=5,
+            column_weights=[1, 1, 1],
+            on_reload=lambda: self._reload_card(self._fetch_legal_holds_worker),
+        )
+
+        # 9. Conditional Access Policies (Paginated listing - 5 columns)
         self.ca_card = TelemetryCard(
             title="Conditional Access Policies",
             link_text="Open Azure Portal ↗",
@@ -350,6 +363,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             self.custom_sit_card,
             self.edm_schemas_card,
             self.ediscovery_card,
+            self.legal_holds_card,
             self.ca_card,
             self.filtering_card,
             self.firewall_card,
@@ -443,7 +457,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
         self.cards_column.controls.clear()
 
-        total_tasks = 13
+        total_tasks = 14
 
         self.progress_bar = ft.ProgressBar(
             value=0.0,
@@ -483,6 +497,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
         self.custom_sit_card.set_loading("Fetching custom SITs...")
         self.edm_schemas_card.set_loading("Fetching EDM schemas...")
         self.ediscovery_card.set_loading("Fetching eDiscovery cases...")
+        self.legal_holds_card.set_loading("Fetching legal holds...")
         self.ca_card.set_loading("Fetching conditional access...")
         self.filtering_card.set_loading("Fetching filtering policies...")
         self.firewall_card.set_loading("Fetching firewall configurations...")
@@ -536,6 +551,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             ("DLPPolicies", _track_task_wrapper(self._fetch_dlp_worker)),
             ("SITsAndEDMs", _track_task_wrapper(self._fetch_sits_worker)),
             ("EDiscoveryCases", _track_task_wrapper(self._fetch_ediscovery_worker)),
+            ("LegalHolds", _track_task_wrapper(self._fetch_legal_holds_worker)),
             ("ConditionalAccess", _track_task_wrapper(self._fetch_ca_worker)),
             ("NetworkSecurity", _track_task_wrapper(self._fetch_network_security_worker)),
             ("MailSecurity", _track_task_wrapper(self._fetch_mail_security_worker)),
@@ -996,8 +1012,84 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             self._safe_run_on_ui(_on_error)
 
+    def _fetch_legal_holds_worker(self, is_reload: bool = False):
+        """8. Mailboxes on Legal Hold Worker via Exchange Online PowerShell (3 columns)."""
+        start_time = time.time()
+        logger.info("Executing Mailboxes on Legal Hold fetch task...")
+        headers = ["Mailbox Name", "User Principal Name (UPN)", "Applied Hold Policies"]
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path = os.path.join(reports_dir, "legal_holds.csv")
+
+        try:
+            data = run_legal_holds_pipeline(
+                client_id=self.client_id,
+                client_secret=self.secret,
+                tenant_id=self.tenant,
+            )
+            lh_list = data.get("value", []) if isinstance(data, dict) else []
+            self.cached_data["legal_holds"] = lh_list
+
+            # Export to CSV & SQLite cache
+            os.makedirs(reports_dir, exist_ok=True)
+            with open(csv_path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["DisplayName", "UserPrincipalName", "InPlaceHolds"])
+                for lh in lh_list:
+                    dname = lh.get("DisplayName") or lh.get("name") or "Unknown"
+                    upn = lh.get("UserPrincipalName") or lh.get("PrimarySmtpAddress") or "N/A"
+                    holds = lh.get("InPlaceHolds", [])
+                    if isinstance(holds, list):
+                        holds_str = ", ".join(str(h) for h in holds) if holds else "Litigation Hold"
+                    else:
+                        holds_str = str(holds) if holds else "Litigation Hold"
+                    writer.writerow([dname, upn, holds_str])
+
+            self._cache_to_sqlite_safe(csv_path, db_path, "legal_holds")
+
+            rows: List[List[Any]] = []
+            for lh in lh_list:
+                dname = lh.get("DisplayName") or lh.get("name") or "Unknown"
+                upn = lh.get("UserPrincipalName") or lh.get("PrimarySmtpAddress") or "N/A"
+                holds = lh.get("InPlaceHolds", [])
+                if isinstance(holds, list):
+                    holds_str = ", ".join(str(h) for h in holds) if holds else "Litigation Hold"
+                else:
+                    holds_str = str(holds) if holds else "Litigation Hold"
+                rows.append([dname, upn, holds_str])
+
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.legal_holds_card.set_data(headers, rows, execution_time=elapsed)
+                if self.legal_holds_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.legal_holds_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+        except Exception as e:
+            logger.error(f"Error fetching Legal Holds: {e}", exc_info=True)
+            err_msg = str(e)
+            if "certificate" in err_msg.lower():
+                err_msg = "Certificate authentication missing or expired. Complete hybrid auth flow."
+            elif "pwsh" in err_msg.lower() or "powershell" in err_msg.lower():
+                err_msg = "PowerShell Core ('pwsh') is not installed or not available in PATH."
+
+            def _on_error():
+                self.legal_holds_card.set_error(f"Failed to fetch Mailboxes on Legal Hold: {err_msg}")
+                if self.legal_holds_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.legal_holds_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
     def _fetch_ca_worker(self, is_reload: bool = False):
-        """8. Conditional Access Policies Worker (5 columns)."""
+        """9. Conditional Access Policies Worker (5 columns)."""
         start_time = time.time()
         logger.info("Executing Conditional Access Policies fetch task...")
         headers = ["Policy Name", "State", "Target Users", "Grant Controls", "Client Apps"]
