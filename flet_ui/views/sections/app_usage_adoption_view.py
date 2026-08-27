@@ -111,14 +111,14 @@ class AppUsageAdoptionView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_mailbox_worker),
         )
 
-        # 4. Email Client Classification (Summary)
+        # 4. Email Client Classification (3-column breakdown)
         self.email_clients_card = TelemetryCard(
             title="Email Client Classification",
             link_text="Email Apps API",
             link_url="https://learn.microsoft.com/en-us/graph/api/reportroot-getemailappusagedetail",
             subtitle="Adoption across browser, desktop Outlook, mobile, and legacy mail protocols",
             paginate=False,
-            column_weights=[3, 1],
+            column_weights=[3, 3, 2],
             on_reload=lambda: self._reload_card(self._fetch_email_clients_worker),
         )
 
@@ -548,17 +548,17 @@ class AppUsageAdoptionView(BaseSectionView):
             result = run_email_client_usage_pipeline(self.client_id, self.secret, self.tenant)
             self.cached_data["email_clients"] = result.get("client_stats", {})
             stats = result.get("client_stats", {})
-            columns = ["Client Category", "Active Users (180 Days)"]
+            columns = ["Client Type", "Client Name", "Active Users (180 Days)"]
             rows = [
-                ["Outlook for Web (Browser)", f"{stats.get('browser_users', 0):,}"],
-                ["Outlook for Windows", f"{stats.get('desktop_win', 0):,}"],
-                ["Outlook for Mac", f"{stats.get('desktop_mac', 0):,}"],
-                ["Apple Mail (Mac)", f"{stats.get('desktop_mail_mac', 0):,}"],
-                ["Outlook for Mobile (iOS/Android)", f"{stats.get('mobile_outlook', 0):,}"],
-                ["Other Mobile Email Apps", f"{stats.get('mobile_other', 0):,}"],
-                ["POP3 Legacy Protocol", f"{stats.get('protocol_pop3', 0):,}"],
-                ["IMAP4 Legacy Protocol", f"{stats.get('protocol_imap4', 0):,}"],
-                ["SMTP Legacy Protocol", f"{stats.get('protocol_smtp', 0):,}"],
+                ["Supported Browser-Based Clients", "Outlook on the Web (OWA)", f"{stats.get('browser_users', 0):,}"],
+                ["Supported Non-Browser (Desktop)", "Outlook for Windows", f"{stats.get('desktop_win', 0):,}"],
+                ["Supported Non-Browser (Desktop)", "Outlook for Mac", f"{stats.get('desktop_mac', 0):,}"],
+                ["Supported Non-Browser (Desktop)", "Apple Mail (macOS)", f"{stats.get('desktop_mail_mac', 0):,}"],
+                ["Supported Non-Browser (Mobile)", "Outlook Mobile (iOS/Android)", f"{stats.get('mobile_outlook', 0):,}"],
+                ["Supported Non-Browser (Mobile)", "Native / Other Mobile Apps", f"{stats.get('mobile_other', 0):,}"],
+                ["Supported Non-Browser (Protocols)", "IMAP4 App", f"{stats.get('protocol_imap4', 0):,}"],
+                ["Supported Non-Browser (Protocols)", "POP3 App", f"{stats.get('protocol_pop3', 0):,}"],
+                ["Supported Non-Browser (Protocols)", "SMTP App", f"{stats.get('protocol_smtp', 0):,}"],
             ]
             elapsed = time.time() - start_time
 
