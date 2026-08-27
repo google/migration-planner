@@ -22,8 +22,28 @@ try {
     Import-Module ExchangeOnlineManagement -ErrorAction Stop
     Connect-ExchangeOnline -CertificateFilePath $CertificatePath -CertificatePassword $secPassword -AppId $AppId -Organization $Organization -ShowBanner:$false -WarningAction SilentlyContinue
 
-    # Get mailboxes on hold
-    $mailboxes = Get-Mailbox -ResultSize Unlimited | Where-Object {$_.InPlaceHolds -ne $null} | Select-Object DisplayName, InPlaceHolds
+    # Query all mailboxes on hold (both LitigationHoldEnabled and InPlaceHolds)
+    $mailboxes = Get-Mailbox -ResultSize Unlimited | Where-Object {
+        $_.LitigationHoldEnabled -eq $true -or ($_.InPlaceHolds -ne $null -and $_.InPlaceHolds.Count -gt 0)
+    } | ForEach-Object {
+        $holdsList = @()
+        if ($_.LitigationHoldEnabled) {
+            $holdsList += "Litigation Hold"
+        }
+        if ($_.InPlaceHolds) {
+            foreach ($h in $_.InPlaceHolds) {
+                if ($h -and "$h".Trim() -and "$h".Trim() -ne "-") {
+                    $holdsList += "$h".Trim()
+                }
+            }
+        }
+        [PSCustomObject]@{
+            DisplayName           = $_.DisplayName
+            UserPrincipalName     = if ($_.UserPrincipalName) { $_.UserPrincipalName } else { $_.PrimarySmtpAddress }
+            InPlaceHolds          = $holdsList
+            LitigationHoldEnabled = [bool]$_.LitigationHoldEnabled
+        }
+    }
     
     $result = @{
         "value" = @($mailboxes)

@@ -61,6 +61,14 @@ class MailboxStatsService:
         try:
             return json.loads(raw_output)
         except json.JSONDecodeError:
+            # Extract JSON block between first '{' and last '}'
+            start_idx = raw_output.find("{")
+            end_idx = raw_output.rfind("}")
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                try:
+                    return json.loads(raw_output[start_idx : end_idx + 1])
+                except Exception:
+                    pass
             lines = raw_output.strip().split('\n')
             json_str = ""
             for line in lines:
