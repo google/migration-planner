@@ -2003,7 +2003,7 @@ class FileEstimator(Estimator):
             total_items = s_data.get("fileCount", 0) + s_data.get("folderCount", 0)
             if total_items < limit:
                 amr_list.append({
-                    "Type": "SITE",
+                    "Type": ResourceType.SITE.value,
                     "URL": self.id_to_display.get(site_id, site_id),
                     "Item Count": total_items,
                     "Is Large Resource": False
@@ -2029,7 +2029,7 @@ class FileEstimator(Estimator):
             subsite_items = get_subsite_item_count(subsite_id)
             if subsite_items < limit:
                 amr_list.append({
-                    "Type": "SUBSITE",
+                    "Type": ResourceType.SUBSITE.value,
                     "URL": self.id_to_display.get(subsite_id, subsite_id),
                     "Item Count": subsite_items,
                     "Is Large Resource": False
@@ -2059,7 +2059,7 @@ class FileEstimator(Estimator):
             dl_items = dl_metric.get("fileCount", 0) + dl_metric.get("folderCount", 0)
             if dl_items < limit:
                 amr_list.append({
-                    "Type": "DL",
+                    "Type": ResourceType.DL.value,
                     "URL": self.id_to_display.get(dl_id, dl_id),
                     "Item Count": dl_items,
                     "Is Large Resource": False
