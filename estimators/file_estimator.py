@@ -294,7 +294,7 @@ class FileEstimator(Estimator):
 
                     if self.config.generate_folder_amr_map:
                         for dl_id, dl_metric in batch_metrics.items():
-                            dl_items = dl_metric.get("fileCount", 0) + dl_metric.get("folderCount", 0)
+                            dl_items = dl_metric.get("fileCount", 0) + dl_metric.get("folderCount", 0) + dl_metric.get("shortcutCount", 0)
                             if dl_items >= self.config.warning_resource_count_limit:
                                 amr_folders = []
                                 self._traverse_folders_for_amr(dl_id, batch_adj_list.get(dl_id, {}), batch_folder_nodes.get(dl_id, {}), amr_folders)
@@ -458,17 +458,18 @@ class FileEstimator(Estimator):
                 if drive_id in metrics["driveMetrics"]:
                     drive_metric = metrics["driveMetrics"][drive_id]
                     
-                    subsite_item_count += drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0)
+                    subsite_item_count += drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0) + drive_metric.get("shortcutCount", 0)
                     
                     # Large Resources
                     metrics["siteMetrics"][top_level_site]["largeResourceCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("largeResourceCount", 0) + len(drive_metric.get("largeResources", []))
-                    if drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0) > self.config.large_resource_count_limit:
+                    drive_item_count = drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0) + drive_metric.get("shortcutCount", 0)
+                    if drive_item_count > self.config.large_resource_count_limit:
                         metrics["siteMetrics"][top_level_site]["largeResourceCount"] += 1    
                         metrics["tenantLevelLargeResources"].append(
                             {
                                 "type": ResourceType.DL.value,
                                 "id": drive_id,
-                                "subTreeCount": drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0),
+                                "subTreeCount": drive_item_count,
                                 "parent": subsite_id,   # Explicitly showing subsite id here as users can use it to determine site collection easily (webUrl will be displayed in final report).
                                 "Limit": self.config.large_resource_count_limit
                             }
@@ -476,13 +477,13 @@ class FileEstimator(Estimator):
 
                     # Warning Resources
                     metrics["siteMetrics"][top_level_site]["warningResourceCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("warningResourceCount", 0) + len(drive_metric.get("warningResources", []))
-                    if drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0) > self.config.warning_resource_count_limit:
+                    if drive_item_count > self.config.warning_resource_count_limit:
                         metrics["siteMetrics"][top_level_site]["warningResourceCount"] += 1    
                         metrics["tenantLevelWarningResources"].append(
                             {
                                 "type": ResourceType.DL.value,
                                 "id": drive_id,
-                                "subTreeCount": drive_metric.get("fileCount", 0) + drive_metric.get("folderCount", 0),
+                                "subTreeCount": drive_item_count,
                                 "parent": subsite_id,
                                 "Limit": self.config.warning_resource_count_limit
                             }
@@ -538,26 +539,30 @@ class FileEstimator(Estimator):
                 metrics["subsiteCount"] += 1
 
         for site_id, metric in metrics["siteMetrics"].items():
-            if metric.get("folderCount", 0) + metric.get("fileCount", 0) > self.config.large_resource_count_limit:
+            site_item_count = metric.get("folderCount", 0) + metric.get("fileCount", 0) + metric.get("shortcutCount", 0)
+            if site_item_count > self.config.large_resource_count_limit:
                 metrics["tenantLevelLargeResources"].append(
                     {
                         "type": ResourceType.SITE.value,
                         "id": site_id,
-                        "subTreeCount": metric.get("fileCount", 0) + metric.get("folderCount", 0),
+                        "subTreeCount": site_item_count,
                         "parent": "N/A (Top level site)",
                         "Limit": self.config.large_resource_count_limit
                     }
                 )
-            if metric.get("folderCount", 0) + metric.get("fileCount", 0) > self.config.warning_resource_count_limit:
+                metrics["siteMetrics"][site_id]["largeResourceCount"] = metric.get("largeResourceCount", 0) + 1
+
+            if site_item_count > self.config.warning_resource_count_limit:
                 metrics["tenantLevelWarningResources"].append(
                     {
                         "type": ResourceType.SITE.value,
                         "id": site_id,
-                        "subTreeCount": metric.get("fileCount", 0) + metric.get("folderCount", 0),
+                        "subTreeCount": site_item_count,
                         "parent": "N/A (Top level site)",
                         "Limit": self.config.warning_resource_count_limit
                     }
                 )
+                metrics["siteMetrics"][site_id]["warningResourceCount"] = metric.get("warningResourceCount", 0) + 1
                     
         for siteId in subsite_to_drives.keys():
             top_level_site = subsite_to_top_level_site.get(siteId, siteId)
@@ -2000,7 +2005,7 @@ class FileEstimator(Estimator):
             if s_data.get("siteLevel", 0) != 0:
                 continue
 
-            total_items = s_data.get("fileCount", 0) + s_data.get("folderCount", 0)
+            total_items = s_data.get("fileCount", 0) + s_data.get("folderCount", 0) + s_data.get("shortcutCount", 0)
             if total_items < limit:
                 amr_list.append({
                     "Type": ResourceType.SITE.value,
@@ -2013,7 +2018,7 @@ class FileEstimator(Estimator):
             count = 0
             for dl_id in subsite_to_drives.get(subsite_id, []):
                 dl_metric = metrics["driveMetrics"].get(dl_id, {})
-                count += dl_metric.get("fileCount", 0) + dl_metric.get("folderCount", 0)
+                count += dl_metric.get("fileCount", 0) + dl_metric.get("folderCount", 0) + dl_metric.get("shortcutCount", 0)
             return count
 
         # 2. Check Subsites
@@ -2023,7 +2028,7 @@ class FileEstimator(Estimator):
                 continue
             
             top_level_metric = metrics["siteMetrics"].get(top_level_site, {})
-            if (top_level_metric.get("fileCount", 0) + top_level_metric.get("folderCount", 0)) < limit:
+            if (top_level_metric.get("fileCount", 0) + top_level_metric.get("folderCount", 0) + top_level_metric.get("shortcutCount", 0)) < limit:
                 continue
 
             subsite_items = get_subsite_item_count(subsite_id)
@@ -2048,7 +2053,7 @@ class FileEstimator(Estimator):
 
             top_level_site = subsite_to_top_level_site.get(parent_subsite, parent_subsite)
             top_level_metric = metrics["siteMetrics"].get(top_level_site, {})
-            if (top_level_metric.get("fileCount", 0) + top_level_metric.get("folderCount", 0)) < limit:
+            if (top_level_metric.get("fileCount", 0) + top_level_metric.get("folderCount", 0) + top_level_metric.get("shortcutCount", 0)) < limit:
                 continue
 
             if parent_subsite != top_level_site:
@@ -2056,7 +2061,7 @@ class FileEstimator(Estimator):
                 if subsite_items < limit:
                     continue
 
-            dl_items = dl_metric.get("fileCount", 0) + dl_metric.get("folderCount", 0)
+            dl_items = dl_metric.get("fileCount", 0) + dl_metric.get("folderCount", 0) + dl_metric.get("shortcutCount", 0)
             if dl_items < limit:
                 amr_list.append({
                     "Type": ResourceType.DL.value,

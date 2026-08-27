@@ -423,6 +423,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "Folder Count > Depth Limit 100",
         "File Count > Depth Limit 100",
         "Entities with > 500k item count",
+        "Entities with > 200k item count",
         "Corpus Size",
     }
     id_col = "Site URL/Name" if "Site URL/Name" in df.columns else ("Site Id" if "Site Id" in df.columns else ("Entity" if "Entity" in df.columns else None))
@@ -618,6 +619,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             "Folder Count > Depth Limit 100": s_data.get("folderCountExceedingDepthLimit", 0),
             "File Count > Depth Limit 100": s_data.get("fileCountExceedingDepthLimit", 0),
             "Entities with > 500k item count": s_data.get("largeResourceCount", 0),
+            "Entities with > 200k item count": s_data.get("warningResourceCount", 0),
             "Corpus Size": s_data.get("totalSize", 0),
             "Resource Count": s_data.get("resourceCount", 0)
         }
@@ -1296,6 +1298,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "Folder Count > Depth Limit 100",
         "File Count > Depth Limit 100",
         "Entities with > 500k item count",
+        "Entities with > 200k item count",
         "Corpus Size",
     }
     is_report_csv = "Entity" in df.columns and report_cols.issubset(df.columns)
@@ -1417,7 +1420,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ("Shortcut Count", data.get("shortcutCount", 0)),
           ("Folder count beyond depth limit 100", data.get("folderCountExceedingDepthLimit", 0)),
           ("File count beyond depth limit 100", data.get("fileCountExceedingDepthLimit", 0)),
-          ("Large Resource Count (Entities with >500k items)", data.get("tenantLevelLargeResourceCount", 0))
+          ("Large Resource Count (Entities with >500k items)", data.get("tenantLevelLargeResourceCount", 0)),
+          ("Warning Resource Count (Entities with >200k items)", data.get("tenantLevelWarningResourceCount", 0))
       ])
       
       for label, val in summary_rows:
