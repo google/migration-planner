@@ -394,6 +394,32 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
 
     # --- Telemetry Worker Pipelines ---
 
+    def _format_dataverse_error(self, err: str) -> str:
+        """Formats raw Dataverse error string into a short, concise user-facing explanation without full URLs or stack traces."""
+        err_lower = err.lower()
+        instance = ""
+        if "dataverse authentication (" in err_lower:
+            try:
+                instance = err.split("Dataverse Authentication (")[1].split(")")[0]
+            except Exception:
+                instance = ""
+
+        inst_label = f" [{instance}]" if instance else ""
+
+        if "403" in err or "forbidden" in err_lower or "not a member" in err_lower:
+            return f"• Dataverse Instance{inst_label}: HTTP 403 Forbidden — App registration lacks Application User permissions in this environment (Desktop Flows skipped)."
+        elif "401" in err or "unauthorized" in err_lower:
+            return f"• Dataverse Instance{inst_label}: HTTP 401 Unauthorized — Authentication failed for Dataverse instance."
+        elif "404" in err or "not found" in err_lower:
+            return f"• Dataverse Instance{inst_label}: HTTP 404 Not Found — Dataverse workflows endpoint unavailable."
+        elif "429" in err or "throttled" in err_lower or "too many requests" in err_lower:
+            return f"• Dataverse Instance{inst_label}: HTTP 429 Too Many Requests — Request rate limit exceeded."
+        elif "timeout" in err_lower:
+            return f"• Dataverse Instance{inst_label}: Connection timed out while querying Desktop Flows."
+        else:
+            short_msg = err.split("for url:")[0].strip() if "for url:" in err else err[:120].strip()
+            return f"• Dataverse Instance{inst_label}: {short_msg}"
+
     def _generate_power_automate_chart(
         self,
         cloud_active: int,
@@ -521,7 +547,8 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
 
             errs = results.get("errors", [])
             if errs:
-                raise Exception("; ".join(errs))
+                for err in errs:
+                    logger.error(f"Power Automate partial scan error: {err}")
 
             columns = ["Metric", "Value"]
             total_envs = results.get("total_environments", 0)
@@ -604,12 +631,56 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
                 ],
             )
 
-            extra_controls: List[ft.Control] = [
+            extra_controls: List[ft.Control] = []
+
+            if errs:
+                formatted_errs = [self._format_dataverse_error(e) for e in errs]
+                err_text = "\n".join(formatted_errs)
+                warning_box = ft.Container(
+                    bgcolor="#FFFBEB",
+                    border=ft.Border.all(1, "#FCD34D"),
+                    border_radius=8,
+                    padding=ft.Padding(14, 12, 14, 12),
+                    content=ft.Row(
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
+                        controls=[
+                            ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color="#D97706", size=20),
+                            ft.Column(
+                                spacing=3,
+                                expand=True,
+                                controls=[
+                                    ft.Text(
+                                        "Partial Scan Notice: Desktop Flows Inaccessible",
+                                        size=12,
+                                        weight=ft.FontWeight.BOLD,
+                                        color="#92400E",
+                                    ),
+                                    ft.Text(
+                                        "Cloud Flows, environments, and connector telemetry were retrieved successfully. "
+                                        "However, Desktop Flows (RPA) could not be retrieved from one or more Dataverse environments:",
+                                        size=11,
+                                        color="#92400E",
+                                    ),
+                                    ft.Text(
+                                        err_text,
+                                        size=11,
+                                        color="#B45309",
+                                        selectable=True,
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+                )
+                extra_controls.append(warning_box)
+
+            extra_controls.append(
                 ft.Container(
                     padding=ft.Padding(0, 4, 0, 0),
                     content=footnotes,
                 )
-            ]
+            )
 
             if chart_base64:
                 chart_img = ft.Image(
