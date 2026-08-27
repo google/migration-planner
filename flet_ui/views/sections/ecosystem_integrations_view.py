@@ -29,6 +29,7 @@ from core.graph.exchange.integrated_apps import run_exchange_apps_pipeline
 from core.graph.entra.app_registrations import run_app_registrations_pipeline
 from core.graph.entra.app_signins import run_app_signins_pipeline
 from core.graph.entra.user_signins import run_user_signins_pipeline
+from core.graph.entra.auth_methods import run_auth_methods_pipeline
 from telemetry.power_automate import run_power_automate_pipeline
 from flet_ui.views.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
@@ -151,7 +152,19 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
             on_reload=lambda: self._reload_card(self._fetch_user_signins_worker),
         )
 
-        # Register all 7 cards with base class for status tracking
+        # 4.8. Authentication Methods (Authentication Method / Success Activity Count (7 days))
+        self.auth_methods_card = TelemetryCard(
+            title="Authentication Methods",
+            link_text="Open Authentication Methods ↗",
+            link_url="https://entra.microsoft.com/#view/Microsoft_AAD_IAM/AuthenticationMethodsMenuBlade/~/AuthMethods",
+            subtitle="User sign-in activity breakdown by authentication method for the past 7 days",
+            paginate=True,
+            page_size=5,
+            column_weights=[3, 1],
+            on_reload=lambda: self._reload_card(self._fetch_auth_methods_worker),
+        )
+
+        # Register all 8 cards with base class for status tracking
         self.register_cards(
             self.power_automate_card,
             self.integrated_apps_card,
@@ -160,6 +173,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
             self.app_registrations_card,
             self.app_signins_card,
             self.user_signins_card,
+            self.auth_methods_card,
         )
 
         # Initial Placeholder State
@@ -246,7 +260,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
         )
 
     def fetch_all_data(self):
-        """Initiates concurrent data fetch across all 7 cards with maximum 2 parallel worker threads."""
+        """Initiates concurrent data fetch across all 8 cards with maximum 2 parallel worker threads."""
         if self.is_fetching:
             return
 
@@ -256,7 +270,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
 
         self.cards_column.controls.clear()
 
-        total_tasks = 7
+        total_tasks = 8
 
         self.progress_bar = ft.ProgressBar(
             value=0.0,
@@ -296,6 +310,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
         self.app_registrations_card.set_loading("Fetching app registrations...")
         self.app_signins_card.set_loading("Fetching app sign-in summary...")
         self.user_signins_card.set_loading("Fetching user sign-in activity...")
+        self.auth_methods_card.set_loading("Fetching authentication methods...")
 
         self.content = self.cards_column
         try:
@@ -327,7 +342,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
                     self._safe_run_on_ui(_update_progress)
             return _wrapped
 
-        # 7 Tasks to execute in worker pool (at max 2 concurrent threads)
+        # 8 Tasks to execute in worker pool (at max 2 concurrent threads)
         tasks = [
             ("PowerAutomate", _track_task_wrapper(self._fetch_power_automate_worker)),
             ("IntegratedApps", _track_task_wrapper(self._fetch_integrated_apps_worker)),
@@ -336,6 +351,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
             ("AppRegistrations", _track_task_wrapper(self._fetch_app_registrations_worker)),
             ("AppSignins", _track_task_wrapper(self._fetch_app_signins_worker)),
             ("UserSignins", _track_task_wrapper(self._fetch_user_signins_worker)),
+            ("AuthMethods", _track_task_wrapper(self._fetch_auth_methods_worker)),
         ]
 
         def _orchestrator():
@@ -1129,5 +1145,73 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
                     pass
 
             self._safe_run_on_ui(_on_error)
+
+    def _fetch_auth_methods_worker(self, is_reload: bool = False):
+        """4.8. Authentication Methods (Authentication Method / Success Activity Count (7 days) matching deal_assistant.py)."""
+        start_time = time.time()
+        logger.info("Executing Authentication Methods fetch task...")
+        reports_dir, db_path = self._get_reports_dir_and_db()
+        csv_path = os.path.join(reports_dir, "entra_auth_methods.csv")
+
+        try:
+            columns = ["Authentication Method", "Success Activity Count (7 days)"]
+            rows: List[List[Any]] = []
+            collected_methods: List[Dict[str, Any]] = []
+
+            def _on_page(page_items):
+                collected_methods.extend(page_items)
+
+            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["authenticationMethod", "successActivityCount"])
+
+            run_auth_methods_pipeline(
+                client_id=self.client_id,
+                client_secret=self.secret,
+                tenant_id=self.tenant,
+                csv_path=csv_path,
+                period="D7",
+                max_rows=5000,
+                on_page_callback=_on_page,
+            )
+
+            self._cache_to_sqlite_safe(csv_path, db_path, "entra_auth_methods")
+            self.cached_data["auth_methods"] = collected_methods
+
+            for item in collected_methods:
+                method = item.get("authenticationMethod") or "Unknown"
+                success_count = str(item.get("successActivityCount") or 0)
+                rows.append([method, success_count])
+
+            elapsed = time.time() - start_time
+
+            def _on_success():
+                self.auth_methods_card.set_data(columns, rows, execution_time=elapsed)
+                if self.auth_methods_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.auth_methods_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_success)
+
+        except Exception as e:
+            logger.error(f"Error fetching Authentication Methods: {e}", exc_info=True)
+            err_msg = str(e)
+            if "401" in err_msg or "403" in err_msg or "permission" in err_msg.lower() or "unauthorized" in err_msg.lower():
+                err_msg = "AuditLog.Read.All permission required in Microsoft Entra."
+
+            def _on_error():
+                self.auth_methods_card.set_error(f"Failed to fetch Authentication Methods: {err_msg}")
+                if self.auth_methods_card not in self.cards_column.controls:
+                    self.cards_column.controls.append(self.auth_methods_card)
+                try:
+                    self.update()
+                except Exception:
+                    pass
+
+            self._safe_run_on_ui(_on_error)
+
 
 
