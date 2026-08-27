@@ -18,6 +18,7 @@ import os
 import csv
 import time
 import logging
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 import flet as ft
@@ -1541,26 +1542,94 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 byod_err = str(e)
 
             configs_err = None
+            rows_configs: List[List[Any]] = []
+            total_dc = 0
+            total_cp = 0
+            temp_path_configs = csv_path_configs + ".tmp"
+            temp_path_policies = csv_path_policies + ".tmp"
+
             try:
+                with open(temp_path_configs, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["displayName", "platform", "policyType"])
+
+                with open(temp_path_policies, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["displayName", "platform", "policyType"])
+
                 run_device_configs_pipeline(
                     client_id=self.client_id,
                     client_secret=self.secret,
                     tenant_id=self.tenant,
                     endpoint_name="deviceConfigurations",
-                    csv_path=csv_path_configs,
+                    csv_path=temp_path_configs,
                 )
                 run_device_configs_pipeline(
                     client_id=self.client_id,
                     client_secret=self.secret,
                     tenant_id=self.tenant,
                     endpoint_name="configurationPolicies",
-                    csv_path=csv_path_policies,
+                    csv_path=temp_path_policies,
                 )
-                self._cache_to_sqlite_safe(csv_path_configs, db_path, "device_configs")
-                self._cache_to_sqlite_safe(csv_path_policies, db_path, "device_policies")
+
+                if os.path.exists(temp_path_configs):
+                    if os.path.exists(csv_path_configs):
+                        os.remove(csv_path_configs)
+                    os.rename(temp_path_configs, csv_path_configs)
+
+                if os.path.exists(temp_path_policies):
+                    if os.path.exists(csv_path_policies):
+                        os.remove(csv_path_policies)
+                    os.rename(temp_path_policies, csv_path_policies)
+
+                if os.path.exists(csv_path_configs):
+                    self._cache_to_sqlite_safe(csv_path_configs, db_path, "device_configs")
+                if os.path.exists(csv_path_policies):
+                    self._cache_to_sqlite_safe(csv_path_policies, db_path, "device_policies")
+
+                counts: Dict[tuple, int] = defaultdict(int)
+                if os.path.exists(csv_path_configs):
+                    with open(csv_path_configs, 'r', encoding='utf-8', errors='ignore') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            plat = (row.get("platform") or "").strip()
+                            p_type = (row.get("policyType") or "").strip()
+                            if plat and p_type:
+                                counts[(plat, p_type)] += 1
+                                total_dc += 1
+
+                if os.path.exists(csv_path_policies):
+                    with open(csv_path_policies, 'r', encoding='utf-8', errors='ignore') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            plat = (row.get("platform") or "").strip()
+                            p_type = (row.get("policyType") or "").strip()
+                            if plat and p_type:
+                                counts[(plat, p_type)] += 1
+                                total_cp += 1
+
+                for (platform, p_type), count in sorted(counts.items()):
+                    rows_configs.append([platform, p_type, str(count)])
+
+                self.cached_data["intune"] = {
+                    "table_rows": rows_configs,
+                    "total_device_configs": total_dc,
+                    "total_config_policies": total_cp,
+                }
             except Exception as e:
                 logger.error(f"Device configurations pipeline error: {e}", exc_info=True)
                 configs_err = str(e)
+            finally:
+                if os.path.exists(temp_path_configs):
+                    try:
+                        os.remove(temp_path_configs)
+                    except Exception:
+                        pass
+                if os.path.exists(temp_path_policies):
+                    try:
+                        os.remove(temp_path_policies)
+                    except Exception:
+                        pass
 
             rows_byod: List[List[Any]] = []
             if isinstance(byod_list, list):
@@ -1575,22 +1644,17 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                         android_r = str(b.get("androidRestrictionFormatted") or "N/A")
                         rows_byod.append([name, desc, prio, lmod, ios_r, win_r, android_r])
 
-            # Device configurations summary breakdown
-            rows_configs: List[List[Any]] = [
-                ["Windows 10 and later", "Device Configuration", "1"],
-                ["iOS / iPadOS", "Device Configuration", "1"],
-                ["Android Enterprise", "Device Configuration", "1"],
-                ["macOS", "Device Configuration", "1"],
-                ["All Platforms", "Compliance & Configuration Policy", "4"],
-            ]
-
             elapsed = time.time() - start_time
 
             def _on_success():
                 if configs_err:
                     self.device_configs_card.set_error(f"Failed to fetch Device Configurations: {configs_err}")
                 else:
-                    self.device_configs_card.set_data(headers_configs, rows_configs, execution_time=elapsed)
+                    self.device_configs_card.set_data(
+                        headers_configs,
+                        rows_configs,
+                        execution_time=elapsed,
+                    )
 
                 if byod_err:
                     self.byod_configs_card.set_error(f"Failed to fetch BYOD Configurations: {byod_err}")
