@@ -191,13 +191,16 @@ class PowerAutomateScanner:
             # 1. FETCH CLOUD FLOWS
             # ==========================================
             flows_url = f"https://api.flow.microsoft.com/providers/Microsoft.ProcessSimple/scopes/admin/environments/{env_name}/v2/flows?api-version=2016-11-01"
-            cloud_flows = self.fetch_all_pages(flows_url, flow_headers, context_name="Cloud Flows Admin API (V2)")
-            
-            counts["Cloud Flows"] += len(cloud_flows)
-            active_cloud_flows = [f for f in cloud_flows if f.get("properties", {}).get("state") == "Started"]
-            active_counts["Cloud Flows"] += len(active_cloud_flows)
-            
-            self.logger.info(f"    -> Cloud Flows: {len(cloud_flows)} total found, {len(active_cloud_flows)} are currently active.")
+            try:
+                cloud_flows = self.fetch_all_pages(flows_url, flow_headers, context_name="Cloud Flows Admin API (V2)")
+                counts["Cloud Flows"] += len(cloud_flows)
+                active_cloud_flows = [f for f in cloud_flows if f.get("properties", {}).get("state") == "Started"]
+                active_counts["Cloud Flows"] += len(active_cloud_flows)
+                self.logger.info(f"    -> Cloud Flows: {len(cloud_flows)} total found, {len(active_cloud_flows)} are currently active.")
+            except Exception as e:
+                self.logger.error(f"      [X] Failed to fetch Cloud Flows for environment {env_display}: {e}")
+                errors.append(f"Cloud Flows ({env_display}): {e}")
+                cloud_flows = []
             
             # Fetch details in parallel using ThreadPoolExecutor
             

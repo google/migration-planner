@@ -394,9 +394,29 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
 
     # --- Telemetry Worker Pipelines ---
 
-    def _format_dataverse_error(self, err: str) -> str:
-        """Formats raw Dataverse error string into a short, concise user-facing explanation without full URLs or stack traces."""
+    def _format_power_automate_error(self, err: str) -> str:
+        """Formats raw Power Automate error string into a short, concise user-facing explanation without full URLs or stack traces."""
         err_lower = err.lower()
+
+        # 1. Cloud Flows Environment error (e.g. Cloud Flows (Production Env): 403 Forbidden)
+        if "cloud flows (" in err_lower:
+            env_name = ""
+            try:
+                env_name = err.split("Cloud Flows (")[1].split(")")[0]
+            except Exception:
+                env_name = ""
+            env_label = f" [{env_name}]" if env_name else ""
+            if "403" in err or "forbidden" in err_lower or "unauthorized" in err_lower:
+                return f"• Environment{env_label}: HTTP 403 Forbidden — App registration lacks Environment Admin permissions to scan Cloud Flows."
+            elif "404" in err or "not found" in err_lower:
+                return f"• Environment{env_label}: HTTP 404 Not Found — Environment flows endpoint unavailable."
+            elif "429" in err or "throttled" in err_lower:
+                return f"• Environment{env_label}: HTTP 429 Too Many Requests — Request rate limit exceeded."
+            else:
+                short_msg = err.split("for url:")[0].strip() if "for url:" in err else err[:120].strip()
+                return f"• Environment{env_label}: {short_msg}"
+
+        # 2. Dataverse Desktop Flows error (e.g. Dataverse Authentication (https://...): 403 Forbidden)
         instance = ""
         if "dataverse authentication (" in err_lower:
             try:
@@ -634,8 +654,21 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
             extra_controls: List[ft.Control] = []
 
             if errs:
-                formatted_errs = [self._format_dataverse_error(e) for e in errs]
+                formatted_errs = [self._format_power_automate_error(e) for e in errs]
                 err_text = "\n".join(formatted_errs)
+                
+                notice_title = (
+                    "Partial Scan Notice: Access Limitations Detected"
+                    if total_flows > 0
+                    else "Scan Notice: Environment Access Restricted"
+                )
+                notice_desc = (
+                    "Cloud Flows, environments, and connector telemetry were retrieved for accessible environments. "
+                    "However, one or more environments or Dataverse instances could not be scanned due to permissions:"
+                    if total_flows > 0
+                    else "Discovered environments could not be scanned because the application registration lacks the required administrator permissions:"
+                )
+
                 warning_box = ft.Container(
                     bgcolor="#FFFBEB",
                     border=ft.Border.all(1, "#FCD34D"),
@@ -651,14 +684,13 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
                                 expand=True,
                                 controls=[
                                     ft.Text(
-                                        "Partial Scan Notice: Desktop Flows Inaccessible",
+                                        notice_title,
                                         size=12,
                                         weight=ft.FontWeight.BOLD,
                                         color="#92400E",
                                     ),
                                     ft.Text(
-                                        "Cloud Flows, environments, and connector telemetry were retrieved successfully. "
-                                        "However, Desktop Flows (RPA) could not be retrieved from one or more Dataverse environments:",
+                                        notice_desc,
                                         size=11,
                                         color="#92400E",
                                     ),
