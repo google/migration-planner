@@ -430,10 +430,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     if not id_col or not req_cols.issubset(df.columns):
       return None
 
-    for idx, row in df.iterrows():
-      val = str(row[id_col]).strip()
-      if "/personal/" not in val.lower():
-        raise ValueError(f"Row {idx+2}: URL '{val}' does not contain '/personal/'. Only OneDrive personal site reports are supported.")
+    # Removed strict '/personal/' check to support SharePoint sites
 
     def _parse_size_str(val):
       if isinstance(val, (int, float)):
@@ -453,16 +450,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       return num * multipliers.get(unit, 1)
 
     site_metrics = {}
+    personal_dl_total = 0
+    team_dl_total = 0
+    
     for _, row in df.iterrows():
       site_id = str(row[id_col]).strip()
       folder_cnt = int(pd.to_numeric(row.get("Folder Count", 0), errors="coerce") or 0)
       file_cnt = int(pd.to_numeric(row.get("File Count", 0), errors="coerce") or 0)
       shortcut_cnt = int(pd.to_numeric(row.get("Shortcut Count", 0), errors="coerce") or 0)
       res_cnt = int(pd.to_numeric(row.get("Resource Count", folder_cnt + file_cnt + shortcut_cnt), errors="coerce") or 0)
+      dl_cnt = int(pd.to_numeric(row.get("DL Count", 0), errors="coerce") or 0)
       
+      if "/personal/" in site_id.lower():
+        personal_dl_total += dl_cnt
+      else:
+        team_dl_total += dl_cnt
+        
       site_metrics[site_id] = {
           "subsiteCount": int(pd.to_numeric(row.get("Subsite Count", 0), errors="coerce") or 0),
-          "dlCount": int(pd.to_numeric(row.get("DL Count", 0), errors="coerce") or 0),
+          "dlCount": dl_cnt,
           "listCount": int(pd.to_numeric(row.get("List Count", 0), errors="coerce") or 0),
           "folderCount": folder_cnt,
           "fileCount": file_cnt,
@@ -476,16 +482,17 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       }
 
     self.skipped_actual_scan = True
-    dl_total = int(pd.to_numeric(df.get("DL Count", pd.Series([0])), errors="coerce").fillna(0).sum())
+    dl_total = personal_dl_total + team_dl_total
+    
     return {
         "siteMetrics": site_metrics,
         "siteCount": len(df),
         "subsiteCount": int(pd.to_numeric(df.get("Subsite Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
-        "personalSiteCount": len(df),
-        "teamSiteCount": 0,
+        "personalSiteCount": len([k for k in site_metrics.keys() if "/personal/" in k.lower()]),
+        "teamSiteCount": len([k for k in site_metrics.keys() if "/personal/" not in k.lower()]),
         "driveCounts": {"documentLibrary": dl_total},
-        "personalSiteDLCount": dl_total,
-        "teamSiteDLCount": 0,
+        "personalSiteDLCount": personal_dl_total,
+        "teamSiteDLCount": team_dl_total,
         "folderCount": int(pd.to_numeric(df.get("Folder Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "fileCount": int(pd.to_numeric(df.get("File Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "shortcutCount": int(pd.to_numeric(df.get("Shortcut Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
@@ -494,7 +501,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "fileCountExceedingDepthLimit": int(pd.to_numeric(df.get("File Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "tenantLevelLargeResourceCount": int(pd.to_numeric(df.get("Entities with > 500k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "tenantLevelWarningResourceCount": int(pd.to_numeric(df.get("Entities with > 200k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
-        "siteClassification": {site_id: "personal" for site_id in site_metrics.keys()},
+        "siteClassification": {site_id: "personal" if "/personal/" in site_id.lower() else "teams" for site_id in site_metrics.keys()},
         "licenseMetrics": {},
         "tenantLevelFileSizeDistribution": {},
         "tenantLevelLargeResources": [],
@@ -795,19 +802,23 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     def get_batch_eta(subset_df):
       def _get_qps_from_license_count():
         # Calculate number of licenses required
-        license_count = licenseMetrics.get("totalAllotedUnits", {}).get("User", 0) + licenseMetrics.get("totalAllotedUnits", {}).get("Company", 0)
-        if license_count <= 1000:
-          qps = 4.8
-        elif license_count <= 5000:
-          qps = 9.6
-        elif license_count <= 15000:
-          qps = 14.4
-        elif license_count <= 50000:
-          qps = 19.2
-        else:
-          qps = 24
+        is_sp = getattr(self, "val_include_team_sites", False)
+        base_qps = 4.4 if is_sp else 4.8
         
-        return qps
+        license_count = licenseMetrics.get("totalAllotedUnits", {}).get("User", 0) + licenseMetrics.get("totalAllotedUnits", {}).get("Company", 0)
+        
+        if license_count <= 1000:
+          qps = base_qps
+        elif license_count <= 5000:
+          qps = base_qps * 2
+        elif license_count <= 15000:
+          qps = base_qps * 3
+        elif license_count <= 50000:
+          qps = base_qps * 4
+        else:
+          qps = base_qps * 5
+        
+        return qps * 0.8
 
       estimator = self.factory.get_files_estimator()
       items = []
@@ -854,7 +865,17 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           lane_df = pd.DataFrame(lane["sites"])
           if lane_df.empty:
             continue
-            
+
+          # Interleave lane_df to mix sizes (Small to Large)
+          lane_size = len(lane_df)
+          K = max(1, lane_size // 10) # Dynamic bucket size (number of buckets)
+          
+          lane_df['temp_index'] = range(lane_size)
+          lane_df['bucket'] = lane_df['temp_index'] % K
+          
+          # Sort by bucket to interleave, then by temp_index to maintain order within bucket
+          lane_df = lane_df.sort_values(by=['bucket', 'temp_index']).drop(columns=['temp_index', 'bucket']).reset_index(drop=True)
+          
           total_users = len(lane_df)
           start_idx = 0
           raw_chunks = []
@@ -1303,9 +1324,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     }
     is_report_csv = "Entity" in df.columns and report_cols.issubset(df.columns)
 
-    if is_report_csv and include_team:
-      messagebox.showerror("Validation Error", "When calculating ETA from an uploaded site report CSV, SharePoint Sites must not be selected in Site Types to Scan.")
-      raise ValueError("SharePoint Sites selected for report CSV")
 
     if set(df.columns) != expected_cols and not is_report_csv:
       messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column or valid site report columns.")
@@ -1616,8 +1634,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       messagebox.showerror("Validation Error", "At least one site type (Personal (OneDrive) or SharePoint) must be selected!")
       return
 
-    # ETA to be only shown for OneDrive sites atm
-    self.show_eta = (os.environ.get("SHOW_ETA", "true").lower() == "true") and (self.include_personal_sites.get() and not self.include_team_sites.get())  
+    if self.include_personal_sites.get() and self.include_team_sites.get():
+      warning_msg = (
+          "You have selected both Personal Sites (OneDrive) and SharePoint Sites.\n\n"
+          "OneDrive and SharePoint have slight differences in throughput. "
+          "For the best predictions, it is recommended to proceed with their estimations separately.\n\n"
+          "If you proceed, all OneDrive sites will be considered as SharePoint sites for the ETA estimation.\n\n"
+          "Do you still want to proceed with both?"
+      )
+      should_continue = messagebox.askyesno(
+          title="Mixed Site Types Warning",
+          message=warning_msg,
+          icon="warning",
+          parent=self
+      )
+      if not should_continue:
+        return
+
+    # ETA to be shown for all combinations now
+    self.show_eta = os.environ.get("SHOW_ETA", "true").lower() == "true"
     
     if self.user_source.get() == "csv":
       self._validate_csv()
