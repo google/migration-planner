@@ -565,12 +565,7 @@ class UsageAdoptionDashboardView(ft.Container):
         def load_csv(filename):
             path = os.path.join(reports_dir, filename)
             if not os.path.exists(path):
-                # Fallback check in telemetry/reports
-                alt_path = os.path.join(repo_root, "telemetry", "reports", f"{self.tenant}_{self.client}", filename)
-                if os.path.exists(alt_path):
-                    path = alt_path
-                else:
-                    return []
+                return []
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     return list(csv.DictReader(f))
