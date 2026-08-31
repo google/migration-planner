@@ -186,11 +186,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
 
     def _get_reports_dir_and_db(self) -> tuple[str, str]:
         """Returns reports directory path and sqlite database path."""
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        reports_dir = os.path.join(base_dir, "telemetry", "reports", f"{self.tenant}_{self.client_id}")
-        os.makedirs(reports_dir, exist_ok=True)
-        db_path = os.path.join(reports_dir, "telemetry_cache.db")
-        return reports_dir, db_path
+        return self.get_reports_dir_and_db()
 
     def _cache_to_sqlite_safe(self, csv_path: str, db_path: str, table_name: str):
         """Asynchronously imports CSV into SQLite without blocking UI."""

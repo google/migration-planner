@@ -591,12 +591,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
     def _get_reports_dir_and_db(self):
         """Returns the persistent reports directory and SQLite database cache path for this tenant."""
-        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-        telemetry_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))), "telemetry")
-        reports_dir = os.path.join(telemetry_dir, "reports", f"{self.tenant}_{self.client_id}")
-        os.makedirs(reports_dir, exist_ok=True)
-        db_path = os.path.join(reports_dir, "telemetry_cache.db")
-        return reports_dir, db_path
+        return self.get_reports_dir_and_db()
 
     def _cache_to_sqlite_safe(self, csv_path: str, db_path: str, table_name: str):
         """Asynchronously imports raw CSV on disk into local SQLite database cache without blocking UI."""

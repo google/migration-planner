@@ -515,10 +515,15 @@ class UsageAdoptionDashboardView(ft.Container):
         
         data = self._collect_all_telemetry_data()
         
-        # Determine save path
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        repo_root = os.path.dirname(os.path.dirname(script_dir))
-        reports_dir = os.path.join(repo_root, "telemetry", "reports")
+        # Determine save path in {root}/reports/{tenant}_{client}
+        curr = os.path.dirname(os.path.abspath(__file__))
+        while curr and curr != os.path.dirname(curr):
+            if os.path.exists(os.path.join(curr, "home.py")):
+                break
+            curr = os.path.dirname(curr)
+        else:
+            curr = os.getcwd()
+        reports_dir = os.path.join(curr, "reports", f"{self.tenant}_{self.client}")
         os.makedirs(reports_dir, exist_ok=True)
         
         import datetime
@@ -547,15 +552,25 @@ class UsageAdoptionDashboardView(ft.Container):
         import os
         import csv
         
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        # Get path to telemetry/reports/tenant_client
-        repo_root = os.path.dirname(os.path.dirname(script_dir))
-        reports_dir = os.path.join(repo_root, "telemetry", "reports", f"{self.tenant}_{self.client}")
+        curr = os.path.dirname(os.path.abspath(__file__))
+        while curr and curr != os.path.dirname(curr):
+            if os.path.exists(os.path.join(curr, "home.py")):
+                break
+            curr = os.path.dirname(curr)
+        else:
+            curr = os.getcwd()
+        repo_root = curr
+        reports_dir = os.path.join(repo_root, "reports", f"{self.tenant}_{self.client}")
         
         def load_csv(filename):
             path = os.path.join(reports_dir, filename)
             if not os.path.exists(path):
-                return []
+                # Fallback check in telemetry/reports
+                alt_path = os.path.join(repo_root, "telemetry", "reports", f"{self.tenant}_{self.client}", filename)
+                if os.path.exists(alt_path):
+                    path = alt_path
+                else:
+                    return []
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     return list(csv.DictReader(f))

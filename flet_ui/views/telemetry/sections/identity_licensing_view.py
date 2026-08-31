@@ -628,8 +628,7 @@ class IdentityLicensingView(BaseSectionView):
         logger.info("Executing User Creation & Deletion Logs fetch task...")
         try:
             client = self._get_client(["AuditLog.Read.All", "Directory.Read.All"])
-            reports_dir = os.path.join(os.getcwd(), "reports", f"{self.tenant}_{self.client_id}")
-            os.makedirs(reports_dir, exist_ok=True)
+            reports_dir = self.get_reports_dir()
             csv_path = os.path.join(reports_dir, "directory_user_creation_logs.csv")
 
             user_logs_service = UserLogsService(client)
@@ -694,8 +693,7 @@ class IdentityLicensingView(BaseSectionView):
         logger.info("Executing Directory Provisioning Logs fetch task...")
         try:
             client = self._get_client(["AuditLog.Read.All", "Directory.Read.All"])
-            reports_dir = os.path.join(os.getcwd(), "reports", f"{self.tenant}_{self.client_id}")
-            os.makedirs(reports_dir, exist_ok=True)
+            reports_dir = self.get_reports_dir()
             csv_path = os.path.join(reports_dir, "directory_provisioning_logs.csv")
 
             prov_service = ProvisioningLogsService(client)
