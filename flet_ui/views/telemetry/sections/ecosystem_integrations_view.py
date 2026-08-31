@@ -31,7 +31,7 @@ from core.graph.entra.app_signins import run_app_signins_pipeline
 from core.graph.entra.user_signins import run_user_signins_pipeline
 from core.graph.entra.auth_methods import run_auth_methods_pipeline
 from telemetry.power_automate import run_power_automate_pipeline
-from flet_ui.views.sections.base_section_view import BaseSectionView
+from flet_ui.views.telemetry.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
     COLOR_PRIMARY,
@@ -186,11 +186,7 @@ class EcosystemIntegrationsAutomationView(BaseSectionView):
 
     def _get_reports_dir_and_db(self) -> tuple[str, str]:
         """Returns reports directory path and sqlite database path."""
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        reports_dir = os.path.join(base_dir, "telemetry", "reports", f"{self.tenant}_{self.client_id}")
-        os.makedirs(reports_dir, exist_ok=True)
-        db_path = os.path.join(reports_dir, "telemetry_cache.db")
-        return reports_dir, db_path
+        return self.get_reports_dir_and_db()
 
     def _cache_to_sqlite_safe(self, csv_path: str, db_path: str, table_name: str):
         """Asynchronously imports CSV into SQLite without blocking UI."""

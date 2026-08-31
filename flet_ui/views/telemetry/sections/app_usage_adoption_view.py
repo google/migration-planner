@@ -34,7 +34,7 @@ from core.graph.files.sharepoint_data_types import run_sharepoint_data_types_pip
 from core.graph.files.onedrive import run_onedrive_pipeline
 from core.graph.files.msteams_overview import run_msteams_pipeline
 from core.graph.exchange.calendar import run_calendar_telemetry_pipeline
-from flet_ui.views.sections.base_section_view import BaseSectionView
+from flet_ui.views.telemetry.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
     COLOR_PRIMARY,

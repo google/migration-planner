@@ -14,11 +14,11 @@
 
 """Telemetry modular section views for Flet UI."""
 
-from flet_ui.views.sections.base_section_view import BaseSectionView
-from flet_ui.views.sections.identity_licensing_view import IdentityLicensingView
-from flet_ui.views.sections.app_usage_adoption_view import AppUsageAdoptionView
-from flet_ui.views.sections.security_compliance_view import SecurityComplianceGovernanceView
-from flet_ui.views.sections.ecosystem_integrations_view import EcosystemIntegrationsAutomationView
+from flet_ui.views.telemetry.sections.base_section_view import BaseSectionView
+from flet_ui.views.telemetry.sections.identity_licensing_view import IdentityLicensingView
+from flet_ui.views.telemetry.sections.app_usage_adoption_view import AppUsageAdoptionView
+from flet_ui.views.telemetry.sections.security_compliance_view import SecurityComplianceGovernanceView
+from flet_ui.views.telemetry.sections.ecosystem_integrations_view import EcosystemIntegrationsAutomationView
 
 __all__ = [
     "BaseSectionView",

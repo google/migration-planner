@@ -40,7 +40,7 @@ from core.graph.intune.mobile_apps import run_mobile_apps_pipeline
 from core.graph.intune.detected_apps import run_detected_apps_pipeline
 from core.graph.intune.device_configs import run_device_configs_pipeline
 from core.graph.intune.mdm_policies import run_mdm_policies_pipeline
-from flet_ui.views.sections.base_section_view import BaseSectionView
+from flet_ui.views.telemetry.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
     COLOR_PRIMARY,
@@ -591,12 +591,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
     def _get_reports_dir_and_db(self):
         """Returns the persistent reports directory and SQLite database cache path for this tenant."""
-        script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
-        telemetry_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))), "telemetry")
-        reports_dir = os.path.join(telemetry_dir, "reports", f"{self.tenant}_{self.client_id}")
-        os.makedirs(reports_dir, exist_ok=True)
-        db_path = os.path.join(reports_dir, "telemetry_cache.db")
-        return reports_dir, db_path
+        return self.get_reports_dir_and_db()
 
     def _cache_to_sqlite_safe(self, csv_path: str, db_path: str, table_name: str):
         """Asynchronously imports raw CSV on disk into local SQLite database cache without blocking UI."""

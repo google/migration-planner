@@ -30,7 +30,7 @@ from core.graph.directory.provisioning_logs import ProvisioningLogsService
 from core.graph.directory.subscribed_skus import SubscribedSKUsService
 from core.graph.directory.user_logs import UserLogsService
 from core.graph.directory.users_groups import UsersGroupsService
-from flet_ui.views.sections.base_section_view import BaseSectionView
+from flet_ui.views.telemetry.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
     COLOR_BORDER,
@@ -628,8 +628,7 @@ class IdentityLicensingView(BaseSectionView):
         logger.info("Executing User Creation & Deletion Logs fetch task...")
         try:
             client = self._get_client(["AuditLog.Read.All", "Directory.Read.All"])
-            reports_dir = os.path.join(os.getcwd(), "reports", f"{self.tenant}_{self.client_id}")
-            os.makedirs(reports_dir, exist_ok=True)
+            reports_dir = self.get_reports_dir()
             csv_path = os.path.join(reports_dir, "directory_user_creation_logs.csv")
 
             user_logs_service = UserLogsService(client)
@@ -694,8 +693,7 @@ class IdentityLicensingView(BaseSectionView):
         logger.info("Executing Directory Provisioning Logs fetch task...")
         try:
             client = self._get_client(["AuditLog.Read.All", "Directory.Read.All"])
-            reports_dir = os.path.join(os.getcwd(), "reports", f"{self.tenant}_{self.client_id}")
-            os.makedirs(reports_dir, exist_ok=True)
+            reports_dir = self.get_reports_dir()
             csv_path = os.path.join(reports_dir, "directory_provisioning_logs.csv")
 
             prov_service = ProvisioningLogsService(client)

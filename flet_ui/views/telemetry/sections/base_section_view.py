@@ -14,8 +14,9 @@
 
 """Base class for modular telemetry section views in Flet UI."""
 
+import os
 import threading
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 import flet as ft
 from flet_ui.components.section_status_indicator import SectionStatus
 
@@ -43,6 +44,26 @@ class BaseSectionView(ft.Container):
         self.is_fetching = False
         self.status = SectionStatus.IDLE
         self._registered_cards: List[ft.Control] = []
+
+    def get_reports_dir(self) -> str:
+        """Returns the absolute root reports directory for the active tenant: {project_root}/reports/{tenant}_{client_id}"""
+        curr = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+        while curr and curr != os.path.dirname(curr):
+            if os.path.exists(os.path.join(curr, "home.py")):
+                break
+            curr = os.path.dirname(curr)
+        else:
+            curr = os.getcwd()
+
+        reports_dir = os.path.join(curr, "reports", f"{self.tenant}_{self.client_id}")
+        os.makedirs(reports_dir, exist_ok=True)
+        return reports_dir
+
+    def get_reports_dir_and_db(self) -> Tuple[str, str]:
+        """Returns reports directory path and sqlite database path in {root}/reports/{tenant}_{client_id}."""
+        reports_dir = self.get_reports_dir()
+        db_path = os.path.join(reports_dir, "telemetry_cache.db")
+        return reports_dir, db_path
 
     def register_cards(self, *cards: ft.Control):
         """Registers telemetry card instances to track for errors upon fetch completion."""
