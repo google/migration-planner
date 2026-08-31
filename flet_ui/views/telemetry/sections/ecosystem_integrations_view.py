@@ -31,7 +31,7 @@ from core.graph.entra.app_signins import run_app_signins_pipeline
 from core.graph.entra.user_signins import run_user_signins_pipeline
 from core.graph.entra.auth_methods import run_auth_methods_pipeline
 from telemetry.power_automate import run_power_automate_pipeline
-from flet_ui.views.sections.base_section_view import BaseSectionView
+from flet_ui.views.telemetry.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
     COLOR_PRIMARY,

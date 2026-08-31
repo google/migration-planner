@@ -36,7 +36,7 @@ from flet_ui.styles import (
     COLOR_TEXT_PRIMARY,
     COLOR_TEXT_SECONDARY,
 )
-from flet_ui.views.sections import (
+from flet_ui.views.telemetry.sections import (
     IdentityLicensingView,
     AppUsageAdoptionView,
     SecurityComplianceGovernanceView,

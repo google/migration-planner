@@ -40,7 +40,7 @@ from core.graph.intune.mobile_apps import run_mobile_apps_pipeline
 from core.graph.intune.detected_apps import run_detected_apps_pipeline
 from core.graph.intune.device_configs import run_device_configs_pipeline
 from core.graph.intune.mdm_policies import run_mdm_policies_pipeline
-from flet_ui.views.sections.base_section_view import BaseSectionView
+from flet_ui.views.telemetry.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
     COLOR_PRIMARY,

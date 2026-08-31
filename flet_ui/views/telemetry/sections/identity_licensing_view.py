@@ -30,7 +30,7 @@ from core.graph.directory.provisioning_logs import ProvisioningLogsService
 from core.graph.directory.subscribed_skus import SubscribedSKUsService
 from core.graph.directory.user_logs import UserLogsService
 from core.graph.directory.users_groups import UsersGroupsService
-from flet_ui.views.sections.base_section_view import BaseSectionView
+from flet_ui.views.telemetry.sections.base_section_view import BaseSectionView
 from flet_ui.components.telemetry_card import TelemetryCard
 from flet_ui.styles import (
     COLOR_BORDER,
