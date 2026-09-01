@@ -1918,7 +1918,7 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
                         Paragraph(escape_text(rule.get("State", "-")), custom_styles['TableCell']),
                         Paragraph(escape_text(rule.get("Priority", "-")), custom_styles['TableCell']),
                         Paragraph(escape_text(rule.get("Mode", "-")), custom_styles['TableCell']),
-                        Paragraph(escape_text(desc_text), custom_styles['SmallTableCell'])
+                        Paragraph(escape_text(desc_text), custom_styles['TableCell'])
                     ])
                 
                 rules_table = Table(rules_table_data, colWidths=[120, 50, 40, 60, 234])
