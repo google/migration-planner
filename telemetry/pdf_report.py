@@ -2414,28 +2414,41 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
         if not sso_apps:
             story.append(Paragraph("No SAML/OIDC SSO applications discovered.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
         else:
+            saml = 0
+            oidc = 0
+            password = 0
+            none_count = 0
+
+            for sp in sso_apps:
+                m = str(sp.get("preferredSingleSignOnMode") or "").lower()
+                if m == "saml":
+                    saml += 1
+                elif m == "oidc":
+                    oidc += 1
+                elif m == "password":
+                    password += 1
+                else:
+                    none_count += 1
+
             sso_table_data = [[
-                Paragraph("Application / Add-in Name", custom_styles['TableCellHeader']),
                 Paragraph("SSO Mode", custom_styles['TableCellHeader']),
-                Paragraph("Publisher", custom_styles['TableCellHeader'])
+                Paragraph("Application Count", custom_styles['TableCellHeader'])
             ]]
             
-            # Limit to top 50 in PDF to prevent 50-page tables if tenant has 10,000 SPs
-            display_apps = sso_apps[:50]
-            for app in display_apps:
-                name = app.get("displayName") or app.get("appDisplayName") or "Unknown SP"
-                mode = app.get("preferredSingleSignOnMode")
-                sso = str(mode).strip() if mode is not None else "OIDC / None"
-                sso = sso or "OIDC / None"
-                pub = app.get("publisherName") or "N/A"
-                
+            rows = [
+                ("SAML", str(saml)),
+                ("OIDC", str(oidc)),
+                ("Password", str(password)),
+                ("Null / Not Supported", str(none_count)),
+            ]
+            
+            for label, val in rows:
                 sso_table_data.append([
-                    Paragraph(escape_text(name), custom_styles['TableCellBold']),
-                    Paragraph(escape_text(sso), custom_styles['TableCell']),
-                    Paragraph(escape_text(pub), custom_styles['TableCell'])
+                    Paragraph(escape_text(label), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(val), custom_styles['TableCell'])
                 ])
                 
-            sso_table = Table(sso_table_data, colWidths=[200, 150, 150])
+            sso_table = Table(sso_table_data, colWidths=[250, 250])
             sso_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), primary_color),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
@@ -2446,10 +2459,6 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
                 ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
             ]))
             story.append(sso_table)
-            
-            if len(sso_apps) > 50:
-                story.append(Spacer(1, 5))
-                story.append(Paragraph(f"<i>... and {len(sso_apps) - 50} more Service Principals.</i>", custom_styles['ReportBody']))
         story.append(Spacer(1, 15))
 
     except Exception as e:
@@ -2473,13 +2482,23 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
                     Paragraph("Routing Config", custom_styles['TableCellHeader'])
                 ]]
                 for conn in connectors:
-                    routing_txt = escape_text(conn.get("Routing", "-")).replace("\n", "<br/>")
+                    conn_direction = conn.get("Direction", "-")
+                    status = "Enabled" if conn.get("Enabled") else "Disabled"
+                    
+                    if conn_direction == "Inbound":
+                        domains = str(conn.get("SenderDomains") or "All External Domains")
+                        routing_txt = f"Type: {conn.get('ConnectorType', 'N/A')}\nRequire TLS: {'Yes' if conn.get('RequireTls') else 'No'}"
+                    else:
+                        domains = str(conn.get("RecipientDomains") or "All External Domains")
+                        routing_txt = f"SmartHosts: {conn.get('SmartHosts', 'N/A')}\nUse MX: {'Yes' if conn.get('UseMxRecord') else 'No'}"
+                        
+                    routing_txt = escape_text(routing_txt).replace("\n", "<br/>")
                     conn_table_data.append([
-                        Paragraph(escape_text(conn.get("Direction", "-")), custom_styles['TableCell']),
+                        Paragraph(escape_text(conn_direction), custom_styles['TableCell']),
                         Paragraph(escape_text(conn.get("Name", "-")), custom_styles['TableCellBold']),
-                        Paragraph(escape_text(conn.get("Status", "-")), custom_styles['TableCell']),
-                        Paragraph(escape_text(conn.get("Domains", "-")), custom_styles['TableCell']),
-                        Paragraph(escape_text(routing_txt), custom_styles['TableCell'])
+                        Paragraph(escape_text(status), custom_styles['TableCell']),
+                        Paragraph(escape_text(domains), custom_styles['TableCell']),
+                        Paragraph(routing_txt, custom_styles['TableCell'])
                     ])
                 conn_table = Table(conn_table_data, colWidths=[70, 120, 60, 100, 154])
                 conn_table.setStyle(TableStyle([
@@ -2499,6 +2518,162 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
 
     except Exception as e:
         story.append(Paragraph(f'⚠️ Error formatting Exchange Connectors & Mail Flow Routing: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 4.5. App Registrations
+        story.append(Paragraph("App Registrations", custom_styles['SectionH2']))
+        story.append(Paragraph("Custom line-of-business applications and enterprise app registrations.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        app_regs = data.get("app_registrations", [])
+        if not app_regs:
+            story.append(Paragraph("No App Registrations found.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+        else:
+            app_reg_table_data = [[
+                Paragraph("App Name", custom_styles['TableCellHeader']),
+                Paragraph("Application ID", custom_styles['TableCellHeader']),
+                Paragraph("Created Date", custom_styles['TableCellHeader']),
+                Paragraph("Sign In Audience", custom_styles['TableCellHeader']),
+                Paragraph("Credentials", custom_styles['TableCellHeader'])
+            ]]
+            for app in app_regs[:30]:
+                name = app.get("displayName") or ""
+                app_id = app.get("appId") or ""
+                created = (app.get("createdDateTime") or "")[:10]
+                audience = app.get("signInAudience") or ""
+                secrets_cnt = len(app.get("passwordCredentials", []))
+                certs_cnt = len(app.get("keyCredentials", []))
+                creds_str = f"{secrets_cnt} Secrets, {certs_cnt} Certs"
+                app_reg_table_data.append([
+                    Paragraph(escape_text(name), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(app_id), custom_styles['TableCell']),
+                    Paragraph(escape_text(created), custom_styles['TableCell']),
+                    Paragraph(escape_text(audience), custom_styles['TableCell']),
+                    Paragraph(escape_text(creds_str), custom_styles['TableCell'])
+                ])
+            app_reg_table = Table(app_reg_table_data, colWidths=[100, 130, 80, 100, 90])
+            app_reg_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(app_reg_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting App Registrations: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 4.6. App Sign-ins
+        story.append(Paragraph("App Sign-in Logs (7 days)", custom_styles['SectionH2']))
+        story.append(Paragraph("Summary of successful sign-in counts by enterprise application.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        app_signins = data.get("app_signins", [])
+        if not app_signins:
+            story.append(Paragraph("No App Sign-ins found.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+        else:
+            asi_table_data = [[
+                Paragraph("App Name", custom_styles['TableCellHeader']),
+                Paragraph("Successful Sign Ins", custom_styles['TableCellHeader'])
+            ]]
+            for item in app_signins[:25]:
+                app_name = item.get("appDisplayName") or "Enterprise App"
+                success_count = str(item.get("successfulSignInCount") or 0)
+                asi_table_data.append([
+                    Paragraph(escape_text(app_name), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(success_count), custom_styles['TableCell'])
+                ])
+            asi_table = Table(asi_table_data, colWidths=[350, 150])
+            asi_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(asi_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting App Sign-ins: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 4.7. User Sign-ins
+        story.append(Paragraph("User Sign-in Activity (7 days)", custom_styles['SectionH2']))
+        story.append(Paragraph("Unique browsers, operating systems, and apps successfully authenticated.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        user_signins = data.get("user_signins", {})
+        if not user_signins:
+            story.append(Paragraph("No User Sign-ins found.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+        else:
+            usi_table_data = [[
+                Paragraph("Sign-in Attribute", custom_styles['TableCellHeader']),
+                Paragraph("Successful Unique Values", custom_styles['TableCellHeader'])
+            ]]
+            
+            apps_str = ", ".join(user_signins.get("apps", [])) or "None"
+            os_str = ", ".join(user_signins.get("os", [])) or "None"
+            browsers_str = ", ".join(user_signins.get("browsers", [])) or "None"
+            
+            for label, val in [("Successful App Sign-ins", apps_str),
+                               ("Successful Client OS", os_str),
+                               ("Successful Browsers", browsers_str)]:
+                usi_table_data.append([
+                    Paragraph(escape_text(label), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(val), custom_styles['TableCell'])
+                ])
+            usi_table = Table(usi_table_data, colWidths=[150, 350])
+            usi_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(usi_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting User Sign-ins: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 4.8. Authentication Methods
+        story.append(Paragraph("Authentication Methods (7 days)", custom_styles['SectionH2']))
+        story.append(Paragraph("Authentication methods successfully used within the environment.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        auth_methods = data.get("auth_methods", [])
+        if not auth_methods:
+            story.append(Paragraph("No Authentication Methods found.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+        else:
+            am_table_data = [[
+                Paragraph("Authentication Method", custom_styles['TableCellHeader']),
+                Paragraph("Success Activity Count", custom_styles['TableCellHeader'])
+            ]]
+            for item in auth_methods:
+                method = item.get("authenticationMethod") or "Unknown"
+                count = str(item.get("successActivityCount") or 0)
+                am_table_data.append([
+                    Paragraph(escape_text(method), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(count), custom_styles['TableCell'])
+                ])
+            am_table = Table(am_table_data, colWidths=[250, 250])
+            am_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(am_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting Authentication Methods: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
 def generate_pdf_report(data: dict, output_filepath: str):
     doc = SimpleDocTemplate(
