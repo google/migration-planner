@@ -2814,6 +2814,24 @@ def generate_pdf_report(data: dict, output_filepath: str):
         textColor=colors.HexColor('#0F172A'),
         fontName='Helvetica-Bold'
     ))
+    custom_styles.add(ParagraphStyle(
+        name='SmallTableCell',
+        parent=custom_styles['Normal'],
+        fontSize=6.0,
+        leading=7.5
+    ))
+    custom_styles.add(ParagraphStyle(
+        name='SmallTableCellBold',
+        parent=custom_styles['SmallTableCell'],
+        fontName='Helvetica-Bold',
+        textColor=primary_color
+    ))
+    custom_styles.add(ParagraphStyle(
+        name='SmallTableCellHeader',
+        parent=custom_styles['SmallTableCell'],
+        fontName='Helvetica-Bold',
+        textColor=colors.white
+    ))
 
     story = []
 
