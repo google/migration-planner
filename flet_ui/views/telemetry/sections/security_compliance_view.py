@@ -1355,10 +1355,12 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             csv_path = res.get("csv_path")
 
             rows: List[List[Any]] = []
+            rules_list = []
             if csv_path and os.path.exists(csv_path):
                 with open(csv_path, mode="r", encoding="utf-8-sig") as f:
                     reader = csv.DictReader(f)
                     for r in reader:
+                        rules_list.append(r)
                         name = r.get("Name") or "N/A"
                         state = r.get("State") or "Enabled"
                         prio = str(r.get("Priority") if r.get("Priority") is not None else "0")

@@ -1644,20 +1644,26 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
                 story.append(Paragraph("No mailboxes on legal hold discovered.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
             else:
                 lh_table_data = [[
-                    Paragraph("Target Mailbox", custom_styles['TableCellHeader']),
-                    Paragraph("Hold Type", custom_styles['TableCellHeader']),
-                    Paragraph("Status", custom_styles['TableCellHeader']),
-                    Paragraph("Enabled By", custom_styles['TableCellHeader'])
+                    Paragraph("Mailbox Name", custom_styles['TableCellHeader']),
+                    Paragraph("User Principal Name", custom_styles['TableCellHeader']),
+                    Paragraph("Applied Hold Policies", custom_styles['TableCellHeader'])
                 ]]
                 for case in legal_holds[:10]:
+                    dname = case.get("DisplayName") or case.get("name") or "Unknown"
+                    upn = case.get("UserPrincipalName") or case.get("PrimarySmtpAddress") or "N/A"
+                    holds = case.get("InPlaceHolds", [])
+                    if isinstance(holds, list):
+                        holds_str = ", ".join(str(h) for h in holds) if holds else "Litigation Hold"
+                    else:
+                        holds_str = str(holds) if holds else "Litigation Hold"
+
                     lh_table_data.append([
-                        Paragraph(escape_text(case.get("TargetMailbox", "-")), custom_styles['TableCellBold']),
-                        Paragraph(escape_text(case.get("HoldType", "-")), custom_styles['TableCell']),
-                        Paragraph(escape_text(case.get("Status", "-")), custom_styles['TableCell']),
-                        Paragraph(escape_text(case.get("EnabledBy", "-")), custom_styles['TableCell'])
+                        Paragraph(escape_text(dname), custom_styles['TableCellBold']),
+                        Paragraph(escape_text(upn), custom_styles['TableCell']),
+                        Paragraph(escape_text(holds_str), custom_styles['TableCell'])
                     ])
                 
-                lh_table = Table(lh_table_data, colWidths=[200, 100, 100, 100])
+                lh_table = Table(lh_table_data, colWidths=[150, 150, 200])
                 lh_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), primary_color),
                     ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
