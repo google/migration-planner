@@ -828,43 +828,24 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
     try:
         # 2.5. Exchange Online Mailbox & Resource Configurations
         story.append(Paragraph("Exchange Online Mailbox & Resource Configurations", custom_styles['SectionH2']))
-        story.append(Paragraph("Measures mailbox capacity values, overall sizes, total email counts, shared mailboxes, public folder parameters, and calendar resource pool reservations.", custom_styles['ReportBody']))
+        story.append(Paragraph("Measures mailbox capacity values, overall sizes, total email counts, shared mailboxes, and public folder parameters.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
         mailbox = data.get("mailbox", {})
-    except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting Exchange Mailboxes & Storage: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
-
-    try:
-        # 2.5. Exchange Online Calendar Environment
-        story.append(Paragraph('Exchange Online Calendar Environment', custom_styles['SectionH2']))
-        story.append(Paragraph('Room mailboxes, equipment resources, and calendar sharing policies', custom_styles['ReportBody']))
-        story.append(Spacer(1, 8))
-        calendar = data.get("calendar", {})
-    
+        
         pw_warn = []
         if mailbox.get("powershell_error"):
             pw_warn.append(f"Mailbox: {mailbox['powershell_error']}")
-        if calendar.get("powershell_error"):
-            pw_warn.append(f"Calendar: {calendar['powershell_error']}")
-        
+            
         if pw_warn:
             story.append(Paragraph(escape_text(f"⚠️ Warning: PowerShell metrics are restricted or incomplete ({'; '.join(pw_warn)})"), ParagraphStyle('WarnTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#D97706"), fontName="Helvetica-Bold")))
             story.append(Spacer(1, 4))
-        
-        workload_table_data = [[
+            
+        mailbox_table_data = [[
             Paragraph("Metric / Telemetry Property", custom_styles['TableCellHeader']),
             Paragraph("Exchange Mailbox Value", custom_styles['TableCellHeader'])
         ]]
-    
-        exchange_rows = [
-            ("Total Mailboxes Analyzed", f"{mailbox.get('total_mailboxes', 0):,} Mailboxes"),
-            ("Total Size of All Mailboxes", mailbox.get("total_storage_formatted", "0.00 Bytes")),
-            ("Average Mailbox Size", mailbox.get("average_mailbox_size_formatted", "0.00 Bytes")),
-            ("Total Emails Volume", f"{mailbox.get('total_emails', 0):,} Emails"),
-            ("Average Emails per Mailbox", f"{mailbox.get('average_emails', 0.0):,.0f} Emails"),
-        ]
-    
+        
         s_count = mailbox.get('shared_mailboxes_count')
         s_count_str = f"{s_count:,} Shared Mailboxes" if s_count is not None else "Error/Unavailable"
         s_size_str = mailbox.get("shared_mailboxes_total_formatted", "Error/Unavailable")
@@ -876,8 +857,13 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
         mail_pf_count_str = f"{mail_pf_count:,} Public Folders" if mail_pf_count is not None else "Error/Unavailable"
     
         pf_size_str = mailbox.get("public_folders_total_formatted", "Error/Unavailable")
-    
-        exchange_rows += [
+        
+        mailbox_rows = [
+            ("Total Mailboxes Analyzed", f"{mailbox.get('total_mailboxes', 0):,} Mailboxes"),
+            ("Total Size of All Mailboxes", mailbox.get("total_storage_formatted", "0.00 Bytes")),
+            ("Average Mailbox Size", mailbox.get("average_mailbox_size_formatted", "0.00 Bytes")),
+            ("Total Emails Volume", f"{mailbox.get('total_emails', 0):,} Emails"),
+            ("Average Emails per Mailbox", f"{mailbox.get('average_emails', 0.0):,.0f} Emails"),
             ("Shared Mailboxes Count", s_count_str),
             ("Total Shared Mailbox Size", s_size_str),
             ("Public Folders Count", pf_count_str),
@@ -885,26 +871,14 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
             ("Total Public Folder Size", pf_size_str),
         ]
         
-        reserve_val = calendar.get("CanUsersReserveRooms")
-        if isinstance(reserve_val, bool): reserve_val = "Yes" if reserve_val else "No"
-    
-        att_val = calendar.get("CanShareAttachments")
-        if isinstance(att_val, bool): att_val = "Yes" if att_val else "No"
-    
-        exchange_rows += [
-            ("Room & Resource Reservation Enabled", str(reserve_val)),
-            ("Calendar Resource Pools (Rooms/Devices)", calendar.get("NamingConvention") or "None found"),
-            ("Calendar Attachment Link Permissions", str(att_val)),
-        ]
-    
-        for label, val in exchange_rows:
-            workload_table_data.append([
+        for label, val in mailbox_rows:
+            mailbox_table_data.append([
                 Paragraph(escape_text(label), custom_styles['TableCellBold']),
                 Paragraph(escape_text(val), custom_styles['TableCell'])
             ])
-        
-        ex_table = Table(workload_table_data, colWidths=[260, 240])
-        ex_table.setStyle(TableStyle([
+            
+        mbx_table = Table(mailbox_table_data, colWidths=[260, 240])
+        mbx_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -913,7 +887,60 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
-        story.append(ex_table)
+        story.append(mbx_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting Exchange Mailboxes & Storage: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 2.5. Exchange Online Calendar Environment
+        story.append(Paragraph('Exchange Online Calendar Environment', custom_styles['SectionH2']))
+        story.append(Paragraph('Room mailboxes, equipment resources, and calendar sharing policies', custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        calendar = data.get("calendar", {})
+    
+        pw_warn = []
+        if calendar.get("powershell_error"):
+            pw_warn.append(f"Calendar: {calendar['powershell_error']}")
+        
+        if pw_warn:
+            story.append(Paragraph(escape_text(f"⚠️ Warning: PowerShell metrics are restricted or incomplete ({'; '.join(pw_warn)})"), ParagraphStyle('WarnTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#D97706"), fontName="Helvetica-Bold")))
+            story.append(Spacer(1, 4))
+            
+        calendar_table_data = [[
+            Paragraph("Metric / Telemetry Property", custom_styles['TableCellHeader']),
+            Paragraph("Exchange Calendar Value", custom_styles['TableCellHeader'])
+        ]]
+        
+        reserve_val = calendar.get("CanUsersReserveRooms")
+        if isinstance(reserve_val, bool): reserve_val = "Yes" if reserve_val else "No"
+    
+        att_val = calendar.get("CanShareAttachments")
+        if isinstance(att_val, bool): att_val = "Yes" if att_val else "No"
+    
+        calendar_rows = [
+            ("Room & Resource Reservation Enabled", str(reserve_val)),
+            ("Calendar Resource Pools (Rooms/Devices)", calendar.get("NamingConvention") or "None found"),
+            ("Calendar Attachment Link Permissions", str(att_val)),
+        ]
+        
+        for label, val in calendar_rows:
+            calendar_table_data.append([
+                Paragraph(escape_text(label), custom_styles['TableCellBold']),
+                Paragraph(escape_text(val), custom_styles['TableCell'])
+            ])
+            
+        cal_table = Table(calendar_table_data, colWidths=[260, 240])
+        cal_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(cal_table)
         story.append(Spacer(1, 15))
 
     except Exception as e:

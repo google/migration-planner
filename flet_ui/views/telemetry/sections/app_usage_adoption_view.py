@@ -546,8 +546,8 @@ class AppUsageAdoptionView(BaseSectionView):
         logger.info("Executing Email Client Classification fetch task...")
         try:
             result = run_email_client_usage_pipeline(self.client_id, self.secret, self.tenant)
-            self.cached_data["email_clients"] = result.get("client_stats", {})
-            stats = result.get("client_stats", {})
+            self.cached_data["email_clients"] = result.get("client_adoption", {})
+            stats = result.get("client_adoption", {})
             columns = ["Client Type", "Client Name", "Active Users (180 Days)"]
             rows = [
                 ["Supported Browser-Based Clients", "Outlook on the Web (OWA)", f"{stats.get('browser_users', 0):,}"],
@@ -823,9 +823,11 @@ class AppUsageAdoptionView(BaseSectionView):
             meetings_organized = 0
 
             if os.path.exists(csv_path):
+                raw_teams_data = []
                 with open(csv_path, mode="r", encoding="utf-8-sig") as f:
                     reader = csv.DictReader(f)
                     for row in reader:
+                        raw_teams_data.append(row)
                         team_name = row.get("Team Name") or row.get("TeamName")
                         if team_name:
                             total_teams += 1
@@ -834,6 +836,7 @@ class AppUsageAdoptionView(BaseSectionView):
                             active_channels += int(float(row.get("Active Channels") or row.get("ActiveChannels") or 0))
                             channel_messages += int(float(row.get("Channel Messages") or row.get("ChannelMessages") or 0))
                             meetings_organized += int(float(row.get("Meetings Organized") or row.get("MeetingsOrganized") or 0))
+                self.cached_data["msteams_activity"] = raw_teams_data
 
             avg_users = f"{(active_users / active_channels):.1f}" if active_channels > 0 else "0"
 

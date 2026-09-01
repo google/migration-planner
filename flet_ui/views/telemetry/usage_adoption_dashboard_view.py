@@ -637,7 +637,7 @@ class UsageAdoptionDashboardView(ft.Container):
             "conditional_access": security_data.get("conditional_access", []),
             "ediscovery_cases": security_data.get("ediscovery_cases", []),
             "power_automate": eco_data.get("power_automate", {}),
-            "msteams_activity": load_csv("msteams_activity.csv")
+            "msteams_activity": usage_data.get("msteams_activity", [])
         }
             
         return combined_data
