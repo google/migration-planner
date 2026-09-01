@@ -378,7 +378,7 @@ def _add_identity_licensing_section(story, data, custom_styles, primary_color, s
     story.append(Spacer(1, 10))
     try:
         # 1.1. Organization Details
-        story.append(Paragraph("1.1. Organization Details", custom_styles['SectionH2']))
+        story.append(Paragraph("Organization Details", custom_styles['SectionH2']))
         story.append(Paragraph("Contains core tenant property variables (tenantType: AAD), sync status attributes, and base provisioned operational plans.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         
@@ -421,10 +421,10 @@ def _add_identity_licensing_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 1.1. Directory Summary: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Directory Summary: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 1.2. Domains
-        story.append(Paragraph("1.2. Domains", custom_styles['SectionH2']))
+        story.append(Paragraph("Domains", custom_styles['SectionH2']))
         story.append(Paragraph("Evaluates internet-facing domain scopes associated with the tenant and maps authentication routing models (Managed vs. Federated).", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         
@@ -478,10 +478,10 @@ def _add_identity_licensing_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 1.2. Verified Domains: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Verified Domains: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 2.1. Subscribed SKUs
-        story.append(Paragraph("2.1. Subscribed SKUs", custom_styles['SectionH2']))
+        story.append(Paragraph("Subscribed SKUs", custom_styles['SectionH2']))
         story.append(Paragraph("Outlines active service license assignments (e.g., SPE_E5, Copilot, Teams Rooms) and compares enabled counts against actual consumed seats.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -520,10 +520,10 @@ def _add_identity_licensing_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 1.3. Subscribed SKUs: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Subscribed SKUs: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 1.5. Groups & Users
-        story.append(Paragraph("1.5. Groups & Users", custom_styles['SectionH2']))
+        story.append(Paragraph("Groups & Users", custom_styles['SectionH2']))
         story.append(Paragraph("Tracks total enabled/disabled object accounts, guest profile totals, and directory classification buckets (Unified M365 Groups vs. Static Security Groups).", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         
@@ -591,10 +591,10 @@ def _add_identity_licensing_section(story, data, custom_styles, primary_color, s
         entra_data = data.get("devices_apps", {})
         
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 1.4. Users & Groups Breakdown: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Users & Groups Breakdown: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 1.3. User Creation/Deletion Logs
-        story.append(Paragraph("1.3. User Creation/Deletion Logs", custom_styles['SectionH2']))
+        story.append(Paragraph("User Creation/Deletion Logs", custom_styles['SectionH2']))
         story.append(Paragraph("Audits raw activity events tracking user directory provisioning adjustments initiated by management services.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         
@@ -635,10 +635,10 @@ def _add_identity_licensing_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 1.5. User Creation & Deletion Logs: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting User Creation & Deletion Logs: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 1.4. Provisioning Logs
-        story.append(Paragraph("1.4. Provisioning Logs", custom_styles['SectionH2']))
+        story.append(Paragraph("Provisioning Logs", custom_styles['SectionH2']))
         story.append(Paragraph("Evaluates directory identity synchronization mechanisms and external source-of-truth status indicators.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         
@@ -699,7 +699,7 @@ def _add_identity_licensing_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 1.6. Directory Provisioning Logs: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Directory Provisioning Logs: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
 def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, secondary_color, outline_color):
     story.append(PageBreak())
@@ -708,7 +708,7 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
     story.append(Spacer(1, 10))
     try:
         # 2.4. Microsoft 365 Client Applications Usage (180 Days)
-        story.append(Paragraph("2.4. Microsoft 365 Client Applications Usage (180 Days)", custom_styles['SectionH2']))
+        story.append(Paragraph("Microsoft 365 Client Applications Usage (180 Days)", custom_styles['SectionH2']))
         story.append(Paragraph("Breaks down distinct end-user service access endpoints by hardware operating systems (Windows, Mac, Web, Mobile).", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -758,10 +758,10 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 2.1. M365 Apps Usage (180 Days): {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting M365 Apps Usage (180 Days): {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 2.2. Active Users Usage
-        story.append(Paragraph("2.2. Active Users Usage", custom_styles['SectionH2']))
+        story.append(Paragraph("Active Users Usage", custom_styles['SectionH2']))
         story.append(Paragraph("Compiles service adoption velocity logs across core application workloads over 30, 90, and 180-day operational windows.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -802,10 +802,10 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 2.2. Active Users Trend: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Active Users Trend: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 2.3. O365 30-Day Active User Trend
-        story.append(Paragraph("2.3. O365 30-Day Active User Trend", custom_styles['SectionH2']))
+        story.append(Paragraph("O365 30-Day Active User Trend", custom_styles['SectionH2']))
         story.append(Paragraph("Maps visual timeline trends displaying consecutive user interaction curves across cloud workspace software platforms.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -824,47 +824,28 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 2.3. O365 30-Day Active User Trend: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting O365 30-Day Active User Trend: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 2.5. Exchange Online Mailbox & Resource Configurations
-        story.append(Paragraph("2.5. Exchange Online Mailbox & Resource Configurations", custom_styles['SectionH2']))
-        story.append(Paragraph("Measures mailbox capacity values, overall sizes, total email counts, shared mailboxes, public folder parameters, and calendar resource pool reservations.", custom_styles['ReportBody']))
+        story.append(Paragraph("Exchange Online Mailbox & Resource Configurations", custom_styles['SectionH2']))
+        story.append(Paragraph("Measures mailbox capacity values, overall sizes, total email counts, shared mailboxes, and public folder parameters.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
         mailbox = data.get("mailbox", {})
-    except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 2.4. Exchange Mailboxes & Storage: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
-
-    try:
-        # 2.5. Exchange Online Calendar Environment
-        story.append(Paragraph('2.5. Exchange Online Calendar Environment', custom_styles['SectionH2']))
-        story.append(Paragraph('Room mailboxes, equipment resources, and calendar sharing policies', custom_styles['ReportBody']))
-        story.append(Spacer(1, 8))
-        calendar = data.get("calendar", {})
-    
+        
         pw_warn = []
         if mailbox.get("powershell_error"):
             pw_warn.append(f"Mailbox: {mailbox['powershell_error']}")
-        if calendar.get("powershell_error"):
-            pw_warn.append(f"Calendar: {calendar['powershell_error']}")
-        
+            
         if pw_warn:
             story.append(Paragraph(escape_text(f"⚠️ Warning: PowerShell metrics are restricted or incomplete ({'; '.join(pw_warn)})"), ParagraphStyle('WarnTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#D97706"), fontName="Helvetica-Bold")))
             story.append(Spacer(1, 4))
-        
-        workload_table_data = [[
+            
+        mailbox_table_data = [[
             Paragraph("Metric / Telemetry Property", custom_styles['TableCellHeader']),
             Paragraph("Exchange Mailbox Value", custom_styles['TableCellHeader'])
         ]]
-    
-        exchange_rows = [
-            ("Total Mailboxes Analyzed", f"{mailbox.get('total_mailboxes', 0):,} Mailboxes"),
-            ("Total Size of All Mailboxes", mailbox.get("total_storage_formatted", "0.00 Bytes")),
-            ("Average Mailbox Size", mailbox.get("average_mailbox_size_formatted", "0.00 Bytes")),
-            ("Total Emails Volume", f"{mailbox.get('total_emails', 0):,} Emails"),
-            ("Average Emails per Mailbox", f"{mailbox.get('average_emails', 0.0):,.0f} Emails"),
-        ]
-    
+        
         s_count = mailbox.get('shared_mailboxes_count')
         s_count_str = f"{s_count:,} Shared Mailboxes" if s_count is not None else "Error/Unavailable"
         s_size_str = mailbox.get("shared_mailboxes_total_formatted", "Error/Unavailable")
@@ -876,8 +857,13 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
         mail_pf_count_str = f"{mail_pf_count:,} Public Folders" if mail_pf_count is not None else "Error/Unavailable"
     
         pf_size_str = mailbox.get("public_folders_total_formatted", "Error/Unavailable")
-    
-        exchange_rows += [
+        
+        mailbox_rows = [
+            ("Total Mailboxes Analyzed", f"{mailbox.get('total_mailboxes', 0):,} Mailboxes"),
+            ("Total Size of All Mailboxes", mailbox.get("total_storage_formatted", "0.00 Bytes")),
+            ("Average Mailbox Size", mailbox.get("average_mailbox_size_formatted", "0.00 Bytes")),
+            ("Total Emails Volume", f"{mailbox.get('total_emails', 0):,} Emails"),
+            ("Average Emails per Mailbox", f"{mailbox.get('average_emails', 0.0):,.0f} Emails"),
             ("Shared Mailboxes Count", s_count_str),
             ("Total Shared Mailbox Size", s_size_str),
             ("Public Folders Count", pf_count_str),
@@ -885,26 +871,14 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
             ("Total Public Folder Size", pf_size_str),
         ]
         
-        reserve_val = calendar.get("CanUsersReserveRooms")
-        if isinstance(reserve_val, bool): reserve_val = "Yes" if reserve_val else "No"
-    
-        att_val = calendar.get("CanShareAttachments")
-        if isinstance(att_val, bool): att_val = "Yes" if att_val else "No"
-    
-        exchange_rows += [
-            ("Room & Resource Reservation Enabled", str(reserve_val)),
-            ("Calendar Resource Pools (Rooms/Devices)", calendar.get("NamingConvention") or "None found"),
-            ("Calendar Attachment Link Permissions", str(att_val)),
-        ]
-    
-        for label, val in exchange_rows:
-            workload_table_data.append([
+        for label, val in mailbox_rows:
+            mailbox_table_data.append([
                 Paragraph(escape_text(label), custom_styles['TableCellBold']),
                 Paragraph(escape_text(val), custom_styles['TableCell'])
             ])
-        
-        ex_table = Table(workload_table_data, colWidths=[260, 240])
-        ex_table.setStyle(TableStyle([
+            
+        mbx_table = Table(mailbox_table_data, colWidths=[260, 240])
+        mbx_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -913,14 +887,67 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
-        story.append(ex_table)
+        story.append(mbx_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting Exchange Mailboxes & Storage: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 2.5. Exchange Online Calendar Environment
+        story.append(Paragraph('Exchange Online Calendar Environment', custom_styles['SectionH2']))
+        story.append(Paragraph('Room mailboxes, equipment resources, and calendar sharing policies', custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        calendar = data.get("calendar", {})
+    
+        pw_warn = []
+        if calendar.get("powershell_error"):
+            pw_warn.append(f"Calendar: {calendar['powershell_error']}")
+        
+        if pw_warn:
+            story.append(Paragraph(escape_text(f"⚠️ Warning: PowerShell metrics are restricted or incomplete ({'; '.join(pw_warn)})"), ParagraphStyle('WarnTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#D97706"), fontName="Helvetica-Bold")))
+            story.append(Spacer(1, 4))
+            
+        calendar_table_data = [[
+            Paragraph("Metric / Telemetry Property", custom_styles['TableCellHeader']),
+            Paragraph("Exchange Calendar Value", custom_styles['TableCellHeader'])
+        ]]
+        
+        reserve_val = calendar.get("CanUsersReserveRooms")
+        if isinstance(reserve_val, bool): reserve_val = "Yes" if reserve_val else "No"
+    
+        att_val = calendar.get("CanShareAttachments")
+        if isinstance(att_val, bool): att_val = "Yes" if att_val else "No"
+    
+        calendar_rows = [
+            ("Room & Resource Reservation Enabled", str(reserve_val)),
+            ("Calendar Resource Pools (Rooms/Devices)", calendar.get("NamingConvention") or "None found"),
+            ("Calendar Attachment Link Permissions", str(att_val)),
+        ]
+        
+        for label, val in calendar_rows:
+            calendar_table_data.append([
+                Paragraph(escape_text(label), custom_styles['TableCellBold']),
+                Paragraph(escape_text(val), custom_styles['TableCell'])
+            ])
+            
+        cal_table = Table(calendar_table_data, colWidths=[260, 240])
+        cal_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(cal_table)
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 2.5. Exchange Online Calendar Environment: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Exchange Online Calendar Environment: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 2.8. Email Clients & PST Environment
-        story.append(Paragraph("2.8. Email Clients & PST Environment", custom_styles['SectionH2']))
+        story.append(Paragraph("Email Clients & PST Environment", custom_styles['SectionH2']))
         story.append(Paragraph("Pinpoints email client type utilization profiles, tracking unique user footprints across web apps, desktop suites, and legacy protocols.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -963,11 +990,11 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 10))
     
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 2.6. Email Client Classification: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Email Client Classification: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
     try:
         # 2.7. PST Files
-        story.append(Paragraph('2.7. PST Files', custom_styles['SectionH2']))
+        story.append(Paragraph('PST Files', custom_styles['SectionH2']))
         story.append(Paragraph('Discovered PST files across SharePoint and OneDrive', custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         pst_files = data.get("pst_files", {})
@@ -1008,40 +1035,35 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 2.7. PST Files: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting PST Files: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
-        # 2.9. SharePoint & OneDrive Environment Telemetry
-        story.append(Paragraph("2.9. SharePoint & OneDrive Environment Telemetry", custom_styles['SectionH2']))
-        story.append(Paragraph("Synthesizes file quantity metrics, total document site spaces, active item splits, and client data sync interactions.", custom_styles['ReportBody']))
+        # 2.9. SharePoint Environment Telemetry
+        story.append(Paragraph("SharePoint Environment Telemetry", custom_styles['SectionH2']))
+        story.append(Paragraph("Synthesizes file quantity metrics, total document site spaces, and active item splits.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
         sp = data.get("sharepoint", {})
-        od = data.get("onedrive", {})
     
-        files_table_data = [[
-            Paragraph("Metric Property Description", custom_styles['TableCellHeader']),
-            Paragraph("SharePoint Sites (180d)", custom_styles['TableCellHeader']),
-            Paragraph("OneDrive Personal (180d)", custom_styles['TableCellHeader'])
+        sp_table_data = [[
+            Paragraph("SharePoint Metric Description", custom_styles['TableCellHeader']),
+            Paragraph("SharePoint Value", custom_styles['TableCellHeader'])
         ]]
     
-        files_rows = [
-            ("Total Scope Count (Sites / Accounts)", f"{sp.get('total_sites', 0):,} Sites", f"{od.get('total_accounts', 0):,} Accounts"),
-            ("Total Storage Consumed", sp.get("total_storage_formatted", "0.00 Bytes"), od.get("total_storage_formatted", "0.00 Bytes")),
-            ("Total Stored File Count", f"{sp.get('total_files', 0):,} Files", f"{od.get('total_files', 0):,} Files"),
-            ("Active Files Count (Active %)", f"{sp.get('active_files', 0):,} ({sp.get('active_files_pct', 0.0):.1f}%)", f"{od.get('active_files', 0):,} ({od.get('active_files_pct', 0.0):.1f}%)"),
-            ("Users with Sync Client Active", "N/A (SharePoint level)", f"{od.get('sync_users', 0):,} Users ({od.get('sync_users_pct', 0.0):.1f}%)"),
-            ("Active OneNote Users", "N/A (SharePoint level)", f"{od.get('onenote_users', 0):,} Users"),
+        sp_rows = [
+            ("Total SharePoint Sites (180d)", f"{sp.get('total_sites', 0):,} Sites"),
+            ("Total Storage Consumed", sp.get("total_storage_formatted", "0.00 Bytes")),
+            ("Total Stored File Count", f"{sp.get('total_files', 0):,} Files"),
+            ("Active Files Count (Active %)", f"{sp.get('active_files', 0):,} ({sp.get('active_files_pct', 0.0):.1f}%)"),
         ]
     
-        for label, sp_val, od_val in files_rows:
-            files_table_data.append([
+        for label, val in sp_rows:
+            sp_table_data.append([
                 Paragraph(escape_text(label), custom_styles['TableCellBold']),
-                Paragraph(escape_text(sp_val), custom_styles['TableCell']),
-                Paragraph(escape_text(od_val), custom_styles['TableCell'])
+                Paragraph(escape_text(val), custom_styles['TableCell'])
             ])
         
-        files_table = Table(files_table_data, colWidths=[200, 150, 150])
-        files_table.setStyle(TableStyle([
+        sp_table = Table(sp_table_data, colWidths=[260, 240])
+        sp_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -1050,7 +1072,7 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
-        story.append(files_table)
+        story.append(sp_table)
         story.append(Spacer(1, 15))
     
         sp_data_types = data.get("sharepoint_data_types", {})
@@ -1082,13 +1104,56 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
                 ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
             ]))
             story.append(sp_dt_table)
-        
+        story.append(Spacer(1, 15))
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 2.8. SharePoint Site Storage: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting SharePoint Site Storage: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 2.10. OneDrive Environment Telemetry
+        story.append(Paragraph("OneDrive Environment Telemetry", custom_styles['SectionH2']))
+        story.append(Paragraph("Synthesizes file quantity metrics, total user accounts, and client data sync interactions.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+    
+        od = data.get("onedrive", {})
+    
+        od_table_data = [[
+            Paragraph("OneDrive Metric Description", custom_styles['TableCellHeader']),
+            Paragraph("OneDrive Value", custom_styles['TableCellHeader'])
+        ]]
+    
+        od_rows = [
+            ("Total User Accounts (180d)", f"{od.get('total_accounts', 0):,} Accounts"),
+            ("Total Storage Consumed", od.get("total_storage_formatted", "0.00 Bytes")),
+            ("Total Stored File Count", f"{od.get('total_files', 0):,} Files"),
+            ("Active Files Count (Active %)", f"{od.get('active_files', 0):,} ({od.get('active_files_pct', 0.0):.1f}%)"),
+            ("Users with Sync Client Active", f"{od.get('sync_users', 0):,} Users ({od.get('sync_users_pct', 0.0):.1f}%)"),
+            ("Active OneNote Users", f"{od.get('onenote_users', 0):,} Users"),
+        ]
+    
+        for label, val in od_rows:
+            od_table_data.append([
+                Paragraph(escape_text(label), custom_styles['TableCellBold']),
+                Paragraph(escape_text(val), custom_styles['TableCell'])
+            ])
+        
+        od_table = Table(od_table_data, colWidths=[260, 240])
+        od_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(od_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting OneDrive Environment Telemetry: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
     try:
         # 2.9. Heavy Sites Inventory
-        story.append(Paragraph('2.9. Heavy Sites Inventory', custom_styles['SectionH2']))
+        story.append(Paragraph('Heavy Sites Inventory', custom_styles['SectionH2']))
         story.append(Paragraph('Top storage-consuming SharePoint sites across tenant', custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         heavy_sites = sp.get("heavy_sites", [])
@@ -1128,10 +1193,10 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 2.9. Heavy Sites Inventory: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Heavy Sites Inventory: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 2.10. Microsoft Teams Overview
-        story.append(Paragraph("2.10. Microsoft Teams Overview", custom_styles['SectionH2']))
+        story.append(Paragraph("Microsoft Teams Overview", custom_styles['SectionH2']))
         story.append(Paragraph("Aggregates real-world interaction data from active communication channels, tracking team names, activity timelines, guest levels, and message history.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1140,26 +1205,47 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
             if not msteams_data:
                 story.append(Paragraph("No Microsoft Teams activity data was available.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
             else:
+                total_teams = 0
+                active_users = 0
+                guests = 0
+                active_channels = 0
+                channel_messages = 0
+                meetings_organized = 0
+
+                for row in msteams_data:
+                    team_name = row.get("Team Name") or row.get("TeamName")
+                    if team_name:
+                        total_teams += 1
+                        active_users += int(float(row.get("Active Users") or row.get("ActiveUsers") or 0))
+                        guests += int(float(row.get("Guests") or 0))
+                        active_channels += int(float(row.get("Active Channels") or row.get("ActiveChannels") or 0))
+                        channel_messages += int(float(row.get("Channel Messages") or row.get("ChannelMessages") or 0))
+                        meetings_organized += int(float(row.get("Meetings Organized") or row.get("MeetingsOrganized") or 0))
+
+                avg_users = f"{(active_users / active_channels):.1f}" if active_channels > 0 else "0"
+
                 teams_table_data = [[
-                    Paragraph("Team Name", custom_styles['TableCellHeader']),
-                    Paragraph("Last Activity", custom_styles['TableCellHeader']),
-                    Paragraph("Active Users", custom_styles['TableCellHeader']),
-                    Paragraph("Guests", custom_styles['TableCellHeader']),
-                    Paragraph("Meetings", custom_styles['TableCellHeader']),
-                    Paragraph("Messages", custom_styles['TableCellHeader'])
+                    Paragraph("Teams Metric Description", custom_styles['TableCellHeader']),
+                    Paragraph("Value / Measurement", custom_styles['TableCellHeader'])
                 ]]
-            
-                for row in msteams_data[:20]:
+                
+                rows = [
+                    ("Total Teams Count", f"{total_teams:,} Teams"),
+                    ("Total Active Channels (180 Days)", f"{active_channels:,} Channels"),
+                    ("Total Channel Messages", f"{channel_messages:,} Messages"),
+                    ("Total Active Users (180 Days)", f"{active_users:,} Users"),
+                    ("Average Users per Channel", avg_users),
+                    ("Total Meetings Organized", f"{meetings_organized:,} Meetings"),
+                    ("Total Guests", f"{guests:,} Guests"),
+                ]
+                
+                for label, val in rows:
                     teams_table_data.append([
-                        Paragraph(escape_text(row.get("Team Name", "-")), custom_styles['TableCellBold']),
-                        Paragraph(escape_text(row.get("Last Activity Date", "-")), custom_styles['TableCell']),
-                        Paragraph(escape_text(row.get("Active Users", "0")), custom_styles['TableCell']),
-                        Paragraph(escape_text(row.get("Guests", "0")), custom_styles['TableCell']),
-                        Paragraph(escape_text(row.get("Meetings Organized", "0")), custom_styles['TableCell']),
-                        Paragraph(escape_text(row.get("Channel Messages", "0")), custom_styles['TableCell'])
+                        Paragraph(escape_text(label), custom_styles['TableCellBold']),
+                        Paragraph(escape_text(val), custom_styles['TableCell'])
                     ])
                 
-                teams_table = Table(teams_table_data, colWidths=[120, 70, 70, 50, 70, 70])
+                teams_table = Table(teams_table_data, colWidths=[260, 240])
                 teams_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), primary_color),
                     ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
@@ -1176,7 +1262,7 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
 
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 2.10. Microsoft Teams Activity: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Microsoft Teams Activity: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
 def _add_security_compliance_governance_section(story, data, custom_styles, primary_color, secondary_color, outline_color):
     filtering_policies = data.get("filtering_policies", [])
@@ -1189,7 +1275,7 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
     story.append(Spacer(1, 10))
     try:
         # 3.1. Microsoft Purview Sensitivity Labels
-        story.append(Paragraph("3.1. Microsoft Purview Sensitivity Labels", custom_styles['SectionH2']))
+        story.append(Paragraph("Microsoft Purview Sensitivity Labels", custom_styles['SectionH2']))
         story.append(Paragraph("Coordinates information classification definitions and encryption shields assigned to protect data assets based on priority rules.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1260,10 +1346,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.1. Sensitivity Labels: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Sensitivity Labels: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.2. Microsoft Purview Retention Compliance Policies
-        story.append(Paragraph("3.2. Microsoft Purview Retention Compliance Policies", custom_styles['SectionH2']))
+        story.append(Paragraph("Microsoft Purview Retention Compliance Policies", custom_styles['SectionH2']))
         story.append(Paragraph("Manages compliance data lifecycles, applying permanent holds or custom retention rules across mail, site, and group workloads.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1328,10 +1414,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.2. Retention Compliance Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Retention Compliance Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.3. Data Loss Prevention (DLP) Policies
-        story.append(Paragraph("3.3. Data Loss Prevention (DLP) Policies", custom_styles['SectionH2']))
+        story.append(Paragraph("Data Loss Prevention (DLP) Policies", custom_styles['SectionH2']))
         story.append(Paragraph("Outlines active data protection schemas designed to identify, monitor, and automatically block sensitive data transfers across systems.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1377,10 +1463,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.3. Data Loss Prevention (DLP) Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Data Loss Prevention (DLP) Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.4. Sensitive Information Types
-        story.append(Paragraph("3.4. Sensitive Information Types", custom_styles['SectionH2']))
+        story.append(Paragraph("Sensitive Information Types", custom_styles['SectionH2']))
         story.append(Paragraph("Catalogs built-in and custom regular expression patterns used to detect confidential strings like banking codes, passport numbers, and API keys.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1424,11 +1510,11 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
             
     
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.4. Sensitive Information Types: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Sensitive Information Types: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
     try:
         # 3.5. Custom Sensitive Information Types
-        story.append(Paragraph('3.5. Custom Sensitive Information Types', custom_styles['SectionH2']))
+        story.append(Paragraph('Custom Sensitive Information Types', custom_styles['SectionH2']))
         story.append(Paragraph('Organization-defined custom rule packages and regex pattern matchers', custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         if custom_types:
@@ -1461,11 +1547,11 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
             
     
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.5. Custom Sensitive Information Types: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Custom Sensitive Information Types: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
     try:
         # 3.6. Exact Data Match (EDM) Schemas
-        story.append(Paragraph('3.6. Exact Data Match (EDM) Schemas', custom_styles['SectionH2']))
+        story.append(Paragraph('Exact Data Match (EDM) Schemas', custom_styles['SectionH2']))
         story.append(Paragraph('Exact Data Match classification schemas and custom data store references', custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         if edm_schemas:
@@ -1498,10 +1584,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.6. Exact Data Match (EDM) Schemas: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Exact Data Match (EDM) Schemas: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.7. Microsoft Purview eDiscovery Cases
-        story.append(Paragraph("3.7. Microsoft Purview eDiscovery Cases", custom_styles['SectionH2']))
+        story.append(Paragraph("Microsoft Purview eDiscovery Cases", custom_styles['SectionH2']))
         story.append(Paragraph("Monitors legal lookup spaces, documenting open and closed content searches, hold constraints, and regulatory review timelines.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1544,10 +1630,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
 
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.7. Microsoft Purview eDiscovery Cases: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Microsoft Purview eDiscovery Cases: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.8. Conditional Access Policies
-        story.append(Paragraph("3.8. Conditional Access Policies", custom_styles['SectionH2']))
+        story.append(Paragraph("Conditional Access Policies", custom_styles['SectionH2']))
         story.append(Paragraph("Houses the master policy framework rules requiring multi-factor authentication (MFA) or MDM compliance checks to unlock cloud assets.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         
@@ -1583,10 +1669,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
 
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.8. Conditional Access Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Conditional Access Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.9. Filtering Policies (Global Secure Access)
-        story.append(Paragraph("3.9. Filtering Policies (Global Secure Access)", custom_styles['SectionH2']))
+        story.append(Paragraph("Filtering Policies (Global Secure Access)", custom_styles['SectionH2']))
         story.append(Paragraph("Manages internet edge routing defenses, tracking proxy behavior constraints for web access within Microsoft's SSE architecture.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         if not filtering_policies:
@@ -1621,10 +1707,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 12))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.9. Global Secure Access Filtering Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Global Secure Access Filtering Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.10. Firewall and Proxy Configurations
-        story.append(Paragraph("3.10. Firewall and Proxy Configurations", custom_styles['SectionH2']))
+        story.append(Paragraph("Firewall and Proxy Configurations", custom_styles['SectionH2']))
         story.append(Paragraph("Tracks platform configuration profiles governing host hardware firewall states and proxy network interface values.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1664,10 +1750,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
 
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.10. Firewall and Proxy Configurations: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Firewall and Proxy Configurations: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.11. Mail Security (Exchange)
-        story.append(Paragraph("3.11. Mail Security (Exchange)", custom_styles['SectionH2']))
+        story.append(Paragraph("Mail Security (Exchange)", custom_styles['SectionH2']))
         story.append(Paragraph("Details active threat filtering protection licensing bundles (such as Microsoft Defender for Office 365 vs. Exchange Online Protection).", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1716,10 +1802,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.11. Exchange Mail Security & SKUs: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Exchange Mail Security & SKUs: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.12. Encryption Key Management
-        story.append(Paragraph('3.12. Encryption Key Management', custom_styles['SectionH2']))
+        story.append(Paragraph('Encryption Key Management', custom_styles['SectionH2']))
         story.append(Paragraph('Microsoft 365 Customer Key policies and Exchange data encryption posture', custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         enc_data = data.get("encryption_posture", [])
@@ -1749,10 +1835,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(enc_table)
         story.append(Spacer(1, 15))
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.12. Encryption Key Management: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Encryption Key Management: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.13. Exchange Transport Rules
-        story.append(Paragraph("3.13. Exchange Transport Rules", custom_styles['SectionH2']))
+        story.append(Paragraph("Exchange Transport Rules", custom_styles['SectionH2']))
         story.append(Paragraph("Houses custom mail flow rules designed to govern tenant traffic, manage encryption triggers, enforce domain rejections, and route alerts.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1797,10 +1883,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.13. Exchange Transport Rules: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Exchange Transport Rules: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.14. Managed Mobile Apps
-        story.append(Paragraph("3.14. Managed Mobile Apps", custom_styles['SectionH2']))
+        story.append(Paragraph("Managed Mobile Apps", custom_styles['SectionH2']))
         story.append(Paragraph("Identifies enterprise-monitored mobile applications package distributions (such as App iOS/iPadOS, Flipkart) tracked through application management policies.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1815,10 +1901,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.14. Managed Mobile Applications: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Managed Mobile Applications: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.15. Detected Apps (Top 10 Discovered)
-        story.append(Paragraph("3.15. Detected Apps (Top 10 Discovered)", custom_styles['SectionH2']))
+        story.append(Paragraph("Detected Apps (Top 10 Discovered)", custom_styles['SectionH2']))
         story.append(Paragraph("Logs inventory scans tracking unmanaged or restricted third-party applications operating on managed tenant hardware.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1862,10 +1948,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.15. Detected Applications: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Detected Applications: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.16. Managed Devices (Top 10)
-        story.append(Paragraph("3.16. Managed Devices (Top 10)", custom_styles['SectionH2']))
+        story.append(Paragraph("Managed Devices (Top 10)", custom_styles['SectionH2']))
         story.append(Paragraph("Captures enrollment states for managed endpoints distributed across standard enterprise work groups.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1913,10 +1999,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.16. Intune Managed Devices: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Intune Managed Devices: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.17. Video Conferencing (VC) Devices (Top 10)
-        story.append(Paragraph("3.17. Video Conferencing (VC) Devices (Top 10)", custom_styles['SectionH2']))
+        story.append(Paragraph("Video Conferencing (VC) Devices (Top 10)", custom_styles['SectionH2']))
         story.append(Paragraph("Measures corporate meeting room hardware allocations cross-referenced with internal room mailbox accounts.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -1964,10 +2050,10 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.17. Video Conferencing (VC) Devices: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Video Conferencing (VC) Devices: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.18. Device Configurations
-        story.append(Paragraph("3.18. Device Configurations", custom_styles['SectionH2']))
+        story.append(Paragraph("Device Configurations", custom_styles['SectionH2']))
         story.append(Paragraph("Monitors operating system setup profiles, tracking deployment values for platform kiosk, wireless network, and endpoint security configurations.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -2009,14 +2095,14 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.18. Device Configurations: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Device Configurations: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 3.19. Mobile BYOD Configurations
-        story.append(Paragraph('3.19. Mobile BYOD Configurations', custom_styles['SectionH2']))
+        story.append(Paragraph('Mobile BYOD Configurations', custom_styles['SectionH2']))
         story.append(Paragraph('Device enrollment restrictions and personal platform enrollment controls', custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         # 3.19. Mobile BYOD Configurations
-        story.append(Paragraph('3.19. Mobile BYOD Configurations', custom_styles['SectionH2']))
+        story.append(Paragraph('Mobile BYOD Configurations', custom_styles['SectionH2']))
         story.append(Paragraph('Device enrollment restrictions and personal platform enrollment controls', custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         # 3. Mobile BYOD Configurations
@@ -2059,11 +2145,11 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.19. Mobile BYOD Configurations: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Mobile BYOD Configurations: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
     try:
         # 3.20. Mobile Device Compliance Policies
-        story.append(Paragraph("3.20. Mobile Device Compliance Policies", custom_styles['SectionH2']))
+        story.append(Paragraph("Mobile Device Compliance Policies", custom_styles['SectionH2']))
         story.append(Paragraph("Details compliance baseline rule structures targeting corporate mobile operating systems including Android and iOS.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -2140,11 +2226,11 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 10))
     
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.20. Mobile Device Compliance Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Mobile Device Compliance Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
     try:
         # 3.21. Mobile Device Management Policies (Top 10)
-        story.append(Paragraph("3.21. Mobile Device Management Policies (Top 10)", custom_styles['SectionH2']))
+        story.append(Paragraph("Mobile Device Management Policies (Top 10)", custom_styles['SectionH2']))
         story.append(Paragraph("Documents automated enrollment server URLs, configuration terms-of-use paths, and compliance action redirects.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -2188,7 +2274,7 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 3.21. Mobile Device Management Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Mobile Device Management Policies: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
 def _add_ecosystem_integrations_section(story, data, custom_styles, primary_color, secondary_color, outline_color):
     story.append(PageBreak())
@@ -2197,7 +2283,7 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
     story.append(Spacer(1, 10))
     try:
         # 5.1. Power Platform & Automate Flows Analytics
-        story.append(Paragraph("5.1. Power Platform & Automate Flows Analytics", custom_styles['SectionH2']))
+        story.append(Paragraph("Power Platform & Automate Flows Analytics", custom_styles['SectionH2']))
         story.append(Paragraph("Houses all low-code automation insights, summarizing scanned environment boundaries, active cloud/desktop flow counts, custom/premium integration connectors, and complex logic rule sets.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -2263,10 +2349,10 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
 
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 4.1. Power Automate Cloud Flows: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Power Automate Cloud Flows: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 4.2. Third-Party Apps & OAuth Scopes
-        story.append(Paragraph("4.2. Third-Party Apps & OAuth Scopes", custom_styles['SectionH2']))
+        story.append(Paragraph("Third-Party Apps & OAuth Scopes", custom_styles['SectionH2']))
         story.append(Paragraph("Enterprise applications, organization-wide add-ins, and delegated consent permissions", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -2317,10 +2403,10 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 4.2. Third-Party Apps & OAuth Scopes: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Third-Party Apps & OAuth Scopes: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 4.3. Enterprise Service Principals & SSO
-        story.append(Paragraph("4.3. Enterprise Service Principals & SSO", custom_styles['SectionH2']))
+        story.append(Paragraph("Enterprise Service Principals & SSO", custom_styles['SectionH2']))
         story.append(Paragraph("Enterprise single sign-on (SSO) service principals, SAML/OIDC configuration, and tenant apps", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
         
@@ -2328,28 +2414,41 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
         if not sso_apps:
             story.append(Paragraph("No SAML/OIDC SSO applications discovered.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
         else:
+            saml = 0
+            oidc = 0
+            password = 0
+            none_count = 0
+
+            for sp in sso_apps:
+                m = str(sp.get("preferredSingleSignOnMode") or "").lower()
+                if m == "saml":
+                    saml += 1
+                elif m == "oidc":
+                    oidc += 1
+                elif m == "password":
+                    password += 1
+                else:
+                    none_count += 1
+
             sso_table_data = [[
-                Paragraph("Application / Add-in Name", custom_styles['TableCellHeader']),
                 Paragraph("SSO Mode", custom_styles['TableCellHeader']),
-                Paragraph("Publisher", custom_styles['TableCellHeader'])
+                Paragraph("Application Count", custom_styles['TableCellHeader'])
             ]]
             
-            # Limit to top 50 in PDF to prevent 50-page tables if tenant has 10,000 SPs
-            display_apps = sso_apps[:50]
-            for app in display_apps:
-                name = app.get("displayName") or app.get("appDisplayName") or "Unknown SP"
-                mode = app.get("preferredSingleSignOnMode")
-                sso = str(mode).strip() if mode is not None else "OIDC / None"
-                sso = sso or "OIDC / None"
-                pub = app.get("publisherName") or "N/A"
-                
+            rows = [
+                ("SAML", str(saml)),
+                ("OIDC", str(oidc)),
+                ("Password", str(password)),
+                ("Null / Not Supported", str(none_count)),
+            ]
+            
+            for label, val in rows:
                 sso_table_data.append([
-                    Paragraph(escape_text(name), custom_styles['TableCellBold']),
-                    Paragraph(escape_text(sso), custom_styles['TableCell']),
-                    Paragraph(escape_text(pub), custom_styles['TableCell'])
+                    Paragraph(escape_text(label), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(val), custom_styles['TableCell'])
                 ])
                 
-            sso_table = Table(sso_table_data, colWidths=[200, 150, 150])
+            sso_table = Table(sso_table_data, colWidths=[250, 250])
             sso_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), primary_color),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
@@ -2360,17 +2459,13 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
                 ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
             ]))
             story.append(sso_table)
-            
-            if len(sso_apps) > 50:
-                story.append(Spacer(1, 5))
-                story.append(Paragraph(f"<i>... and {len(sso_apps) - 50} more Service Principals.</i>", custom_styles['ReportBody']))
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 4.3. Enterprise Service Principals & SSO: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Enterprise Service Principals & SSO: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
         # 4.4. Exchange Connectors & Mail Flow Routing
-        story.append(Paragraph("4.4. Exchange Connectors & Mail Flow Routing", custom_styles['SectionH2']))
+        story.append(Paragraph("Exchange Connectors & Mail Flow Routing", custom_styles['SectionH2']))
         story.append(Paragraph("Inbound and outbound hybrid email connectors, smart hosts, and TLS enforcement policies", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -2387,13 +2482,23 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
                     Paragraph("Routing Config", custom_styles['TableCellHeader'])
                 ]]
                 for conn in connectors:
-                    routing_txt = escape_text(conn.get("Routing", "-")).replace("\n", "<br/>")
+                    conn_direction = conn.get("Direction", "-")
+                    status = "Enabled" if conn.get("Enabled") else "Disabled"
+                    
+                    if conn_direction == "Inbound":
+                        domains = str(conn.get("SenderDomains") or "All External Domains")
+                        routing_txt = f"Type: {conn.get('ConnectorType', 'N/A')}\nRequire TLS: {'Yes' if conn.get('RequireTls') else 'No'}"
+                    else:
+                        domains = str(conn.get("RecipientDomains") or "All External Domains")
+                        routing_txt = f"SmartHosts: {conn.get('SmartHosts', 'N/A')}\nUse MX: {'Yes' if conn.get('UseMxRecord') else 'No'}"
+                        
+                    routing_txt = escape_text(routing_txt).replace("\n", "<br/>")
                     conn_table_data.append([
-                        Paragraph(escape_text(conn.get("Direction", "-")), custom_styles['TableCell']),
+                        Paragraph(escape_text(conn_direction), custom_styles['TableCell']),
                         Paragraph(escape_text(conn.get("Name", "-")), custom_styles['TableCellBold']),
-                        Paragraph(escape_text(conn.get("Status", "-")), custom_styles['TableCell']),
-                        Paragraph(escape_text(conn.get("Domains", "-")), custom_styles['TableCell']),
-                        Paragraph(escape_text(routing_txt), custom_styles['TableCell'])
+                        Paragraph(escape_text(status), custom_styles['TableCell']),
+                        Paragraph(escape_text(domains), custom_styles['TableCell']),
+                        Paragraph(routing_txt, custom_styles['TableCell'])
                     ])
                 conn_table = Table(conn_table_data, colWidths=[70, 120, 60, 100, 154])
                 conn_table.setStyle(TableStyle([
@@ -2412,7 +2517,163 @@ def _add_ecosystem_integrations_section(story, data, custom_styles, primary_colo
         story.append(Spacer(1, 15))
 
     except Exception as e:
-        story.append(Paragraph(f'⚠️ Error formatting 4.4. Exchange Connectors & Mail Flow Routing: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+        story.append(Paragraph(f'⚠️ Error formatting Exchange Connectors & Mail Flow Routing: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 4.5. App Registrations
+        story.append(Paragraph("App Registrations", custom_styles['SectionH2']))
+        story.append(Paragraph("Custom line-of-business applications and enterprise app registrations.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        app_regs = data.get("app_registrations", [])
+        if not app_regs:
+            story.append(Paragraph("No App Registrations found.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+        else:
+            app_reg_table_data = [[
+                Paragraph("App Name", custom_styles['TableCellHeader']),
+                Paragraph("Application ID", custom_styles['TableCellHeader']),
+                Paragraph("Created Date", custom_styles['TableCellHeader']),
+                Paragraph("Sign In Audience", custom_styles['TableCellHeader']),
+                Paragraph("Credentials", custom_styles['TableCellHeader'])
+            ]]
+            for app in app_regs[:30]:
+                name = app.get("displayName") or ""
+                app_id = app.get("appId") or ""
+                created = (app.get("createdDateTime") or "")[:10]
+                audience = app.get("signInAudience") or ""
+                secrets_cnt = len(app.get("passwordCredentials", []))
+                certs_cnt = len(app.get("keyCredentials", []))
+                creds_str = f"{secrets_cnt} Secrets, {certs_cnt} Certs"
+                app_reg_table_data.append([
+                    Paragraph(escape_text(name), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(app_id), custom_styles['TableCell']),
+                    Paragraph(escape_text(created), custom_styles['TableCell']),
+                    Paragraph(escape_text(audience), custom_styles['TableCell']),
+                    Paragraph(escape_text(creds_str), custom_styles['TableCell'])
+                ])
+            app_reg_table = Table(app_reg_table_data, colWidths=[100, 130, 80, 100, 90])
+            app_reg_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(app_reg_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting App Registrations: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 4.6. App Sign-ins
+        story.append(Paragraph("App Sign-in Logs (7 days)", custom_styles['SectionH2']))
+        story.append(Paragraph("Summary of successful sign-in counts by enterprise application.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        app_signins = data.get("app_signins", [])
+        if not app_signins:
+            story.append(Paragraph("No App Sign-ins found.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+        else:
+            asi_table_data = [[
+                Paragraph("App Name", custom_styles['TableCellHeader']),
+                Paragraph("Successful Sign Ins", custom_styles['TableCellHeader'])
+            ]]
+            for item in app_signins[:25]:
+                app_name = item.get("appDisplayName") or "Enterprise App"
+                success_count = str(item.get("successfulSignInCount") or 0)
+                asi_table_data.append([
+                    Paragraph(escape_text(app_name), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(success_count), custom_styles['TableCell'])
+                ])
+            asi_table = Table(asi_table_data, colWidths=[350, 150])
+            asi_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(asi_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting App Sign-ins: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 4.7. User Sign-ins
+        story.append(Paragraph("User Sign-in Activity (7 days)", custom_styles['SectionH2']))
+        story.append(Paragraph("Unique browsers, operating systems, and apps successfully authenticated.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        user_signins = data.get("user_signins", {})
+        if not user_signins:
+            story.append(Paragraph("No User Sign-ins found.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+        else:
+            usi_table_data = [[
+                Paragraph("Sign-in Attribute", custom_styles['TableCellHeader']),
+                Paragraph("Successful Unique Values", custom_styles['TableCellHeader'])
+            ]]
+            
+            apps_str = ", ".join(user_signins.get("apps", [])) or "None"
+            os_str = ", ".join(user_signins.get("os", [])) or "None"
+            browsers_str = ", ".join(user_signins.get("browsers", [])) or "None"
+            
+            for label, val in [("Successful App Sign-ins", apps_str),
+                               ("Successful Client OS", os_str),
+                               ("Successful Browsers", browsers_str)]:
+                usi_table_data.append([
+                    Paragraph(escape_text(label), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(val), custom_styles['TableCell'])
+                ])
+            usi_table = Table(usi_table_data, colWidths=[150, 350])
+            usi_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(usi_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting User Sign-ins: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 4.8. Authentication Methods
+        story.append(Paragraph("Authentication Methods (7 days)", custom_styles['SectionH2']))
+        story.append(Paragraph("Authentication methods successfully used within the environment.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        auth_methods = data.get("auth_methods", [])
+        if not auth_methods:
+            story.append(Paragraph("No Authentication Methods found.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+        else:
+            am_table_data = [[
+                Paragraph("Authentication Method", custom_styles['TableCellHeader']),
+                Paragraph("Success Activity Count", custom_styles['TableCellHeader'])
+            ]]
+            for item in auth_methods:
+                method = item.get("authenticationMethod") or "Unknown"
+                count = str(item.get("successActivityCount") or 0)
+                am_table_data.append([
+                    Paragraph(escape_text(method), custom_styles['TableCellBold']),
+                    Paragraph(escape_text(count), custom_styles['TableCell'])
+                ])
+            am_table = Table(am_table_data, colWidths=[250, 250])
+            am_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+            ]))
+            story.append(am_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting Authentication Methods: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
 def generate_pdf_report(data: dict, output_filepath: str):
     doc = SimpleDocTemplate(
@@ -2509,6 +2770,23 @@ def generate_pdf_report(data: dict, output_filepath: str):
     story.append(Paragraph("This report provides an in-depth audit of the Microsoft 365 environment, encompassing Azure Active Directory, Endpoint Management, Security, Compliance, and Ecosystem telemetry.", custom_styles['ReportBody']))
     story.append(PageBreak())
 
+    # Index Page
+    story.append(Spacer(1, 40))
+    story.append(Paragraph("Table of Contents", custom_styles['ReportTitle']))
+    story.append(Spacer(1, 20))
+
+    sections = [
+        "1. Identity & Licensing",
+        "2. App Usage, Adoption & Collaboration",
+        "3. Security, Compliance & Governance",
+        "4. Ecosystem & Integrations"
+    ]
+
+    for section in sections:
+        story.append(Paragraph(section, custom_styles['SectionH2']))
+        story.append(Spacer(1, 10))
+
+    story.append(PageBreak())
     _add_identity_licensing_section(story, data, custom_styles, primary_color, secondary_color, outline_color)
     _add_app_usage_adoption_section(story, data, custom_styles, primary_color, secondary_color, outline_color)
     _add_security_compliance_governance_section(story, data, custom_styles, primary_color, secondary_color, outline_color)

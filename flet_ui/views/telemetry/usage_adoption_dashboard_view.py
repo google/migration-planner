@@ -637,7 +637,12 @@ class UsageAdoptionDashboardView(ft.Container):
             "conditional_access": security_data.get("conditional_access", []),
             "ediscovery_cases": security_data.get("ediscovery_cases", []),
             "power_automate": eco_data.get("power_automate", {}),
-            "msteams_activity": load_csv("msteams_activity.csv")
+            "msteams_activity": usage_data.get("msteams_activity", []),
+            "integrated_apps": eco_data.get("integrated_apps", {}),
+            "app_registrations": eco_data.get("app_registrations", []),
+            "app_signins": eco_data.get("app_signins", []),
+            "user_signins": eco_data.get("user_signins", {}),
+            "auth_methods": eco_data.get("auth_methods", [])
         }
             
         return combined_data
