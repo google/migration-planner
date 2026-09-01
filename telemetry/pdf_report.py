@@ -2770,6 +2770,23 @@ def generate_pdf_report(data: dict, output_filepath: str):
     story.append(Paragraph("This report provides an in-depth audit of the Microsoft 365 environment, encompassing Azure Active Directory, Endpoint Management, Security, Compliance, and Ecosystem telemetry.", custom_styles['ReportBody']))
     story.append(PageBreak())
 
+    # Index Page
+    story.append(Spacer(1, 40))
+    story.append(Paragraph("Table of Contents", custom_styles['ReportTitle']))
+    story.append(Spacer(1, 20))
+
+    sections = [
+        "1. Identity & Licensing",
+        "2. App Usage, Adoption & Collaboration",
+        "3. Security, Compliance & Governance",
+        "4. Ecosystem & Integrations"
+    ]
+
+    for section in sections:
+        story.append(Paragraph(section, custom_styles['SectionH2']))
+        story.append(Spacer(1, 10))
+
+    story.append(PageBreak())
     _add_identity_licensing_section(story, data, custom_styles, primary_color, secondary_color, outline_color)
     _add_app_usage_adoption_section(story, data, custom_styles, primary_color, secondary_color, outline_color)
     _add_security_compliance_governance_section(story, data, custom_styles, primary_color, secondary_color, outline_color)
