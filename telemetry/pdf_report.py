@@ -1631,6 +1631,51 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
 
     except Exception as e:
         story.append(Paragraph(f'⚠️ Error formatting Microsoft Purview eDiscovery Cases: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+    
+    try:
+        # 3.7.1. Mailboxes on Legal Hold
+        story.append(Paragraph("Mailboxes on Legal Hold", custom_styles['SectionH2']))
+        story.append(Paragraph("Provides visibility into Exchange mailboxes subjected to immutable legal hold requirements for preservation.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        
+        try:
+            legal_holds = data.get("legal_holds", [])
+            if not legal_holds:
+                story.append(Paragraph("No mailboxes on legal hold discovered.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+            else:
+                lh_table_data = [[
+                    Paragraph("Target Mailbox", custom_styles['TableCellHeader']),
+                    Paragraph("Hold Type", custom_styles['TableCellHeader']),
+                    Paragraph("Status", custom_styles['TableCellHeader']),
+                    Paragraph("Enabled By", custom_styles['TableCellHeader'])
+                ]]
+                for case in legal_holds[:10]:
+                    lh_table_data.append([
+                        Paragraph(escape_text(case.get("TargetMailbox", "-")), custom_styles['TableCellBold']),
+                        Paragraph(escape_text(case.get("HoldType", "-")), custom_styles['TableCell']),
+                        Paragraph(escape_text(case.get("Status", "-")), custom_styles['TableCell']),
+                        Paragraph(escape_text(case.get("EnabledBy", "-")), custom_styles['TableCell'])
+                    ])
+                
+                lh_table = Table(lh_table_data, colWidths=[200, 100, 100, 100])
+                lh_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                    ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+                ]))
+                story.append(lh_table)
+                if len(legal_holds) > 10:
+                     story.append(Paragraph(f"...and {len(legal_holds) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=custom_styles['ReportBody'], fontName='Helvetica-Oblique', textColor=secondary_color)))
+        except Exception as e:
+            logger.exception("Failed to format Legal Holds section in PDF")
+            story.append(Paragraph(f"⚠️ Error formatting Legal Holds section: {escape_text(str(e))}", custom_styles['SectionErrTxt']))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting Mailboxes on Legal Hold: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
     try:
         # 3.8. Conditional Access Policies
         story.append(Paragraph("Conditional Access Policies", custom_styles['SectionH2']))
@@ -1803,6 +1848,51 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
 
     except Exception as e:
         story.append(Paragraph(f'⚠️ Error formatting Exchange Mail Security & SKUs: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 3.11.1. Exchange Transport Rules
+        story.append(Paragraph("Exchange Transport Rules", custom_styles['SectionH2']))
+        story.append(Paragraph("Evaluates mail flow rule configurations designed to filter, monitor, or block inbound/outbound transit based on conditions.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        
+        try:
+            transport_rules = data.get("transport_rules", [])
+            if not transport_rules:
+                story.append(Paragraph("No Exchange Transport Rules discovered.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+            else:
+                tr_table_data = [[
+                    Paragraph("Rule Name", custom_styles['TableCellHeader']),
+                    Paragraph("State", custom_styles['TableCellHeader']),
+                    Paragraph("Priority", custom_styles['TableCellHeader']),
+                    Paragraph("Mode", custom_styles['TableCellHeader'])
+                ]]
+                for rule in transport_rules[:20]:
+                    tr_table_data.append([
+                        Paragraph(escape_text(rule.get("Name", "-")), custom_styles['TableCellBold']),
+                        Paragraph(escape_text(rule.get("State", "-")), custom_styles['TableCell']),
+                        Paragraph(escape_text(str(rule.get("Priority", "-"))), custom_styles['TableCell']),
+                        Paragraph(escape_text(rule.get("Mode", "-")), custom_styles['TableCell'])
+                    ])
+                
+                tr_table = Table(tr_table_data, colWidths=[200, 80, 80, 100])
+                tr_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                    ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+                ]))
+                story.append(tr_table)
+                if len(transport_rules) > 20:
+                     story.append(Paragraph(f"...and {len(transport_rules) - 20} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=custom_styles['ReportBody'], fontName='Helvetica-Oblique', textColor=secondary_color)))
+        except Exception as e:
+            logger.exception("Failed to format Transport Rules section in PDF")
+            story.append(Paragraph(f"⚠️ Error formatting Transport Rules section: {escape_text(str(e))}", custom_styles['SectionErrTxt']))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting Exchange Transport Rules: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
     try:
         # 3.12. Encryption Key Management
         story.append(Paragraph('Encryption Key Management', custom_styles['SectionH2']))
