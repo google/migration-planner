@@ -1037,38 +1037,33 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
     except Exception as e:
         story.append(Paragraph(f'⚠️ Error formatting PST Files: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
-        # 2.9. SharePoint & OneDrive Environment Telemetry
-        story.append(Paragraph("SharePoint & OneDrive Environment Telemetry", custom_styles['SectionH2']))
-        story.append(Paragraph("Synthesizes file quantity metrics, total document site spaces, active item splits, and client data sync interactions.", custom_styles['ReportBody']))
+        # 2.9. SharePoint Environment Telemetry
+        story.append(Paragraph("SharePoint Environment Telemetry", custom_styles['SectionH2']))
+        story.append(Paragraph("Synthesizes file quantity metrics, total document site spaces, and active item splits.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
         sp = data.get("sharepoint", {})
-        od = data.get("onedrive", {})
     
-        files_table_data = [[
-            Paragraph("Metric Property Description", custom_styles['TableCellHeader']),
-            Paragraph("SharePoint Sites (180d)", custom_styles['TableCellHeader']),
-            Paragraph("OneDrive Personal (180d)", custom_styles['TableCellHeader'])
+        sp_table_data = [[
+            Paragraph("SharePoint Metric Description", custom_styles['TableCellHeader']),
+            Paragraph("SharePoint Value", custom_styles['TableCellHeader'])
         ]]
     
-        files_rows = [
-            ("Total Scope Count (Sites / Accounts)", f"{sp.get('total_sites', 0):,} Sites", f"{od.get('total_accounts', 0):,} Accounts"),
-            ("Total Storage Consumed", sp.get("total_storage_formatted", "0.00 Bytes"), od.get("total_storage_formatted", "0.00 Bytes")),
-            ("Total Stored File Count", f"{sp.get('total_files', 0):,} Files", f"{od.get('total_files', 0):,} Files"),
-            ("Active Files Count (Active %)", f"{sp.get('active_files', 0):,} ({sp.get('active_files_pct', 0.0):.1f}%)", f"{od.get('active_files', 0):,} ({od.get('active_files_pct', 0.0):.1f}%)"),
-            ("Users with Sync Client Active", "N/A (SharePoint level)", f"{od.get('sync_users', 0):,} Users ({od.get('sync_users_pct', 0.0):.1f}%)"),
-            ("Active OneNote Users", "N/A (SharePoint level)", f"{od.get('onenote_users', 0):,} Users"),
+        sp_rows = [
+            ("Total SharePoint Sites (180d)", f"{sp.get('total_sites', 0):,} Sites"),
+            ("Total Storage Consumed", sp.get("total_storage_formatted", "0.00 Bytes")),
+            ("Total Stored File Count", f"{sp.get('total_files', 0):,} Files"),
+            ("Active Files Count (Active %)", f"{sp.get('active_files', 0):,} ({sp.get('active_files_pct', 0.0):.1f}%)"),
         ]
     
-        for label, sp_val, od_val in files_rows:
-            files_table_data.append([
+        for label, val in sp_rows:
+            sp_table_data.append([
                 Paragraph(escape_text(label), custom_styles['TableCellBold']),
-                Paragraph(escape_text(sp_val), custom_styles['TableCell']),
-                Paragraph(escape_text(od_val), custom_styles['TableCell'])
+                Paragraph(escape_text(val), custom_styles['TableCell'])
             ])
         
-        files_table = Table(files_table_data, colWidths=[200, 150, 150])
-        files_table.setStyle(TableStyle([
+        sp_table = Table(sp_table_data, colWidths=[260, 240])
+        sp_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), primary_color),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -1077,7 +1072,7 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
             ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
         ]))
-        story.append(files_table)
+        story.append(sp_table)
         story.append(Spacer(1, 15))
     
         sp_data_types = data.get("sharepoint_data_types", {})
@@ -1109,9 +1104,52 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
                 ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
             ]))
             story.append(sp_dt_table)
-        
+        story.append(Spacer(1, 15))
     except Exception as e:
         story.append(Paragraph(f'⚠️ Error formatting SharePoint Site Storage: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
+    try:
+        # 2.10. OneDrive Environment Telemetry
+        story.append(Paragraph("OneDrive Environment Telemetry", custom_styles['SectionH2']))
+        story.append(Paragraph("Synthesizes file quantity metrics, total user accounts, and client data sync interactions.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+    
+        od = data.get("onedrive", {})
+    
+        od_table_data = [[
+            Paragraph("OneDrive Metric Description", custom_styles['TableCellHeader']),
+            Paragraph("OneDrive Value", custom_styles['TableCellHeader'])
+        ]]
+    
+        od_rows = [
+            ("Total User Accounts (180d)", f"{od.get('total_accounts', 0):,} Accounts"),
+            ("Total Storage Consumed", od.get("total_storage_formatted", "0.00 Bytes")),
+            ("Total Stored File Count", f"{od.get('total_files', 0):,} Files"),
+            ("Active Files Count (Active %)", f"{od.get('active_files', 0):,} ({od.get('active_files_pct', 0.0):.1f}%)"),
+            ("Users with Sync Client Active", f"{od.get('sync_users', 0):,} Users ({od.get('sync_users_pct', 0.0):.1f}%)"),
+            ("Active OneNote Users", f"{od.get('onenote_users', 0):,} Users"),
+        ]
+    
+        for label, val in od_rows:
+            od_table_data.append([
+                Paragraph(escape_text(label), custom_styles['TableCellBold']),
+                Paragraph(escape_text(val), custom_styles['TableCell'])
+            ])
+        
+        od_table = Table(od_table_data, colWidths=[260, 240])
+        od_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+            ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+        ]))
+        story.append(od_table)
+        story.append(Spacer(1, 15))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting OneDrive Environment Telemetry: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
 
     try:
         # 2.9. Heavy Sites Inventory
@@ -1167,26 +1205,47 @@ def _add_app_usage_adoption_section(story, data, custom_styles, primary_color, s
             if not msteams_data:
                 story.append(Paragraph("No Microsoft Teams activity data was available.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
             else:
+                total_teams = 0
+                active_users = 0
+                guests = 0
+                active_channels = 0
+                channel_messages = 0
+                meetings_organized = 0
+
+                for row in msteams_data:
+                    team_name = row.get("Team Name") or row.get("TeamName")
+                    if team_name:
+                        total_teams += 1
+                        active_users += int(float(row.get("Active Users") or row.get("ActiveUsers") or 0))
+                        guests += int(float(row.get("Guests") or 0))
+                        active_channels += int(float(row.get("Active Channels") or row.get("ActiveChannels") or 0))
+                        channel_messages += int(float(row.get("Channel Messages") or row.get("ChannelMessages") or 0))
+                        meetings_organized += int(float(row.get("Meetings Organized") or row.get("MeetingsOrganized") or 0))
+
+                avg_users = f"{(active_users / active_channels):.1f}" if active_channels > 0 else "0"
+
                 teams_table_data = [[
-                    Paragraph("Team Name", custom_styles['TableCellHeader']),
-                    Paragraph("Last Activity", custom_styles['TableCellHeader']),
-                    Paragraph("Active Users", custom_styles['TableCellHeader']),
-                    Paragraph("Guests", custom_styles['TableCellHeader']),
-                    Paragraph("Meetings", custom_styles['TableCellHeader']),
-                    Paragraph("Messages", custom_styles['TableCellHeader'])
+                    Paragraph("Teams Metric Description", custom_styles['TableCellHeader']),
+                    Paragraph("Value / Measurement", custom_styles['TableCellHeader'])
                 ]]
-            
-                for row in msteams_data[:20]:
+                
+                rows = [
+                    ("Total Teams Count", f"{total_teams:,} Teams"),
+                    ("Total Active Channels (180 Days)", f"{active_channels:,} Channels"),
+                    ("Total Channel Messages", f"{channel_messages:,} Messages"),
+                    ("Total Active Users (180 Days)", f"{active_users:,} Users"),
+                    ("Average Users per Channel", avg_users),
+                    ("Total Meetings Organized", f"{meetings_organized:,} Meetings"),
+                    ("Total Guests", f"{guests:,} Guests"),
+                ]
+                
+                for label, val in rows:
                     teams_table_data.append([
-                        Paragraph(escape_text(row.get("Team Name", "-")), custom_styles['TableCellBold']),
-                        Paragraph(escape_text(row.get("Last Activity Date", "-")), custom_styles['TableCell']),
-                        Paragraph(escape_text(row.get("Active Users", "0")), custom_styles['TableCell']),
-                        Paragraph(escape_text(row.get("Guests", "0")), custom_styles['TableCell']),
-                        Paragraph(escape_text(row.get("Meetings Organized", "0")), custom_styles['TableCell']),
-                        Paragraph(escape_text(row.get("Channel Messages", "0")), custom_styles['TableCell'])
+                        Paragraph(escape_text(label), custom_styles['TableCellBold']),
+                        Paragraph(escape_text(val), custom_styles['TableCell'])
                     ])
                 
-                teams_table = Table(teams_table_data, colWidths=[120, 70, 70, 50, 70, 70])
+                teams_table = Table(teams_table_data, colWidths=[260, 240])
                 teams_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), primary_color),
                     ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
