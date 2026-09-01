@@ -1555,6 +1555,8 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             rows_managed: List[List[Any]] = []
             rows_vc: List[List[Any]] = []
+            managed_list = devices_list if isinstance(devices_list, list) else []
+            vc_list = []
 
             if isinstance(devices_list, list):
                 for d in devices_list:
@@ -1575,6 +1577,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                             reg_state = d.get("deviceRegistrationState") or "registered"
                             manuf = d.get("manufacturer") or "Unknown"
                             rows_vc.append([uid, name, os_name, agent, reg_state, model_name, manuf])
+                            vc_list.append(d)
 
             if rows_vc:
                 with open(csv_path_vc, 'w', encoding='utf-8', newline='') as f:

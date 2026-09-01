@@ -1989,7 +1989,8 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         try:
             intune_data = data.get("intune", {})
             mobile_apps = intune_data.get("mobile_apps", []) if intune_data else []
-            apps_text = ", ".join(mobile_apps) if mobile_apps else "No mobile apps discovered or permission restricted."
+            app_names = [app.get("displayName") for app in mobile_apps if isinstance(app, dict) and app.get("displayName")]
+            apps_text = ", ".join(app_names) if app_names else "No mobile apps discovered or permission restricted."
             story.append(Paragraph(escape_text(apps_text), custom_styles['ReportBody']))
         except Exception as e:
             logger.exception("Failed to format Managed Mobile Apps section in PDF")
