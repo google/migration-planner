@@ -636,6 +636,8 @@ class UsageAdoptionDashboardView(ft.Container):
             "service_principals_sso": eco_data.get("service_principals_sso", []),
             "conditional_access": security_data.get("conditional_access", []),
             "ediscovery_cases": security_data.get("ediscovery_cases", []),
+            "legal_holds": security_data.get("legal_holds", []),
+            "filtering_policies": security_data.get("filtering_policies", []),
             "power_automate": eco_data.get("power_automate", {}),
             "msteams_activity": usage_data.get("msteams_activity", []),
             "integrated_apps": eco_data.get("integrated_apps", {}),

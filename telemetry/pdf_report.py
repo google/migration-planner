@@ -341,7 +341,10 @@ def _get_custom_styles(styles, primary_color, secondary_color, text_color):
         spaceBefore=10,
         spaceAfter=10
     )
-    
+    for k, v in custom_styles.items():
+        if v.name not in styles:
+            styles.add(v)
+            
     return custom_styles
 
 
@@ -1631,6 +1634,57 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
 
     except Exception as e:
         story.append(Paragraph(f'⚠️ Error formatting Microsoft Purview eDiscovery Cases: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+    
+    try:
+        # 3.7.1. Mailboxes on Legal Hold
+        story.append(Paragraph("Mailboxes on Legal Hold", custom_styles['SectionH2']))
+        story.append(Paragraph("Provides visibility into Exchange mailboxes subjected to immutable legal hold requirements for preservation.", custom_styles['ReportBody']))
+        story.append(Spacer(1, 8))
+        
+        try:
+            legal_holds = data.get("legal_holds", [])
+            if not legal_holds:
+                story.append(Paragraph("No mailboxes on legal hold discovered.", ParagraphStyle('ErrTxt', parent=custom_styles['ReportBody'], textColor=colors.HexColor("#DC2626"))))
+            else:
+                lh_table_data = [[
+                    Paragraph("Mailbox Name", custom_styles['TableCellHeader']),
+                    Paragraph("User Principal Name", custom_styles['TableCellHeader']),
+                    Paragraph("Applied Hold Policies", custom_styles['TableCellHeader'])
+                ]]
+                for case in legal_holds[:10]:
+                    dname = case.get("DisplayName") or case.get("name") or "Unknown"
+                    upn = case.get("UserPrincipalName") or case.get("PrimarySmtpAddress") or "N/A"
+                    holds = case.get("InPlaceHolds", [])
+                    if isinstance(holds, list):
+                        holds_str = ", ".join(str(h) for h in holds) if holds else "Litigation Hold"
+                    else:
+                        holds_str = str(holds) if holds else "Litigation Hold"
+
+                    lh_table_data.append([
+                        Paragraph(escape_text(dname), custom_styles['TableCellBold']),
+                        Paragraph(escape_text(upn), custom_styles['TableCell']),
+                        Paragraph(escape_text(holds_str), custom_styles['TableCell'])
+                    ])
+                
+                lh_table = Table(lh_table_data, colWidths=[150, 150, 200])
+                lh_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor("#F8FAFC")]),
+                    ('GRID', (0, 0), (-1, -1), 0.5, outline_color),
+                ]))
+                story.append(lh_table)
+                if len(legal_holds) > 10:
+                     story.append(Paragraph(f"...and {len(legal_holds) - 10} more. See generated CSV reports for full details.", ParagraphStyle('Ital', parent=custom_styles['ReportBody'], fontName='Helvetica-Oblique', textColor=secondary_color)))
+        except Exception as e:
+            logger.exception("Failed to format Legal Holds section in PDF")
+            story.append(Paragraph(f"⚠️ Error formatting Legal Holds section: {escape_text(str(e))}", custom_styles['SectionErrTxt']))
+    except Exception as e:
+        story.append(Paragraph(f'⚠️ Error formatting Mailboxes on Legal Hold: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
     try:
         # 3.8. Conditional Access Policies
         story.append(Paragraph("Conditional Access Policies", custom_styles['SectionH2']))
@@ -1803,6 +1857,7 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
 
     except Exception as e:
         story.append(Paragraph(f'⚠️ Error formatting Exchange Mail Security & SKUs: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
+
     try:
         # 3.12. Encryption Key Management
         story.append(Paragraph('Encryption Key Management', custom_styles['SectionH2']))
@@ -1863,7 +1918,7 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
                         Paragraph(escape_text(rule.get("State", "-")), custom_styles['TableCell']),
                         Paragraph(escape_text(rule.get("Priority", "-")), custom_styles['TableCell']),
                         Paragraph(escape_text(rule.get("Mode", "-")), custom_styles['TableCell']),
-                        Paragraph(escape_text(desc_text), custom_styles['SmallTableCell'])
+                        Paragraph(escape_text(desc_text), custom_styles['TableCell'])
                     ])
                 
                 rules_table = Table(rules_table_data, colWidths=[120, 50, 40, 60, 234])
@@ -1893,7 +1948,8 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
         try:
             intune_data = data.get("intune", {})
             mobile_apps = intune_data.get("mobile_apps", []) if intune_data else []
-            apps_text = ", ".join(mobile_apps) if mobile_apps else "No mobile apps discovered or permission restricted."
+            app_names = [app.get("displayName") for app in mobile_apps if isinstance(app, dict) and app.get("displayName")]
+            apps_text = ", ".join(app_names) if app_names else "No mobile apps discovered or permission restricted."
             story.append(Paragraph(escape_text(apps_text), custom_styles['ReportBody']))
         except Exception as e:
             logger.exception("Failed to format Managed Mobile Apps section in PDF")
@@ -1950,8 +2006,8 @@ def _add_security_compliance_governance_section(story, data, custom_styles, prim
     except Exception as e:
         story.append(Paragraph(f'⚠️ Error formatting Detected Applications: {escape_text(str(e))}', custom_styles['SectionErrTxt']))
     try:
-        # 3.16. Managed Devices (Top 10)
-        story.append(Paragraph("Managed Devices (Top 10)", custom_styles['SectionH2']))
+        # 3.16. Managed Intune Devices (Top 10)
+        story.append(Paragraph("Managed Intune Devices (Top 10)", custom_styles['SectionH2']))
         story.append(Paragraph("Captures enrollment states for managed endpoints distributed across standard enterprise work groups.", custom_styles['ReportBody']))
         story.append(Spacer(1, 8))
     
@@ -2757,6 +2813,24 @@ def generate_pdf_report(data: dict, output_filepath: str):
         leading=10,
         textColor=colors.HexColor('#0F172A'),
         fontName='Helvetica-Bold'
+    ))
+    custom_styles.add(ParagraphStyle(
+        name='SmallTableCell',
+        parent=custom_styles['Normal'],
+        fontSize=6.0,
+        leading=7.5
+    ))
+    custom_styles.add(ParagraphStyle(
+        name='SmallTableCellBold',
+        parent=custom_styles['SmallTableCell'],
+        fontName='Helvetica-Bold',
+        textColor=primary_color
+    ))
+    custom_styles.add(ParagraphStyle(
+        name='SmallTableCellHeader',
+        parent=custom_styles['SmallTableCell'],
+        fontName='Helvetica-Bold',
+        textColor=colors.white
     ))
 
     story = []

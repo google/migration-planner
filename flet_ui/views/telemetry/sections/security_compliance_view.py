@@ -1122,6 +1122,9 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             elapsed = time.time() - start_time
 
+            if hasattr(self, "cached_data") and isinstance(self.cached_data, dict):
+                self.cached_data["conditional_access"] = policies_list
+
             def _on_success():
                 self.ca_card.set_data(headers, rows, execution_time=elapsed)
                 if self.ca_card not in self.cards_column.controls:
@@ -1211,6 +1214,10 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 rows_fw.append([name, ptype, fw_stat, proxy_stat])
 
             elapsed = time.time() - start_time
+
+            if hasattr(self, "cached_data") and isinstance(self.cached_data, dict):
+                self.cached_data["filtering_policies"] = filtering_list
+                self.cached_data["firewall_proxy"] = firewall_list
 
             def _on_success():
                 if filter_err:
@@ -1348,10 +1355,12 @@ class SecurityComplianceGovernanceView(BaseSectionView):
             csv_path = res.get("csv_path")
 
             rows: List[List[Any]] = []
+            rules_list = []
             if csv_path and os.path.exists(csv_path):
                 with open(csv_path, mode="r", encoding="utf-8-sig") as f:
                     reader = csv.DictReader(f)
                     for r in reader:
+                        rules_list.append(r)
                         name = r.get("Name") or "N/A"
                         state = r.get("State") or "Enabled"
                         prio = str(r.get("Priority") if r.get("Priority") is not None else "0")
@@ -1367,6 +1376,9 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                         rows.append([name, state, prio, mode, desc])
 
             elapsed = time.time() - start_time
+
+            if hasattr(self, "cached_data") and isinstance(self.cached_data, dict):
+                self.cached_data["transport_rules"] = rules_list
 
             def _on_success():
                 self.transport_rules_card.set_data(headers, rows, execution_time=elapsed)
@@ -1474,6 +1486,12 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             elapsed = time.time() - start_time
 
+            if hasattr(self, "cached_data") and isinstance(self.cached_data, dict):
+                self.cached_data.setdefault("intune", {}).update({
+                    "mobile_apps": mobile_list,
+                    "detected_apps": detected_list
+                })
+
             def _on_success():
                 if mobile_err:
                     self.mobile_apps_card.set_error(f"Failed to fetch Managed Mobile Apps: {mobile_err}")
@@ -1537,6 +1555,8 @@ class SecurityComplianceGovernanceView(BaseSectionView):
 
             rows_managed: List[List[Any]] = []
             rows_vc: List[List[Any]] = []
+            managed_list = devices_list if isinstance(devices_list, list) else []
+            vc_list = []
 
             if isinstance(devices_list, list):
                 for d in devices_list:
@@ -1557,6 +1577,7 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                             reg_state = d.get("deviceRegistrationState") or "registered"
                             manuf = d.get("manufacturer") or "Unknown"
                             rows_vc.append([uid, name, os_name, agent, reg_state, model_name, manuf])
+                            vc_list.append(d)
 
             if rows_vc:
                 with open(csv_path_vc, 'w', encoding='utf-8', newline='') as f:
@@ -1566,6 +1587,12 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 self._cache_to_sqlite_safe(csv_path_vc, db_path, "vc_devices")
 
             elapsed = time.time() - start_time
+
+            if hasattr(self, "cached_data") and isinstance(self.cached_data, dict):
+                self.cached_data.setdefault("intune", {}).update({
+                    "managed_devices": managed_list,
+                    "vc_devices": vc_list
+                })
 
             def _on_success():
                 self.managed_devices_card.set_data(headers_managed, rows_managed, execution_time=elapsed)
@@ -1698,11 +1725,11 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                 for (platform, p_type), count in sorted(counts.items()):
                     rows_configs.append([platform, p_type, str(count)])
 
-                self.cached_data["intune"] = {
+                self.cached_data.setdefault("intune", {}).update({
                     "table_rows": rows_configs,
                     "total_device_configs": total_dc,
                     "total_config_policies": total_cp,
-                }
+                })
             except Exception as e:
                 logger.error(f"Device configurations pipeline error: {e}", exc_info=True)
                 configs_err = str(e)
@@ -1872,6 +1899,13 @@ class SecurityComplianceGovernanceView(BaseSectionView):
                         rows_mdm.append([name, desc, applies, d_url, t_url, c_url])
 
             elapsed = time.time() - start_time
+
+            if hasattr(self, "cached_data") and isinstance(self.cached_data, dict):
+                self.cached_data.setdefault("intune", {}).update({
+                    "android_compliance": android_list,
+                    "ios_compliance": ios_list,
+                    "mdm_policies": mdm_list
+                })
 
             def _on_success():
                 if android_err:
