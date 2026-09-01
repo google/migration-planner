@@ -11,3 +11,4 @@ aiosqlite
 Pillow
 urllib3
 certifi
+flet==0.86.5
