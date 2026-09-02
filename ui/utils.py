@@ -389,3 +389,10 @@ def build_large_resource_limit_input(self, ctk, min_val=2, max_val=10, increment
       font=FONT_BODY_SMALL,
       text_color=COLOR_TEXT_SUB,
   ).pack(anchor="w", padx=20, pady=(0, 15))
+
+def center_window(window, width, height):
+  screen_width = window.winfo_screenwidth()
+  screen_height = window.winfo_screenheight()
+  x = int((screen_width / 2) - (width / 2))
+  y = int((screen_height / 2) - (height / 2))
+  window.geometry(f"{width}x{height}+{x}+{y}")

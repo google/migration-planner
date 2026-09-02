@@ -14,6 +14,7 @@ import time
 import os
 import subprocess
 import sys
+import webbrowser
 
 from util.connectors import TokenManager, UrlInvoker
 from util.monitoring import ResourceMonitor
@@ -34,8 +35,8 @@ class MigrationEstimatorTool(ctk.CTk):
     ctk.set_default_color_theme("blue")
 
     self.configure(fg_color=COLOR_BACKGROUND)
-    self.title("Migration Planner")
-    self.geometry("950x900")
+    self.title("Migration Planner - Exchange Online")
+    ui_utils.center_window(self, 950, 900)
 
     self.log_queue = queue.Queue()
     self.log_buffer = []
@@ -1025,6 +1026,7 @@ class MigrationEstimatorTool(ctk.CTk):
         font=FONT_BODY_BOLD,
         text_color=COLOR_PRIMARY,
         anchor="w",
+        cursor="hand2",
     )
     link.pack(fill="x")
     link.bind("<Button-1>", lambda e: webbrowser.open(link_url))

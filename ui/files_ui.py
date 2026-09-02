@@ -60,6 +60,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.show_eta = False
 
     super().__init__()
+    self.title("Migration Planner - Files")
     self.factory = None
 
   def setup_variables(self):

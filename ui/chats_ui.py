@@ -27,6 +27,7 @@ from util.enums import FailureType
 from util.monitoring import ResourceMonitor
 from util.utils import ScanConfig
 from util.constants import *
+import ui.utils as ui_utils
 
 class ChatMigrationEstimatorTool(ctk.CTk):
   """Main Application Class for Migration Planner."""
@@ -38,8 +39,8 @@ class ChatMigrationEstimatorTool(ctk.CTk):
     ctk.set_default_color_theme("blue")
 
     self.configure(fg_color=COLOR_BACKGROUND)
-    self.title("Migration Planner")
-    self.geometry("950x900")
+    self.title("Migration Planner - Chats")
+    ui_utils.center_window(self, 950, 900)
 
     self.log_queue = queue.Queue()
     self.log_buffer = []
@@ -1252,6 +1253,7 @@ class ChatMigrationEstimatorTool(ctk.CTk):
         font=FONT_BODY_BOLD,
         text_color=COLOR_PRIMARY,
         anchor="w",
+        cursor="hand2",
     )
     link.pack(fill="x")
     link.bind("<Button-1>", lambda e: webbrowser.open(link_url))
