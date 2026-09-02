@@ -82,7 +82,8 @@ class UrlInvoker():
                     break
 
             if len(failed_responses) > 0:
-                logger(f"Consistent failures observed for the following: {",".join(response.get("body") for response in failed_responses)}")
+                bodies = [json.dumps(r.get("body")) if isinstance(r.get("body"), dict) else str(r.get("body")) for r in failed_responses]
+                logger(f"Consistent failures observed for the following: {','.join(bodies)}")
 
         except Exception as e:
             logger(f"Error in {context}: {e}")
