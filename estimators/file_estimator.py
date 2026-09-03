@@ -1448,7 +1448,8 @@ class FileEstimator(Estimator):
                         url = None
 
                 elif "body" in resp and "error" in resp["body"]:
-                    print(f"DEBUG: Error in response for item {item_id}: {resp['body']['error']}")
+                    if self.logger:
+                        self.logger(f"DEBUG: Error in response for item {item_id}: {resp['body']['error']}")
                     failures.append({
                         "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
                         "statusCode": resp.get("status"),
@@ -1456,7 +1457,8 @@ class FileEstimator(Estimator):
                     })
                     break
                 else:
-                    print(f"DEBUG: Unexpected response structure for item {item_id}: {json.dumps(resp, indent=2)}")
+                    if self.logger:
+                        self.logger(f"DEBUG: Unexpected response structure for item {item_id}: {json.dumps(resp, indent=2)}")
                     break
 
             self.processed_versions_count.increment()
@@ -1469,7 +1471,8 @@ class FileEstimator(Estimator):
                 )
 
         except Exception as e:
-            print(f"DEBUG: Exception in _fetch_file_versions_size for item {item_id}: {str(e)}")
+            if self.logger:
+                self.logger(f"DEBUG: Exception in _fetch_file_versions_size for item {item_id}: {str(e)}")
             failures.append({
                 "type": FailureType.EXCEPTION.name,
                 "statusCode": None,
@@ -1522,7 +1525,7 @@ class FileEstimator(Estimator):
 
         try:
             # use delta api to fetch the folders
-            delta_api = "/drives/{driveId}/root/delta?$select=id,parentReference,name,webUrl,folder,file,remoteItem,size"
+            delta_api = "/drives/{driveId}/root/delta?$top=1000&$select=id,parentReference,name,webUrl,folder,file,remoteItem,size"
             batches = create_batches(delta_api, [{"driveId": drive_id} for drive_id in drive_ids], self.config.parallel_batches, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
