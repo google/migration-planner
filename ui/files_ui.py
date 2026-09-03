@@ -223,7 +223,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
   def update_progress(self, msg):
     if isinstance(msg, str):
-      self.log_buffer.append(msg)
+      self.log_msg(msg)
     elif isinstance(msg, dict):
       mtype = msg.get("type")
       if mtype == "site_discovery":
@@ -823,6 +823,26 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       threading.Thread(target=_write_logs_to_disk, daemon=True).start()
     except Exception as e:
       self.log_msg(f"Error initiating log export: {e}")
+
+  def log_msg(self, text):
+    """Appends log text with an ISO-like timestamp."""
+    if text is None:
+      return
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    s_text = str(text)
+    prefix = ""
+    while s_text.startswith("\n"):
+      prefix += "\n"
+      s_text = s_text[1:]
+    formatted_text = f"{prefix}[{ts}] {s_text}"
+    with self.log_lock:
+      self.log_buffer.append(formatted_text)
+
+  def stop_scan_logic(self):
+    self.btn_action_primary.configure(state="disabled", text="Stopping scan...")
+    self.stop_scan_event.set()
+    self.log_msg("Scan Stopped.")
+
 
 
 
