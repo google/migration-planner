@@ -264,9 +264,9 @@ Click **"Show Advanced Settings"** to tune the performance:
 
     ```csv
     Entity
-    bugbash4@smh3v.onmicrosoft.com
-    https://smh3v.sharepoint.com/sites/sc2
-    https://smh3v.sharepoint.com/
+    user14@xyz.onmicrosoft.com
+    https://xyz.sharepoint.com/sites/sc2
+    https://xyz.sharepoint.com/
 
     ```
 
