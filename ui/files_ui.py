@@ -6,7 +6,8 @@ import os
 import customtkinter as ctk
 import time
 import psutil
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
+import threading
 from util.monitoring import ResourceMonitor
 from estimators.factory import EstimatorFactory
 from util.enums import FailureType
@@ -759,6 +760,71 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
   # ==========================
   def build_progress_view(self):
     super().build_progress_view()
+
+  def show_progress_view(self):
+    self.view_config.pack_forget()
+    self.view_results.pack_forget()
+    self.view_progress.pack(fill="both", expand=True)
+
+    if hasattr(self, "btn_export_logs"):
+      self.btn_export_logs.destroy()
+
+    self.btn_action_secondary.pack_forget()
+    self.btn_action_primary.configure(
+        text="Stop scan",
+        command=self.stop_scan_logic,
+        fg_color=COLOR_ERROR,
+        hover_color=COLOR_ERROR_HOVER,
+        width=180,
+    )
+    self.btn_action_primary.pack(side="right", padx=25, pady=15)
+
+    self.btn_export_logs = ctk.CTkButton(
+        self.footer,
+        text="Export logs",
+        command=self.export_logs,
+        fg_color=COLOR_TONAL_BG,
+        text_color=COLOR_TONAL_TEXT,
+        hover_color=COLOR_TONAL_HOVER,
+        border_width=0,
+        font=FONT_BODY_BOLD,
+        width=120,
+        height=40,
+        corner_radius=20,
+    )
+    self.btn_export_logs.pack(side="right", pady=15)
+
+  def export_logs(self):
+    """Exports logs accumulated so far asynchronously and non-disruptively."""
+    try:
+      ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+      f = filedialog.asksaveasfilename(
+          parent=self,
+          initialfile=f"logs_{ts}.log",
+          defaultextension=".log",
+          filetypes=[("Log Files", "*.log"), ("All Files", "*.*")],
+      )
+      if not f:
+        return
+
+      # Fast, non-blocking shallow snapshot under lock to minimize lock contention
+      with self.log_lock:
+        logs_snapshot = list(self.log_buffer)
+
+      # Offload string formatting and disk I/O to a background daemon thread
+      def _write_logs_to_disk():
+        try:
+          content = "\n".join(logs_snapshot)
+          with open(f, "w", encoding="utf-8") as file:
+            file.write(content)
+        except Exception as e:
+          self.log_msg(f"Failed to export logs to {f}: {e}")
+
+      threading.Thread(target=_write_logs_to_disk, daemon=True).start()
+    except Exception as e:
+      self.log_msg(f"Error initiating log export: {e}")
+
+
 
   # ==========================
   # VIEW: RESULTS
@@ -1740,6 +1806,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       plan_text = "Generating Estimation Report"
       
     self.create_progress_row(self.scan_container, "plan_generation", plan_text, mode="determinate")
+
+    self.show_progress_view()
 
     import threading
     threading.Thread(target=self.execute_migration_scan, args=(config,)).start()
