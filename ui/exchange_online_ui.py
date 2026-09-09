@@ -787,7 +787,7 @@ class MigrationEstimatorTool(ctk.CTk):
             if batch["name"] in page_batch_names:
               segment = ctk.CTkFrame(
                   inner_track,
-                  fg_color=COLOR_TONAL_BG,
+                  fg_color=batch.get("bg_color", COLOR_TONAL_BG),
                   corner_radius=12,
                   border_width=1,
                   border_color="white",
