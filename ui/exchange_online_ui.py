@@ -852,6 +852,14 @@ class MigrationEstimatorTool(ctk.CTk):
           self.create_batch_bar(master_container, w, max_batch_eta)
 
       self.view_results.update_idletasks()
+      # The dynamically rendered Gantt chart / batch details can change the
+      # scrollable content's total height, but the canvas scrollregion is
+      # not always recomputed automatically. Without this, content past the
+      # window's visible area (e.g. the disclaimer footnote) becomes
+      # unreachable until the window is manually resized.
+      self.view_results._parent_canvas.configure(
+          scrollregion=self.view_results._parent_canvas.bbox("all")
+      )
       try:
         self.view_results._parent_canvas.yview_moveto(current_scroll)
       except:
@@ -1118,6 +1126,16 @@ class MigrationEstimatorTool(ctk.CTk):
       self.adv_frame.pack(fill="x", pady=10, after=self.btn_adv)
       self.btn_adv.configure(text="Hide Advanced Settings ▲")
       self.adv_visible = True
+
+    # Revealing/hiding the advanced settings changes the scrollable
+    # content's total height, but CTkScrollableFrame does not always
+    # recompute its scroll region until the window is manually resized.
+    # Force a refresh so newly shown fields (e.g. Migration Plan Options)
+    # are reachable via scrolling right away.
+    self.scroll_connect.update_idletasks()
+    self.scroll_connect._parent_canvas.configure(
+        scrollregion=self.scroll_connect._parent_canvas.bbox("all")
+    )
 
   def browse_user_csv(self):
     f = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
