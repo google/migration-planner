@@ -2571,27 +2571,6 @@ class MigrationEstimatorTool(ctk.CTk):
     phase_events = 0
     phase_cals = 0
     
-    state_lock = threading.Lock()
-
-    def realtime_callback(count):
-        nonlocal phase_total
-        with state_lock:
-            phase_total += count
-            current_cumulative = phase_total
-            current_processed = users_processed
-            current_failed = users_failed
-
-        self.ui_update(
-            "scan_progress",
-            source=res_type,
-            progress=current_processed / total_users if total_users > 0 else 0,
-            cumulative=current_cumulative,
-            processed=current_processed,
-            failed=current_failed,
-            total=total_users,
-            extra_text="",
-        )
-
     executor = ThreadPoolExecutor(max_workers=workers)
     try:
       # Map the Future to its specific chunk so we know exactly how many users it contained
@@ -2603,7 +2582,7 @@ class MigrationEstimatorTool(ctk.CTk):
               manager,
               self.log_msg,
               self.stop_scan_event,
-              realtime_callback if res_type == "encrypted_messages" else None
+              None,
           ): chunk
           for chunk in chunks
       }
@@ -2628,7 +2607,7 @@ class MigrationEstimatorTool(ctk.CTk):
           elif res_type == "encrypted_messages":
             val = r.get("encrypted_emails", 0)
             stats["encrypted_emails"] += val
-            # phase_total is updated via callback in real-time
+            phase_total += val
           elif res_type == "contacts":
             val = r["contacts"]
             stats["contacts"] += val

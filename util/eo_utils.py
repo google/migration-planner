@@ -30,124 +30,10 @@ def fetch_user_batch_data(
   session = token_manager.get_session()
   batch_url = f"{GRAPH_BASE_URL}/$batch"
 
-  if resource_type == "encrypted_messages":
-      # Option C: Deep-Dive Iterate and Count for Encrypted Messages
-      user_counts = {u["User ID / Group ID"]: 0 for u in user_chunk}
-      pending_reqs = []
-      for i, user in enumerate(user_chunk):
-          user_id = user["User ID / Group ID"]
-          pending_reqs.append({
-              "id": str(i),
-              "user_id": user_id,
-              "url": f"/users/{user_id}/messages?$expand=attachments($select=name)&$top=500&$select=id",
-              "method": "GET",
-              "headers": {"ConsistencyLevel": "eventual"},
-          })
-
-      url_invoker = UrlInvoker(token_manager, None, None, None, None)
-      b_failed = 0
-      failed_details = []
-      batch_encrypted_emails_count = 0
-
-      while pending_reqs:
-          if stop_event and stop_event.is_set():
-              break
-
-          batch_payload = [{"id": r["id"], "method": r["method"], "url": r["url"], "headers": r["headers"]} for r in pending_reqs]
-
-          responses = url_invoker.execute_batch_request(
-              session,
-              batch_url,
-              token_manager,
-              token_data,
-              batch_payload,
-              logger,
-              stop_event=stop_event,
-              context=resource_type,
-          )
-
-          next_pending_reqs = []
-          for req in pending_reqs:
-              req_id = req["id"]
-              user_id = req["user_id"]
-              r_data = responses.get(req_id)
-
-              user_obj = next(u for u in user_chunk if u["User ID / Group ID"] == user_id)
-
-              if not r_data:
-                  b_failed += 1
-                  failed_details.append({
-                      "user": user_obj["User Principal Name / Group Mail"],
-                      "cause": "User dropped after max retries in pagination.",
-                  })
-                  continue
-
-              status = r_data.get("status", 0)
-              if status == 200:
-                  body = r_data.get("body", {})
-                  value = body.get("value", [])
-                  page_encrypted_count = 0
-                  for msg in value:
-                      attachments = msg.get("attachments", [])
-                      is_encrypted = False
-                      for att in attachments:
-                          name = att.get("name", "")
-                          if name and name.endswith(".rpmsg"):
-                              is_encrypted = True
-                              break
-                      if is_encrypted:
-                          user_counts[user_id] += 1
-                          page_encrypted_count += 1
-                  
-                  if progress_callback and page_encrypted_count > 0:
-                      progress_callback(page_encrypted_count)
-
-                  next_link = body.get("@odata.nextLink")
-                  if next_link:
-                      relative_url = next_link.split("/v1.0")[-1]
-                      next_pending_reqs.append({
-                          "id": req_id,
-                          "user_id": user_id,
-                          "url": relative_url,
-                          "method": "GET",
-                          "headers": {"ConsistencyLevel": "eventual"},
-                      })
-              elif status == 404:
-                  b_failed += 1
-                  failed_details.append({
-                      "user": user_obj["User Principal Name / Group Mail"],
-                      "cause": f"[{status}] Mailbox not found during pagination.",
-                  })
-              else:
-                  err_msg = r_data.get("body", {}).get("error", {}).get("message", "Unknown")
-                  b_failed += 1
-                  failed_details.append({
-                      "user": user_obj["User Principal Name / Group Mail"],
-                      "cause": f"[{status}] {err_msg} during pagination.",
-                  })
-
-          pending_reqs = next_pending_reqs
-
-      for user in user_chunk:
-          user_id = user["User ID / Group ID"]
-          user["Encrypted Email Count"] = user_counts[user_id]
-          batch_encrypted_emails_count += user_counts[user_id]
-
-      token_manager.return_token_slot(token_data)
-
-      return {
-          "emails": 0,
-          "encrypted_emails": batch_encrypted_emails_count,
-          "contacts": 0,
-          "calendars": 0,
-          "events": 0,
-          "failed": b_failed,
-          "failed_details": failed_details,
-      }
-
   batch_requests = []
 
   batch_emails_count = 0
+  batch_encrypted_emails_count = 0
   batch_contacts_count = 0
   batch_cals_count = 0
   batch_events_count = 0
@@ -160,6 +46,10 @@ def fetch_user_batch_data(
     req_id = str(i)
     if resource_type == "calendars":
       url = f"/users/{user_id}/calendars?$select=id,name&$top=100"
+    elif resource_type == "encrypted_messages":
+      prop_id = "String {00020386-0000-0000-C000-000000000046} Name Content-Class"
+      filter_expr = f"singleValueExtendedProperties/Any(ep: ep/id eq '{prop_id}' and ep/value eq 'rpmsg.message')"
+      url = f"/users/{user_id}/messages?$filter={urllib.parse.quote(filter_expr)}&$count=true&$top=1&$select=id"
     else:
       url = f"/users/{user_id}/{resource_type}?$count=true&$top=1&$select=id"
     batch_requests.append({
@@ -229,6 +119,11 @@ def fetch_user_batch_data(
           if resource_type == "messages":
             user["Email Count"] = count_val
             batch_emails_count += count_val
+          elif resource_type == "encrypted_messages":
+            user["Encrypted Email Count"] = count_val
+            batch_encrypted_emails_count += count_val
+            if progress_callback and count_val > 0:
+              progress_callback(count_val)
           else:
             user["Contact Count"] = count_val
             batch_contacts_count += count_val
@@ -261,6 +156,7 @@ def fetch_user_batch_data(
 
   return {
       "emails": batch_emails_count,
+      "encrypted_emails": batch_encrypted_emails_count,
       "contacts": batch_contacts_count,
       "calendars": batch_cals_count,
       "events": batch_events_count,
