@@ -2582,7 +2582,6 @@ class MigrationEstimatorTool(ctk.CTk):
               manager,
               self.log_msg,
               self.stop_scan_event,
-              None,
           ): chunk
           for chunk in chunks
       }

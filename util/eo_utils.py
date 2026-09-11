@@ -20,7 +20,6 @@ def fetch_user_batch_data(
     token_manager: TokenManager,
     logger: Callable[[str], None],
     stop_event: Optional[threading.Event] = None,
-    progress_callback: Optional[Callable[[int], None]] = None,
 ) -> Dict[str, int]:
   """Fetches data for a batch of users for a specific resource type."""
   if stop_event and stop_event.is_set():
@@ -122,8 +121,6 @@ def fetch_user_batch_data(
           elif resource_type == "encrypted_messages":
             user["Encrypted Email Count"] = count_val
             batch_encrypted_emails_count += count_val
-            if progress_callback and count_val > 0:
-              progress_callback(count_val)
           else:
             user["Contact Count"] = count_val
             batch_contacts_count += count_val
