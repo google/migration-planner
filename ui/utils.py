@@ -224,8 +224,8 @@ def build_migration_plan_options(self, ctk):
   slider_parallel_batches = ctk.CTkSlider(
       eta_settings_frame,
       from_=1,
-      to=10,
-      number_of_steps=9,
+      to=20,
+      number_of_steps=19,
       variable=self.parallel_batches,
   )
   slider_parallel_batches.grid(row=1, column=4, sticky="ew", padx=5, pady=5)
