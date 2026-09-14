@@ -264,7 +264,7 @@ class MigrationEstimatorTool(ctk.CTk):
     ui_utils.build_concurrency_settings_slider(self, ctk)
 
     # Migration Plan Options
-    ui_utils.build_migration_plan_options(self, ctk)
+    ui_utils.build_migration_plan_options(self, ctk, max_parallel_batches=20)
 
   # ==========================
   # VIEW: PROGRESS
