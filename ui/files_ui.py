@@ -73,6 +73,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.generate_folder_amr_map = ctk.BooleanVar(value=False)
     self.eta_min_users = ctk.IntVar(value=1000)
     self.eta_max_users = ctk.IntVar(value=5000)
+    self.parallel_batches = ctk.IntVar(value=5)
 
   def _is_valid_email(self, val):
     return bool(re.match(r'^[^@]+@[^@]+\.[^@]+$', val))
@@ -220,6 +221,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
+
+    # Migration Plan Options
+    ui_utils.build_migration_plan_options(self, ctk, max_parallel_batches=5)
 
   def update_progress(self, msg):
     if isinstance(msg, str):
@@ -875,7 +879,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     user_min_limit = self.val_eta_min_users
     user_max_limit = self.val_eta_max_users
-    num_parallel = min(4, max(1, self.val_parallel_batches))
+    num_parallel = self.val_parallel_batches
     max_allowed_batches = self.val_eta_max_batches
 
     candidate_hours = [3, 6, 12, 18, 24, 36, 48, 72, 120, 168, 240, 360, 480, 720, 1080, 1440]
@@ -1707,6 +1711,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
   def _get_scan_configuration(self):
     config = super()._get_scan_configuration()
+    config.parallel_batches = 10
     config.includePersonalSites = self.val_include_personal_sites
     config.includeTeamSites = self.val_include_team_sites
     config.include_recycle_bin_contents = self.val_include_recycle_bin_contents
