@@ -223,6 +223,7 @@ class HomeView(ft.Container):
                         description="Analyze current Microsoft 365 readiness.",
                         icon=ft.Icons.SEARCH_ROUNDED,
                         on_click=self._handle_migration_planner_click,
+                        is_locked=True,
                     ),
                 ],
             ),
