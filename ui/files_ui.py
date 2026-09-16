@@ -1,5 +1,6 @@
 from ui.exchange_online_ui import MigrationEstimatorTool
 from ui import utils as ui_utils
+from ui.files_shallow import shallow_ui_helpers
 from util.constants import *
 from datetime import timedelta, datetime
 import os
@@ -65,6 +66,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
   def setup_variables(self):
     super().setup_variables()
+    self.shallow_scan = ctk.BooleanVar(value=False)
     self.include_personal_sites = ctk.BooleanVar(value=True)
     self.include_team_sites = ctk.BooleanVar(value=False)
     self.include_recycle_bin_contents = ctk.BooleanVar(value=False)
@@ -109,21 +111,23 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.scroll_connect, fg_color="transparent"
     )
     source_selection_frame.pack(fill="x", anchor="w")
-    ctk.CTkRadioButton(
+    self.rb_scan_all = ctk.CTkRadioButton(
       source_selection_frame,
       text="Scan All Sites",
       variable=self.user_source,
       value="tenant",
       border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=20)
-    ctk.CTkRadioButton(
+    )
+    self.rb_scan_all.pack(side="left", padx=20)
+    self.rb_upload_csv = ctk.CTkRadioButton(
       source_selection_frame,
       text="Upload CSV",
       variable=self.user_source,
       value="csv",
       border_color=COLOR_TEXT_SUB,
-    ).pack(side="left")
-    ctk.CTkButton(
+    )
+    self.rb_upload_csv.pack(side="left")
+    self.btn_browse_csv = ctk.CTkButton(
       source_selection_frame,
       text="Browse",
       command=self.browse_user_csv,
@@ -133,7 +137,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       border_width=1,
       text_color=COLOR_PRIMARY,
       corner_radius=16,
-    ).pack(side="left", padx=10)
+    )
+    self.btn_browse_csv.pack(side="left", padx=10)
     ctk.CTkLabel(
       source_selection_frame,
       textvariable=self.user_csv_path,
@@ -142,6 +147,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     # Advanced Settings
     ui_utils.build_advanced_settings_frame(self, ctk)
+
+    # Shallow Scan Toggle
+    shallow_ui_helpers.build_shallow_scan_toggle(self, ctk)
     
     # Site Options
     ctk.CTkLabel(
@@ -154,23 +162,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     site_options_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
     site_options_frame.pack(fill="x", padx=15)
     
-    ctk.CTkCheckBox(
+    self.cb_personal_sites = ctk.CTkCheckBox(
         site_options_frame,
         text="Personal Sites (OneDrive)",
         variable=self.include_personal_sites,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_personal_sites.pack(side="left", padx=10)
     
-    ctk.CTkCheckBox(
+    self.cb_sharepoint_sites = ctk.CTkCheckBox(
         site_options_frame,
         text="SharePoint Sites",
         variable=self.include_team_sites,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_sharepoint_sites.pack(side="left", padx=10)
 
     # Additional Settings
     ctk.CTkLabel(
@@ -183,41 +193,45 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     additional_settings_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
     additional_settings_frame.pack(fill="x", padx=15)
 
-    ctk.CTkCheckBox(
+    self.cb_recycle_bin = ctk.CTkCheckBox(
         additional_settings_frame,
         text="Include Recycle Bin Contents",
         variable=self.include_recycle_bin_contents,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_recycle_bin.pack(side="left", padx=10)
 
-    ctk.CTkCheckBox(
+    self.cb_file_versions = ctk.CTkCheckBox(
         additional_settings_frame,
         text="Include Historical File Versions in Corpus Size",
         variable=self.include_file_versions,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_file_versions.pack(side="left", padx=10)
 
-    ctk.CTkCheckBox(
+    self.cb_encrypted_files = ctk.CTkCheckBox(
         additional_settings_frame,
         text="Scan for Encrypted Files (RMS/MIP)",
         variable=self.scan_encrypted_files,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_encrypted_files.pack(side="left", padx=10)
 
-    ctk.CTkCheckBox(
+    self.cb_depth_report = ctk.CTkCheckBox(
         additional_settings_frame,
         text="Generate Depth Report for Large Resources",
         variable=self.generate_folder_amr_map,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_depth_report.pack(side="left", padx=10)
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
@@ -1718,6 +1732,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config.include_file_versions = self.val_include_file_versions
     config.scan_encrypted_files = self.val_scan_encrypted_files
     config.generate_folder_amr_map = self.val_generate_folder_amr_map
+    config.shallow_scan = getattr(self, "val_shallow_scan", False)
     return config
 
   def start_scan(self):    
@@ -1749,6 +1764,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self._validate_csv()
 
     # Save values to regular variables to avoid thread-safety issues in Tkinter
+    self.val_shallow_scan = self.shallow_scan.get()
     self.val_include_personal_sites = self.include_personal_sites.get()
     self.val_include_team_sites = self.include_team_sites.get()
     self.val_include_recycle_bin_contents = self.include_recycle_bin_contents.get()
@@ -1823,7 +1839,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     self.create_progress_row(self.scan_container, "sites", "Site Discovery", mode="determinate")
     self.create_progress_row(self.scan_container, "drives", "Drive Discovery", mode="determinate")
-    self.create_progress_row(self.scan_container, "drive_parsing", "Metrics Calculation", mode="determinate")
+    if not self.val_shallow_scan:
+      self.create_progress_row(self.scan_container, "drive_parsing", "Metrics Calculation", mode="determinate")
 
     if self.show_eta:
       plan_text = "Generating Migration Plan"
