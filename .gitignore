@@ -13,6 +13,7 @@ test_*.py
 # Generated application artifacts
 certificate/
 certificates/
+reports/
 telemetry/reports/
 telemetry/logs/
 telemetry/*/reports/
