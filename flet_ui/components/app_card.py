@@ -98,7 +98,7 @@ class AppCard(ft.Container):
             content=row_content,
             padding=ft.Padding(20, 18, 20, 18),
             bgcolor=COLOR_SURFACE,
-            ink=True,
+            ink=not is_locked,
             border_radius=12,
             on_click=self._handle_click if not is_locked else None,
             on_hover=self._handle_hover if not is_locked else None,

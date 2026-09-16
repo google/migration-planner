@@ -138,7 +138,7 @@ def main(page: ft.Page):
             HomeView(
                 page=page,
                 on_open_usage_adoption=show_usage_adoption,
-                on_open_migration_planner=show_migration_planner,
+                on_open_migration_planner=None,
             )
         )
         page.update()
