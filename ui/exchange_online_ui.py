@@ -1332,7 +1332,8 @@ class MigrationEstimatorTool(ctk.CTk):
         warning_msg = (
             "Enabling 'Scan for Encrypted Emails' will cause performance degradation "
             "as it requires fetching content headers for emails to detect encryption. "
-            "It is highly recommended to only enable this if you need to identify RMS/MIP protected emails."
+            "It is highly recommended to only enable this if you need to identify RMS/MIP protected emails.\n\n"
+            "Would you still like to continue?"
         )
         should_continue = messagebox.askyesno(
             title="Performance Warning",
