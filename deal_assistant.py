@@ -52,6 +52,9 @@ from telemetry.m365_telemetry import M365TelemetryTab, async_logger
 import logging
 from telemetry.power_automate import PowerAutomateScanner
 from telemetry.styles import *
+from telemetry.user_persona_analysis import run_user_persona_pipeline
+from telemetry.executive_summary import generate_executive_summary_json
+from telemetry.pdf_summary_report import generate_pdf_summary_report
 
 import queue
 import threading
@@ -307,6 +310,463 @@ class MigrationPlannerView(ctk.CTkFrame):
             self.active_tool_frame = None
         self.selector_frame.pack(fill="both", expand=True)
 
+
+class UserPersonaAnalysisView(ctk.CTkFrame):
+    """Container for the User Persona Analysis screen."""
+
+    def __init__(self, master, controller, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.controller = controller
+        self.personas_list = []
+        self.output_csv = None
+        self.results_frame = None
+
+        # Main container
+        self.container = ctk.CTkFrame(self, fg_color="transparent")
+        self.container.pack(fill="both", expand=True)
+
+        self.setup_ui()
+
+    def setup_ui(self):
+
+        # API Key Form Card (Top aligned, matches header width)
+        self.form_card = ctk.CTkFrame(
+            self.container,
+            fg_color=COLOR_SURFACE,
+            corner_radius=12,
+            border_width=1,
+            border_color=COLOR_OUTLINE_LIGHT
+        )
+        self.form_card.pack(fill="x", side="top", pady=(5, 15))
+
+        self.form_container = ctk.CTkFrame(self.form_card, fg_color="transparent")
+        self.form_container.pack(fill="x", expand=True, padx=40, pady=25)
+
+        # API Key Input Label
+        self.api_key_lbl = ctk.CTkLabel(
+            self.form_container,
+            text="Gemini API Key",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.api_key_lbl.pack(anchor="w", pady=(10, 5))
+
+        # API Key Input Wrapper Frame (No hardcoded width for responsiveness)
+        self.api_key_border = tk.Frame(
+            self.form_container, height=42,
+            highlightbackground=COLOR_OUTLINE, highlightcolor=COLOR_PRIMARY, highlightthickness=1,
+            bd=0, background=COLOR_SURFACE
+        )
+        self.api_key_border.pack(fill="x", expand=True, pady=(0, 15))
+        self.api_key_border.pack_propagate(False)
+
+        self.api_key_entry = ctk.CTkEntry(
+            self.api_key_border, border_width=0, fg_color="transparent", text_color=COLOR_TEXT_MAIN,
+            placeholder_text="Enter Gemini API Key", show="*"
+        )
+        self.api_key_entry.pack(fill="both", expand=True, padx=10, pady=2)
+
+        # Strategy Selector Heading
+        self.strategy_lbl = ctk.CTkLabel(
+            self.form_container,
+            text="Analysis Strategy",
+            font=FONT_BODY_BOLD,
+            text_color=COLOR_TEXT_MAIN
+        )
+        self.strategy_lbl.pack(anchor="w", pady=(5, 5))
+
+        self.strategy_var = tk.StringVar(value="heuristic")
+
+        self.strategy_frame = ctk.CTkFrame(self.form_container, fg_color="transparent")
+        self.strategy_frame.pack(fill="x", pady=(0, 20))
+
+        # Radio option 1: AI Heuristic matching
+        self.radio_heuristic = ctk.CTkRadioButton(
+            self.strategy_frame,
+            text="Strategy 1: Direct LLM Classification",
+            variable=self.strategy_var,
+            value="heuristic",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER
+        )
+        self.radio_heuristic.pack(anchor="w", pady=5)
+
+        # Radio option 2: K-Means + LLM Summary
+        self.radio_kmeans = ctk.CTkRadioButton(
+            self.strategy_frame,
+            text="Strategy 2: K-Means pre-clustering & LLM summary",
+            variable=self.strategy_var,
+            value="kmeans",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER
+        )
+        self.radio_kmeans.pack(anchor="w", pady=5)
+
+        # Radio option 3: AI Feature Selection + LLM classification
+        self.radio_feature_selection = ctk.CTkRadioButton(
+            self.strategy_frame,
+            text="Strategy 3: AI Feature selection & Direct LLM classification",
+            variable=self.strategy_var,
+            value="feature_selection",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_TEXT_MAIN,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER
+        )
+        self.radio_feature_selection.pack(anchor="w", pady=5)
+
+        # Generate Button
+        self.generate_btn = ctk.CTkButton(
+            self.form_container,
+            text="Generate User Personas",
+            command=self.on_generate_clicked,
+            width=250,
+            height=40,
+            corner_radius=20,
+            fg_color=COLOR_PRIMARY,
+            hover_color=COLOR_PRIMARY_HOVER,
+            font=FONT_BODY_BOLD
+        )
+        self.generate_btn.pack(pady=(0, 10))
+
+        # Status loading label (hidden by default)
+        self.status_lbl = ctk.CTkLabel(
+            self.form_container,
+            text="",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_PRIMARY,
+            justify="center",
+            wraplength=700
+        )
+        # Progress loading bar (hidden by default)
+        self.progress_bar = ctk.CTkProgressBar(
+            self.form_container,
+            width=250,
+            height=8,
+            corner_radius=4,
+            progress_color=COLOR_PRIMARY,
+            fg_color="#E2E8F0"
+        )
+        self.progress_bar.set(0)
+        # Disclaimer Box always packed at bottom of self.container (No hardcoded width, center-aligned)
+        self.disclaimer_card = ctk.CTkFrame(
+            self.container,
+            fg_color="#FFF9E6",
+            corner_radius=8,
+            border_width=1,
+            border_color="#FFE0B2"
+        )
+        self.disclaimer_card.pack(fill="x", side="bottom", pady=20, padx=40)
+
+        self.disclaimer_lbl = ctk.CTkLabel(
+            self.disclaimer_card,
+            text="⚠️ Disclaimer: This tool uses Generative AI (GenAI) to generate user personas and may not be fully accurate.\nIt should be used for a rough estimate and not as hard evidence.",
+            font=FONT_BODY_MEDIUM,
+            text_color="#B78103",
+            justify="center",
+            anchor="center"
+        )
+        self.disclaimer_lbl.pack(fill="both", expand=True, padx=20, pady=15)
+
+    def set_loading_state(self, is_loading):
+        state = "disabled" if is_loading else "normal"
+        self.generate_btn.configure(state=state)
+        self.api_key_entry.configure(state=state)
+        self.radio_heuristic.configure(state=state)
+        self.radio_kmeans.configure(state=state)
+        self.radio_feature_selection.configure(state=state)
+        
+        if is_loading:
+            self.status_lbl.configure(text_color=COLOR_PRIMARY)
+            self.status_lbl.pack(pady=10)
+            if self.results_frame:
+                self.results_frame.pack_forget()
+        else:
+            self.status_lbl.pack_forget()
+            self.progress_bar.pack_forget()
+
+    def update_status(self, step, progress=None):
+        if step == "Fetching Reports":
+            msg = "⏳ Fetching Reports..."
+            self.controller.after(0, lambda: self.progress_bar.pack(pady=(0, 10)))
+            if progress is not None:
+                self.controller.after(0, lambda: self.progress_bar.set(progress))
+            else:
+                self.controller.after(0, lambda: self.progress_bar.set(0))
+        elif step == "Aggregating Data":
+            msg = "⏳ Aggregating Data..."
+            self.controller.after(0, lambda: self.progress_bar.pack_forget())
+        elif step == "Selecting features":
+            msg = "⏳ Selecting telemetry features..."
+            self.controller.after(0, lambda: self.progress_bar.pack_forget())
+        elif step == "Generating insights using Gemini":
+            msg = "⏳ Generating insights using Gemini..."
+            self.controller.after(0, lambda: self.progress_bar.pack_forget())
+        else:
+            msg = f"⏳ {step}..."
+            self.controller.after(0, lambda: self.progress_bar.pack_forget())
+            
+        self.controller.after(0, lambda: self.status_lbl.configure(text=msg, text_color=COLOR_PRIMARY))
+
+    def on_pipeline_success(self, result):
+        self.set_loading_state(False)
+        self.status_lbl.pack_forget() # Hide the status label on success
+        self.progress_bar.pack_forget()
+        
+        self.personas_list = result.get("personas", [])
+        self.output_csv = result.get("dataset_path")
+        
+        # Hide the input settings card
+        self.form_card.pack_forget()
+        
+        if self.results_frame:
+            self.results_frame.pack_forget()
+            self.results_frame.destroy()
+            
+        self.render_persona_results()
+
+    def on_pipeline_error(self, err_msg):
+        self.set_loading_state(False)
+        self.status_lbl.configure(
+            text=f"✖ Failed to generate dataset: {err_msg}",
+            text_color=COLOR_ERROR
+        )
+        self.status_lbl.pack(pady=10)
+        self.progress_bar.pack_forget()
+
+    def show_regenerate_form(self):
+        if self.results_frame:
+            self.results_frame.pack_forget()
+        self.status_lbl.pack_forget()
+        self.form_card.pack(fill="x", side="top", pady=(5, 15))
+
+    def render_persona_results(self):
+        if not self.personas_list or not self.output_csv:
+            return
+
+        # 1. Create a container frame for results
+        self.results_frame = ctk.CTkFrame(self.container, fg_color="transparent")
+        # Pack below the form card, above the disclaimer
+        self.results_frame.pack(fill="both", expand=True, padx=40, pady=(0, 10))
+
+        # Title / Export Header row
+        header_row = ctk.CTkFrame(self.results_frame, fg_color="transparent")
+        header_row.pack(fill="x", pady=(0, 10))
+
+        ctk.CTkLabel(
+            header_row,
+            text="Generated User Personas",
+            font=FONT_HEADER_SMALL,
+            text_color=COLOR_TEXT_MAIN
+        ).pack(side="left")
+
+        # Export Button
+        btn_export = ctk.CTkButton(
+            header_row,
+            text="Export Assignments CSV",
+            command=self.export_assignments_csv,
+            width=180,
+            height=32,
+            corner_radius=16,
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER
+        )
+        btn_export.pack(side="right")
+
+        # Regenerate Button
+        btn_regenerate = ctk.CTkButton(
+            header_row,
+            text="Regenerate Response",
+            command=self.show_regenerate_form,
+            width=180,
+            height=32,
+            corner_radius=16,
+            font=FONT_BODY_BOLD,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLOR_OUTLINE,
+            text_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER
+        )
+        btn_regenerate.pack(side="right", padx=(0, 10))
+
+        # Export status label (empty initially)
+        self.export_status_lbl = ctk.CTkLabel(
+            header_row,
+            text="",
+            font=FONT_BODY_MEDIUM,
+            text_color=COLOR_SUCCESS
+        )
+        self.export_status_lbl.pack(side="right", padx=(0, 15))
+
+        # 2. Get user counts per persona from output CSV
+        try:
+            df = pd.read_csv(self.output_csv)
+            counts = df['Assigned_Persona_ID'].value_counts().to_dict()
+        except Exception as e:
+            logger.error(f"Failed to read user counts: {e}")
+            counts = {}
+
+        # 3. Create a scrollable frame for cards if there are many
+        cards_scroll = ctk.CTkScrollableFrame(
+            self.results_frame,
+            fg_color="transparent",
+            height=400
+        )
+        cards_scroll.pack(fill="both", expand=True)
+
+        # 4. Generate Persona Cards
+        for persona in self.personas_list:
+            p_id = persona.get("id")
+            p_title = persona.get("title", "Persona")
+            p_emoji = persona.get("emoji", "👤")
+            p_desc = persona.get("description", "")
+            p_patterns = persona.get("behavior_patterns", [])
+            p_count = counts.get(p_id, 0)
+
+            # Card Container
+            card = ctk.CTkFrame(
+                cards_scroll,
+                fg_color=COLOR_SURFACE,
+                border_width=1,
+                border_color=COLOR_OUTLINE_LIGHT,
+                corner_radius=8
+            )
+            card.pack(fill="x", pady=6, padx=2)
+
+            # Card Header (Title & User Count)
+            card_header = ctk.CTkFrame(card, fg_color="transparent")
+            card_header.pack(fill="x", padx=15, pady=(12, 6))
+
+            ctk.CTkLabel(
+                card_header,
+                text=f"{p_emoji} {p_title}",
+                font=FONT_HEADER_SMALL,
+                text_color=COLOR_PRIMARY
+            ).pack(side="left")
+
+            ctk.CTkLabel(
+                card_header,
+                text=f"{p_count} users assigned",
+                font=FONT_BODY_BOLD,
+                text_color=COLOR_TEXT_SUB
+            ).pack(side="right")
+
+            # Card Description
+            ctk.CTkLabel(
+                card,
+                text=p_desc,
+                font=FONT_BODY_MEDIUM,
+                text_color=COLOR_TEXT_MAIN,
+                justify="left",
+                anchor="w",
+                wraplength=1050
+            ).pack(fill="x", padx=15, pady=(0, 10))
+
+            # Behavior Patterns Bullet points
+            if p_patterns:
+                patterns_frame = ctk.CTkFrame(card, fg_color="transparent")
+                patterns_frame.pack(fill="x", padx=15, pady=(0, 12))
+                
+                for pattern in p_patterns:
+                    ctk.CTkLabel(
+                        patterns_frame,
+                        text=f"• {pattern}",
+                        font=FONT_BODY_MEDIUM,
+                        text_color=COLOR_TEXT_MAIN,
+                        justify="left",
+                        anchor="w",
+                        wraplength=1030
+                    ).pack(fill="x", pady=1)
+
+    def export_assignments_csv(self):
+        if not self.output_csv:
+            return
+            
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Export User Persona Assignments",
+            initialfile="M365_User_Persona_Assignments.csv",
+            parent=self
+        )
+        if not file_path:
+            return
+            
+        try:
+            df = pd.read_csv(self.output_csv)
+            export_cols = ['User Principal Name', 'App_Access_Profile', 'Assigned_Persona_ID', 'Assigned_Persona_Title']
+            df_export = df[[c for c in export_cols if c in df.columns]]
+            df_export.to_csv(file_path, index=False, encoding="utf-8-sig")
+            self.export_status_lbl.configure(
+                text="✔ Exported successfully!",
+                text_color=COLOR_SUCCESS
+            )
+        except Exception as e:
+            self.export_status_lbl.configure(
+                text=f"✖ Export failed: {e}",
+                text_color=COLOR_ERROR
+            )
+
+    def on_generate_clicked(self):
+        tenant = self.controller.stored_tenant
+        client = self.controller.stored_client
+        secret = self.controller.stored_secret
+
+        if not tenant or not client or not secret:
+            self.status_lbl.configure(
+                text="✖ Error: Please connect your Azure App Credentials on the welcome screen first.",
+                text_color=COLOR_ERROR
+            )
+            self.status_lbl.pack(pady=10)
+            return
+
+        api_key = self.api_key_entry.get().strip()
+        if not api_key:
+            self.status_lbl.configure(
+                text="✖ Warning: Please enter a valid Gemini API Key.",
+                text_color=COLOR_ERROR
+            )
+            self.status_lbl.pack(pady=10)
+            return
+
+        # Start loading state
+        self.set_loading_state(True)
+        self.update_status("Starting pipeline")
+
+        # Run pipeline in a background thread
+        def run_thread():
+            try:
+                # Set output path
+                output_dir = os.path.join("telemetry", "reports", f"{tenant}_{client}")
+                output_csv = os.path.join(output_dir, "user_activity_data.csv")
+                
+                # Execute pipeline
+                res = run_user_persona_pipeline(
+                    tenant_id=tenant,
+                    client_id=client,
+                    client_secret=secret,
+                    gemini_api_key=api_key,
+                    output_csv_path=output_csv,
+                    strategy=self.strategy_var.get(),
+                    status_callback=lambda step, progress=None: self.update_status(step, progress)
+                )
+                
+                # Success
+                self.controller.after(0, lambda: self.on_pipeline_success(res))
+            except Exception as e:
+                logger.exception("Error generating user persona dataset")
+                self.controller.after(0, lambda err=str(e): self.on_pipeline_error(err))
+
+        threading.Thread(target=run_thread, daemon=True).start()
 
 
 
@@ -1056,7 +1516,23 @@ class ReportsPage(ctk.CTkFrame):
         )
         self.pdf_btn.pack(side="right", padx=(10, 0), pady=17)
 
-        self.pdf_btn.pack(side="right", padx=(10, 0), pady=17)
+        # 5. Generate Executive Summary button (Extreme Left)
+        self.summary_btn = ctk.CTkButton(
+            self.nav_header,
+            text="Generate Executive Summary",
+            command=self.on_generate_summary_clicked,
+            width=210,
+            height=36,
+            corner_radius=8,
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLOR_PRIMARY,
+            text_color=COLOR_PRIMARY,
+            hover_color=COLOR_SECONDARY_HOVER,
+            font=FONT_BODY_BOLD,
+            state="disabled"
+        )
+        self.summary_btn.pack(side="right", padx=(10, 0), pady=17)
 
 
         # Initialize the telemetry view (No TabView layout)
@@ -1075,7 +1551,11 @@ class ReportsPage(ctk.CTkFrame):
             controller=self.controller
         )
 
-
+        # Initialize the user persona view (initially hidden)
+        self.user_persona_view = UserPersonaAnalysisView(
+            master=self.dashboard_container,
+            controller=self.controller
+        )
 
         # Adapt layout recursively to hide original inputs from view
         self.adapt_embedded_view()
@@ -1083,20 +1563,34 @@ class ReportsPage(ctk.CTkFrame):
     def on_sidebar_selection_changed(self, label):
         import gc
         if label == "Usage and adoption":
-            # Show Telemetry, Hide Migration Planner
+            # Show Telemetry, Hide Migration Planner & Persona Analysis
             self.migration_planner_view.pack_forget()
+            self.user_persona_view.pack_forget()
             self.nav_title.configure(text="Usage Report")
             self.fetch_btn.pack(side="right", padx=(10, 20), pady=17)
             self.pdf_btn.pack(side="right", padx=(10, 0), pady=17)
+            self.summary_btn.pack(side="right", padx=(10, 0), pady=17)
             self.m365_telemetry_view.pack(fill="both", expand=True)
             self.after(500, gc.collect)
         elif label == "Migration planner":
-            # Show Migration Planner, Hide Telemetry
+            # Show Migration Planner, Hide Telemetry & Persona Analysis
             self.m365_telemetry_view.pack_forget()
+            self.user_persona_view.pack_forget()
             self.fetch_btn.pack_forget()
             self.pdf_btn.pack_forget()
+            self.summary_btn.pack_forget()
             self.nav_title.configure(text="Migration Planner")
             self.migration_planner_view.pack(fill="both", expand=True)
+            self.after(500, gc.collect)
+        elif "User Persona Analysis" in label:
+            # Show Persona Analysis, Hide Telemetry & Migration Planner
+            self.m365_telemetry_view.pack_forget()
+            self.migration_planner_view.pack_forget()
+            self.fetch_btn.pack_forget()
+            self.pdf_btn.pack_forget()
+            self.summary_btn.pack_forget()
+            self.nav_title.configure(text="User Persona Analysis (Experimental)")
+            self.user_persona_view.pack(fill="both", expand=True)
             self.after(500, gc.collect)
 
     def adapt_embedded_view(self):
@@ -1157,6 +1651,7 @@ class ReportsPage(ctk.CTkFrame):
         # Toggle button to Cancel and keep it enabled and active
         self.fetch_btn.configure(state="normal", text="Cancel", fg_color="#DC2626") # Red color for cancel
         self.pdf_btn.configure(state="disabled")
+        self.summary_btn.configure(state="disabled")
 
         # Set variables of m365_telemetry_view directly
         self.m365_telemetry_view.lic_tenant_id.set(tenant)
@@ -1184,10 +1679,6 @@ class ReportsPage(ctk.CTkFrame):
             data.get("m365_apps"),
             data.get("mailbox"),
             data.get("calendar"),
-            data.get("mail_security"),
-            data.get("connectors"),
-            data.get("email_clients"),
-            data.get("pst_files"),
             data.get("sharepoint"),
             data.get("onedrive"),
             data.get("devices_apps"),
@@ -1199,8 +1690,12 @@ class ReportsPage(ctk.CTkFrame):
         
         if has_any_data:
             self.pdf_btn.configure(state="normal")
+            if not getattr(self, "is_generating_summary", False):
+                self.summary_btn.configure(state="normal", border_color=COLOR_PRIMARY)
         else:
             self.pdf_btn.configure(state="disabled")
+            if not getattr(self, "is_generating_summary", False):
+                self.summary_btn.configure(state="disabled", border_color="grey")
 
     def on_download_pdf_clicked(self):
         """Prompts the user to save the M365 usage report as a detailed PDF file."""
@@ -1234,7 +1729,185 @@ class ReportsPage(ctk.CTkFrame):
                 
         threading.Thread(target=_generate_pdf_worker, daemon=True).start()
 
+    def on_generate_summary_clicked(self):
+        """Prompts the user for their Gemini API Key, queries Gemini, and saves the Executive Summary PDF."""
+        self.is_generating_summary = True
+        self.summary_btn.configure(state="disabled", border_color="grey")
+        self.update_idletasks()
+        class ApiKeyDialog(ctk.CTkToplevel):
+            def __init__(self, parent):
+                super().__init__(parent)
+                self.title("Enter Gemini API Key")
+                self.geometry("440x380")
+                self.resizable(False, False)
+                
+                # Center on parent window
+                self.transient(parent)
+                self.grab_set()
+                
+                self.result_key = None
+                self.result_prompt = None
+                
+                # Frame
+                frame = ctk.CTkFrame(self, fg_color="transparent")
+                frame.pack(fill="both", expand=True, padx=20, pady=15)
+                
+                lbl = ctk.CTkLabel(frame, text="Please enter your Gemini API Key to analyze telemetry:", font=FONT_BODY_MEDIUM)
+                lbl.pack(anchor="w", pady=(0, 5))
+                
+                self.entry = ctk.CTkEntry(frame, show="*", width=400)
+                self.entry.pack(fill="x", pady=(0, 15))
+                self.entry.focus()
+                
+                # Tailoring prompt instructions text field
+                prompt_lbl = ctk.CTkLabel(frame, text="Tailor Report Focus (Optional, e.g., focus on Teams; Max 100 words):", font=FONT_BODY_MEDIUM)
+                prompt_lbl.pack(anchor="w", pady=(0, 5))
+                
+                self.prompt_box = ctk.CTkTextbox(frame, height=60, width=400)
+                self.prompt_box.pack(fill="x", pady=(0, 10))
+                
+                # Error Label
+                self.error_lbl = ctk.CTkLabel(frame, text="", font=FONT_BODY_SMALL, text_color=COLOR_ERROR)
+                self.error_lbl.pack(anchor="w", pady=(0, 5))
+                
+                # Disclaimer Box
+                disclaimer_frame = ctk.CTkFrame(frame, fg_color=COLOR_SURFACE_VARIANT, corner_radius=6)
+                disclaimer_frame.pack(fill="x", pady=(0, 15))
+                
+                disclaimer_lbl = ctk.CTkLabel(
+                    disclaimer_frame,
+                    text="⚠️ Disclaimer: This tool uses Generative AI (GenAI) to analyze telemetry data and generate the report. AI-generated outputs may not be fully accurate. Please review and verify all recommendations.",
+                    font=FONT_BODY_SMALL,
+                    text_color=COLOR_TEXT_SUB,
+                    wraplength=380,
+                    justify="left"
+                )
+                disclaimer_lbl.pack(padx=10, pady=8)
+                
+                btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
+                btn_frame.pack(anchor="e")
+                
+                cancel_btn = ctk.CTkButton(btn_frame, text="Cancel", width=80, fg_color="transparent", border_width=1, border_color=COLOR_PRIMARY, text_color=COLOR_PRIMARY, hover_color=COLOR_SECONDARY_HOVER, command=self.on_cancel)
+                cancel_btn.pack(side="left", padx=(0, 10))
+                
+                ok_btn = ctk.CTkButton(btn_frame, text="Generate", width=90, fg_color=COLOR_PRIMARY, hover_color=COLOR_PRIMARY_HOVER, command=self.on_ok)
+                ok_btn.pack(side="left")
+                
+                # Bind return key
+                self.entry.bind("<Return>", lambda e: self.on_ok())
+                
+                # Wait for window to close
+                parent.wait_window(self)
+                
+            def on_ok(self):
+                key = self.entry.get().strip()
+                if not key:
+                    self.error_lbl.configure(text="API Key cannot be empty.")
+                    return
+                
+                prompt = self.prompt_box.get("1.0", "end-1c").strip()
+                word_count = len(prompt.split())
+                if word_count > 100:
+                    self.error_lbl.configure(text=f"Instructions exceed 100 words (currently {word_count} words).")
+                    return
+                
+                self.result_key = key
+                self.result_prompt = prompt if prompt else None
+                self.destroy()
+                
+            def on_cancel(self):
+                self.result_key = None
+                self.result_prompt = None
+                self.destroy()
 
+        dialog = ApiKeyDialog(self)
+        api_key = dialog.result_key
+        user_instructions = dialog.result_prompt
+        if not api_key:
+            self.is_generating_summary = False
+            self.summary_btn.configure(state="normal", border_color=COLOR_PRIMARY)
+            return
+            
+        # Get all telemetry data from view
+        data = self.m365_telemetry_view.get_all_telemetry_data()
+        
+        # Create a simple top-level progress window
+        progress_win = ctk.CTkToplevel(self)
+        progress_win.title("Generating Summary")
+        progress_win.geometry("320x100")
+        progress_win.resizable(False, False)
+        progress_win.transient(self)
+        # Removed grab_set() so user can interact with the main application
+        
+        frame = ctk.CTkFrame(progress_win, fg_color="transparent")
+        frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        lbl = ctk.CTkLabel(frame, text="Calling Gemini API and preparing PDF report...", font=FONT_BODY_MEDIUM)
+        lbl.pack(pady=(0, 10))
+        
+        progress_bar = ctk.CTkProgressBar(frame, width=280)
+        progress_bar.pack()
+        progress_bar.configure(mode="indefinite")
+        progress_bar.start()
+        
+        # Results container for threading communication
+        result_container = {}
+        
+        def bg_worker():
+            try:
+                # 1. Call Gemini to get summary JSON
+                summary_data = generate_executive_summary_json(api_key, data, user_instructions)
+                result_container["summary_data"] = summary_data
+                result_container["success"] = True
+            except Exception as ex:
+                logger.error("Failed to generate executive summary via Gemini", exc_info=True)
+                result_container["success"] = False
+                result_container["error"] = str(ex)
+                
+        # Ensure button remains disabled and visual reflects state
+        self.summary_btn.configure(state="disabled", border_color="grey")
+                
+        thread = threading.Thread(target=bg_worker, daemon=True)
+        thread.start()
+        
+        def check_thread():
+            if thread.is_alive():
+                self.after(100, check_thread)
+            else:
+                progress_bar.stop()
+                progress_win.destroy()
+                
+                # Re-enable the summary button once processing is complete
+                self.is_generating_summary = False
+                self.summary_btn.configure(state="normal", border_color=COLOR_PRIMARY)
+                
+                if not result_container.get("success"):
+                    if "error" in result_container:
+                        messagebox.showerror("Summary Generation Failed", f"Failed to generate Executive Summary:\n{result_container['error']}", parent=self)
+                    return
+                    
+                summary_data = result_container["summary_data"]
+                
+                # Prompt user where to save the PDF
+                import datetime
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                f = filedialog.asksaveasfilename(
+                    initialfile=f"m365_executive_summary_{ts}.pdf",
+                    defaultextension=".pdf",
+                    filetypes=[("PDF Documents", "*.pdf"), ("All Files", "*.*")],
+                    parent=self
+                )
+                if not f:
+                    return
+                    
+                try:
+                    generate_pdf_summary_report(summary_data, f, tenant_id=self.controller.stored_tenant)
+                    messagebox.showinfo("Export Successful", f"Executive Summary PDF report successfully saved to:\n{f}", parent=self)
+                except Exception as pdf_ex:
+                    logger.error("Failed to generate PDF summary report", exc_info=True)
+                    messagebox.showerror("Export Failed", f"Failed to generate PDF summary report: {pdf_ex}", parent=self)
+                    
+        self.after(100, check_thread)
 
     def clear_session_data(self):
         """Wipes the cached parameters from telemetry objects and resets the Fetch button."""
@@ -1245,6 +1918,7 @@ class ReportsPage(ctk.CTkFrame):
         # Reset Fetch Report button state
         self.fetch_btn.configure(state="normal", text="Fetch Report", fg_color="#1E3A8A")
         self.pdf_btn.configure(state="disabled")
+        self.summary_btn.configure(state="disabled")
 
         # Reset the telemetry coordinator tab and hide all grids
         self.m365_telemetry_view.reset_tab()
@@ -1317,7 +1991,8 @@ class SidebarFrame(ctk.CTkFrame):
         self.menu_buttons = []
         self.menu_data = [
             ("Usage and adoption", "📊", True),
-            ("Migration planner", "🚀", False)
+            ("Migration planner", "🚀", False),
+            ("User Persona Analysis (Experimental)", "👥", False)
         ]
 
         self.render_navigation_menu()
@@ -1377,7 +2052,8 @@ class SidebarFrame(ctk.CTkFrame):
     def reset_selection(self):
         self.menu_data = [
             ("Usage and adoption", "📊", True),
-            ("Migration planner", "🚀", False)
+            ("Migration planner", "🚀", False),
+            ("User Persona Analysis (Experimental)", "👥", False)
         ]
         self.render_navigation_menu()
 
