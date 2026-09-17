@@ -1567,22 +1567,25 @@ class MigrationEstimatorTool(ctk.CTk):
       )
 
       if col:
-        if "Email Count" in df_input.columns:
+        def has_col_data(col_name):
+          return (
+              col_name in df_input.columns
+              and (pd.to_numeric(df_input[col_name], errors="coerce").fillna(0) > 0).any()
+          )
+
+        if has_col_data("Email Count"):
           have_email = True
-        if "Encrypted Email Count" in df_input.columns:
+        if has_col_data("Encrypted Email Count"):
           have_encrypted_email = True
-        if "Contact Count" in df_input.columns:
+        if has_col_data("Contact Count"):
           have_contact = True
-        if (
-            "Calendar Count" in df_input.columns
-            and "Event Count" in df_input.columns
-        ):
+        if has_col_data("Calendar Count") and has_col_data("Event Count"):
           have_calendar = True
-        if "Group Post Count" in df_input.columns:
+        if has_col_data("Group Post Count"):
           have_group_mailboxes = True
-        if "Shared Mail Count" in df_input.columns:
+        if has_col_data("Shared Mail Count"):
           have_shared_mails = True
-        if "In Place Archive Count" in df_input.columns:
+        if has_col_data("In Place Archive Count"):
           have_in_place_archives = True
 
         have_type_col = "Type" in df_input.columns
@@ -1732,6 +1735,7 @@ class MigrationEstimatorTool(ctk.CTk):
     # Check what we have in existing_data
     sample = next(iter(existing_data.values())) if existing_data else {}
     have_email = "Email Count" in sample
+    have_encrypted_email = "Encrypted Email Count" in sample
     have_contact = "Contact Count" in sample
     have_calendar = "Calendar Count" in sample and "Event Count" in sample
     have_in_place_archives = "In Place Archive Count" in sample
@@ -1778,6 +1782,8 @@ class MigrationEstimatorTool(ctk.CTk):
         src = existing_data[key]
         if have_email and config.scan_email:
           row["Email Count"] = safe_int(src.get("Email Count", 0))
+        if have_encrypted_email and config.scan_encrypted_email:
+          row["Encrypted Email Count"] = safe_int(src.get("Encrypted Email Count", 0))
         if have_contact and config.scan_contact:
           row["Contact Count"] = safe_int(src.get("Contact Count", 0))
         if have_calendar and config.scan_calendar:
