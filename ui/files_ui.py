@@ -622,28 +622,19 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       failures = []
       if file_metrics is None:
         manager = self.factory.get_manager()
+        manager.authenticate_all(
+            self.log_msg,
+            required_scopes=[
+                "Sites.Read.All",
+                "Files.Read.All",
+                "LicenseAssignment.Read.All",
+            ],
+        )
         if config.shallow_scan:
-          manager.authenticate_all(
-              self.log_msg,
-              required_scopes=[
-                  "Sites.Read.All",
-                  "Files.Read.All",
-                  "LicenseAssignment.Read.All",
-                  "Reports.Read.All",
-              ],
-          )
           estimator = self.factory.get_shallow_files_estimator(
               progress_update_callback=self.ui_update, hard_reset=True
           )
         else:
-          manager.authenticate_all(
-              self.log_msg,
-              required_scopes=[
-                  "Sites.Read.All",
-                  "Files.Read.All",
-                  "LicenseAssignment.Read.All",
-              ],
-          )
           estimator = self.factory.get_files_estimator(
               progress_update_callback=self.ui_update, hard_reset=True
           )
