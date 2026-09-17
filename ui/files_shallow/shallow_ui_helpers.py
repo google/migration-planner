@@ -72,7 +72,7 @@ def build_shallow_scan_toggle(tool, ctk):
   ctk.CTkLabel(
       shallow_frame,
       text=(
-          "* Fast tenant-wide estimation using usage reports and item counts."
+          "* Fast estimation using SharePoint REST StorageMetrics and ItemCounts."
       ),
       font=FONT_BODY_SMALL,
       text_color=COLOR_TEXT_SUB,
@@ -105,15 +105,6 @@ def on_shallow_scan_toggle(tool):
         and tool.cb_sharepoint_sites is not None
     ):
       tool.cb_sharepoint_sites.configure(state="disabled")
-
-    # Temporarily enforce 'Scan All Sites' source and disable CSV upload
-    tool._saved_user_csv_path = tool.user_csv_path.get()
-    tool.user_source.set("tenant")
-    tool.user_csv_path.set("")
-    if hasattr(tool, "rb_upload_csv") and tool.rb_upload_csv is not None:
-      tool.rb_upload_csv.configure(state="disabled")
-    if hasattr(tool, "btn_browse_csv") and tool.btn_browse_csv is not None:
-      tool.btn_browse_csv.configure(state="disabled")
   else:
     # Re-enable all additional settings checkboxes
     for _, widget in additional_checkboxes:
@@ -126,14 +117,6 @@ def on_shallow_scan_toggle(tool):
         and tool.cb_sharepoint_sites is not None
     ):
       tool.cb_sharepoint_sites.configure(state="normal")
-
-    # Re-enable CSV upload controls and restore previous CSV path if any
-    if hasattr(tool, "rb_upload_csv") and tool.rb_upload_csv is not None:
-      tool.rb_upload_csv.configure(state="normal")
-    if hasattr(tool, "btn_browse_csv") and tool.btn_browse_csv is not None:
-      tool.btn_browse_csv.configure(state="normal")
-    if getattr(tool, "_saved_user_csv_path", ""):
-      tool.user_csv_path.set(tool._saved_user_csv_path)
 
 
 class CertDecryptionErrorDialog:
