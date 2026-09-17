@@ -87,8 +87,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
   # VIEW: CONFIGURATION
   # ==========================
   def build_config_view(self):
-    # """Builds the Configuration View."""
-    
+    # Clean up orphaned CTkEntry write traces on variables from any previously destroyed config view
+    for attr in self.__dict__.values():
+      if isinstance(attr, ctk.Variable):
+        for mode, cb_name in list(attr.trace_info()):
+          if "textvariable_callback" in cb_name:
+            try:
+              attr.trace_remove(mode, cb_name)
+            except Exception:
+              pass
+
     ui_utils.build_configuration_view(self, ctk)
 
     # Header
@@ -245,6 +253,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     elif isinstance(msg, dict):
       mtype = msg.get("type")
       if mtype == "site_discovery":
+        if getattr(self, "scan_runtime_start", None) is None:
+          self.scan_runtime_start = time.time()
         if not self.view_progress.winfo_viewable():
           self.show_progress_view()
         count = msg.get("count", 0)
@@ -641,8 +651,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
         # Calculate resource metrics for the tenant. Progress update to be made directly in the backend.
         input_map = self._get_input_from_csv_if_uploaded(config)
+        if getattr(self, "scan_runtime_start", None) is None:
+          self.scan_runtime_start = time.time()
         file_metrics = estimator.calculate_resource_metrics(input_map, failures)
       else:
+        if getattr(self, "scan_runtime_start", None) is None:
+          self.scan_runtime_start = time.time()
         estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
         self.ui_update("site_discovery", status="Done", count=file_metrics.get("siteCount", 0))
         self.ui_update("drive_discovery", status="Done", count=sum(file_metrics.get("driveCounts", {}).values()))
@@ -724,17 +738,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       report_path = os.path.join(output_dir, f"site_report_{ts}.csv")
       logs_path = os.path.join(output_dir, f"logs_{ts}.log")
+      self.current_logs_path = logs_path
 
       monitor.stop()
       monitor.join()
-      elapsed = str(timedelta(seconds=int(time.time() - start_time)))
       avg_cpu, max_cpu, avg_ram, max_ram = monitor.get_stats()
       total_ram_gb = psutil.virtual_memory().total / (1024**3)
       total_cpu_cores = psutil.cpu_count(logical=True)
 
       total_corpus = sum([s_data.get("totalSize", 0) for s_data in site_metrics.values()])
       self.log_msg("\n" + "=" * 40)
-      self.log_msg(f"TOTAL TIME: {elapsed}")
       shortcuts_summary = shallow_ui_helpers.format_stat_value(
           file_metrics.get("shortcutCount", 0)
       )
@@ -1284,12 +1297,36 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             text_color=COLOR_TEXT_SUB,
         ).pack(anchor="w", padx=10, pady=(0, 10))
 
-        # Total Footer
-        foot = ctk.CTkFrame(self.view_results, fg_color="transparent")
-        foot.pack(fill="x", pady=10)
+      # Total Footer (Estimated Time & Total Scan Runtime)
+      foot = ctk.CTkFrame(self.view_results, fg_color="transparent")
+      foot.pack(fill="x", pady=10)
+      if self.show_eta:
         self.create_summary_box(
             foot, self.format_eta(data["total_eta"]), "Estimated Time"
         )
+
+      runtime_box = ctk.CTkFrame(
+          foot,
+          fg_color=COLOR_SURFACE,
+          height=90,
+          corner_radius=12,
+          border_color=COLOR_OUTLINE_LIGHT,
+          border_width=1,
+      )
+      runtime_box.pack(side="left", padx=10, expand=True, fill="x")
+      self.lbl_scan_runtime_val = ctk.CTkLabel(
+          runtime_box,
+          text=data.get("total_runtime", "0:00:00"),
+          font=FONT_HEADER_MEDIUM,
+          text_color=COLOR_TEXT_MAIN,
+      )
+      self.lbl_scan_runtime_val.pack(pady=(20, 0))
+      ctk.CTkLabel(
+          runtime_box,
+          text="Total Scan Runtime",
+          font=FONT_BODY_MEDIUM,
+          text_color=COLOR_TEXT_SUB,
+      ).pack(pady=(0, 20))
 
       # Container for Paginated Content
       self.paginated_frame = ctk.CTkFrame(
@@ -1423,6 +1460,32 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if self.show_eta:
         self.selected_page_size = "50"
         self.render_paginated_view(0)
+
+      self.update_idletasks()
+      if "total_runtime" not in data:
+        end_time = time.time()
+        start_t = getattr(self, "scan_runtime_start", None)
+        if start_t is not None:
+          total_seconds = max(0, int(round(end_time - start_t)))
+          data["total_runtime"] = str(timedelta(seconds=total_seconds))
+        else:
+          data["total_runtime"] = "0:00:00"
+
+      if hasattr(self, "lbl_scan_runtime_val") and self.lbl_scan_runtime_val.winfo_exists():
+        self.lbl_scan_runtime_val.configure(text=data["total_runtime"])
+
+      with self.log_lock:
+        already_logged = any("TOTAL TIME:" in line for line in self.log_buffer)
+      if not already_logged:
+        self.log_msg(f"TOTAL TIME: {data['total_runtime']}")
+        if getattr(self, "current_logs_path", None):
+          try:
+            with self.log_lock:
+              log_content = "\n".join(self.log_buffer)
+            with open(self.current_logs_path, "w", encoding="utf-8") as f:
+              f.write(log_content)
+          except Exception:
+            pass
 
     except Exception as e:
       for w in self.view_results.winfo_children():
@@ -1603,7 +1666,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ("Folder count beyond depth limit 100", data.get("folderCountExceedingDepthLimit", 0)),
           ("File count beyond depth limit 100", data.get("fileCountExceedingDepthLimit", 0)),
           ("Large Resource Count (Entities with >500k items)", data.get("tenantLevelLargeResourceCount", 0)),
-          ("Warning Resource Count (Entities with >200k items)", data.get("tenantLevelWarningResourceCount", 0))
+          ("Warning Resource Count (Entities with >200k items)", data.get("tenantLevelWarningResourceCount", 0)),
+          ("Total Scan Runtime", data.get("total_runtime", "N/A"))
       ])
       
       for label, val in summary_rows:
@@ -1893,6 +1957,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         return
 
     self.stop_scan_event.clear()
+    self.scan_runtime_start = None
+    self.current_logs_path = None
     with self.log_lock:
       self.log_buffer = []
     self.spinners_active = {}
