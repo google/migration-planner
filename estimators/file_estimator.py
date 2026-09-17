@@ -173,81 +173,14 @@ class FileEstimator(Estimator):
             if "drives" in data and len(data["drives"]) > 0:
                 drives = data["drives"]
             else:
-                self.site_to_metadata = {}
-                site_discovery_progress_metrics = {
-                    "siteCount": 0,
-                    "personalSiteCount": 0,
-                    "teamSiteCount": 0,
-                    "listCount": 0,
-                    "licenseCount": 0,
-                    "driveCount": 0,
-                }
-
-                self.progress_update_callback("site_discovery", status="Fetching...", count=0)
-                metrics["licenseMetrics"] = self._get_license_metrics(site_discovery_progress_metrics, failures)
-
-                self._configure_executor_from_license_counts(metrics["licenseMetrics"])
-
-                has_emails = "emailIds" in data and len(data["emailIds"]) > 0
-                has_urls = "siteUrls" in data and len(data["siteUrls"]) > 0
-
-                if not has_emails and not has_urls:
-                    top_level_sites = self._get_top_level_sites(metrics, site_discovery_progress_metrics, failures)
-                    subsite_to_top_level_site = {}
-                else:
-                    top_level_sites = []
-                    subsite_to_top_level_site = {}
-                    
-                    if has_emails:
-                        mail_to_top_level_site = self._get_sites_for_users(data["emailIds"], site_discovery_progress_metrics)
-                        for mail, site_id in mail_to_top_level_site.items():
-                            top_level_sites.append(site_id)
-                            self.site_to_metadata[site_id] = {"isPersonalSite": True}
-                            metrics["personalSiteCount"] += 1
-                        
-                        site_id_to_mail = {site_id: mail for mail, site_id in mail_to_top_level_site.items()}
-                        metrics["siteIdToMail"] = site_id_to_mail
-
-                    if has_urls:
-                        url_to_site_id = self._get_sites_from_urls(data["siteUrls"], site_discovery_progress_metrics, failures)
-                        for url, site_id in url_to_site_id.items():
-                            top_level_sites.append(site_id)
-                            self.site_to_metadata[site_id] = {"isPersonalSite": False}
-                            metrics["teamSiteCount"] += 1
-                        
-                        site_id_to_url = {site_id: url for url, site_id in url_to_site_id.items()}
-                        
-                    top_level_sites = list(set(top_level_sites))
-                    
-                metrics["siteCount"] = len(top_level_sites)
-                all_sites = [{"siteId": site_id, "siteLevel": 0} for site_id in top_level_sites]
-                self._get_subsites_in_site(top_level_sites, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, metrics, 1)
-                
-                if not has_emails and not has_urls:
-                    metrics["personalSiteCount"] = site_discovery_progress_metrics.get("personalSiteCount", 0)
-                    metrics["teamSiteCount"] = site_discovery_progress_metrics.get("teamSiteCount", 0)
-
-                for site_detail in all_sites:
-                    metrics["siteMetrics"][site_detail["siteId"]] = {
-                        "siteLevel": site_detail["siteLevel"]
-                    }
-                    
-                all_site_ids = [site["siteId"] for site in all_sites]
-                self._append_tenant_level_metrics(all_site_ids, metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
-
-                self.progress_update_callback(
-                    "site_discovery", 
-                    status="Done", 
-                    count=site_discovery_progress_metrics.get("siteCount", 0), 
-                    personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
-                    teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
-                    driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
-                    listCount=site_discovery_progress_metrics.get("listCount", 0), 
-                    licenseCount=site_discovery_progress_metrics.get("licenseCount", 0),
-                    recycleBinItemCount=site_discovery_progress_metrics.get("recycleBinItemCount", 0)
+                self._discover_sites(
+                    data,
+                    metrics,
+                    drives,
+                    subsite_to_drives,
+                    subsite_to_top_level_site,
+                    failures,
                 )
-
-                self.logger("Site Scanning is finished!!!!")
 
             # get adjacency lists and parent references for each drive
             drive_discovery_progress_metrics = ThreadSafeMap()
@@ -414,6 +347,135 @@ class FileEstimator(Estimator):
     def _is_subsite_personal(self, site_id: str) -> bool:
         return self.site_to_metadata.get(site_id, {}).get("isPersonalSite", False)
 
+    def _discover_sites(
+        self,
+        data: Dict[str, Any],
+        metrics: Dict[str, Any],
+        drives: List[Dict[str, Any]],
+        subsite_to_drives: Dict[str, List[Any]],
+        subsite_to_top_level_site: Dict[str, str],
+        failures: List[Dict[str, str]],
+    ) -> None:
+        """Runs Phase 1 Site Discovery (licenses, sites, subsites, lists, drives)."""
+        self.site_to_metadata = {}
+        site_discovery_progress_metrics = {
+            "siteCount": 0,
+            "personalSiteCount": 0,
+            "teamSiteCount": 0,
+            "listCount": 0,
+            "licenseCount": 0,
+            "driveCount": 0,
+        }
+
+        self.progress_update_callback("site_discovery", status="Fetching...", count=0)
+        metrics["licenseMetrics"] = self._get_license_metrics(site_discovery_progress_metrics, failures)
+
+        self._configure_executor_from_license_counts(metrics["licenseMetrics"])
+
+        has_emails = "emailIds" in data and len(data["emailIds"]) > 0
+        has_urls = "siteUrls" in data and len(data["siteUrls"]) > 0
+
+        if not has_emails and not has_urls:
+            top_level_sites = self._get_top_level_sites(metrics, site_discovery_progress_metrics, failures)
+        else:
+            top_level_sites = []
+            
+            if has_emails:
+                mail_to_top_level_site = self._get_sites_for_users(data["emailIds"], site_discovery_progress_metrics)
+                for mail, site_id in mail_to_top_level_site.items():
+                    top_level_sites.append(site_id)
+                    self.site_to_metadata[site_id] = {"isPersonalSite": True}
+                    metrics["personalSiteCount"] += 1
+                
+                site_id_to_mail = {site_id: mail for mail, site_id in mail_to_top_level_site.items()}
+                metrics["siteIdToMail"] = site_id_to_mail
+
+            if has_urls:
+                url_to_site_id = self._get_sites_from_urls(data["siteUrls"], site_discovery_progress_metrics, failures)
+                for url, site_id in url_to_site_id.items():
+                    top_level_sites.append(site_id)
+                    self.site_to_metadata[site_id] = {"isPersonalSite": False}
+                    metrics["teamSiteCount"] += 1
+                
+                site_id_to_url = {site_id: url for url, site_id in url_to_site_id.items()}
+                
+            top_level_sites = list(set(top_level_sites))
+            
+        metrics["siteCount"] = len(top_level_sites)
+        all_sites = [{"siteId": site_id, "siteLevel": 0} for site_id in top_level_sites]
+        self._get_subsites_in_site(top_level_sites, all_sites, subsite_to_top_level_site, site_discovery_progress_metrics, failures, metrics, 1)
+        
+        if not has_emails and not has_urls:
+            metrics["personalSiteCount"] = site_discovery_progress_metrics.get("personalSiteCount", 0)
+            metrics["teamSiteCount"] = site_discovery_progress_metrics.get("teamSiteCount", 0)
+
+        for site_detail in all_sites:
+            metrics["siteMetrics"][site_detail["siteId"]] = {
+                "siteLevel": site_detail["siteLevel"]
+            }
+            
+        all_site_ids = [site["siteId"] for site in all_sites]
+        self._append_tenant_level_metrics(all_site_ids, metrics, drives, subsite_to_drives, site_discovery_progress_metrics, failures)
+
+        self.progress_update_callback(
+            "site_discovery", 
+            status="Done", 
+            count=site_discovery_progress_metrics.get("siteCount", 0), 
+            personalSiteCount=site_discovery_progress_metrics.get("personalSiteCount", 0),
+            teamSiteCount=site_discovery_progress_metrics.get("teamSiteCount", 0),
+            driveCount=site_discovery_progress_metrics.get("driveCount", 0), 
+            listCount=site_discovery_progress_metrics.get("listCount", 0), 
+            licenseCount=site_discovery_progress_metrics.get("licenseCount", 0),
+            recycleBinItemCount=site_discovery_progress_metrics.get("recycleBinItemCount", 0)
+        )
+
+        self.logger("Site Scanning is finished!!!!")
+
+    def _aggregate_site_structural_counts(
+        self,
+        metrics: Dict[str, Any],
+        subsite_to_drives: Dict[str, List[Any]],
+        subsite_to_top_level_site: Dict[str, str],
+    ) -> None:
+        """Aggregates listCount, subsiteCount, dlCount, and personal/team DL counts."""
+        for site_id in list(metrics["siteMetrics"].keys()):
+            top_level_site = subsite_to_top_level_site.get(site_id, site_id)
+            if top_level_site in metrics["siteMetrics"]:
+                metrics["siteMetrics"][top_level_site]["listCount"] = (
+                    metrics["siteMetrics"][top_level_site].get("listCount", 0)
+                    + self.site_to_metadata.get(site_id, {}).get("listCount", 0)
+                )
+                if site_id != top_level_site and self.config.include_recycle_bin_contents:
+                    metrics["siteMetrics"][top_level_site]["recycleBinSize"] = (
+                        metrics["siteMetrics"][top_level_site].get("recycleBinSize", 0)
+                        + metrics["siteMetrics"][site_id].get("recycleBinSize", 0)
+                    )
+                    metrics["siteMetrics"][top_level_site]["recycleBinCount"] = (
+                        metrics["siteMetrics"][top_level_site].get("recycleBinCount", 0)
+                        + metrics["siteMetrics"][site_id].get("recycleBinCount", 0)
+                    )
+
+        for subsite_id, drive_ids in subsite_to_drives.items():
+            metrics["maxSubsiteDepth"] = max(
+                metrics["maxSubsiteDepth"],
+                metrics["siteMetrics"][subsite_id]["siteLevel"],
+            )
+            top_level_site = subsite_to_top_level_site.get(subsite_id, subsite_id)
+            if top_level_site != subsite_id:
+                metrics["siteMetrics"][top_level_site]["subsiteCount"] = (
+                    metrics["siteMetrics"][top_level_site].get("subsiteCount", 0) + 1
+                )
+                metrics["subsiteCount"] += 1
+
+            metrics["siteMetrics"][top_level_site]["dlCount"] = (
+                metrics["siteMetrics"].get(top_level_site, {}).get("dlCount", 0)
+                + len(drive_ids)
+            )
+            if self._is_subsite_personal(subsite_id):
+                metrics["personalSiteDLCount"] += len(drive_ids)
+            else:
+                metrics["teamSiteDLCount"] += len(drive_ids)
+
     def _update_tenant_metrics_from_drive_metrics(
         self,
         metrics: Dict[str, Any],
@@ -436,24 +498,12 @@ class FileEstimator(Estimator):
             metrics["folderCountExceedingDepthLimit"] += drive_metric.get("folderCountExceedingDepthLimit", 0)
             metrics["fileCountExceedingDepthLimit"] += drive_metric.get("fileCountExceedingDepthLimit", 0)
         
-        # Aggregate listCount and recycleBin metrics for all sites (including those without drives or with failed drive scans)
-        for site_id in list(metrics["siteMetrics"].keys()):
-            top_level_site = subsite_to_top_level_site.get(site_id, site_id)
-            if top_level_site in metrics["siteMetrics"]:
-                metrics["siteMetrics"][top_level_site]["listCount"] = metrics["siteMetrics"][top_level_site].get("listCount", 0) + self.site_to_metadata.get(site_id, {}).get("listCount", 0)
-                if site_id != top_level_site and self.config.include_recycle_bin_contents:
-                    metrics["siteMetrics"][top_level_site]["recycleBinSize"] = metrics["siteMetrics"][top_level_site].get("recycleBinSize", 0) + metrics["siteMetrics"][site_id].get("recycleBinSize", 0)
-                    metrics["siteMetrics"][top_level_site]["recycleBinCount"] = metrics["siteMetrics"][top_level_site].get("recycleBinCount", 0) + metrics["siteMetrics"][site_id].get("recycleBinCount", 0)
+        self._aggregate_site_structural_counts(metrics, subsite_to_drives, subsite_to_top_level_site)
 
         for subsite_id, drive_ids in subsite_to_drives.items():
-            metrics["maxSubsiteDepth"] = max(metrics["maxSubsiteDepth"], metrics["siteMetrics"][subsite_id]["siteLevel"])
             top_level_site = subsite_to_top_level_site.get(subsite_id, subsite_id)
-
             subsite_item_count = 0          # Used to track if this subsite is a Large Resource
 
-            if top_level_site != subsite_id:
-                metrics["siteMetrics"][top_level_site]["subsiteCount"] = metrics["siteMetrics"][top_level_site].get("subsiteCount", 0) + 1
-            
             for drive_id in drive_ids:
                 if drive_id in metrics["driveMetrics"]:
                     drive_metric = metrics["driveMetrics"][drive_id]
@@ -526,17 +576,7 @@ class FileEstimator(Estimator):
                         "parent": top_level_site,
                         "Limit": self.config.warning_resource_count_limit
                     }
-                )            
-
-            metrics["siteMetrics"][top_level_site]["dlCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("dlCount", 0) + len(drive_ids)
-            
-            if self._is_subsite_personal(subsite_id):
-                metrics["personalSiteDLCount"] += len(drive_ids)
-            else:
-                metrics["teamSiteDLCount"] += len(drive_ids)
-            
-            if top_level_site != subsite_id:
-                metrics["subsiteCount"] += 1
+                )
 
         for site_id, metric in metrics["siteMetrics"].items():
             site_item_count = metric.get("folderCount", 0) + metric.get("fileCount", 0) + metric.get("shortcutCount", 0)

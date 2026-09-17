@@ -296,29 +296,45 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               widget_bar.set(1.0)
       elif mtype == "drive_discovery":
         count = msg.get("count", 0)
+        failed = msg.get("failed", 0)
         folder_count = msg.get("folderCount", 0)
         file_count = msg.get("fileCount", 0)
         shortcut_count = msg.get("shortcutCount", 0)
         version_count = msg.get("versionCount", 0)
         encrypted_file_count = msg.get("encryptedFileCount", 0)
+        extra_text = msg.get("extra_text", "")
+        progress = msg.get("progress", None)
         status = msg.get("status", "Scanning...")
         if "drives" in self.prog_widgets:
           widget = self.prog_widgets["drives"]["lbl"]
           bar = self.prog_widgets["drives"]["bar"]
           if status == "Fetching...":
-            bar.configure(mode="indeterminate")
-            bar.start()
-          text = f"Drives: {count}"
-          if folder_count > 0:
-            text += f" | Folders: {folder_count}"
-          if file_count > 0:
-            text += f" | Files: {file_count}"
-          if shortcut_count > 0:
-            text += f" | Shortcuts: {shortcut_count}"
-          if version_count > 0:
-            text += f" | Versions: {version_count}"
-          if encrypted_file_count > 0:
-            text += f" | Encrypted Files: {encrypted_file_count}"
+            if bar.cget("mode") != "indeterminate":
+              bar.configure(mode="indeterminate")
+              bar.start()
+          elif progress is not None and bar.winfo_exists():
+            if bar.cget("mode") == "indeterminate":
+              bar.stop()
+              bar.configure(mode="determinate")
+            bar.set(progress)
+
+          is_shallow = getattr(self, "val_shallow_scan", False)
+          if extra_text and count == 0:
+            text = extra_text
+          else:
+            if failed > 0 or is_shallow:
+              succeeded = max(0, count - failed)
+              text = f"Drives: {succeeded} succeeded | {failed} failed"
+            else:
+              text = f"Drives: {count}"
+            if is_shallow or folder_count > 0 or file_count > 0:
+              text += f" | Folders: {folder_count} | Files: {file_count}"
+            if isinstance(shortcut_count, (int, float)) and shortcut_count > 0:
+              text += f" | Shortcuts: {shortcut_count}"
+            if version_count > 0:
+              text += f" | Versions: {version_count}"
+            if encrypted_file_count > 0:
+              text += f" | Encrypted Files: {encrypted_file_count}"
           if widget.winfo_exists():
             widget.configure(
                 text=text
@@ -606,8 +622,31 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       failures = []
       if file_metrics is None:
         manager = self.factory.get_manager()
-        manager.authenticate_all(self.log_msg, required_scopes=["Sites.Read.All", "Files.Read.All", "LicenseAssignment.Read.All"])
-        estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
+        if config.shallow_scan:
+          manager.authenticate_all(
+              self.log_msg,
+              required_scopes=[
+                  "Sites.Read.All",
+                  "Files.Read.All",
+                  "LicenseAssignment.Read.All",
+                  "Reports.Read.All",
+              ],
+          )
+          estimator = self.factory.get_shallow_files_estimator(
+              progress_update_callback=self.ui_update, hard_reset=True
+          )
+        else:
+          manager.authenticate_all(
+              self.log_msg,
+              required_scopes=[
+                  "Sites.Read.All",
+                  "Files.Read.All",
+                  "LicenseAssignment.Read.All",
+              ],
+          )
+          estimator = self.factory.get_files_estimator(
+              progress_update_callback=self.ui_update, hard_reset=True
+          )
 
         # Calculate resource metrics for the tenant. Progress update to be made directly in the backend.
         input_map = self._get_input_from_csv_if_uploaded(config)
@@ -663,7 +702,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       df = pd.DataFrame(site_data)
       
       if self.show_eta:
-        df_final, batches_list, total_eta, buckets = self.calculate_migration_batches(df, file_metrics.get("licenseMetrics", {}))
+        df_final, batches_list, total_eta, buckets = (
+            shallow_ui_helpers.calculate_batches_with_shallow_exclusions(
+                self, df, file_metrics.get("licenseMetrics", {})
+            )
+        )
         
         file_metrics["batches"] = batches_list
         file_metrics["buckets"] = buckets
@@ -671,6 +714,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         file_metrics["df"] = df_final
         base_df = df_final
       else:
+        if getattr(self, "val_shallow_scan", False) and "Entities with > 200k item count" in df.columns:
+          numeric_warn = pd.to_numeric(df["Entities with > 200k item count"], errors="coerce").fillna(0)
+          df["Suggested Batch"] = numeric_warn.apply(lambda v: "Deep Scan Recommended" if v > 0 else "")
         base_df = df
 
       self.ui_update(
@@ -698,10 +744,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       total_corpus = sum([s_data.get("totalSize", 0) for s_data in site_metrics.values()])
       self.log_msg("\n" + "=" * 40)
       self.log_msg(f"TOTAL TIME: {elapsed}")
+      shortcuts_summary = shallow_ui_helpers.format_stat_value(
+          file_metrics.get("shortcutCount", 0)
+      )
       self.log_msg(
           f"Site Collections: {file_metrics.get('siteCount', 0):,} | Subsites: {file_metrics.get('subsiteCount', 0):,} | DLs: {sum(file_metrics.get('driveCounts', {}).values()):,} |"
           f" Folders: {file_metrics.get('folderCount', 0):,} | Files: {file_metrics.get('fileCount', 0):,} |"
-          f" Shortcuts: {file_metrics.get('shortcutCount', 0):,} | Lists: {file_metrics.get('listCount', 0):,}"
+          f" Shortcuts: {shortcuts_summary} | Lists: {file_metrics.get('listCount', 0):,}"
       )
       self.log_msg(f"Total Size: {self.format_size(total_corpus)}")
       self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
@@ -738,8 +787,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           amr_df.to_csv(amr_path, index=False)
           self.log_msg(f"Depth report exported to: {amr_path}")
       
-      if self.show_eta:
-        unique_batches = df_output["Suggested Batch"].unique()
+      if "Suggested Batch" in df_output.columns:
+        unique_batches = df_output["Suggested Batch"].dropna().unique()
         for batch in unique_batches:
           if not batch:
             continue
@@ -1084,7 +1133,14 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     return df_final, final_batches_list, total_eta, buckets
 
+  def format_metric(self, value):
+    if isinstance(value, str):
+      return value
+    return super().format_metric(value)
+
   def format_size(self, size_in_bytes):
+    if isinstance(size_in_bytes, str):
+      return size_in_bytes
     if size_in_bytes >= 1024**5:
       return f"{size_in_bytes / (1024**5):.2f} PB"
     elif size_in_bytes >= 1024**4:
@@ -1180,6 +1236,19 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               text_color=COLOR_TEXT_MAIN,
           ).pack(anchor="w", padx=10, pady=(0, 10))
 
+      if data.get("isShallowScan") and data.get("tenantLevelWarningResourceCount", 0) > 0:
+          rec_text = (
+              f"⚠️ {data.get('tenantLevelWarningResourceCount', 0):,} site(s) contain Document Libraries with >200k items and were excluded from ETA calculations.\n"
+              "Recommendation: Run a Deep Scan with 'Generate Folder Depth Report' enabled on these resources using the exported 'DeepScanRecommended.csv' in suggested_batches."
+          )
+          ctk.CTkLabel(
+              self.view_results,
+              text=rec_text,
+              font=FONT_BODY_BOLD,
+              text_color=COLOR_TEXT_MAIN,
+              justify="left",
+          ).pack(anchor="w", padx=10, pady=(0, 10))
+
       # Cards for simple metrics
       card_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
       card_frame.pack(fill="x", pady=10)
@@ -1199,10 +1268,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if getattr(self, "val_scan_encrypted_files", False):
         self.create_stat_card(card_frame, "Total Encrypted File Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
         self.create_stat_card(card_frame, "Total Encrypted File Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
-      self.create_stat_card(card_frame, "Shortcut Count", f"{data.get('shortcutCount', 0):,}", "🔗")
+      self.create_stat_card(card_frame, "Shortcut Count", shallow_ui_helpers.format_stat_value(data.get('shortcutCount', 0)), "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
-      self.create_stat_card(card_frame, "Folder count beyond depth limit 100", f"{data.get('folderCountExceedingDepthLimit', 0):,}", "📁")
-      self.create_stat_card(card_frame, "File count beyond depth limit 100", f"{data.get('fileCountExceedingDepthLimit', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Folder count beyond depth limit 100", shallow_ui_helpers.format_stat_value(data.get('folderCountExceedingDepthLimit', 0)), "📁")
+      self.create_stat_card(card_frame, "File count beyond depth limit 100", shallow_ui_helpers.format_stat_value(data.get('fileCountExceedingDepthLimit', 0)), "📄")
       self.create_stat_card(card_frame, "Large Resource Count (Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
       self.create_stat_card(card_frame, "Warning Resource Count (Entities with >200k items)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
 
@@ -1239,7 +1308,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
       # File Size Distribution
       dist_data = data.get("tenantLevelFileSizeDistribution", data.get("fileSizeDistribution"))
-      if dist_data:
+      if dist_data and not data.get("isShallowScan"):
           ctk.CTkLabel(
               self.view_results,
               text="File Size Distribution",
@@ -1558,17 +1627,18 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       writer.writerow([]) # Blank line separator
       
       # Section 3: File Size Distribution
-      writer.writerow(["File Size Distribution", ""])
-      writer.writerow(["Range", "Count"])
-      dist_data = data.get("tenantLevelFileSizeDistribution", {})
-      buckets = dist_data.get("buckets", [])
-      for bucket in buckets:
-        range_vals = bucket.get("sizeRange", (0, 0))
-        range_str = format_range(range_vals[0], range_vals[1])
-        count = bucket.get("count", 0)
-        writer.writerow([range_str, count])
-        
-      writer.writerow([]) # Blank line separator
+      if not data.get("isShallowScan"):
+        writer.writerow(["File Size Distribution", ""])
+        writer.writerow(["Range", "Count"])
+        dist_data = data.get("tenantLevelFileSizeDistribution", {})
+        buckets = dist_data.get("buckets", [])
+        for bucket in buckets:
+          range_vals = bucket.get("sizeRange", (0, 0))
+          range_str = format_range(range_vals[0], range_vals[1])
+          count = bucket.get("count", 0)
+          writer.writerow([range_str, count])
+          
+        writer.writerow([]) # Blank line separator
       
       # Section 4: Large Resources
       if len(data.get("tenantLevelLargeResources", [])) > 0:
@@ -1826,6 +1896,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       return
 
     config = self._get_scan_configuration()
+
+    if getattr(self, "val_shallow_scan", False):
+      if not shallow_ui_helpers.ensure_certificates_and_prompt(self, config, ctk):
+        return
 
     self.stop_scan_event.clear()
     with self.log_lock:

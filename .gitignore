@@ -11,3 +11,4 @@ outputs/
 data/
 test_*.py
 .DS_Store
+certificate/
