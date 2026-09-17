@@ -85,7 +85,7 @@ The Migration Planner is a desktop application designed to help deployment partn
 
 ### 1. Python Version
 
-Please ensure you have **Python 3.10** or newer installed on your system.
+Please ensure you have a stable version of **Python 3.10** or newer installed on your system (avoid beta or release candidate versions).
 
 ### 2. Installation Steps
 
