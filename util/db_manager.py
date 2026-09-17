@@ -192,6 +192,15 @@ class DatabaseManager:
             (chat_id, count),
         )
 
+  def get_processed_channel_keys(self, limit: int) -> list[tuple[str, str]]:
+    """Retrieves already processed (team_id, channel_id) pairs up to limit."""
+    with self._lock:
+      cursor = self._conn.execute(
+          "SELECT team_id, channel_id FROM processed_channels LIMIT ?",
+          (limit,),
+      )
+      return [(row[0], row[1]) for row in cursor.fetchall()]
+
   def get_processed_channel(
       self, team_id: str, channel_id: str
   ) -> tuple[int, int, int] | None:
@@ -300,14 +309,58 @@ class DatabaseManager:
       return row[0] if row else 0
 
   def get_random_discovered_chat_sample(self, sample_size: int) -> list[str]:
-    """Retrieves a randomized unique sample pool of discovered chat IDs."""
+    """Retrieves a randomized unique sample pool of discovered chat IDs, reusing already processed chats first."""
     with self._lock:
+      cursor = self._conn.execute(
+          "SELECT chat_id FROM processed_chats LIMIT ?",
+          (sample_size,),
+      )
+      cached_rows = [row[0] for row in cursor.fetchall()]
+      # Hit on a rerun when processed_chats already has at least sample_size non-meeting
+      # chats cached (e.g. a tenant with no meeting chats, or a rerun at a lower sample_percentage).
+      if len(cached_rows) >= sample_size:
+        return cached_rows[:sample_size]
+
+      # Hit on a fresh initial scan when processed_chats is empty (or if a prior sample
+      # consisted exclusively of 0-message meeting chats that are not persisted in processed_chats).
+      if not cached_rows:
+        cursor = self._conn.execute(
+            "SELECT DISTINCT value "
+            "FROM processed_users, json_each(processed_users.chat_ids) "
+            "ORDER BY random() LIMIT ?",
+            (sample_size,),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+      # Hit on a rerun when processed_chats contains the non-meeting portion of the prior sample
+      # (0 < len(cached_rows) < sample_size), or when rerunning with a higher sample_percentage.
+      remaining = sample_size - len(cached_rows)
+      # On a rerun where processed_chats is populated (non-meeting chats),
+      # fill remaining sample slots from meeting chats first (which return 0 messages
+      # without API calls and are not stored in processed_chats) to preserve the
+      # original sample's meeting vs. non-meeting proportion and avoid recrawling.
       cursor = self._conn.execute(
           "SELECT DISTINCT value "
           "FROM processed_users, json_each(processed_users.chat_ids) "
+          "WHERE value LIKE '19:meeting_%' "
+          "AND value NOT IN (SELECT chat_id FROM processed_chats) "
           "ORDER BY random() LIMIT ?",
-          (sample_size,),
+          (remaining,),
       )
-      rows = cursor.fetchall()
-      return [row[0] for row in rows]
+      meeting_rows = [row[0] for row in cursor.fetchall()]
+      remaining -= len(meeting_rows)
+
+      other_rows: list[str] = []
+      if remaining > 0:
+        cursor = self._conn.execute(
+            "SELECT DISTINCT value "
+            "FROM processed_users, json_each(processed_users.chat_ids) "
+            "WHERE value NOT IN (SELECT chat_id FROM processed_chats) "
+            "AND value NOT LIKE '19:meeting_%' "
+            "ORDER BY random() LIMIT ?",
+            (remaining,),
+        )
+        other_rows = [row[0] for row in cursor.fetchall()]
+
+      return cached_rows + meeting_rows + other_rows
 

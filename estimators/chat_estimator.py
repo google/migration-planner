@@ -7,6 +7,7 @@ from util.batch_client import GraphBatchClient
 from util.connectors import UrlInvoker
 from util.constants import BLENDED_MSG_COST_SEC
 from util.constants import CHANNEL_COST_SEC
+from util.constants import MAX_ALLOWED_BATCHES
 from util.constants import MAX_TEAMS_USERS_PER_BATCH
 from util.constants import MEMBERSHIP_COST_SEC
 from util.constants import CHANNEL_QPS
@@ -192,7 +193,12 @@ class ChatEstimator(Estimator):
     )
     candidate_hours = [3, 6, 12, 24, 48, 72, 120, 168, 240, 360, 480, 720]
 
-    MAX_ALLOWED_BATCHES = 50
+    raw_max_batches = getattr(self.config, "eta_max_batches", None)
+    max_allowed_batches = (
+        min(MAX_ALLOWED_BATCHES, max(1, int(raw_max_batches)))
+        if isinstance(raw_max_batches, (int, float))
+        else MAX_ALLOWED_BATCHES
+    )
     best_total_eta = float("inf")
 
     def calculate_batch_eta_fast(s_idx, e_idx):
@@ -268,7 +274,7 @@ class ChatEstimator(Estimator):
         })
         start_idx = end_idx
 
-      if len(batches) <= MAX_ALLOWED_BATCHES:
+      if len(batches) <= max_allowed_batches:
         buckets = [0.0] * min(num_parallel, max(1, len(batches)))
         for b in batches:
           idx = buckets.index(min(buckets))

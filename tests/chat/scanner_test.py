@@ -263,6 +263,48 @@ class TestMigrationScanner(unittest.TestCase):
     self.assertEqual(counts["user1"], ["chat1", "19:meeting_A@thread.v2", "chat2"])
     self.scanner.db.save_processed_user.assert_called_once_with("user1", ["chat1", "19:meeting_A@thread.v2", "chat2"])
 
+  def test_fetch_user_chat_counts_batch_deduplicates_across_users(self):
+    """Verify fetch_user_chat_counts_batch deduplicates shared chats across users."""
+    users = [{"id": "user1"}, {"id": "user2"}]
+    self.scanner.db.get_processed_user.return_value = None
+    self.scanner.chat_batch_limiter = mock.Mock()
+
+    def mock_batch(*args, **kwargs):
+      return {
+          "0": {
+              "status": 200,
+              "body": {
+                  "value": [{"id": "chat1"}, {"id": "chat_shared"}, {"id": "19:meeting_shared"}]
+              },
+          },
+          "1": {
+              "status": 200,
+              "body": {
+                  "value": [{"id": "chat_shared"}, {"id": "19:meeting_shared"}, {"id": "chat2"}]
+              },
+          },
+      }
+
+    self.client.execute_batch_request.side_effect = mock_batch
+    counts = self.scanner.fetch_user_chat_counts_batch(self.token_manager, users)
+
+    self.assertEqual(counts["user1"], ["chat1", "chat_shared", "19:meeting_shared"])
+    self.assertEqual(counts["user2"], ["chat2"])
+
+  def test_sqlite_rerun_reuses_cached_chats_without_recrawl(self):
+    """Verify that rerunning against an existing SQLite DB reuses processed_chats and processed_users."""
+    real_db = DatabaseManager(":memory:")
+    try:
+      real_db.save_processed_user("u1", ["c1", "c2"])
+      real_db.save_processed_user("u2", ["c2", "c3"])
+      real_db.save_processed_chat("c2", 42)
+
+      sample = real_db.get_random_discovered_chat_sample(1)
+      self.assertEqual(sample, ["c2"])
+      self.assertEqual(real_db.get_processed_chat("c2"), 42)
+    finally:
+      real_db.close()
+
 
 
 
@@ -448,15 +490,51 @@ class TestChatScannerService(unittest.TestCase):
         
         # Average messages per chat = 10 / 2 = 5
         # Average memberships per chat = 6 / 2 = 3
-        # user1 has 2 chats -> messages = 10, memberships = 6
+        # user1 claims both 'chat1' and 'chat_shared' -> 2 chats, messages = 10, memberships = 6
         self.assertEqual(result["u_map"]["user1@test.com"]["chats"], 2)
         self.assertEqual(result["u_map"]["user1@test.com"]["messages"], 10)
         self.assertEqual(result["u_map"]["user1@test.com"]["memberships"], 6)
         
-        # user2 has 1 chat -> messages = 5, memberships = 3
-        self.assertEqual(result["u_map"]["user2@test.com"]["chats"], 1)
-        self.assertEqual(result["u_map"]["user2@test.com"]["messages"], 5)
-        self.assertEqual(result["u_map"]["user2@test.com"]["memberships"], 3)
+        # user2's 'chat_shared' was already claimed by user1 -> 0 additional unique chats
+        self.assertEqual(result["u_map"]["user2@test.com"]["chats"], 0)
+        self.assertEqual(result["u_map"]["user2@test.com"]["messages"], 0)
+        self.assertEqual(result["u_map"]["user2@test.com"]["memberships"], 0)
+
+  def test_execute_scan_sampling_resolves_guid_key_in_u_map(self):
+    """Verify tenant scan resolves chat_counts keyed by GUID when u_map keys by userPrincipalName."""
+    config = mock.Mock()
+    config.mode = "sampling"
+    config.user_source = "tenant"
+    config.csv_path = None
+    config.tenant_id = "tenant_id"
+    config.percent = 100.0
+    config.sample_percentage = 100.0
+
+    scanner_mock = mock.Mock()
+    scanner_mock.fetch_all_users_graph.return_value = [
+        {"id": "guid_1", "userPrincipalName": "u1@test.com"},
+        {"id": "guid_2", "userPrincipalName": "u2@test.com"},
+    ]
+    scanner_mock.fetch_all_teams_graph.return_value = []
+    scanner_mock.fetch_user_chat_counts_batch.return_value = {
+        "guid_1": ["c1", "c2", "c3"],
+        "guid_2": ["c4"],
+    }
+    scanner_mock.fetch_all_channels_for_teams_batch.return_value = {}
+    scanner_mock.fetch_team_details_batch.return_value = {}
+    self._configure_scanner_mock_db(scanner_mock)
+
+    with mock.patch('chat.chat_service.MigrationScanner') as mock_scanner_class:
+      mock_scanner_class.return_value = scanner_mock
+      self.service._scan_sampled_chats = mock.Mock(return_value=(40, 8, 4))
+      self.service._scan_sampled_channels_async = mock.AsyncMock(return_value=(0, 0))
+
+      result = self.service.execute_scan(config, self.token_manager, 10)
+
+      self.assertEqual(result["u_map"]["u1@test.com"]["chats"], 3)
+      self.assertEqual(result["u_map"]["u1@test.com"]["messages"], 30)
+      self.assertEqual(result["u_map"]["u2@test.com"]["chats"], 1)
+      self.assertEqual(result["u_map"]["u2@test.com"]["messages"], 10)
 
   @mock.patch('pandas.read_csv')
   @mock.patch('os.path.exists')
