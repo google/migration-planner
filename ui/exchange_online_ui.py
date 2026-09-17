@@ -264,7 +264,7 @@ class MigrationEstimatorTool(ctk.CTk):
     ui_utils.build_concurrency_settings_slider(self, ctk)
 
     # Migration Plan Options
-    ui_utils.build_migration_plan_options(self, ctk)
+    ui_utils.build_migration_plan_options(self, ctk, max_parallel_batches=20)
 
   # ==========================
   # VIEW: PROGRESS
@@ -852,6 +852,14 @@ class MigrationEstimatorTool(ctk.CTk):
           self.create_batch_bar(master_container, w, max_batch_eta)
 
       self.view_results.update_idletasks()
+      # The dynamically rendered Gantt chart / batch details can change the
+      # scrollable content's total height, but the canvas scrollregion is
+      # not always recomputed automatically. Without this, content past the
+      # window's visible area (e.g. the disclaimer footnote) becomes
+      # unreachable until the window is manually resized.
+      self.view_results._parent_canvas.configure(
+          scrollregion=self.view_results._parent_canvas.bbox("all")
+      )
       try:
         self.view_results._parent_canvas.yview_moveto(current_scroll)
       except:
@@ -1118,6 +1126,16 @@ class MigrationEstimatorTool(ctk.CTk):
       self.adv_frame.pack(fill="x", pady=10, after=self.btn_adv)
       self.btn_adv.configure(text="Hide Advanced Settings ▲")
       self.adv_visible = True
+
+    # Revealing/hiding the advanced settings changes the scrollable
+    # content's total height, but CTkScrollableFrame does not always
+    # recompute its scroll region until the window is manually resized.
+    # Force a refresh so newly shown fields (e.g. Migration Plan Options)
+    # are reachable via scrolling right away.
+    self.scroll_connect.update_idletasks()
+    self.scroll_connect._parent_canvas.configure(
+        scrollregion=self.scroll_connect._parent_canvas.bbox("all")
+    )
 
   def browse_user_csv(self):
     f = filedialog.askopenfilename(filetypes=[("CSV", "*.csv")])
@@ -2553,27 +2571,6 @@ class MigrationEstimatorTool(ctk.CTk):
     phase_events = 0
     phase_cals = 0
     
-    state_lock = threading.Lock()
-
-    def realtime_callback(count):
-        nonlocal phase_total
-        with state_lock:
-            phase_total += count
-            current_cumulative = phase_total
-            current_processed = users_processed
-            current_failed = users_failed
-
-        self.ui_update(
-            "scan_progress",
-            source=res_type,
-            progress=current_processed / total_users if total_users > 0 else 0,
-            cumulative=current_cumulative,
-            processed=current_processed,
-            failed=current_failed,
-            total=total_users,
-            extra_text="",
-        )
-
     executor = ThreadPoolExecutor(max_workers=workers)
     try:
       # Map the Future to its specific chunk so we know exactly how many users it contained
@@ -2585,7 +2582,6 @@ class MigrationEstimatorTool(ctk.CTk):
               manager,
               self.log_msg,
               self.stop_scan_event,
-              realtime_callback if res_type == "encrypted_messages" else None
           ): chunk
           for chunk in chunks
       }
@@ -2610,7 +2606,7 @@ class MigrationEstimatorTool(ctk.CTk):
           elif res_type == "encrypted_messages":
             val = r.get("encrypted_emails", 0)
             stats["encrypted_emails"] += val
-            # phase_total is updated via callback in real-time
+            phase_total += val
           elif res_type == "contacts":
             val = r["contacts"]
             stats["contacts"] += val
