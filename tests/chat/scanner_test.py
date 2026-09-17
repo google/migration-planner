@@ -305,6 +305,32 @@ class TestMigrationScanner(unittest.TestCase):
     finally:
       real_db.close()
 
+  def test_fetch_all_users_graph_filters_non_user_mailboxes(self):
+    """Verify fetch_all_users_graph filters out non-user mailboxes and guests."""
+    mock_response = mock.Mock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "value": [
+            {"id": "user1", "userPrincipalName": "user1@example.com"},
+            {"id": "user2", "userPrincipalName": "user2@example.com"},
+        ]
+    }
+    self.client.get_with_retry.return_value = mock_response
+
+    users = self.scanner.fetch_all_users_graph(self.token_manager)
+
+    self.assertEqual(len(users), 2)
+    self.client.get_with_retry.assert_called_once()
+    call_args = self.client.get_with_retry.call_args
+    called_url = call_args[0][1]
+    called_headers = call_args[0][2]
+    self.assertIn(
+        "userType eq 'Member' and assignedPlans/any(c:c/service eq 'TeamspaceAPI' and c/capabilityStatus eq 'Enabled')",
+        called_url,
+    )
+    self.assertIn("$count=true", called_url)
+    self.assertEqual(called_headers.get("ConsistencyLevel"), "eventual")
+
 
 
 

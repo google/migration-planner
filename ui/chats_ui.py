@@ -2008,11 +2008,24 @@ class ChatMigrationEstimatorTool(ctk.CTk):
 
   def _get_all_users_graph(self, manager):
     users = []
-    url = f"{GRAPH_BASE_URL}/users?$select=id,userPrincipalName&$top=999"
+    filter_query = (
+        "userType eq 'Member' and "
+        "assignedPlans/any(c:c/service eq 'TeamspaceAPI' and c/capabilityStatus eq 'Enabled')"
+    )
+    url = (
+        f"{GRAPH_BASE_URL}/users"
+        f"?$filter={filter_query}"
+        "&$select=id,userPrincipalName"
+        "&$top=999"
+        "&$count=true"
+    )
     token_data = manager.get_valid_token_slot()
     token = token_data["token"]
     session = manager.get_session()
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "ConsistencyLevel": "eventual",
+    }
     try:
       while url and not self.stop_scan_event.is_set():
         # Check mid-loop for extremely long tenant scans
@@ -2020,7 +2033,10 @@ class ChatMigrationEstimatorTool(ctk.CTk):
           manager.return_token_slot(token_data)
           token_data = manager.get_valid_token_slot()
           token = token_data["token"]
-          headers = {"Authorization": f"Bearer {token}"}
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "ConsistencyLevel": "eventual",
+          }
 
         r = session.get(url, headers=headers)
         if r.status_code != 200:
