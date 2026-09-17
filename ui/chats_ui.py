@@ -65,7 +65,7 @@ class ChatMigrationEstimatorTool(ctk.CTk):
     self.load_multiplier = ctk.IntVar(value=1)
     self.retries = ctk.IntVar(value=MAX_RETRIES)
     self.backoff = ctk.IntVar(value=BACKOFF)
-    self.eta_max_batches = ctk.IntVar(value=50)
+    self.eta_max_batches = ctk.IntVar(value=DEFAULT_ETA_MAX_BATCHES)
     self.parallel_batches = ctk.IntVar(value=10)
     self.scan_result_csv_path = ctk.StringVar()
     self.id_to_display_name = {}
@@ -374,9 +374,9 @@ class ChatMigrationEstimatorTool(ctk.CTk):
     ).grid(row=1, column=3, sticky="w", padx=5, pady=5)
     slider_max_batches = ctk.CTkSlider(
         eta_settings_frame,
-        from_=10,
-        to=100,
-        number_of_steps=18,
+        from_=MIN_ALLOWED_BATCHES,
+        to=MAX_ALLOWED_BATCHES,
+        number_of_steps=(MAX_ALLOWED_BATCHES - MIN_ALLOWED_BATCHES) // 5,
         variable=self.eta_max_batches,
     )
     slider_max_batches.grid(row=1, column=4, sticky="ew", padx=5, pady=5)
@@ -1661,6 +1661,7 @@ class ChatMigrationEstimatorTool(ctk.CTk):
         load_multiplier=self.load_multiplier.get(),
         retries=self.retries.get(),
         backoff=self.backoff.get(),
+        eta_max_batches=self.eta_max_batches.get(),
         parallel_batches=self.parallel_batches.get(),
         mode=self.mode.get(),
         sample_percentage=self.sample_percentage.get(),

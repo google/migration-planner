@@ -79,6 +79,33 @@ class TestChatEstimator(unittest.TestCase):
         "Expected at least one wave to contain both users and teams co-located.",
     )
 
+  def test_calculate_migration_eta_respects_eta_max_batches(self):
+    """Verify that config.eta_max_batches up to 250 is honored when generating waves."""
+    data = {
+        "private_channels": 0,
+        "total_teams": 0,
+        "total_users": 120,
+        "t_map": {},
+        "u_map": {
+            f"user_{i}@test.com": {"chats": 200, "messages": 50000, "memberships": 400}
+            for i in range(120)
+        },
+    }
+
+    self.config.parallel_batches = 7
+    self.config.eta_max_batches = 250
+    eta_250 = self.estimator.calculate_migration_eta(data)
+    batches_250 = list(self.estimator.last_batches)
+
+    self.config.eta_max_batches = 15
+    eta_15 = self.estimator.calculate_migration_eta(data)
+    batches_15 = list(self.estimator.last_batches)
+
+    self.assertLessEqual(len(batches_15), 15)
+    self.assertLessEqual(len(batches_250), 250)
+    self.assertGreater(len(batches_250), 15)
+    self.assertLessEqual(eta_250, eta_15)
+
 
 if __name__ == "__main__":
   unittest.main()

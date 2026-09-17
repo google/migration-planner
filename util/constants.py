@@ -33,6 +33,9 @@ CHANNEL_QPS: float = 2.0
 MESSAGE_QPS: float = 22.0
 MEMBERSHIP_QPS: float = 75.0
 MAX_TEAMS_USERS_PER_BATCH: int = 10000
+MIN_ALLOWED_BATCHES: int = 10
+DEFAULT_ETA_MAX_BATCHES: int = 50
+MAX_ALLOWED_BATCHES: int = 250
 
 # --- UI Colors (Google Material 3) ---
 COLOR_PRIMARY = "#0B57D0"  # Google Blue
