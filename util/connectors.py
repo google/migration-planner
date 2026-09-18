@@ -180,7 +180,8 @@ class UrlInvoker():
                                 next_retry_requests.append(current_batch_map[req_id])
                                 retry_after_delay = max(retry_after_delay, 2)
                         elif "error" in response_item["body"]:
-                            # Failsafe for uncaught errors.
+                            # Failsafe for uncaught errors; pass through so callers record accurate failure status/message.
+                            successful_responses[req_id] = response_item
                             logger(f"Error encountered in batch response in {context}: {response_item['body']['error']}")
                         else:
                             successful_responses[req_id] = response_item
@@ -263,7 +264,7 @@ class UrlInvoker():
                     current_try -= 1
                     continue
                 else:
-                    logger(f"Batch failed with {resp.status_code}: {resp.text[:100]}")
+                    logger(f"Batch failed with {resp.status_code}: {resp.text}")
                     break
             except Exception as e:
                 logger(
@@ -294,3 +295,4 @@ class UrlInvoker():
             )
 
         return successful_responses
+
