@@ -812,9 +812,22 @@ class MigrationScanner:
   ) -> list[dict[str, typing.Any]]:
     """Retrieves absolute unified roster of users across target directory."""
     users = []
-    url = f"{GRAPH_BASE_URL}/users?$select=id,userPrincipalName&$top=999"
+    filter_query = (
+        "userType eq 'Member' and "
+        "assignedPlans/any(c:c/service eq 'TeamspaceAPI' and c/capabilityStatus eq 'Enabled')"
+    )
+    url = (
+        f"{GRAPH_BASE_URL}/users"
+        f"?$filter={filter_query}"
+        "&$select=id,userPrincipalName"
+        "&$top=999"
+        "&$count=true"
+    )
     token_data = token_manager.get_valid_token_slot()
-    headers = {"Authorization": f"Bearer {token_data['token']}"}
+    headers = {
+        "Authorization": f"Bearer {token_data['token']}",
+        "ConsistencyLevel": "eventual",
+    }
     try:
       while url and not self.stop_event.is_set():
         response = self.client.get_with_retry(
