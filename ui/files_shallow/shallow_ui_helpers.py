@@ -80,7 +80,14 @@ def build_shallow_scan_toggle(tool, ctk):
 
 
 def on_shallow_scan_toggle(tool):
-  """Handles enabling/disabling UI controls when Shallow Scan is toggled."""
+  """Handles enabling/disabling UI controls when Shallow Scan is toggled.
+
+  Shallow Scan reads aggregate StorageMetrics and ItemCounts only, so settings
+  that require per-file requests or a folder tree are cleared and disabled.
+  Source selection is left untouched: OneDrive, SharePoint, or both are all
+  supported, since every document library is scanned through the same
+  per-library REST path.
+  """
   is_shallow = tool.shallow_scan.get()
 
   additional_checkboxes = [
@@ -90,33 +97,11 @@ def on_shallow_scan_toggle(tool):
       (tool.generate_folder_amr_map, getattr(tool, "cb_depth_report", None)),
   ]
 
-  if is_shallow:
-    # Uncheck and disable incompatible additional settings
-    for var, widget in additional_checkboxes:
+  for var, widget in additional_checkboxes:
+    if is_shallow:
       var.set(False)
-      if widget is not None:
-        widget.configure(state="disabled")
-
-    # Ensure Personal Sites (OneDrive) is selected; temporarily disable SharePoint Sites
-    tool.include_personal_sites.set(True)
-    tool.include_team_sites.set(False)
-    if (
-        hasattr(tool, "cb_sharepoint_sites")
-        and tool.cb_sharepoint_sites is not None
-    ):
-      tool.cb_sharepoint_sites.configure(state="disabled")
-  else:
-    # Re-enable all additional settings checkboxes
-    for _, widget in additional_checkboxes:
-      if widget is not None:
-        widget.configure(state="normal")
-
-    # Re-enable SharePoint Sites checkbox
-    if (
-        hasattr(tool, "cb_sharepoint_sites")
-        and tool.cb_sharepoint_sites is not None
-    ):
-      tool.cb_sharepoint_sites.configure(state="normal")
+    if widget is not None:
+      widget.configure(state="disabled" if is_shallow else "normal")
 
 
 class CertDecryptionErrorDialog:

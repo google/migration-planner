@@ -54,12 +54,30 @@ class SpRestConnector:
       raise ValueError(f"Invalid SharePoint URL: {web_url}")
     return parsed.netloc
 
-  def _get_escaped_documents_path(self, web_url: str) -> Tuple[str, str]:
-    """Returns (base_url, escaped_documents_rel_path) for SharePoint REST calls."""
-    base_url = web_url.rstrip("/")
-    server_rel_path = unquote(urlparse(base_url).path.rstrip("/"))
-    escaped_rel_path = server_rel_path.replace("'", "''")
-    return base_url, f"{escaped_rel_path}/Documents"
+  def _split_library_endpoint(
+      self, web_base_url: str, library_url: str
+  ) -> Tuple[str, str, str]:
+    """Resolves REST addressing components for a single document library.
+
+    The `_api` endpoint must be rooted at the web that owns the library, while
+    the library itself is addressed by its decoded server-relative path. This
+    holds for OneDrive (`/personal/<upn>/Documents`) as well as SharePoint
+    libraries on site collections and subsites
+    (`/sites/<site>/<subsite>/Shared Documents`).
+
+    Args:
+      web_base_url: Absolute URL of the web owning the library.
+      library_url: Absolute URL of the document library.
+
+    Returns:
+      Tuple of (base_url, escaped_library_rel_path, domain).
+    """
+    base_url = web_base_url.rstrip("/")
+    domain = self._extract_domain(base_url)
+    library_rel_path = unquote(urlparse(library_url.rstrip("/")).path)
+    if not library_rel_path:
+      raise ValueError(f"Invalid document library URL: {library_url}")
+    return base_url, library_rel_path.replace("'", "''"), domain
 
   def _execute_get(
       self,
@@ -179,51 +197,54 @@ class SpRestConnector:
 
   def get_item_counts(
       self,
-      web_url: str,
+      web_base_url: str,
+      library_url: str,
       logger: Optional[Callable[[str], None]] = None,
       stop_event: Optional[threading.Event] = None,
   ) -> int:
-    """Fetches recursive Documents library item count (files + folders) for a OneDrive site.
+    """Fetches the recursive item count (files + folders) for a document library.
 
     Endpoint:
-      GET {base_url}/_api/web/GetList('{escaped_rel_path}/Documents')?$select=ItemCount
+      GET {base_url}/_api/web/GetList('{library_rel_path}')?$select=ItemCount
     """
     if logger is None:
       logger = lambda x: None
 
-    domain = self._extract_domain(web_url)
-    base_url, documents_rel_path = self._get_escaped_documents_path(web_url)
+    base_url, library_rel_path, domain = self._split_library_endpoint(
+        web_base_url, library_url
+    )
     endpoint = (
-        f"{base_url}/_api/web/GetList('{documents_rel_path}')"
-        "?$select=ItemCount"
+        f"{base_url}/_api/web/GetList('{library_rel_path}')?$select=ItemCount"
     )
     data = self._execute_get(endpoint, base_url, domain, logger, stop_event)
     return self._parse_int(data.get("ItemCount"))
 
   def get_storage_metrics(
       self,
-      web_url: str,
+      web_base_url: str,
+      library_url: str,
       logger: Optional[Callable[[str], None]] = None,
       stop_event: Optional[threading.Event] = None,
   ) -> Dict[str, int]:
-    """Fetches recursive StorageMetrics from the OneDrive Documents root folder.
+    """Fetches recursive StorageMetrics from a document library's root folder.
 
     Endpoint:
-      GET {base_url}/_api/web/GetFolderByServerRelativeUrl('{escaped_rel_path}/Documents')?$select=StorageMetrics&$expand=StorageMetrics
+      GET {base_url}/_api/web/GetFolderByServerRelativeUrl('{library_rel_path}')?$select=StorageMetrics&$expand=StorageMetrics
 
     Returns:
       Dict with keys:
-        - file_count: TotalFileCount (recursive files count in /Documents)
+        - file_count: TotalFileCount (recursive files count in the library)
         - active_size_bytes: TotalFileStreamSize (current versions only)
         - total_size_bytes: TotalSize (including version history and metadata)
     """
     if logger is None:
       logger = lambda x: None
 
-    domain = self._extract_domain(web_url)
-    base_url, documents_rel_path = self._get_escaped_documents_path(web_url)
+    base_url, library_rel_path, domain = self._split_library_endpoint(
+        web_base_url, library_url
+    )
     endpoint = (
-        f"{base_url}/_api/web/GetFolderByServerRelativeUrl('{documents_rel_path}')"
+        f"{base_url}/_api/web/GetFolderByServerRelativeUrl('{library_rel_path}')"
         "?$select=StorageMetrics&$expand=StorageMetrics"
     )
     data = self._execute_get(endpoint, base_url, domain, logger, stop_event)
@@ -239,22 +260,27 @@ class SpRestConnector:
         "total_size_bytes": self._parse_int(storage_metrics.get("TotalSize")),
     }
 
-  def get_onedrive_metrics(
+  def get_library_metrics(
       self,
-      web_url: str,
+      web_base_url: str,
+      library_url: str,
       logger: Optional[Callable[[str], None]] = None,
       stop_event: Optional[threading.Event] = None,
   ) -> Dict[str, int]:
-    """Fetches recursive ItemCount and StorageMetrics for a OneDrive site using two direct GET calls.
+    """Fetches recursive ItemCount and StorageMetrics for one document library.
 
-    Executes sequentially per OneDrive over the persistent HTTP Keep-Alive session:
-      1. GET .../_api/web/GetList('.../Documents')?$select=ItemCount
-      2. GET .../_api/web/GetFolderByServerRelativeUrl('.../Documents')?$select=StorageMetrics&$expand=StorageMetrics
+    Executes sequentially per library over the persistent HTTP Keep-Alive
+    session:
+      1. GET .../_api/web/GetList('{library_rel_path}')?$select=ItemCount
+      2. GET .../_api/web/GetFolderByServerRelativeUrl('{library_rel_path}')?$select=StorageMetrics&$expand=StorageMetrics
+
+    Both calls must succeed; any failure propagates so the caller can record the
+    library as failed rather than reporting partial counts.
 
     Returns:
       Dict containing:
-        - item_count: total recursive items (files + folders) in library
-        - file_count: total recursive files in site
+        - item_count: total recursive items (files + folders) in the library
+        - file_count: total recursive files in the library
         - folder_count: max(0, item_count - file_count)
         - active_size_bytes: active file stream size in bytes (TotalFileStreamSize)
         - total_size_bytes: total storage size including versions (TotalSize)
@@ -262,18 +288,18 @@ class SpRestConnector:
     if logger is None:
       logger = lambda x: None
 
-    item_count = self.get_item_counts(web_url, logger, stop_event)
-    storage = self.get_storage_metrics(web_url, logger, stop_event)
+    item_count = self.get_item_counts(
+        web_base_url, library_url, logger, stop_event
+    )
+    storage = self.get_storage_metrics(
+        web_base_url, library_url, logger, stop_event
+    )
 
     file_count = storage["file_count"]
-    active_size_bytes = storage["active_size_bytes"]
-    total_size_bytes = storage["total_size_bytes"]
-    folder_count = max(0, item_count - file_count)
-
     return {
         "item_count": item_count,
         "file_count": file_count,
-        "folder_count": folder_count,
-        "active_size_bytes": active_size_bytes,
-        "total_size_bytes": total_size_bytes,
+        "folder_count": max(0, item_count - file_count),
+        "active_size_bytes": storage["active_size_bytes"],
+        "total_size_bytes": storage["total_size_bytes"],
     }

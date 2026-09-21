@@ -15,6 +15,7 @@
 """Shallow Scan estimator for OneDrive and SharePoint files."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -25,6 +26,27 @@ from util.enums import FailureType, ResourceType
 from util.files_shallow.cert_token_manager import CertTokenManager
 from util.files_shallow.sp_rest_connector import SpRestConnector
 from util.utils import ScanConfig
+
+
+@dataclass(frozen=True)
+class LibraryTarget:
+  """A single document library to query, resolved during Site Discovery.
+
+  Attributes:
+    drive_id: Graph drive id, used as the report-facing resource id.
+    library_url: Absolute URL of the document library.
+    web_base_url: Absolute URL of the web owning the library. SharePoint's
+      `_api` endpoints are web-scoped, so subsite libraries must be addressed
+      through their own web rather than the site collection root.
+    owning_site_id: Site (or subsite) that directly owns the library.
+    top_level_site_id: Root site collection the metrics roll up into.
+  """
+
+  drive_id: str
+  library_url: str
+  web_base_url: str
+  owning_site_id: str
+  top_level_site_id: str
 
 
 class ShallowFileEstimator(FileEstimator):
@@ -107,93 +129,173 @@ class ShallowFileEstimator(FileEstimator):
       s_data.setdefault("totalSize", 0)
       s_data.setdefault("resourceCount", 0)
 
+  def _build_library_targets(
+      self,
+      metrics: Dict[str, Any],
+      subsite_to_drives: Dict[str, List[Any]],
+      subsite_to_top_level_site: Dict[str, str],
+      failures: List[Dict[str, str]],
+  ) -> List[LibraryTarget]:
+    """Expands Site Discovery output into the flat list of libraries to query.
+
+    Every document library found during discovery is included without further
+    filtering, so Shallow and Deep scans operate on an identical library set.
+    """
+    targets: List[LibraryTarget] = []
+
+    for owning_site_id, drive_ids in subsite_to_drives.items():
+      top_level_site_id = subsite_to_top_level_site.get(
+          owning_site_id, owning_site_id
+      )
+      if top_level_site_id not in metrics["siteMetrics"]:
+        continue
+
+      web_base_url = self.id_to_display.get(owning_site_id, "")
+      if not web_base_url.startswith("http"):
+        failures.append({
+            "type": FailureType.NOT_FOUND.name,
+            "statusCode": None,
+            "message": (
+                f"Skipping site {owning_site_id}: no resolvable web URL for "
+                "SharePoint REST addressing."
+            ),
+        })
+        continue
+
+      for drive_id in drive_ids:
+        library_url = self.id_to_display.get(drive_id, "")
+        if not library_url.startswith("http"):
+          failures.append({
+              "type": FailureType.NOT_FOUND.name,
+              "statusCode": None,
+              "message": (
+                  f"Skipping document library {drive_id}: no resolvable URL."
+              ),
+          })
+          continue
+
+        targets.append(
+            LibraryTarget(
+                drive_id=drive_id,
+                library_url=library_url,
+                web_base_url=web_base_url,
+                owning_site_id=owning_site_id,
+                top_level_site_id=top_level_site_id,
+            )
+        )
+
+    return targets
+
   def _pre_authenticate_domains(
-      self, site_ids: List[str], sp_connector: SpRestConnector
+      self, targets: List[LibraryTarget], sp_connector: SpRestConnector
   ) -> None:
     """Pre-authenticates unique SharePoint domains before launching workers."""
     domains = set()
-    for site_id in site_ids:
-      web_url = self.id_to_display.get(site_id, "")
-      if web_url and web_url.startswith("http"):
-        parsed = urlparse(web_url)
-        if parsed.netloc:
-          domains.add(parsed.netloc)
+    for target in targets:
+      parsed = urlparse(target.web_base_url)
+      if parsed.netloc:
+        domains.add(parsed.netloc)
 
-    for domain in domains:
+    for domain in sorted(domains):
       if self.is_hard_stop_requested():
         break
       sp_connector.cert_token_manager.ensure_domain_authenticated(
           domain, self.logger
       )
 
-  def _evaluate_thresholds_for_site(
+  def _flag_threshold_breaches(
       self,
-      target_site_id: str,
-      web_url: str,
-      item_count: int,
-      s_meta: Dict[str, Any],
       metrics: Dict[str, Any],
+      s_meta: Dict[str, Any],
+      resource_type: str,
+      resource_id: str,
+      item_count: int,
+      parent_id: str,
   ) -> None:
-    """Evaluates >500k and >200k item count limits for DL and Site Collection."""
-    dl_id = f"{web_url.rstrip('/')}/Documents"
-    self.id_to_display[dl_id] = dl_id
+    """Records Large (>500k) and Warning (>200k) breaches for one resource.
 
+    Counters are always incremented on the owning root site collection so the
+    site report aggregates identically to Deep Scan.
+    """
     if item_count > self.config.large_resource_count_limit:
       s_meta["largeResourceCount"] += 1
       metrics["tenantLevelLargeResources"].append({
-          "type": ResourceType.DL.value,
-          "id": dl_id,
+          "type": resource_type,
+          "id": resource_id,
           "subTreeCount": item_count,
-          "parent": target_site_id,
+          "parent": parent_id,
           "Limit": self.config.large_resource_count_limit,
       })
+
     if item_count > self.config.warning_resource_count_limit:
       s_meta["warningResourceCount"] += 1
       metrics["tenantLevelWarningResources"].append({
-          "type": ResourceType.DL.value,
-          "id": dl_id,
+          "type": resource_type,
+          "id": resource_id,
           "subTreeCount": item_count,
-          "parent": target_site_id,
+          "parent": parent_id,
           "Limit": self.config.warning_resource_count_limit,
       })
 
-    site_total_items = s_meta.get("resourceCount", item_count)
-    if site_total_items > self.config.large_resource_count_limit:
-      s_meta["largeResourceCount"] += 1
-      metrics["tenantLevelLargeResources"].append({
-          "type": ResourceType.SITE.value,
-          "id": target_site_id,
-          "subTreeCount": site_total_items,
-          "parent": "N/A (Top level site)",
-          "Limit": self.config.large_resource_count_limit,
-      })
-    if site_total_items > self.config.warning_resource_count_limit:
-      s_meta["warningResourceCount"] += 1
-      metrics["tenantLevelWarningResources"].append({
-          "type": ResourceType.SITE.value,
-          "id": target_site_id,
-          "subTreeCount": site_total_items,
-          "parent": "N/A (Top level site)",
-          "Limit": self.config.warning_resource_count_limit,
-      })
-
-  def _scan_active_onedrive_dls(
+  def _evaluate_container_thresholds(
       self,
       metrics: Dict[str, Any],
+      subsite_item_totals: Dict[str, int],
+      subsite_to_top_level_site: Dict[str, str],
+  ) -> None:
+    """Applies Subsite and Site Collection thresholds once all DLs are scanned.
+
+    Mirrors Deep Scan, which evaluates Folder, DL, Subsite and Site levels.
+    Folder level is unavailable to Shallow Scan as no folder tree is built.
+    """
+    for owning_site_id in sorted(subsite_item_totals):
+      top_level_site_id = subsite_to_top_level_site.get(
+          owning_site_id, owning_site_id
+      )
+      if owning_site_id == top_level_site_id:
+        continue
+      s_meta = metrics["siteMetrics"].get(top_level_site_id)
+      if s_meta is None:
+        continue
+      self._flag_threshold_breaches(
+          metrics,
+          s_meta,
+          ResourceType.SUBSITE.value,
+          owning_site_id,
+          subsite_item_totals[owning_site_id],
+          top_level_site_id,
+      )
+
+    for site_id in sorted(metrics["siteMetrics"]):
+      s_meta = metrics["siteMetrics"][site_id]
+      self._flag_threshold_breaches(
+          metrics,
+          s_meta,
+          ResourceType.SITE.value,
+          site_id,
+          s_meta.get("resourceCount", 0),
+          "N/A (Top level site)",
+      )
+
+  def _scan_document_libraries(
+      self,
+      metrics: Dict[str, Any],
+      targets: List[LibraryTarget],
+      subsite_to_top_level_site: Dict[str, str],
       failures: List[Dict[str, str]],
   ) -> Tuple[int, int]:
-    """Queries SharePoint REST StorageMetrics & ItemCounts for active OneDrives."""
-    active_site_ids = [
-        s_id
-        for s_id, s_data in metrics["siteMetrics"].items()
-        if s_data.get("dlCount", 0) > 0
-    ]
-    total_sites = len(active_site_ids)
+    """Queries StorageMetrics & ItemCount for every discovered document library.
+
+    Each library is scanned all-or-nothing: if either REST call fails the
+    library contributes no metrics and is counted as failed.
+    """
+    total_libraries = len(targets)
     worker_count = max(1, self.config.concurrency // 10)
 
     self.logger(
         f"[Phase 2] Querying SharePoint REST StorageMetrics & ItemCounts for "
-        f"{total_sites} active OneDrives with concurrency = {worker_count}..."
+        f"{total_libraries} document libraries with concurrency = "
+        f"{worker_count}..."
     )
 
     self.progress_update_callback(
@@ -206,7 +308,7 @@ class ShallowFileEstimator(FileEstimator):
         progress=0.0,
     )
 
-    if total_sites == 0:
+    if total_libraries == 0:
       return 0, 0
 
     sp_connector = SpRestConnector(
@@ -214,114 +316,110 @@ class ShallowFileEstimator(FileEstimator):
         max_retries=5,
         backoff=self.config.backoff,
     )
-    self._pre_authenticate_domains(active_site_ids, sp_connector)
+    self._pre_authenticate_domains(targets, sp_connector)
 
     processed_count = 0
     failed_count = 0
     running_folder_total = 0
     running_file_total = 0
+    subsite_item_totals: Dict[str, int] = {}
     lock = threading.Lock()
 
-    def _process_single_site(target_site_id: str) -> None:
-      nonlocal processed_count, failed_count, running_folder_total, running_file_total
+    def _publish_progress() -> None:
+      """Emits a drive_discovery update. Must be called while holding the lock."""
+      self.progress_update_callback(
+          "drive_discovery",
+          status="Scanning...",
+          count=processed_count,
+          failed=failed_count,
+          folderCount=running_folder_total,
+          fileCount=running_file_total,
+          progress=processed_count / max(1, total_libraries),
+      )
+
+    def _record_failure(
+        message: str, failure_type: str, status_code: Optional[int]
+    ) -> None:
+      """Marks the current library as failed and logs the reason."""
+      nonlocal processed_count, failed_count
+      with lock:
+        processed_count += 1
+        failed_count += 1
+        self.logger(message)
+        failures.append({
+            "type": failure_type,
+            "statusCode": status_code,
+            "message": message,
+        })
+        _publish_progress()
+
+    def _process_single_library(target: LibraryTarget) -> None:
+      nonlocal processed_count, running_folder_total, running_file_total
       if self.is_hard_stop_requested():
         return
 
-      s_meta = metrics["siteMetrics"][target_site_id]
-      web_url = self.id_to_display.get(target_site_id, "")
-      if not web_url or not web_url.startswith("http"):
-        with lock:
-          processed_count += 1
-          failed_count += 1
-          self.progress_update_callback(
-              "drive_discovery",
-              status="Scanning...",
-              count=processed_count,
-              failed=failed_count,
-              folderCount=running_folder_total,
-              fileCount=running_file_total,
-              progress=processed_count / max(1, total_sites),
-          )
+      try:
+        library_metrics = sp_connector.get_library_metrics(
+            target.web_base_url, target.library_url, self.logger, self.stop_event
+        )
+      except PermissionError as perm_err:
+        _record_failure(
+            f"Skipping document library {target.library_url}: {perm_err}",
+            FailureType.FAILURE_STATUS_CODE_ERROR.name,
+            403,
+        )
+        return
+      except Exception as err:
+        _record_failure(
+            "Failed StorageMetrics/ItemCounts REST call for "
+            f"{target.library_url}: {err}",
+            FailureType.UNKNOWN_ERROR.name,
+            500,
+        )
         return
 
-      try:
-        od_metrics = sp_connector.get_onedrive_metrics(
-            web_url, self.logger, self.stop_event
+      item_cnt = library_metrics["item_count"]
+      file_cnt = library_metrics["file_count"]
+      folder_cnt = library_metrics["folder_count"]
+      active_size_bytes = library_metrics["active_size_bytes"]
+      resource_cnt = max(item_cnt, folder_cnt + file_cnt)
+
+      with lock:
+        s_meta = metrics["siteMetrics"][target.top_level_site_id]
+        s_meta["fileCount"] += file_cnt
+        s_meta["folderCount"] += folder_cnt
+        s_meta["totalSize"] += active_size_bytes
+        s_meta["resourceCount"] += resource_cnt
+
+        subsite_item_totals[target.owning_site_id] = (
+            subsite_item_totals.get(target.owning_site_id, 0) + resource_cnt
         )
-        item_cnt = od_metrics["item_count"]
-        file_cnt = od_metrics["file_count"]
-        folder_cnt = od_metrics["folder_count"]
-        active_size_bytes = od_metrics["active_size_bytes"]
 
-        with lock:
-          s_meta["fileCount"] = file_cnt
-          s_meta["folderCount"] = folder_cnt
-          s_meta["totalSize"] = active_size_bytes
-          s_meta["resourceCount"] = max(item_cnt, folder_cnt + file_cnt)
+        metrics["driveMetrics"][target.drive_id] = {
+            "fileCount": file_cnt,
+            "folderCount": folder_cnt,
+            "resourceCount": resource_cnt,
+            "totalSize": active_size_bytes,
+        }
 
-          self._evaluate_thresholds_for_site(
-              target_site_id, web_url, item_cnt, s_meta, metrics
-          )
+        self._flag_threshold_breaches(
+            metrics,
+            s_meta,
+            ResourceType.DL.value,
+            target.drive_id,
+            item_cnt,
+            target.owning_site_id,
+        )
 
-          processed_count += 1
-          running_folder_total += folder_cnt
-          running_file_total += file_cnt
-
-          self.progress_update_callback(
-              "drive_discovery",
-              status="Scanning...",
-              count=processed_count,
-              failed=failed_count,
-              folderCount=running_folder_total,
-              fileCount=running_file_total,
-              progress=processed_count / max(1, total_sites),
-          )
-
-      except PermissionError as perm_err:
-        with lock:
-          processed_count += 1
-          failed_count += 1
-          self.logger(f"Skipping site {web_url}: {perm_err}")
-          failures.append({
-              "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
-              "statusCode": 403,
-              "message": str(perm_err),
-          })
-          self.progress_update_callback(
-              "drive_discovery",
-              status="Scanning...",
-              count=processed_count,
-              failed=failed_count,
-              folderCount=running_folder_total,
-              fileCount=running_file_total,
-              progress=processed_count / max(1, total_sites),
-          )
-
-      except Exception as err:
-        with lock:
-          processed_count += 1
-          failed_count += 1
-          err_msg = f"Failed StorageMetrics/ItemCounts REST call for {web_url}: {err}"
-          self.logger(err_msg)
-          failures.append({
-              "type": FailureType.UNKNOWN_ERROR.name,
-              "statusCode": 500,
-              "message": err_msg,
-          })
-          self.progress_update_callback(
-              "drive_discovery",
-              status="Scanning...",
-              count=processed_count,
-              failed=failed_count,
-              folderCount=running_folder_total,
-              fileCount=running_file_total,
-              progress=processed_count / max(1, total_sites),
-          )
+        processed_count += 1
+        running_folder_total += folder_cnt
+        running_file_total += file_cnt
+        _publish_progress()
 
     with ThreadPoolExecutor(max_workers=worker_count) as shallow_executor:
       futures = [
-          shallow_executor.submit(_process_single_site, s_id)
-          for s_id in active_site_ids
+          shallow_executor.submit(_process_single_library, target)
+          for target in targets
       ]
       for future in as_completed(futures):
         if self.is_hard_stop_requested():
@@ -330,6 +428,10 @@ class ShallowFileEstimator(FileEstimator):
           future.result()
         except Exception as exc:
           self.logger(f"Unexpected worker exception in Shallow Scan: {exc}")
+
+    self._evaluate_container_thresholds(
+        metrics, subsite_item_totals, subsite_to_top_level_site
+    )
 
     return processed_count, failed_count
 
@@ -372,9 +474,9 @@ class ShallowFileEstimator(FileEstimator):
         "phase_status", source="plan_generation", status="complete"
     )
     self.logger(
-        f"[Phase 2] Shallow Drive Discovery complete. Active DLs scanned: "
-        f"{processed_count} | Total Files: {metrics['fileCount']:,} | Total "
-        f"Folders: {metrics['folderCount']:,} | Failed: {failed_count}"
+        f"[Phase 2] Shallow Drive Discovery complete. Document libraries "
+        f"scanned: {processed_count} | Total Files: {metrics['fileCount']:,} | "
+        f"Total Folders: {metrics['folderCount']:,} | Failed: {failed_count}"
     )
 
   def calculate_resource_metrics(
@@ -414,8 +516,11 @@ class ShallowFileEstimator(FileEstimator):
       # ==========================================
       # PHASE 2: SHALLOW DRIVE DISCOVERY
       # ==========================================
-      processed_count, failed_count = self._scan_active_onedrive_dls(
-          metrics, failures
+      targets = self._build_library_targets(
+          metrics, subsite_to_drives, subsite_to_top_level_site, failures
+      )
+      processed_count, failed_count = self._scan_document_libraries(
+          metrics, targets, subsite_to_top_level_site, failures
       )
 
       if self.is_hard_stop_requested():
