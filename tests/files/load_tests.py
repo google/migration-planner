@@ -1,3 +1,16 @@
+"""Load tests for the deep (full crawl) file scan.
+
+Prerequisite: generate the synthetic tenant first, it is not checked in.
+
+    python3 tests/files/data_state_creator.py
+    python3 -m unittest tests.files.load_tests
+
+The generator also writes the expected result into the fixture, so regenerate
+it whenever data_state_creator.py or the estimator's aggregation changes.
+Use --seed N plus TEST_DATA_PATH to run against a reproducible tenant.
+See tests/README.md for the full list of suites and common failures.
+"""
+
 import unittest
 from unittest.mock import MagicMock, patch
 from estimators.file_estimator import FileEstimator
@@ -155,8 +168,9 @@ class TestFileEstimatorLoad(unittest.TestCase):
         self.assertEqual(sum(s.get("shortcutCount", 0) for s in site_metrics_values), result.get("shortcutCount", 0))
         self.assertEqual(sum(s.get("folderCountExceedingDepthLimit", 0) for s in site_metrics_values), result.get("folderCountExceedingDepthLimit", 0))
         self.assertEqual(sum(s.get("fileCountExceedingDepthLimit", 0) for s in site_metrics_values), result.get("fileCountExceedingDepthLimit", 0))
-        site_collection_large_res_count = sum(1 for res in result.get("tenantLevelLargeResources", []) if res.get("type") == "SITE COLLECTION")
-        self.assertEqual(sum(s.get("largeResourceCount", 0) for s in site_metrics_values) + site_collection_large_res_count, result.get("tenantLevelLargeResourceCount", 0))
+        # Site-level largeResourceCount already includes the site collection's own
+        # breach, so the site totals must add up to the tenant total as-is.
+        self.assertEqual(sum(s.get("largeResourceCount", 0) for s in site_metrics_values), result.get("tenantLevelLargeResourceCount", 0))
         self.assertEqual(sum(s.get("dlCount", 0) for s in site_metrics_values), sum(result.get("driveCounts", {}).values()))
 
     def _get_expected_for_subset(self, email_ids: List[str]) -> Tuple[Dict[str, Any], List[str]]:

@@ -511,6 +511,9 @@ def generate_data(
             # Check if Site Collection is a Large Resource
             total_site_count = s_metrics["folderCount"] + s_metrics["fileCount"]
             if total_site_count > 50:
+                # The estimator counts a site collection's own breach against that
+                # site's largeResourceCount, so the expectation must do the same.
+                s_metrics["largeResourceCount"] += 1
                 expected["tenantLevelLargeResources"].append({
                     "type": "SITE COLLECTION",
                     "id": root_site_id,

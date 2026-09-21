@@ -1,3 +1,13 @@
+"""Load tests for the Exchange Online shared mailbox scan.
+
+Prerequisite: generate the synthetic tenant first, it is not checked in.
+
+    python3 tests/eo_shared_mail_boxes/data_state_creator.py
+    python3 -m unittest tests.eo_shared_mail_boxes.load_tests
+
+See tests/README.md for the full list of suites and common failures.
+"""
+
 import unittest
 from unittest.mock import MagicMock, patch
 from estimators.eo_shared_mailbox_estimator import EOSharedMailBoxEstimator

@@ -1,3 +1,16 @@
+"""Load tests for the Exchange Online in-place archive scan.
+
+Prerequisite: generate the synthetic tenant first, it is not checked in.
+
+    python3 tests/eo_in_place_archives/data_state_creator.py
+    python3 -m unittest tests.eo_in_place_archives.load_tests
+
+setUp patches TokenManager.authenticate_all because the estimator
+authenticates inside __init__. Without that patch the constructor sets the
+stop event and every metric silently comes back as zero.
+See tests/README.md for the full list of suites and common failures.
+"""
+
 import unittest
 from unittest.mock import MagicMock, patch
 from estimators.eo_in_place_archive_estimator import EOInPlaceArchiveEstimator
@@ -75,6 +88,15 @@ class TestEOInPlaceArchiveLoad(unittest.TestCase):
         )
         
         self.stop_event = threading.Event()
+
+        # EOInPlaceArchiveEstimator authenticates its auxiliary TokenManager inside
+        # __init__. Left unpatched that call reaches the real Microsoft login
+        # endpoint, fails for the fake tenant and sets the stop event, which makes
+        # every scan short-circuit to zero. Stub it out to keep the test offline.
+        auth_patcher = patch.object(TokenManager, "authenticate_all", return_value=None)
+        self.mock_authenticate_all = auth_patcher.start()
+        self.addCleanup(auth_patcher.stop)
+
         self.estimator = EOInPlaceArchiveEstimator(
             config=self.config,
             url_invoker=self.mock_url_invoker,
