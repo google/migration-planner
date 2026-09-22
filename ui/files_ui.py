@@ -680,6 +680,14 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       site_metrics = file_metrics.get("siteMetrics", {})
       if not site_metrics:
         raise Exception("No sites were scanned successfully. Please check Azure app permissions or organization access policies.")
+      if not file_metrics.get("folderCount") and site_metrics:
+        file_metrics["folderCount"] = sum(
+            int(s.get("folderCount", 0) or 0) for s in site_metrics.values()
+        )
+      if not file_metrics.get("fileCount") and site_metrics:
+        file_metrics["fileCount"] = sum(
+            int(s.get("fileCount", 0) or 0) for s in site_metrics.values()
+        )
       site_data = []
       for site_id, s_data in site_metrics.items():
         row_data = {
@@ -1333,8 +1341,14 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.create_stat_card(card_frame, "Site Collection Count", f"{data.get('siteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsiteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Document Library Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
-      self.create_stat_card(card_frame, "Folder Count", f"{data.get('folderCount', 0):,}", "📁")
-      self.create_stat_card(card_frame, "File Count", f"{data.get('fileCount', 0):,}", "📄")
+      folder_count = data.get("folderCount", 0)
+      if not folder_count and data.get("siteMetrics"):
+        folder_count = sum(int(s.get("folderCount", 0) or 0) for s in data["siteMetrics"].values())
+      file_count = data.get("fileCount", 0)
+      if not file_count and data.get("siteMetrics"):
+        file_count = sum(int(s.get("fileCount", 0) or 0) for s in data["siteMetrics"].values())
+      self.create_stat_card(card_frame, "Folder Count", f"{folder_count:,}", "📁")
+      self.create_stat_card(card_frame, "File Count", f"{file_count:,}", "📄")
       if getattr(self, "val_scan_encrypted_files", False):
         self.create_stat_card(card_frame, "Total Encrypted File Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
         self.create_stat_card(card_frame, "Total Encrypted File Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")

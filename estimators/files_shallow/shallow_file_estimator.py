@@ -475,8 +475,9 @@ class ShallowFileEstimator(FileEstimator):
     self.progress_update_callback(
         "phase_status", source="plan_generation", status="complete"
     )
+    status_str = "stopped" if self.is_hard_stop_requested() else "complete"
     self.logger(
-        f"[Phase 2] Shallow Drive Discovery complete. Document libraries "
+        f"[Phase 2] Shallow Drive Discovery {status_str}. Document libraries "
         f"scanned: {processed_count} | Total Files: {metrics['fileCount']:,} | "
         f"Total Folders: {metrics['folderCount']:,} | Failed: {failed_count}"
     )
@@ -520,6 +521,7 @@ class ShallowFileEstimator(FileEstimator):
       )
 
       if self.is_hard_stop_requested():
+        self._finalize_tenant_totals(metrics, 0, 0)
         metrics["phase_runtimes"] = {
             "site_discovery_seconds": site_discovery_duration,
             "drive_discovery_seconds": 0.0,
@@ -537,26 +539,26 @@ class ShallowFileEstimator(FileEstimator):
           metrics, targets, subsite_to_top_level_site, failures
       )
 
-      if self.is_hard_stop_requested():
-        drive_discovery_duration = time.time() - t_drive_discovery_start
-        metrics["phase_runtimes"] = {
-            "site_discovery_seconds": site_discovery_duration,
-            "drive_discovery_seconds": drive_discovery_duration,
-        }
-        return metrics
-
       self._finalize_tenant_totals(metrics, processed_count, failed_count)
       t_drive_discovery_end = time.time()
       drive_discovery_duration = t_drive_discovery_end - t_drive_discovery_start
-      self.logger(
-          f"[Phase 2: Drive Discovery] Completed in {drive_discovery_duration:.2f}s"
-          f" ({timedelta(seconds=int(round(drive_discovery_duration)))})"
-      )
 
       metrics["phase_runtimes"] = {
           "site_discovery_seconds": site_discovery_duration,
           "drive_discovery_seconds": drive_discovery_duration,
       }
+
+      if self.is_hard_stop_requested():
+        self.logger(
+            f"[Phase 2: Drive Discovery] Stopped after {drive_discovery_duration:.2f}s"
+            f" ({timedelta(seconds=int(round(drive_discovery_duration)))})"
+        )
+        return metrics
+
+      self.logger(
+          f"[Phase 2: Drive Discovery] Completed in {drive_discovery_duration:.2f}s"
+          f" ({timedelta(seconds=int(round(drive_discovery_duration)))})"
+      )
       return metrics
 
     except Exception as e:
