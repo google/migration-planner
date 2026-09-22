@@ -18,7 +18,7 @@ import random
 import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 from util.files_shallow.cert_token_manager import CertTokenManager
 
@@ -161,7 +161,12 @@ class SpRestConnector:
           continue
 
         elif resp.status_code == 401:
-          if current_try >= self.max_retries:
+          resp_text_lower = (resp.text or "").lower()
+          if (
+              current_try >= self.max_retries
+              or "maxurllength" in resp_text_lower
+              or "runtime error" in resp_text_lower
+          ):
             raise PermissionError(
                 f"SharePoint REST 401 Unauthorized on {base_url} after {self.max_retries} attempts: {resp.text}"
             )
@@ -205,7 +210,7 @@ class SpRestConnector:
     """Fetches the recursive item count (files + folders) for a document library.
 
     Endpoint:
-      GET {base_url}/_api/web/GetList('{library_rel_path}')?$select=ItemCount
+      GET {base_url}/_api/web/GetList(@v)?@v='{encoded_rel_path}'&$select=ItemCount
     """
     if logger is None:
       logger = lambda x: None
@@ -213,8 +218,10 @@ class SpRestConnector:
     base_url, library_rel_path, domain = self._split_library_endpoint(
         web_base_url, library_url
     )
+    encoded_rel_path = quote(library_rel_path, safe="/'")
     endpoint = (
-        f"{base_url}/_api/web/GetList('{library_rel_path}')?$select=ItemCount"
+        f"{base_url}/_api/web/GetList(@v)"
+        f"?@v='{encoded_rel_path}'&$select=ItemCount"
     )
     data = self._execute_get(endpoint, base_url, domain, logger, stop_event)
     return self._parse_int(data.get("ItemCount"))
@@ -229,7 +236,7 @@ class SpRestConnector:
     """Fetches recursive StorageMetrics from a document library's root folder.
 
     Endpoint:
-      GET {base_url}/_api/web/GetFolderByServerRelativeUrl('{library_rel_path}')?$select=StorageMetrics&$expand=StorageMetrics
+      GET {base_url}/_api/web/GetFolderByServerRelativeUrl(@v)?@v='{encoded_rel_path}'&$select=StorageMetrics&$expand=StorageMetrics
 
     Returns:
       Dict with keys:
@@ -243,9 +250,15 @@ class SpRestConnector:
     base_url, library_rel_path, domain = self._split_library_endpoint(
         web_base_url, library_url
     )
+    encoded_rel_path = quote(library_rel_path, safe="/'")
+    folder_fn = (
+        "GetList(@v)/RootFolder"
+        if len(urlparse(base_url).path) + len("/_api/web/GetFolderByServerRelativeUrl(@v)") >= 260
+        else "GetFolderByServerRelativeUrl(@v)"
+    )
     endpoint = (
-        f"{base_url}/_api/web/GetFolderByServerRelativeUrl('{library_rel_path}')"
-        "?$select=StorageMetrics&$expand=StorageMetrics"
+        f"{base_url}/_api/web/{folder_fn}"
+        f"?@v='{encoded_rel_path}'&$select=StorageMetrics&$expand=StorageMetrics"
     )
     data = self._execute_get(endpoint, base_url, domain, logger, stop_event)
     storage_metrics = data.get("StorageMetrics")
