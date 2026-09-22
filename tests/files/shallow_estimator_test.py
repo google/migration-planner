@@ -1010,6 +1010,55 @@ class ShallowScanOrchestrationTest(unittest.TestCase):
 
     self.assertEqual(result.get("driveMetrics"), {})
 
+  def test_hard_stop_during_phase_two_preserves_discovered_counts(self):
+    """Verify that stopping during Phase 2 preserves discovered folders/files."""
+    graph_data = self.build_graph_data()
+    stop_event = threading.Event()
+    logs = []
+    estimator = self.build_estimator(graph_data, stop_event, logger=logs.append)
+    failures = []
+
+    call_count = 0
+    lock = threading.Lock()
+
+    def fake_execute_get(_self, endpoint, base_url, domain, logger, stop_event=None):
+      nonlocal call_count
+      with lock:
+        call_count += 1
+        # Set stop_event after the first library's REST calls (GetList & StorageMetrics)
+        if call_count >= 2:
+          stop_event.set()
+      if "GetList(" in endpoint:
+        return {"ItemCount": 100}
+      return storage_body(80, 2048)
+
+    with mock.patch.object(SpRestConnector, "_execute_get", fake_execute_get):
+      result = estimator.calculate_resource_metrics({}, failures)
+
+    self.assertTrue(result["isShallowScan"])
+    # First library produced 80 files and 20 folders (100 - 80)
+    self.assertEqual(result["folderCount"], 20)
+    self.assertEqual(result["fileCount"], 80)
+    self.assertEqual(
+        result["folderCount"],
+        sum(s.get("folderCount", 0) for s in result["siteMetrics"].values()),
+    )
+    self.assertEqual(
+        result["fileCount"],
+        sum(s.get("fileCount", 0) for s in result["siteMetrics"].values()),
+    )
+    self.assertIn("phase_runtimes", result)
+    self.assertIn("drive_discovery_seconds", result["phase_runtimes"])
+    self.assertIn("siteClassification", result)
+    self.assertTrue(
+        any("[Phase 2: Drive Discovery] Stopped after" in line for line in logs),
+        f"Expected stopped log in: {logs}",
+    )
+    self.assertTrue(
+        any("[Phase 2] Shallow Drive Discovery stopped." in line for line in logs),
+        f"Expected phase 2 stopped log in: {logs}",
+    )
+
   def test_phase_runtimes_tracked_and_logged(self):
     """Verify Phase 1 and Phase 2 runtimes are recorded in metrics and logged."""
     graph_data = self.build_graph_data()
