@@ -670,6 +670,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         self.log_msg(prefix + str(failure))
 
       self.log_msg("=" * 60)
+      # ==========================================
+      # PHASE 3: MIGRATION PLAN GENERATION
+      # ==========================================
+      t_plan_gen_start = time.time()
       self.ui_update("scan_progress", source="plan_generation", progress=0.5, status="running", extra_text="Calculating migration batches...")
       
       # Extract siteMetrics and build DataFrame
@@ -723,6 +727,22 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           numeric_warn = pd.to_numeric(df["Entities with > 200k item count"], errors="coerce").fillna(0)
           df["Suggested Batch"] = numeric_warn.apply(lambda v: "Deep Scan Recommended" if v > 0 else "")
         base_df = df
+
+      t_plan_gen_end = time.time()
+      plan_gen_duration = t_plan_gen_end - t_plan_gen_start
+      self.log_msg(
+          f"[Phase 3: Migration Plan Generation] Completed in {plan_gen_duration:.2f}s"
+          f" ({timedelta(seconds=int(round(plan_gen_duration)))})"
+      )
+
+      # ==========================================
+      # PHASE 4: FINAL DASHBOARD PREPARATION
+      # ==========================================
+      t_dash_prep_start = time.time()
+      if "phase_runtimes" not in file_metrics:
+        file_metrics["phase_runtimes"] = {}
+      file_metrics["phase_runtimes"]["plan_generation_seconds"] = plan_gen_duration
+      file_metrics["phase_runtimes"]["dash_prep_start"] = t_dash_prep_start
 
       self.ui_update(
           "scan_progress",
@@ -1508,8 +1528,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         self.render_paginated_view(0)
 
       self.update_idletasks()
+      end_time = time.time()
       if "total_runtime" not in data:
-        end_time = time.time()
         start_t = getattr(self, "scan_runtime_start", None)
         if start_t is not None:
           total_seconds = max(0, int(round(end_time - start_t)))
@@ -1520,10 +1540,36 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if hasattr(self, "lbl_scan_runtime_val") and self.lbl_scan_runtime_val.winfo_exists():
         self.lbl_scan_runtime_val.configure(text=data["total_runtime"])
 
+      phase_runtimes = data.get("phase_runtimes", {})
+      dash_prep_start = phase_runtimes.get("dash_prep_start")
+      if dash_prep_start is not None:
+        dash_prep_sec = max(0.0, end_time - dash_prep_start)
+        phase_runtimes["dash_prep_seconds"] = dash_prep_sec
+      else:
+        dash_prep_sec = phase_runtimes.get("dash_prep_seconds", 0.0)
+
       with self.log_lock:
         already_logged = any("TOTAL TIME:" in line for line in self.log_buffer)
       if not already_logged:
+        self.log_msg(
+            f"[Phase 4: Final Dashboard Preparation] Completed in {dash_prep_sec:.2f}s"
+            f" ({timedelta(seconds=int(round(dash_prep_sec)))})"
+        )
+
+        site_disc_sec = phase_runtimes.get("site_discovery_seconds", 0.0)
+        drive_disc_sec = phase_runtimes.get("drive_discovery_seconds", 0.0)
+        plan_gen_sec = phase_runtimes.get("plan_generation_seconds", 0.0)
+
+        self.log_msg("\n" + "=" * 50)
+        self.log_msg("⏱️ Scan Runtime Breakdown:")
+        self.log_msg(f"  • Site Discovery:            {timedelta(seconds=int(round(site_disc_sec)))} ({site_disc_sec:.2f}s)")
+        self.log_msg(f"  • Drive Discovery:           {timedelta(seconds=int(round(drive_disc_sec)))} ({drive_disc_sec:.2f}s)")
+        self.log_msg(f"  • Migration Plan Generation: {timedelta(seconds=int(round(plan_gen_sec)))} ({plan_gen_sec:.2f}s)")
+        self.log_msg(f"  • Final Dashboard Prep:      {timedelta(seconds=int(round(dash_prep_sec)))} ({dash_prep_sec:.2f}s)")
+        self.log_msg("-" * 50)
         self.log_msg(f"TOTAL TIME: {data['total_runtime']}")
+        self.log_msg("=" * 50)
+
         if getattr(self, "current_logs_path", None):
           try:
             with self.log_lock:

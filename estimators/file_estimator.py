@@ -1,4 +1,5 @@
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import timedelta
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -170,6 +171,7 @@ class FileEstimator(Estimator):
                 "tenantLevelWarningResourceCount": 0
             }
 
+            t_site_discovery_start = time.time()
             if "drives" in data and len(data["drives"]) > 0:
                 drives = data["drives"]
             else:
@@ -181,8 +183,15 @@ class FileEstimator(Estimator):
                     subsite_to_top_level_site,
                     failures,
                 )
+            t_site_discovery_end = time.time()
+            site_discovery_duration = t_site_discovery_end - t_site_discovery_start
+            self.logger(
+                f"[Phase 1: Site Discovery] Completed in {site_discovery_duration:.2f}s"
+                f" ({timedelta(seconds=int(round(site_discovery_duration)))})"
+            )
 
             # get adjacency lists and parent references for each drive
+            t_drive_discovery_start = time.time()
             drive_discovery_progress_metrics = ThreadSafeMap()
             drive_discovery_progress_metrics.update("folderCount", 0)
             drive_discovery_progress_metrics.update("fileCount", 0)
@@ -310,6 +319,18 @@ class FileEstimator(Estimator):
                     subsite_to_top_level_site
                 )
                 self.progress_update_callback("phase_status", source="amr_map_generation", status="complete")
+
+            t_drive_discovery_end = time.time()
+            drive_discovery_duration = t_drive_discovery_end - t_drive_discovery_start
+            self.logger(
+                f"[Phase 2: Drive Discovery] Completed in {drive_discovery_duration:.2f}s"
+                f" ({timedelta(seconds=int(round(drive_discovery_duration)))})"
+            )
+
+            metrics["phase_runtimes"] = {
+                "site_discovery_seconds": site_discovery_duration,
+                "drive_discovery_seconds": drive_discovery_duration,
+            }
 
             self.progress_update_callback("phase_status", source="plan_generation", status="complete")
 

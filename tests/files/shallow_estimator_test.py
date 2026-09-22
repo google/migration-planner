@@ -919,12 +919,12 @@ class ShallowScanOrchestrationTest(unittest.TestCase):
         "licenses": [],
     }
 
-  def build_estimator(self, graph_data, stop_event=None):
+  def build_estimator(self, graph_data, stop_event=None, logger=None):
     estimator = ShallowFileEstimator(
         config=build_config(),
         url_invoker=MockUrlInvoker(graph_data),
         cert_token_manager=MockCertTokenManager(),
-        logger=lambda *_: None,
+        logger=logger if logger is not None else (lambda *_: None),
         stop_event=stop_event if stop_event is not None else threading.Event(),
         progress_update_callback=lambda *a, **k: None,
     )
@@ -1009,6 +1009,65 @@ class ShallowScanOrchestrationTest(unittest.TestCase):
       result = estimator.calculate_resource_metrics({}, failures)
 
     self.assertEqual(result.get("driveMetrics"), {})
+
+  def test_phase_runtimes_tracked_and_logged(self):
+    """Verify Phase 1 and Phase 2 runtimes are recorded in metrics and logged."""
+    graph_data = self.build_graph_data()
+    logs = []
+    estimator = self.build_estimator(graph_data, logger=logs.append)
+    failures = []
+
+    def fake_execute_get(_self, endpoint, base_url, domain, logger, stop_event=None):
+      if "GetList(" in endpoint:
+        return {"ItemCount": 10}
+      return storage_body(10, 1024)
+
+    with mock.patch.object(SpRestConnector, "_execute_get", fake_execute_get):
+      result = estimator.calculate_resource_metrics({}, failures)
+
+    self.assertIn("phase_runtimes", result)
+    phase_runtimes = result["phase_runtimes"]
+    self.assertIn("site_discovery_seconds", phase_runtimes)
+    self.assertIn("drive_discovery_seconds", phase_runtimes)
+    self.assertIsInstance(phase_runtimes["site_discovery_seconds"], float)
+    self.assertIsInstance(phase_runtimes["drive_discovery_seconds"], float)
+    self.assertGreaterEqual(phase_runtimes["site_discovery_seconds"], 0.0)
+    self.assertGreaterEqual(phase_runtimes["drive_discovery_seconds"], 0.0)
+
+    # Check that logger was called for both phases
+    phase1_logged = any("[Phase 1: Site Discovery] Completed in" in line for line in logs)
+    phase2_logged = any("[Phase 2: Drive Discovery] Completed in" in line for line in logs)
+    self.assertTrue(phase1_logged, f"Expected Phase 1 log in: {logs}")
+    self.assertTrue(phase2_logged, f"Expected Phase 2 log in: {logs}")
+
+  def test_deep_file_estimator_phase_runtimes_tracked_and_logged(self):
+    """Verify FileEstimator (Deep Scan) records and logs phase runtimes."""
+    from estimators.file_estimator import FileEstimator
+    graph_data = self.build_graph_data()
+    logs = []
+    estimator = FileEstimator(
+        config=build_config(),
+        url_invoker=MockUrlInvoker(graph_data),
+        logger=logs.append,
+        stop_event=threading.Event(),
+        progress_update_callback=lambda *a, **k: None,
+    )
+    failures = []
+    result = estimator.calculate_resource_metrics({}, failures)
+
+    self.assertIn("phase_runtimes", result)
+    phase_runtimes = result["phase_runtimes"]
+    self.assertIn("site_discovery_seconds", phase_runtimes)
+    self.assertIn("drive_discovery_seconds", phase_runtimes)
+    self.assertIsInstance(phase_runtimes["site_discovery_seconds"], float)
+    self.assertIsInstance(phase_runtimes["drive_discovery_seconds"], float)
+    self.assertGreaterEqual(phase_runtimes["site_discovery_seconds"], 0.0)
+    self.assertGreaterEqual(phase_runtimes["drive_discovery_seconds"], 0.0)
+
+    phase1_logged = any("[Phase 1: Site Discovery] Completed in" in line for line in logs)
+    phase2_logged = any("[Phase 2: Drive Discovery] Completed in" in line for line in logs)
+    self.assertTrue(phase1_logged, f"Expected Phase 1 log in: {logs}")
+    self.assertTrue(phase2_logged, f"Expected Phase 2 log in: {logs}")
 
 
 if __name__ == "__main__":

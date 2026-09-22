@@ -16,7 +16,9 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import timedelta
 import threading
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -497,6 +499,7 @@ class ShallowFileEstimator(FileEstimator):
       # ==========================================
       # PHASE 1: SITE DISCOVERY (Reusing Deep Scan)
       # ==========================================
+      t_site_discovery_start = time.time()
       self._discover_sites(
           data,
           metrics,
@@ -509,13 +512,24 @@ class ShallowFileEstimator(FileEstimator):
           metrics, subsite_to_drives, subsite_to_top_level_site
       )
       self._prepare_root_sites(metrics)
+      t_site_discovery_end = time.time()
+      site_discovery_duration = t_site_discovery_end - t_site_discovery_start
+      self.logger(
+          f"[Phase 1: Site Discovery] Completed in {site_discovery_duration:.2f}s"
+          f" ({timedelta(seconds=int(round(site_discovery_duration)))})"
+      )
 
       if self.is_hard_stop_requested():
+        metrics["phase_runtimes"] = {
+            "site_discovery_seconds": site_discovery_duration,
+            "drive_discovery_seconds": 0.0,
+        }
         return metrics
 
       # ==========================================
       # PHASE 2: SHALLOW DRIVE DISCOVERY
       # ==========================================
+      t_drive_discovery_start = time.time()
       targets = self._build_library_targets(
           metrics, subsite_to_drives, subsite_to_top_level_site, failures
       )
@@ -524,9 +538,25 @@ class ShallowFileEstimator(FileEstimator):
       )
 
       if self.is_hard_stop_requested():
+        drive_discovery_duration = time.time() - t_drive_discovery_start
+        metrics["phase_runtimes"] = {
+            "site_discovery_seconds": site_discovery_duration,
+            "drive_discovery_seconds": drive_discovery_duration,
+        }
         return metrics
 
       self._finalize_tenant_totals(metrics, processed_count, failed_count)
+      t_drive_discovery_end = time.time()
+      drive_discovery_duration = t_drive_discovery_end - t_drive_discovery_start
+      self.logger(
+          f"[Phase 2: Drive Discovery] Completed in {drive_discovery_duration:.2f}s"
+          f" ({timedelta(seconds=int(round(drive_discovery_duration)))})"
+      )
+
+      metrics["phase_runtimes"] = {
+          "site_discovery_seconds": site_discovery_duration,
+          "drive_discovery_seconds": drive_discovery_duration,
+      }
       return metrics
 
     except Exception as e:
