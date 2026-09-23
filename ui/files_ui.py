@@ -452,7 +452,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       return None
       
     try:
-      df = pd.read_csv(config.csv_path)
+      df = pd.read_csv(config.csv_path, keep_default_na=False)
     except Exception:
       return None
 
@@ -477,6 +477,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     # Removed strict '/personal/' check to support SharePoint sites
 
+    def _safe_int(val, default=0):
+      num = pd.to_numeric(val, errors="coerce")
+      if pd.isna(num):
+        return default
+      return int(num)
+
     def _parse_size_str(val):
       if isinstance(val, (int, float)):
         return float(val)
@@ -494,17 +500,34 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       }
       return num * multipliers.get(unit, 1)
 
+    na_cols = [
+        "Shortcut Count",
+        "Folder Count > Depth Limit 100",
+        "File Count > Depth Limit 100",
+    ]
+    is_shallow_report = getattr(self, "val_shallow_scan", False) or any(
+        df[col].astype(str).str.strip().str.upper().str.startswith("N/A").any()
+        for col in na_cols
+        if col in df.columns
+    )
+    if is_shallow_report:
+      self.val_shallow_scan = True
+      config.shallow_scan = True
+
     site_metrics = {}
     personal_dl_total = 0
     team_dl_total = 0
     
     for _, row in df.iterrows():
       site_id = str(row[id_col]).strip()
-      folder_cnt = int(pd.to_numeric(row.get("Folder Count", 0), errors="coerce") or 0)
-      file_cnt = int(pd.to_numeric(row.get("File Count", 0), errors="coerce") or 0)
-      shortcut_cnt = int(pd.to_numeric(row.get("Shortcut Count", 0), errors="coerce") or 0)
-      res_cnt = int(pd.to_numeric(row.get("Resource Count", folder_cnt + file_cnt + shortcut_cnt), errors="coerce") or 0)
-      dl_cnt = int(pd.to_numeric(row.get("DL Count", 0), errors="coerce") or 0)
+      folder_cnt = _safe_int(row.get("Folder Count", 0))
+      file_cnt = _safe_int(row.get("File Count", 0))
+      shortcut_cnt = _safe_int(row.get("Shortcut Count", 0))
+      res_cnt = _safe_int(
+          row.get("Resource Count"),
+          default=folder_cnt + file_cnt + shortcut_cnt,
+      )
+      dl_cnt = _safe_int(row.get("DL Count", 0))
       
       if "/personal/" in site_id.lower():
         personal_dl_total += dl_cnt
@@ -512,16 +535,24 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         team_dl_total += dl_cnt
         
       site_metrics[site_id] = {
-          "subsiteCount": int(pd.to_numeric(row.get("Subsite Count", 0), errors="coerce") or 0),
+          "subsiteCount": _safe_int(row.get("Subsite Count", 0)),
           "dlCount": dl_cnt,
-          "listCount": int(pd.to_numeric(row.get("List Count", 0), errors="coerce") or 0),
+          "listCount": _safe_int(row.get("List Count", 0)),
           "folderCount": folder_cnt,
           "fileCount": file_cnt,
-          "shortcutCount": shortcut_cnt,
-          "folderCountExceedingDepthLimit": int(pd.to_numeric(row.get("Folder Count > Depth Limit 100", 0), errors="coerce") or 0),
-          "fileCountExceedingDepthLimit": int(pd.to_numeric(row.get("File Count > Depth Limit 100", 0), errors="coerce") or 0),
-          "largeResourceCount": int(pd.to_numeric(row.get("Entities with > 500k item count", 0), errors="coerce") or 0),
-          "warningResourceCount": int(pd.to_numeric(row.get("Entities with > 200k item count", 0), errors="coerce") or 0),
+          "shortcutCount": "N/A" if is_shallow_report else shortcut_cnt,
+          "folderCountExceedingDepthLimit": (
+              "N/A"
+              if is_shallow_report
+              else _safe_int(row.get("Folder Count > Depth Limit 100", 0))
+          ),
+          "fileCountExceedingDepthLimit": (
+              "N/A"
+              if is_shallow_report
+              else _safe_int(row.get("File Count > Depth Limit 100", 0))
+          ),
+          "largeResourceCount": _safe_int(row.get("Entities with > 500k item count", 0)),
+          "warningResourceCount": _safe_int(row.get("Entities with > 200k item count", 0)),
           "totalSize": _parse_size_str(row.get("Corpus Size", 0)),
           "resourceCount": res_cnt,
       }
@@ -530,6 +561,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     dl_total = personal_dl_total + team_dl_total
     
     return {
+        "isShallowScan": is_shallow_report,
         "siteMetrics": site_metrics,
         "siteCount": len(df),
         "subsiteCount": int(pd.to_numeric(df.get("Subsite Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
@@ -540,10 +572,22 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "teamSiteDLCount": team_dl_total,
         "folderCount": int(pd.to_numeric(df.get("Folder Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "fileCount": int(pd.to_numeric(df.get("File Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
-        "shortcutCount": int(pd.to_numeric(df.get("Shortcut Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "shortcutCount": (
+            "N/A"
+            if is_shallow_report
+            else int(pd.to_numeric(df.get("Shortcut Count", pd.Series([0])), errors="coerce").fillna(0).sum())
+        ),
         "listCount": int(pd.to_numeric(df.get("List Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
-        "folderCountExceedingDepthLimit": int(pd.to_numeric(df.get("Folder Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
-        "fileCountExceedingDepthLimit": int(pd.to_numeric(df.get("File Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "folderCountExceedingDepthLimit": (
+            "N/A"
+            if is_shallow_report
+            else int(pd.to_numeric(df.get("Folder Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum())
+        ),
+        "fileCountExceedingDepthLimit": (
+            "N/A"
+            if is_shallow_report
+            else int(pd.to_numeric(df.get("File Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum())
+        ),
         "tenantLevelLargeResourceCount": int(pd.to_numeric(df.get("Entities with > 500k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "tenantLevelWarningResourceCount": int(pd.to_numeric(df.get("Entities with > 200k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "siteClassification": {site_id: "personal" if "/personal/" in site_id.lower() else "teams" for site_id in site_metrics.keys()},
@@ -659,7 +703,14 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           self.scan_runtime_start = time.time()
         estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
         self.ui_update("site_discovery", status="Done", count=file_metrics.get("siteCount", 0))
-        self.ui_update("drive_discovery", status="Done", count=sum(file_metrics.get("driveCounts", {}).values()))
+        self.ui_update(
+            "drive_discovery",
+            status="Done",
+            count=sum(file_metrics.get("driveCounts", {}).values()),
+            folderCount=file_metrics.get("folderCount", 0),
+            fileCount=file_metrics.get("fileCount", 0),
+            progress=1.0,
+        )
         self.ui_update("scan_progress", source="drive_parsing", progress=1.0)
         self.ui_update("phase_status", source="drive_parsing", status="complete")
 
@@ -1610,7 +1661,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       raise ValueError("CSV path invalid or file not found.")
 
     try:
-      df = pd.read_csv(csv_path)
+      df = pd.read_csv(csv_path, keep_default_na=False)
     except Exception as e:
       messagebox.showerror("Validation Error", f"Failed to read CSV file: {e}")
       raise ValueError(f"Failed to read CSV file: {e}")
@@ -1622,17 +1673,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       messagebox.showerror("Validation Error", "CSV file is empty.")
       raise ValueError("CSV file is empty.")
 
-    # 2. No empty/null fields/cells present in any row
-    if df.isnull().any().any():
-      messagebox.showerror("Validation Error", "CSV contains empty or null values.")
-      raise ValueError("CSV contains empty or null values.")
-
-    for col in df.columns:
-      if (df[col].astype(str).str.strip() == "").any():
-        messagebox.showerror("Validation Error", f"CSV contains empty values in column '{col}'.")
-        raise ValueError(f"CSV contains empty values in column '{col}'.")
-
-    # 3. Check columns and types
+    # 2. Check columns and identify whether this is a site report CSV
     include_personal = self.include_personal_sites.get()
     include_team = self.include_team_sites.get()
 
@@ -1657,6 +1698,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     }
     is_report_csv = "Entity" in df.columns and report_cols.issubset(df.columns)
 
+    # 3. No empty/null fields/cells present in required columns
+    cols_to_check = ({"Entity"} | report_cols) if is_report_csv else set(df.columns)
+    shallow_na_cols = {
+        "Shortcut Count",
+        "Folder Count > Depth Limit 100",
+        "File Count > Depth Limit 100",
+    }
+    invalid_null_tokens = {"", "null", "nan", "none", "#n/a", "#na", "<na>"}
+    for col in df.columns:
+      if col not in cols_to_check:
+        continue
+      cleaned = df[col].astype(str).str.strip()
+      lowered = cleaned.str.lower()
+      bad_tokens = set(invalid_null_tokens)
+      if not (is_report_csv and col in shallow_na_cols):
+        bad_tokens.update({"n/a", "na"})
+      if lowered.isin(bad_tokens).any():
+        messagebox.showerror("Validation Error", "CSV contains empty or null values.")
+        raise ValueError("CSV contains empty or null values.")
 
     if set(df.columns) != expected_cols and not is_report_csv:
       messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column or valid site report columns.")
@@ -2058,7 +2118,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     config = self._get_scan_configuration()
 
-    if getattr(self, "val_shallow_scan", False):
+    is_report_upload = self._try_get_metrics_from_csv_report(config) is not None
+    if getattr(self, "val_shallow_scan", False) and not is_report_upload:
       if not shallow_ui_helpers.ensure_certificates_and_prompt(self, config, ctk):
         return
 

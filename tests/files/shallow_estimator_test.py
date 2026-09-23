@@ -1119,5 +1119,81 @@ class ShallowScanOrchestrationTest(unittest.TestCase):
     self.assertTrue(phase2_logged, f"Expected Phase 2 log in: {logs}")
 
 
+class ShallowScanReportCsvUploadTest(unittest.TestCase):
+  """Verifies uploading a Shallow Scan site_report CSV passes validation and parses metrics."""
+
+  def _make_dummy_tool(self, csv_path: str, shallow_toggle: bool = False):
+    from ui.files_ui import FileMigrationEstimatorTool
+
+    class DummyVar:
+      def __init__(self, val):
+        self._val = val
+      def get(self):
+        return self._val
+
+    tool = object.__new__(FileMigrationEstimatorTool)
+    tool.user_source = DummyVar("csv")
+    tool.user_csv_path = DummyVar(csv_path)
+    tool.include_personal_sites = DummyVar(True)
+    tool.include_team_sites = DummyVar(True)
+    tool.val_shallow_scan = shallow_toggle
+    tool.skipped_actual_scan = False
+    return tool
+
+  def test_shallow_scan_site_report_csv_validates_and_parses(self):
+    """Uploading a shallow scan site_report.csv with N/A columns succeeds and preserves Shallow Scan semantics."""
+    import os
+    import tempfile
+
+    csv_content = (
+        "Site URL/Name,Subsite Count,DL Count,List Count,Folder Count,File Count,"
+        "Shortcut Count,Folder Count > Depth Limit 100,File Count > Depth Limit 100,"
+        "Entities with > 500k item count,Entities with > 200k item count,Corpus Size,Suggested Batch\n"
+        "https://smh3v-my.sharepoint.com/personal/bugbash5_smh3v_onmicrosoft_com,0,1,4,2,99997,N/A,N/A,N/A,0,0,73.24 MB,Batch 1\n"
+        "https://smh3v-my.sharepoint.com/personal/bugbash4_smh3v_onmicrosoft_com,0,1,8,3,99977,N/A,N/A,N/A,0,0,73.24 MB,Batch 2\n"
+        "https://smh3v-my.sharepoint.com/personal/runwaydrivetest100_smh3v_onmicrosoft_com,0,1,3,200,17540,N/A,N/A,N/A,0,0,540.93 GB,Batch 4\n"
+    )
+
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as tmp:
+      tmp.write(csv_content)
+      tmp_path = tmp.name
+
+    try:
+      tool = self._make_dummy_tool(tmp_path, shallow_toggle=False)
+      config = build_config(user_source="csv", csv_path=tmp_path)
+
+      # 1. _validate_csv must not raise "CSV contains empty or null values."
+      with mock.patch("ui.files_ui.messagebox.showerror") as mock_err:
+        tool._validate_csv()
+        mock_err.assert_not_called()
+
+      # 2. _try_get_metrics_from_csv_report must parse N/A safely and auto-enable shallow scan mode
+      metrics = tool._try_get_metrics_from_csv_report(config)
+      self.assertIsNotNone(metrics)
+      self.assertTrue(metrics["isShallowScan"])
+      self.assertTrue(tool.val_shallow_scan)
+      self.assertTrue(config.shallow_scan)
+      self.assertTrue(tool.skipped_actual_scan)
+
+      self.assertEqual(metrics["siteCount"], 3)
+      self.assertEqual(metrics["folderCount"], 2 + 3 + 200)
+      self.assertEqual(metrics["fileCount"], 99997 + 99977 + 17540)
+      self.assertEqual(metrics["shortcutCount"], "N/A")
+      self.assertEqual(metrics["folderCountExceedingDepthLimit"], "N/A")
+      self.assertEqual(metrics["fileCountExceedingDepthLimit"], "N/A")
+
+      s1 = metrics["siteMetrics"]["https://smh3v-my.sharepoint.com/personal/bugbash5_smh3v_onmicrosoft_com"]
+      self.assertEqual(s1["folderCount"], 2)
+      self.assertEqual(s1["fileCount"], 99997)
+      self.assertEqual(s1["shortcutCount"], "N/A")
+      self.assertEqual(s1["folderCountExceedingDepthLimit"], "N/A")
+      self.assertEqual(s1["fileCountExceedingDepthLimit"], "N/A")
+      self.assertEqual(s1["resourceCount"], 99999)
+      self.assertAlmostEqual(s1["totalSize"], 73.24 * (1024 ** 2), places=0)
+    finally:
+      if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+
+
 if __name__ == "__main__":
   unittest.main()
