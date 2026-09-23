@@ -205,7 +205,11 @@ class EstimatorFactory:
       
       if not use_mocks:
         url_invoker = self.get_url_invoker()
-        cert_manager = self.get_cert_token_manager()
+        cert_manager = (
+            self.get_cert_token_manager()
+            if getattr(self.config, "scan_encrypted_files", False)
+            else None
+        )
       else:
         url_invoker = self.get_mock_url_invoker(hard_reset=hard_reset, seed=mock_seed)
         cert_manager = None

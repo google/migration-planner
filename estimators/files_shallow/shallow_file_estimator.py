@@ -100,6 +100,7 @@ class ShallowFileEstimator(FileEstimator):
             "personal": 0,
             "business": 0,
         },
+        "failedDlCount": 0,
         "personalSiteDLCount": 0,
         "teamSiteDLCount": 0,
         "tenantLevelFileSizeDistribution": {"buckets": []},
@@ -120,6 +121,7 @@ class ShallowFileEstimator(FileEstimator):
     for s_data in metrics["siteMetrics"].values():
       s_data.setdefault("subsiteCount", 0)
       s_data.setdefault("dlCount", 0)
+      s_data.setdefault("failedDlCount", 0)
       s_data.setdefault("listCount", 0)
       s_data.setdefault("folderCount", 0)
       s_data.setdefault("fileCount", 0)
@@ -130,8 +132,6 @@ class ShallowFileEstimator(FileEstimator):
       s_data.setdefault("warningResourceCount", 0)
       s_data.setdefault("totalSize", 0)
       s_data.setdefault("resourceCount", 0)
-      s_data.setdefault("encryptedFileCount", 0)
-      s_data.setdefault("encryptedFileSize", 0)
 
   def _build_library_targets(
       self,
@@ -342,13 +342,19 @@ class ShallowFileEstimator(FileEstimator):
       )
 
     def _record_failure(
-        message: str, failure_type: str, status_code: Optional[int]
+        top_level_site_id: str,
+        message: str,
+        failure_type: str,
+        status_code: Optional[int],
     ) -> None:
       """Marks the current library as failed and logs the reason."""
       nonlocal processed_count, failed_count
       with lock:
         processed_count += 1
         failed_count += 1
+        if top_level_site_id in metrics["siteMetrics"]:
+          s_meta = metrics["siteMetrics"][top_level_site_id]
+          s_meta["failedDlCount"] = int(s_meta.get("failedDlCount", 0) or 0) + 1
         self.logger(message)
         failures.append({
             "type": failure_type,
@@ -368,6 +374,7 @@ class ShallowFileEstimator(FileEstimator):
         )
       except PermissionError as perm_err:
         _record_failure(
+            target.top_level_site_id,
             f"Skipping document library {target.library_url}: {perm_err}",
             FailureType.FAILURE_STATUS_CODE_ERROR.name,
             403,
@@ -375,6 +382,7 @@ class ShallowFileEstimator(FileEstimator):
         return
       except Exception as err:
         _record_failure(
+            target.top_level_site_id,
             "Failed StorageMetrics/ItemCounts REST call for "
             f"{target.library_url}: {err}",
             FailureType.UNKNOWN_ERROR.name,
@@ -453,6 +461,13 @@ class ShallowFileEstimator(FileEstimator):
     metrics["fileCount"] = sum(
         int(s.get("fileCount", 0) or 0)
         for s in metrics["siteMetrics"].values()
+    )
+    metrics["failedDlCount"] = max(
+        failed_count,
+        sum(
+            int(s.get("failedDlCount", 0) or 0)
+            for s in metrics["siteMetrics"].values()
+        ),
     )
     metrics["tenantLevelLargeResourceCount"] = len(
         metrics["tenantLevelLargeResources"]
@@ -534,45 +549,6 @@ class ShallowFileEstimator(FileEstimator):
       # PHASE 2: SHALLOW DRIVE DISCOVERY
       # ==========================================
       t_drive_discovery_start = time.time()
-      if self.config.scan_encrypted_files:
-        from util.thread_safe_ds import ThreadSafeMap
-        self.drive_id_to_encrypted_file_size = {}
-        self.drive_id_to_encrypted_file_count = {}
-        self.drive_id_to_labeled_file_count = {}
-        self.total_sensitivity_label_ids = set()
-        self.encrypted_sensitivity_label_ids = set()
-        self.total_labeled_file_count = 0
-        self.encryption_metrics_lock = threading.Lock()
-        valid_drive_ids = {drive["id"] for drive in drives if "id" in drive}
-        shallow_progress_metrics = ThreadSafeMap()
-        self._scan_encrypted_files(
-            shallow_progress_metrics,
-            failures,
-            valid_drive_ids,
-            drives=drives,
-            subsite_to_drives=subsite_to_drives,
-        )
-        metrics["sensitivityLabelCount"] = len(getattr(self, "total_sensitivity_label_ids", set()))
-        metrics["encryptedSensitivityLabelCount"] = len(getattr(self, "encrypted_sensitivity_label_ids", set()))
-        metrics["sensitivityLabeledFileCount"] = getattr(self, "total_labeled_file_count", 0)
-        for subsite_id, drive_ids in subsite_to_drives.items():
-          top_level_site = subsite_to_top_level_site.get(subsite_id, subsite_id)
-          if top_level_site not in metrics["siteMetrics"]:
-            continue
-          for d_id in drive_ids:
-            metrics["siteMetrics"][top_level_site]["encryptedFileCount"] = (
-                metrics["siteMetrics"][top_level_site].get("encryptedFileCount", 0)
-                + self.drive_id_to_encrypted_file_count.get(d_id, 0)
-            )
-            metrics["siteMetrics"][top_level_site]["encryptedFileSize"] = (
-                metrics["siteMetrics"][top_level_site].get("encryptedFileSize", 0)
-                + self.drive_id_to_encrypted_file_size.get(d_id, 0)
-            )
-            metrics["siteMetrics"][top_level_site]["sensitivityLabeledFileCount"] = (
-                metrics["siteMetrics"][top_level_site].get("sensitivityLabeledFileCount", 0)
-                + self.drive_id_to_labeled_file_count.get(d_id, 0)
-            )
-
       targets = self._build_library_targets(
           metrics, subsite_to_drives, subsite_to_top_level_site, failures
       )

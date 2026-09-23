@@ -1194,190 +1194,140 @@ class ShallowScanReportCsvUploadTest(unittest.TestCase):
       if os.path.exists(tmp_path):
         os.remove(tmp_path)
 
+  def test_shallow_scan_default_on_disables_deep_scan_settings(self):
+    """Verify Shallow Scan defaults to True and disables all Deep Scan checkboxes."""
+    from ui.files_shallow import shallow_ui_helpers
+    from ui.files_ui import FileMigrationEstimatorTool
 
-class EncryptedFilesSharePointSearchTest(unittest.TestCase):
-  """Verifies SharePoint REST postquery encrypted file detection with IndexDocId cursor pagination."""
+    class DummyVar:
+      def __init__(self, value=False):
+        self._val = value
+      def get(self):
+        return self._val
+      def set(self, val):
+        self._val = val
 
-  def test_extract_postquery_rows_handles_verbose_and_nometadata(self):
-    """_extract_postquery_rows parses both odata=verbose and odata=nometadata structures."""
-    verbose_payload = {
-        "d": {
-            "postquery": {
-                "PrimaryQueryResult": {
-                    "RelevantResults": {
-                        "Table": {
-                            "Rows": {
-                                "results": [
-                                    {
-                                        "Cells": {
-                                            "results": [
-                                                {"Key": "DocId", "Value": "101"},
-                                                {"Key": "Size", "Value": "4096"},
-                                                {"Key": "Path", "Value": "https://contoso.sharepoint.com/sites/HR/Shared Documents/a.docx"},
-                                            ]
-                                        }
-                                    }
-                                ]
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    rows = SpRestConnector._extract_postquery_rows(verbose_payload)
-    self.assertEqual(len(rows), 1)
-    self.assertEqual(rows[0]["DocId"], "101")
-    self.assertEqual(rows[0]["Size"], "4096")
+    class DummyWidget:
+      def __init__(self):
+        self.state = "normal"
+      def configure(self, **kwargs):
+        if "state" in kwargs:
+          self.state = kwargs["state"]
 
-  def test_search_encrypted_files_by_labels_cursor_pagination(self):
-    """search_encrypted_files_by_labels paginates using IndexDocId > last_doc_id sorted by DocId ascending."""
-    token_manager = MockCertTokenManager(MockSpSession())
-    connector = SpRestConnector(token_manager, max_retries=2, backoff=1)
+    tool = object.__new__(FileMigrationEstimatorTool)
+    with mock.patch("ui.files_ui.ctk.BooleanVar", side_effect=lambda value=False: DummyVar(value)), \
+         mock.patch("ui.files_ui.ctk.IntVar", side_effect=lambda value=0: DummyVar(value)), \
+         mock.patch("ui.files_ui.MigrationEstimatorTool.setup_variables"):
+      tool.setup_variables()
 
-    captured_payloads = []
+    self.assertTrue(tool.shallow_scan.get())
 
-    def fake_execute_post(endpoint, payload, base_url, domain, logger, stop_event=None):
-      captured_payloads.append((endpoint, payload))
-      if len(captured_payloads) == 1:
-        # Return exactly 500 rows with DocId 1..500 to trigger next cursor page
-        rows_data = [
-            {
-                "Cells": [
-                    {"Key": "DocId", "Value": str(i)},
-                    {"Key": "Size", "Value": "1024"},
-                    {"Key": "Path", "Value": f"https://contoso.sharepoint.com/sites/HR/Shared Documents/file_{i}.docx"},
-                    {"Key": "UniqueId", "Value": f"guid-{i}"},
-                ]
-            }
-            for i in range(1, 501)
-        ]
-      else:
-        rows_data = [
-            {
-                "Cells": [
-                    {"Key": "DocId", "Value": "501"},
-                    {"Key": "Size", "Value": "2048"},
-                    {"Key": "Path", "Value": "https://contoso.sharepoint.com/sites/HR/Shared Documents/file_501.docx"},
-                    {"Key": "UniqueId", "Value": "guid-501"},
-                ]
-            }
-        ]
-      return {
-          "PrimaryQueryResult": {
-              "RelevantResults": {"Table": {"Rows": rows_data}}
-          }
-      }
+    tool.cb_recycle_bin = DummyWidget()
+    tool.cb_file_versions = DummyWidget()
+    tool.cb_encrypted_files = DummyWidget()
+    tool.cb_depth_report = DummyWidget()
 
-    with mock.patch.object(connector, "_execute_post", side_effect=fake_execute_post):
-      results = connector.search_encrypted_files_by_labels(
-          base_url="https://contoso.sharepoint.com",
-          encrypted_label_ids=["label-guid-1"],
-          path_prefixes=["https://contoso.sharepoint.com/sites/HR"],
-      )
+    # Pre-set vars to True to confirm on_shallow_scan_toggle resets them to False and disables widgets
+    tool.include_recycle_bin_contents.set(True)
+    tool.include_file_versions.set(True)
+    tool.scan_encrypted_files.set(True)
+    tool.generate_folder_amr_map.set(True)
 
-    self.assertEqual(len(results), 501)
-    self.assertEqual(len(captured_payloads), 2)
-    req1 = captured_payloads[0][1]["request"]
-    req2 = captured_payloads[1][1]["request"]
-    self.assertEqual(req1["SortList"]["results"], [{"Property": "DocId", "Direction": "0"}])
-    self.assertNotIn("IndexDocId>", req1["Querytext"])
-    self.assertIn("IndexDocId>500", req2["Querytext"])
-    self.assertEqual(req2["StartRow"], 0)
+    shallow_ui_helpers.on_shallow_scan_toggle(tool)
 
-  def test_sensitivity_labels_and_labeled_files_count(self):
-    """Verify ShallowFileEstimator counts total & encrypted sensitivity labels and labeled files."""
-    cfg = build_config(scan_encrypted_files=True)
-    site = {
-        "id": "siteA",
-        "displayName": "Finance",
-        "webUrl": f"{TENANT}/sites/Finance",
-        "isPersonalSite": False,
-        "drives": ["d1"],
-        "lists": [],
-        "subsites": [],
-    }
-    graph_data = {
-        "root_site": "siteA",
-        "sites": {"siteA": site},
-        "all_sites": [site],
-        "lists": {},
-        "drives": {
-            "d1": {
-                "id": "d1",
-                "name": "Documents",
-                "driveType": "documentLibrary",
-                "webUrl": f"{TENANT}/sites/Finance/Shared%20Documents",
-            },
-        },
-        "items": {},
-        "licenses": [],
-    }
-    invoker = MockUrlInvoker(graph_data)
-    invoker.token_manager.session.custom_responses["/security/dataSecurityAndGovernance/sensitivityLabels"] = (
-        200,
+    for var in (
+        tool.include_recycle_bin_contents,
+        tool.include_file_versions,
+        tool.scan_encrypted_files,
+        tool.generate_folder_amr_map,
+    ):
+      self.assertFalse(var.get())
+
+    for widget in (
+        tool.cb_recycle_bin,
+        tool.cb_file_versions,
+        tool.cb_encrypted_files,
+        tool.cb_depth_report,
+    ):
+      self.assertEqual(widget.state, "disabled")
+
+  def test_shallow_scan_site_report_csv_upload_with_failed_dl_count(self):
+    """Verify Shallow Scan site_report.csv with 'Failed DL Count' column validates and parses failedDlCount."""
+    import os
+    import tempfile
+
+    csv_content = (
+        "Site URL/Name,Subsite Count,DL Count,Failed DL Count,List Count,Folder Count,File Count,"
+        "Shortcut Count,Folder Count > Depth Limit 100,File Count > Depth Limit 100,"
+        "Entities with > 500k item count,Entities with > 200k item count,Corpus Size,Suggested Batch\n"
+        "https://smh3v-my.sharepoint.com/personal/bugbash5_smh3v_onmicrosoft_com,0,3,1,4,2,99997,N/A,N/A,N/A,0,0,73.24 MB,Batch 1\n"
+        "https://smh3v.sharepoint.com/sites/marketing,1,5,2,6,200,17540,N/A,N/A,N/A,0,0,540.93 GB,Batch 2\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as tmp:
+      tmp.write(csv_content)
+      tmp_path = tmp.name
+
+    try:
+      tool = self._make_dummy_tool(tmp_path, shallow_toggle=True)
+      config = build_config(user_source="csv", csv_path=tmp_path)
+
+      with mock.patch("ui.files_ui.messagebox.showerror") as mock_err:
+        tool._validate_csv()
+        mock_err.assert_not_called()
+
+      metrics = tool._try_get_metrics_from_csv_report(config)
+      self.assertIsNotNone(metrics)
+      self.assertTrue(metrics["isShallowScan"])
+      self.assertEqual(metrics["failedDlCount"], 3)
+
+      s1 = metrics["siteMetrics"]["https://smh3v-my.sharepoint.com/personal/bugbash5_smh3v_onmicrosoft_com"]
+      self.assertEqual(s1["dlCount"], 3)
+      self.assertEqual(s1["failedDlCount"], 1)
+
+      s2 = metrics["siteMetrics"]["https://smh3v.sharepoint.com/sites/marketing"]
+      self.assertEqual(s2["dlCount"], 5)
+      self.assertEqual(s2["failedDlCount"], 2)
+    finally:
+      if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+
+
+class ShallowFailedDlTrackingTest(ShallowScanBaseTest):
+  """Tests per-site and tenant-wide failedDlCount tracking when a DL REST call fails."""
+
+  def test_failed_dl_count_tracked_per_site_and_tenant_level(self):
+    """Verify failed DL REST calls increment per-site and tenant-level failedDlCount while keeping dlCount as total discovered DLs."""
+    site = self.register_site("siteA", f"{TENANT}/sites/Finance")
+    d1 = self.register_library("d1", f"{TENANT}/sites/Finance/Shared%20Documents")
+    d2 = self.register_library("d2", f"{TENANT}/sites/Finance/RestrictedLib")
+    d3 = self.register_library("d3", f"{TENANT}/sites/Finance/SiteAssets")
+    metrics = self.build_metrics([site])
+    metrics["siteMetrics"][site]["dlCount"] = 3
+    metrics["driveCounts"][site] = 3
+
+    out = self.run_scan(
+        metrics,
+        {site: [d1, d2, d3]},
+        {},
         {
-            "value": [
-                {"id": "enc-label-1", "name": "Confidential Encrypted", "hasProtection": True, "sublabels": []},
-                {"id": "unenc-label-1", "name": "General", "hasProtection": False, "sublabels": []},
-            ]
+            d1: {"item": 20, "files": 15, "size": 1000},
+            d2: RuntimeError("403 Forbidden"),
+            d3: {"item": 10, "files": 8, "size": 500},
         },
     )
-    estimator = ShallowFileEstimator(
-        config=cfg,
-        url_invoker=invoker,
-        cert_token_manager=MockCertTokenManager(),
-        logger=lambda *_: None,
-        stop_event=threading.Event(),
-        progress_update_callback=lambda *a, **k: None,
-    )
-    estimator.set_id_to_display_name_map({})
 
-    def fake_get_library_metrics(_self, web_base_url, library_url, logger=None, stop_event=None):
-      return {
-          "item_count": 20,
-          "file_count": 15,
-          "folder_count": 5,
-          "active_size_bytes": 10000,
-          "total_size_bytes": 10000,
-      }
-
-    def fake_search_all_labeled(_self, base_url, path_prefixes=None, logger=None, stop_event=None):
-      return [
-          {
-              "DocId": "10",
-              "Size": "1024",
-              "Path": f"{TENANT}/sites/Finance/Shared Documents/enc1.docx",
-              "UniqueId": "u1",
-              "InformationProtectionLabelId": "enc-label-1",
-          },
-          {
-              "DocId": "11",
-              "Size": "2048",
-              "Path": f"{TENANT}/sites/Finance/Shared Documents/gen1.docx",
-              "UniqueId": "u2",
-              "InformationProtectionLabelId": "unenc-label-1",
-          },
-          {
-              "DocId": "12",
-              "Size": "4096",
-              "Path": f"{TENANT}/sites/Finance/Shared Documents/gen2.docx",
-              "UniqueId": "u3",
-              "InformationProtectionLabelId": "unenc-label-1",
-          },
-      ]
-
-    with mock.patch.object(SpRestConnector, "get_library_metrics", fake_get_library_metrics), \
-         mock.patch.object(SpRestConnector, "search_all_labeled_files", fake_search_all_labeled):
-      res = estimator.calculate_resource_metrics({}, [])
-
-    self.assertEqual(res["sensitivityLabelCount"], 2)
-    self.assertEqual(res["encryptedSensitivityLabelCount"], 1)
-    self.assertEqual(res["sensitivityLabeledFileCount"], 3)
-    self.assertEqual(res["siteMetrics"]["siteA"]["sensitivityLabeledFileCount"], 3)
-    self.assertEqual(res["siteMetrics"]["siteA"]["encryptedFileCount"], 1)
-    self.assertEqual(res["siteMetrics"]["siteA"]["encryptedFileSize"], 1024)
+    self.assertEqual(out["processed"], 3)
+    self.assertEqual(out["failed"], 1)
+    site_metrics = out["metrics"]["siteMetrics"][site]
+    self.assertEqual(site_metrics["dlCount"], 3)
+    self.assertEqual(site_metrics["failedDlCount"], 1)
+    self.assertEqual(site_metrics["fileCount"], 23)
+    self.assertEqual(site_metrics["folderCount"], 7)
+    self.assertEqual(site_metrics["totalSize"], 1500)
+    self.assertEqual(out["metrics"]["failedDlCount"], 1)
 
 
 if __name__ == "__main__":
   unittest.main()
+
+

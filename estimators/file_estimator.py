@@ -221,17 +221,6 @@ class FileEstimator(Estimator):
 
             cumulative_completed_drives = AtomicInt(0)
 
-            if self.config.scan_encrypted_files:
-                self.encryption_metrics_lock = threading.Lock()
-                valid_drive_ids = {drive["id"] for drive in drives if "id" in drive}
-                self._scan_encrypted_files(
-                    drive_discovery_progress_metrics,
-                    failures,
-                    valid_drive_ids,
-                    drives=drives,
-                    subsite_to_drives=subsite_to_drives,
-                )
-
             idx = 0
             self.progress_update_callback("phase_status", source="drive_parsing", status="running")
             while idx < total_drives:
@@ -315,6 +304,17 @@ class FileEstimator(Estimator):
 
             time.sleep(5)
             self.progress_update_callback("phase_status", source="drive_parsing", status="complete")
+
+            if self.config.scan_encrypted_files:
+                self.encryption_metrics_lock = threading.Lock()
+                valid_drive_ids = {drive["id"] for drive in drives if "id" in drive}
+                self._scan_encrypted_files(
+                    drive_discovery_progress_metrics,
+                    failures,
+                    valid_drive_ids,
+                    drives=drives,
+                    subsite_to_drives=subsite_to_drives,
+                )
 
             self.progress_update_callback("phase_status", source="plan_generation", status="running")
             metrics["driveMetrics"] = drive_metrics
@@ -1501,193 +1501,111 @@ class FileEstimator(Estimator):
 
         try:
             from urllib.parse import urlparse
-            from util.files_shallow.sp_rest_connector import SpRestConnector
+            from util.encrypted_files_utils import (
+                ENCRYPTED_FILES_CONCURRENCY,
+                scan_libraries_for_encrypted_files,
+            )
 
-            if not hasattr(self, "drive_id_to_labeled_file_count"):
-                self.drive_id_to_labeled_file_count = {}
-            if not hasattr(self, "total_sensitivity_label_ids"):
-                self.total_sensitivity_label_ids = set()
-            if not hasattr(self, "encrypted_sensitivity_label_ids"):
-                self.encrypted_sensitivity_label_ids = set()
+            self.drive_id_to_labeled_file_count = {}
+            self.drive_id_to_encrypted_file_count = {}
+            self.drive_id_to_encrypted_file_size = {}
+            self.total_sensitivity_label_ids = set()
+            self.encrypted_sensitivity_label_ids = set()
             self.total_labeled_file_count = 0
 
-            encrypted_label_ids = self._get_protected_sensitivity_label_ids(failures)
-            policy_api_ok = getattr(self, "policy_api_succeeded", True)
-            if policy_api_ok and not encrypted_label_ids and not self.total_sensitivity_label_ids:
-                if self.logger:
-                    self.logger("No sensitivity labels with hasProtection=True found in tenant.")
-                drive_discovery_progress_metrics.update("encryptedFileCount", 0)
-                return
+            drive_to_subsite: Dict[str, str] = {}
+            if subsite_to_drives:
+                for subsite_id, s_drive_ids in subsite_to_drives.items():
+                    for cand_id in (s_drive_ids or []):
+                        drive_to_subsite[cand_id] = subsite_id
 
-            drive_prefix_list: List[Tuple[str, str]] = []
-            site_prefix_list: List[Tuple[str, str]] = []
-            domain_to_site_urls: Dict[str, set] = {}
-
+            library_targets: List[Tuple[str, str, str]] = []
             for drv in (drives or []):
                 d_id = drv.get("id")
                 if not d_id:
                     continue
                 if valid_drive_ids and d_id not in valid_drive_ids:
                     continue
-                d_url = drv.get("webUrl") or self.id_to_display.get(d_id, "")
-                if d_url and d_url.startswith("http"):
-                    norm_d_url = self._normalize_sp_url(d_url)
-                    drive_prefix_list.append((norm_d_url, d_id))
-                    parsed = urlparse(d_url)
-                    if parsed.netloc:
-                        domain_to_site_urls.setdefault(parsed.netloc, set()).add(d_url.rstrip("/"))
+                library_url = str(drv.get("webUrl") or self.id_to_display.get(d_id, "") or "").strip().rstrip("/")
+                subsite_id = drive_to_subsite.get(d_id, "")
+                web_base_url = str(self.id_to_display.get(subsite_id, "") or "").strip().rstrip("/")
 
-            if subsite_to_drives:
-                for s_id, s_drive_ids in subsite_to_drives.items():
-                    if not s_drive_ids:
-                        continue
-                    primary_drive_id = None
-                    for cand_id in s_drive_ids:
-                        if not valid_drive_ids or cand_id in valid_drive_ids:
-                            primary_drive_id = cand_id
-                            break
-                    if not primary_drive_id:
-                        continue
-                    s_url = self.id_to_display.get(s_id, "")
-                    if s_url and s_url.startswith("http"):
-                        norm_s_url = self._normalize_sp_url(s_url)
-                        site_prefix_list.append((norm_s_url, primary_drive_id))
-                        parsed = urlparse(s_url)
-                        if parsed.netloc:
-                            domain_to_site_urls.setdefault(parsed.netloc, set()).add(s_url.rstrip("/"))
+                if not web_base_url and library_url.startswith("http"):
+                    parsed = urlparse(library_url)
+                    path_parts = [p for p in parsed.path.split("/") if p]
+                    if len(path_parts) > 1:
+                        web_base_url = f"{parsed.scheme}://{parsed.netloc}/" + "/".join(path_parts[:-1])
+                    else:
+                        web_base_url = library_url
+                if not library_url and web_base_url.startswith("http"):
+                    library_url = web_base_url
 
-            drive_prefix_list.sort(key=lambda x: len(x[0]), reverse=True)
-            site_prefix_list.sort(key=lambda x: len(x[0]), reverse=True)
+                if library_url.startswith("http") and web_base_url.startswith("http"):
+                    library_targets.append((d_id, web_base_url, library_url))
 
-            if not domain_to_site_urls:
-                for disp_id, disp_url in self.id_to_display.items():
-                    if disp_url and str(disp_url).startswith("http"):
-                        parsed = urlparse(str(disp_url))
-                        if parsed.netloc:
-                            domain_to_site_urls.setdefault(parsed.netloc, set()).add(str(disp_url).rstrip("/"))
+            if not library_targets:
+                drive_discovery_progress_metrics.update("encryptedFileCount", 0)
+                drive_discovery_progress_metrics.update("sensitivityLabeledFileCount", 0)
+                return
 
             cert_manager = self._get_or_create_cert_token_manager()
             if hasattr(cert_manager, "load_or_generate_all_certificates"):
                 cert_manager.load_or_generate_all_certificates(self.logger)
-            sp_connector = SpRestConnector(
-                cert_manager,
+
+            total_encrypted_count_box = [0]
+
+            def _on_tenant_labels(all_ids: set, encrypted_ids: set) -> None:
+                with self.encryption_metrics_lock:
+                    self.total_sensitivity_label_ids.update(all_ids)
+                    self.encrypted_sensitivity_label_ids.update(encrypted_ids)
+
+            def _on_page_metrics(
+                drive_id: str,
+                page_labeled_count: int,
+                page_encrypted_count: int,
+                page_encrypted_size: int,
+                page_all_labels: set,
+                page_encrypted_labels: set,
+            ) -> None:
+                with self.encryption_metrics_lock:
+                    self.drive_id_to_labeled_file_count[drive_id] = (
+                        self.drive_id_to_labeled_file_count.get(drive_id, 0) + page_labeled_count
+                    )
+                    self.total_labeled_file_count += page_labeled_count
+                    self.drive_id_to_encrypted_file_count[drive_id] = (
+                        self.drive_id_to_encrypted_file_count.get(drive_id, 0) + page_encrypted_count
+                    )
+                    self.drive_id_to_encrypted_file_size[drive_id] = (
+                        self.drive_id_to_encrypted_file_size.get(drive_id, 0) + page_encrypted_size
+                    )
+                    self.total_sensitivity_label_ids.update(page_all_labels)
+                    self.encrypted_sensitivity_label_ids.update(page_encrypted_labels)
+                    total_encrypted_count_box[0] += page_encrypted_count
+                if page_encrypted_count > 0:
+                    drive_discovery_progress_metrics.increment("encryptedFileCount", page_encrypted_count)
+                if page_labeled_count > 0:
+                    drive_discovery_progress_metrics.increment("sensitivityLabeledFileCount", page_labeled_count)
+
+            scan_libraries_for_encrypted_files(
+                cert_token_manager=cert_manager,
+                url_invoker=self.url_invoker,
+                library_targets=library_targets,
+                on_page_metrics=_on_page_metrics,
+                on_tenant_labels_discovered=_on_tenant_labels,
+                logger=self.logger,
+                stop_event=self.stop_event,
                 max_retries=self.config.retries,
                 backoff=self.config.backoff,
+                concurrency=ENCRYPTED_FILES_CONCURRENCY,
             )
 
-            seen_files = set()
-            total_encrypted_count = 0
-            encrypted_ids_lower = {lid.lower() for lid in encrypted_label_ids} | set(self.encrypted_sensitivity_label_ids)
-
-            for domain, target_urls in sorted(domain_to_site_urls.items()):
-                if self.is_hard_stop_requested():
-                    break
-                sp_connector.cert_token_manager.ensure_domain_authenticated(domain, self.logger)
-                base_url = f"https://{domain}"
-                path_prefixes = sorted(target_urls) if 1 <= len(target_urls) <= 10 else [base_url]
-
-                rows_from_encrypted_only = False
-                rows = []
-                if hasattr(sp_connector, "search_all_labeled_files"):
-                    cand_rows = sp_connector.search_all_labeled_files(
-                        base_url=base_url,
-                        path_prefixes=path_prefixes,
-                        logger=self.logger,
-                        stop_event=self.stop_event,
-                    )
-                    if isinstance(cand_rows, list) and cand_rows:
-                        rows = cand_rows
-                        if hasattr(sp_connector, "detect_encrypted_label_ids_from_samples"):
-                            known_unenc = (
-                                set(self.total_sensitivity_label_ids) - encrypted_ids_lower
-                                if policy_api_ok
-                                else set()
-                            )
-                            disc_all, disc_enc = sp_connector.detect_encrypted_label_ids_from_samples(
-                                rows,
-                                known_encrypted_label_ids=encrypted_ids_lower,
-                                known_unencrypted_label_ids=known_unenc,
-                                logger=self.logger,
-                                stop_event=self.stop_event,
-                            )
-                            if isinstance(disc_all, set):
-                                self.total_sensitivity_label_ids.update(disc_all)
-                            if isinstance(disc_enc, set):
-                                self.encrypted_sensitivity_label_ids.update(disc_enc)
-                                encrypted_ids_lower.update(disc_enc)
-
-                if not rows and encrypted_label_ids:
-                    rows = sp_connector.search_encrypted_files_by_labels(
-                        base_url=base_url,
-                        encrypted_label_ids=sorted(encrypted_label_ids),
-                        path_prefixes=path_prefixes,
-                        logger=self.logger,
-                        stop_event=self.stop_event,
-                    )
-                    rows_from_encrypted_only = True
-
-                for row in rows:
-                    raw_path = (
-                        row.get("Path")
-                        or row.get("OriginalPath")
-                        or row.get("ParentLink")
-                        or row.get("SPWebUrl")
-                        or ""
-                    )
-                    if not raw_path:
-                        continue
-                    norm_path = self._normalize_sp_url(raw_path)
-
-                    matched_drive_id = None
-                    for norm_d_url, d_id in drive_prefix_list:
-                        if norm_path == norm_d_url or norm_path.startswith(norm_d_url + "/"):
-                            matched_drive_id = d_id
-                            break
-
-                    if not matched_drive_id:
-                        for norm_s_url, d_id in site_prefix_list:
-                            if norm_path == norm_s_url or norm_path.startswith(norm_s_url + "/"):
-                                matched_drive_id = d_id
-                                break
-
-                    if not matched_drive_id:
-                        continue
-                    if valid_drive_ids and matched_drive_id not in valid_drive_ids:
-                        continue
-
-                    unique_key = str(row.get("UniqueId") or row.get("DocId") or norm_path)
-                    file_key = (matched_drive_id, unique_key)
-                    if file_key in seen_files:
-                        continue
-                    seen_files.add(file_key)
-
-                    row_lid = str(row.get("InformationProtectionLabelId") or "").strip().lower()
-                    if row_lid:
-                        self.total_sensitivity_label_ids.add(row_lid)
-
-                    is_encrypted_row = rows_from_encrypted_only or (row_lid in encrypted_ids_lower)
-                    file_size = SpRestConnector._parse_int(row.get("Size"))
-                    with self.encryption_metrics_lock:
-                        self.drive_id_to_labeled_file_count[matched_drive_id] = (
-                            self.drive_id_to_labeled_file_count.get(matched_drive_id, 0) + 1
-                        )
-                        self.total_labeled_file_count += 1
-                        if is_encrypted_row:
-                            self.drive_id_to_encrypted_file_count[matched_drive_id] = (
-                                self.drive_id_to_encrypted_file_count.get(matched_drive_id, 0) + 1
-                            )
-                            self.drive_id_to_encrypted_file_size[matched_drive_id] = (
-                                self.drive_id_to_encrypted_file_size.get(matched_drive_id, 0) + file_size
-                            )
-                            total_encrypted_count += 1
-
-            drive_discovery_progress_metrics.update("encryptedFileCount", total_encrypted_count)
+            drive_discovery_progress_metrics.update("encryptedFileCount", total_encrypted_count_box[0])
             drive_discovery_progress_metrics.update("sensitivityLabeledFileCount", self.total_labeled_file_count)
             if self.logger:
                 self.logger(
                     f"Sensitivity label & encrypted file scan complete (SharePoint REST postquery): "
                     f"Sensitivity Labels: {len(self.total_sensitivity_label_ids)} ({len(self.encrypted_sensitivity_label_ids)} Encrypted) | "
-                    f"Sensitivity Labeled Files: {self.total_labeled_file_count} ({total_encrypted_count} Encrypted)."
+                    f"Sensitivity Labeled Files: {self.total_labeled_file_count} ({total_encrypted_count_box[0]} Encrypted)."
                 )
 
         except Exception as e:
@@ -2573,7 +2491,7 @@ class FileEstimator(Estimator):
                 if path.endswith("/"):
                     path = path[:-1]
                 
-                url = f"{GRAPH_BASE_URL}/sites/{hostname}:{path}?$select=id,webUrl"
+                url = f"{GRAPH_BASE_URL}/sites/{hostname}:{path}?$select=id,isPersonalSite"
                 
                 attempts = 0
                 max_attempts = self.config.retries + 1
@@ -2605,7 +2523,7 @@ class FileEstimator(Estimator):
                 
                 if response_data and "id" in response_data:
                     site_id = response_data["id"]
-                    is_personal = response_data.get("isPersonalSite", "/personal/" in site_url.lower())
+                    is_personal = response_data.get("isPersonalSite", False)
                     url_to_site_id[url] = site_id
                     
                     self.site_to_metadata[site_id] = {"isPersonalSite": is_personal}
