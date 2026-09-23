@@ -100,6 +100,7 @@ class ShallowFileEstimator(FileEstimator):
             "personal": 0,
             "business": 0,
         },
+        "failedDlCount": 0,
         "personalSiteDLCount": 0,
         "teamSiteDLCount": 0,
         "tenantLevelFileSizeDistribution": {"buckets": []},
@@ -120,6 +121,7 @@ class ShallowFileEstimator(FileEstimator):
     for s_data in metrics["siteMetrics"].values():
       s_data.setdefault("subsiteCount", 0)
       s_data.setdefault("dlCount", 0)
+      s_data.setdefault("failedDlCount", 0)
       s_data.setdefault("listCount", 0)
       s_data.setdefault("folderCount", 0)
       s_data.setdefault("fileCount", 0)
@@ -340,13 +342,19 @@ class ShallowFileEstimator(FileEstimator):
       )
 
     def _record_failure(
-        message: str, failure_type: str, status_code: Optional[int]
+        top_level_site_id: str,
+        message: str,
+        failure_type: str,
+        status_code: Optional[int],
     ) -> None:
       """Marks the current library as failed and logs the reason."""
       nonlocal processed_count, failed_count
       with lock:
         processed_count += 1
         failed_count += 1
+        if top_level_site_id in metrics["siteMetrics"]:
+          s_meta = metrics["siteMetrics"][top_level_site_id]
+          s_meta["failedDlCount"] = int(s_meta.get("failedDlCount", 0) or 0) + 1
         self.logger(message)
         failures.append({
             "type": failure_type,
@@ -366,6 +374,7 @@ class ShallowFileEstimator(FileEstimator):
         )
       except PermissionError as perm_err:
         _record_failure(
+            target.top_level_site_id,
             f"Skipping document library {target.library_url}: {perm_err}",
             FailureType.FAILURE_STATUS_CODE_ERROR.name,
             403,
@@ -373,6 +382,7 @@ class ShallowFileEstimator(FileEstimator):
         return
       except Exception as err:
         _record_failure(
+            target.top_level_site_id,
             "Failed StorageMetrics/ItemCounts REST call for "
             f"{target.library_url}: {err}",
             FailureType.UNKNOWN_ERROR.name,
@@ -451,6 +461,13 @@ class ShallowFileEstimator(FileEstimator):
     metrics["fileCount"] = sum(
         int(s.get("fileCount", 0) or 0)
         for s in metrics["siteMetrics"].values()
+    )
+    metrics["failedDlCount"] = max(
+        failed_count,
+        sum(
+            int(s.get("failedDlCount", 0) or 0)
+            for s in metrics["siteMetrics"].values()
+        ),
     )
     metrics["tenantLevelLargeResourceCount"] = len(
         metrics["tenantLevelLargeResources"]
