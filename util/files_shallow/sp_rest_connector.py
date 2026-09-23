@@ -597,3 +597,183 @@ class SpRestConnector:
           break
 
     return all_rows
+
+  def search_all_labeled_files(
+      self,
+      base_url: str,
+      path_prefixes: Optional[List[str]] = None,
+      logger: Optional[Callable[[str], None]] = None,
+      stop_event: Optional[threading.Event] = None,
+  ) -> List[Dict[str, Any]]:
+    """Queries SharePoint REST `postquery` API for all sensitivity-labeled files.
+
+    Uses hex-prefix KQL (`InformationProtectionLabelId:0* OR ... OR f*`) with
+    `[DocId]:ascending` and `IndexDocId > {Last_DocId}` cursor pagination so all
+    sensitivity-labeled documents are discovered even if the tenant app lacks
+    `SensitivityLabels.Read.All` Graph policy permissions.
+    """
+    if logger is None:
+      logger = lambda x: None
+
+    domain = self._extract_domain(base_url)
+    clean_base_url = base_url.rstrip("/")
+    endpoint = f"{clean_base_url}/_api/search/postquery"
+
+    hex_clause = " OR ".join(
+        f"InformationProtectionLabelId:{c}*" for c in "0123456789abcdef"
+    )
+    if path_prefixes:
+      cleaned_prefixes = [
+          p.rstrip("/") for p in path_prefixes if p and p.startswith("http")
+      ]
+      if cleaned_prefixes:
+        path_clause = " OR ".join(f'Path:"{p}*"' for p in cleaned_prefixes)
+        base_kql = f"({hex_clause}) AND ({path_clause}) AND IsDocument:true"
+      else:
+        base_kql = f"({hex_clause}) AND IsDocument:true"
+    else:
+      base_kql = f"({hex_clause}) AND IsDocument:true"
+
+    select_props = [
+        "DocId",
+        "Size",
+        "Path",
+        "OriginalPath",
+        "ParentLink",
+        "SPWebUrl",
+        "SiteId",
+        "WebId",
+        "ListId",
+        "DocumentLibraryId",
+        "UniqueId",
+        "InformationProtectionLabelId",
+    ]
+
+    all_rows: List[Dict[str, Any]] = []
+    last_doc_id: Optional[int] = None
+    start_row = 0
+    row_limit = 500
+
+    while not (stop_event and stop_event.is_set()):
+      if last_doc_id is not None:
+        query_text = f"{base_kql} AND IndexDocId>{last_doc_id}"
+        current_start_row = 0
+      else:
+        query_text = base_kql
+        current_start_row = start_row
+
+      payload = {
+          "request": {
+              "__metadata": {
+                  "type": "Microsoft.Office.Server.Search.REST.SearchRequest"
+              },
+              "Querytext": query_text,
+              "RowLimit": row_limit,
+              "StartRow": current_start_row,
+              "TrimDuplicates": False,
+              "SelectProperties": {"results": select_props},
+              "SortList": {
+                  "results": [{"Property": "DocId", "Direction": "0"}]
+              },
+          }
+      }
+
+      resp_data = self._execute_post(
+          endpoint, payload, clean_base_url, domain, logger, stop_event
+      )
+      rows = self._extract_postquery_rows(resp_data)
+      if not rows:
+        break
+
+      all_rows.extend(rows)
+
+      max_batch_doc_id: Optional[int] = None
+      for row in rows:
+        doc_id_val = self._parse_int(row.get("DocId"))
+        if doc_id_val > 0 and (
+            max_batch_doc_id is None or doc_id_val > max_batch_doc_id
+        ):
+          max_batch_doc_id = doc_id_val
+
+      if len(rows) < row_limit:
+        break
+
+      if max_batch_doc_id is not None and (
+          last_doc_id is None or max_batch_doc_id > last_doc_id
+      ):
+        last_doc_id = max_batch_doc_id
+      else:
+        start_row += len(rows)
+        if start_row >= 50000:
+          break
+
+    return all_rows
+
+  def detect_encrypted_label_ids_from_samples(
+      self,
+      labeled_rows: List[Dict[str, Any]],
+      known_encrypted_label_ids: Optional[set] = None,
+      known_unencrypted_label_ids: Optional[set] = None,
+      logger: Optional[Callable[[str], None]] = None,
+      stop_event: Optional[threading.Event] = None,
+  ) -> Tuple[set, set]:
+    """Identifies distinct sensitivity label IDs and which ones encrypt files.
+
+    For any `InformationProtectionLabelId` not already classified by the Graph
+    `sensitivityLabels` policy API, probes 1 representative file's first 8 bytes
+    (`Range: bytes=0-7`) via SharePoint REST `/_api/web/GetFileById('{UniqueId}')/$value`
+    to check for the OLE2/RMS compound encryption header (`\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1`).
+    """
+    if logger is None:
+      logger = lambda x: None
+
+    all_label_ids = set()
+    encrypted_label_ids = set(known_encrypted_label_ids or set())
+    unencrypted_label_ids = set(known_unencrypted_label_ids or set())
+    sample_row_by_label: Dict[str, Dict[str, Any]] = {}
+
+    for row in labeled_rows:
+      lid = str(row.get("InformationProtectionLabelId") or "").strip().lower()
+      if not lid:
+        continue
+      all_label_ids.add(lid)
+      if (
+          lid not in encrypted_label_ids
+          and lid not in unencrypted_label_ids
+          and lid not in sample_row_by_label
+      ):
+        if row.get("SPWebUrl") and row.get("UniqueId"):
+          sample_row_by_label[lid] = row
+
+    ole_rms_magic = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    session = self.cert_token_manager.get_session()
+
+    for lid, sample_row in sample_row_by_label.items():
+      if stop_event and stop_event.is_set():
+        break
+      sp_web_url = str(sample_row.get("SPWebUrl") or "").rstrip("/")
+      unique_id = str(sample_row.get("UniqueId") or "").strip("{}")
+      if not sp_web_url or not unique_id:
+        continue
+      try:
+        domain = self._extract_domain(sp_web_url)
+        self.cert_token_manager.ensure_domain_authenticated(domain, logger)
+        token_data = self.cert_token_manager.get_valid_token_slot(domain, logger)
+        try:
+          probe_url = f"{sp_web_url}/_api/web/GetFileById('{unique_id}')/$value"
+          headers = {
+              "Authorization": f"Bearer {token_data['token']}",
+              "Range": "bytes=0-7",
+          }
+          resp = session.get(probe_url, headers=headers, timeout=20.0)
+          if resp.status_code in (200, 206) and resp.content[:8].startswith(ole_rms_magic):
+            encrypted_label_ids.add(lid)
+          else:
+            unencrypted_label_ids.add(lid)
+        finally:
+          self.cert_token_manager.return_token_slot(domain, token_data)
+      except Exception as probe_err:
+        logger(f"Sample encryption probe skipped for label {lid}: {probe_err}")
+
+    return all_label_ids, encrypted_label_ids
+

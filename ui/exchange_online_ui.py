@@ -392,11 +392,33 @@ class MigrationEstimatorTool(ctk.CTk):
       self.create_stat_card(
           card_frame, "Emails", f"{data['total_emails']:,}", "📩"
       )
-      if data.get("total_encrypted_emails", 0) > 0:
+      if (
+          data.get("scan_encrypted_email")
+          or data.get("total_encrypted_emails", 0) > 0
+          or data.get("total_labeled_emails", 0) > 0
+      ):
+        total_lbls = data.get("total_sensitivity_labels", 0)
+        enc_lbls = data.get("total_encrypted_sensitivity_labels", 0)
+        total_lbl_emails = data.get(
+            "total_labeled_emails", data.get("total_encrypted_emails", 0)
+        )
+        total_enc_emails = data.get("total_encrypted_emails", 0)
+        self.create_stat_card(
+            card_frame,
+            "Sensitivity Labels",
+            f"{total_lbls:,} ({enc_lbls:,} Encrypted)",
+            "🏷️",
+        )
+        self.create_stat_card(
+            card_frame,
+            "Sensitivity Labeled Emails",
+            f"{total_lbl_emails:,} ({total_enc_emails:,} Encrypted)",
+            "🏷️",
+        )
         self.create_stat_card(
             card_frame,
             "Encrypted Emails",
-            f"{data['total_encrypted_emails']:,}",
+            f"{total_enc_emails:,}",
             "🔒",
         )
       self.create_stat_card(
@@ -1838,6 +1860,9 @@ class MigrationEstimatorTool(ctk.CTk):
     stats = {
         "emails": sum(r["Email Count"] for r in csv_rows),
         "encrypted_emails": sum(r.get("Encrypted Email Count", 0) for r in csv_rows),
+        "labeled_emails": 0,
+        "sensitivity_label_ids": set(),
+        "encrypted_sensitivity_label_ids": set(),
         "contacts": sum(r["Contact Count"] for r in csv_rows),
         "calendars": sum(r["Calendar Count"] for r in csv_rows),
         "events": sum(r["Event Count"] for r in csv_rows),
@@ -2207,6 +2232,32 @@ class MigrationEstimatorTool(ctk.CTk):
     if config.scan_encrypted_email:
       if can_scan and (not has_encrypted_email_data or config.user_source == "tenant"):
         self.ui_update("phase_status", source="encrypted_messages", status="running")
+        try:
+          slot = manager.get_valid_token_slot(self.log_msg)
+          try:
+            s_lbl = manager.get_session()
+            h_lbl = {"Authorization": f"Bearer {slot['token']}", "Content-Type": "application/json"}
+            l_url = f"{GRAPH_BASE_URL}/security/dataSecurityAndGovernance/sensitivityLabels?$select=id,name,hasProtection,sublabels"
+            while l_url and not self.stop_scan_event.is_set():
+              lr = s_lbl.get(l_url, headers=h_lbl, timeout=30)
+              if lr.status_code != 200:
+                break
+              ldata = lr.json()
+              def _collect_lbls(lbl_list):
+                for lb in lbl_list:
+                  lid = str(lb.get("id") or "").strip().lower()
+                  if lid:
+                    stats["sensitivity_label_ids"].add(lid)
+                    if lb.get("hasProtection") is True:
+                      stats["encrypted_sensitivity_label_ids"].add(lid)
+                  if lb.get("sublabels"):
+                    _collect_lbls(lb["sublabels"])
+              _collect_lbls(ldata.get("value", []))
+              l_url = ldata.get("@odata.nextLink")
+          finally:
+            manager.return_token_slot(slot)
+        except Exception:
+          pass
         failed_encrypted_emails = self.run_batch_phase_ui(
             user_chunks, "encrypted_messages", manager, workers, stats, total_users
         )
@@ -2447,15 +2498,19 @@ class MigrationEstimatorTool(ctk.CTk):
     total_ram_gb = psutil.virtual_memory().total / (1024**3)
     total_cpu_cores = psutil.cpu_count(logical=True)
 
+    total_lbls = len(stats.get("sensitivity_label_ids", set()))
+    enc_lbls = len(stats.get("encrypted_sensitivity_label_ids", set()))
+    total_lbl_emails = max(stats.get("labeled_emails", 0), stats.get("encrypted_emails", 0))
+
     self.log_msg("\n" + "=" * 40)
     self.log_msg(f"TOTAL TIME: {elapsed}")
     self.log_msg(f"Total Users / Groups: {len(csv_rows)}")
     self.log_msg(
-        f"Emails: {stats['emails']} (Encrypted: {stats.get('encrypted_emails', 0)}) | Contacts: {stats['contacts']} |"
-        f" Calendars: {stats['calendars']} | Events: {stats['events']} |"
-        f" In Place Archives: {stats['in_place_archives']} |"
-        f" Shared Mails: {stats['shared_mails']} |"
-        f" Group Mails: {stats['group_mails']} | Group Threads: {stats['group_threads']}"
+        f"Emails: {stats['emails']} | Sensitivity Labels: {total_lbls} ({enc_lbls} Encrypted) | "
+        f"Sensitivity Labeled Emails: {total_lbl_emails} ({stats.get('encrypted_emails', 0)} Encrypted) | "
+        f"Contacts: {stats['contacts']} | Calendars: {stats['calendars']} | Events: {stats['events']} | "
+        f"In Place Archives: {stats['in_place_archives']} | Shared Mails: {stats['shared_mails']} | "
+        f"Group Mails: {stats['group_mails']} | Group Threads: {stats['group_threads']}"
     )
     self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
     self.log_msg(f"CPU Avg/Peak: {avg_cpu:.1f}% / {max_cpu:.1f}%")
@@ -2481,6 +2536,7 @@ class MigrationEstimatorTool(ctk.CTk):
     if config.scan_email:
       final_columns.append("Email Count")
     if config.scan_encrypted_email:
+      final_columns.append("Sensitivity Labeled Email Count")
       final_columns.append("Encrypted Email Count")
     if config.scan_contact:
       final_columns.append("Contact Count")
@@ -2529,7 +2585,11 @@ class MigrationEstimatorTool(ctk.CTk):
     result_data = {
         "total_users": len(df),
         "total_emails": stats["emails"],
+        "scan_encrypted_email": config.scan_encrypted_email,
         "total_encrypted_emails": stats.get("encrypted_emails", 0),
+        "total_labeled_emails": total_lbl_emails,
+        "total_sensitivity_labels": total_lbls,
+        "total_encrypted_sensitivity_labels": enc_lbls,
         "total_contacts": stats["contacts"],
         "total_calendars": stats["calendars"],
         "total_events": stats["events"],
@@ -2606,6 +2666,13 @@ class MigrationEstimatorTool(ctk.CTk):
           elif res_type == "encrypted_messages":
             val = r.get("encrypted_emails", 0)
             stats["encrypted_emails"] += val
+            stats["labeled_emails"] = stats.get("labeled_emails", 0) + r.get("labeled_emails", 0)
+            if "sensitivity_label_ids" not in stats:
+              stats["sensitivity_label_ids"] = set()
+            if "encrypted_sensitivity_label_ids" not in stats:
+              stats["encrypted_sensitivity_label_ids"] = set()
+            stats["sensitivity_label_ids"].update(r.get("all_label_ids", set()))
+            stats["encrypted_sensitivity_label_ids"].update(r.get("encrypted_label_ids", set()))
             phase_total += val
           elif res_type == "contacts":
             val = r["contacts"]

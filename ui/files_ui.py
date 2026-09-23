@@ -765,7 +765,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             row_data["Historical File Version Count"] = s_data.get("versionCount", 0)
             row_data["Historical File Version Size"] = s_data.get("versionSize", 0)
         if getattr(self, "val_scan_encrypted_files", False):
-            row_data["Encrypted File Count"] = s_data.get("encryptedFileCount", 0)
+            enc_cnt = s_data.get("encryptedFileCount", 0)
+            lbl_cnt = s_data.get("sensitivityLabeledFileCount", 0) or enc_cnt
+            row_data["Sensitivity Labeled File Count"] = f"{lbl_cnt} ({enc_cnt} Encrypted)"
+            row_data["Encrypted File Count"] = enc_cnt
             row_data["Encrypted File Size"] = s_data.get("encryptedFileSize", 0)
             
         site_data.append(row_data)
@@ -1380,9 +1383,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               justify="left",
           ).pack(anchor="w", padx=10, pady=(0, 10))
 
-      # Cards for simple metrics
+      # Cards for simple metrics (Row 1)
       card_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
-      card_frame.pack(fill="x", pady=10)
+      card_frame.pack(fill="x", pady=(10, 5))
 
       self.create_stat_card(card_frame, "Total Corpus Size", f"{self.format_size(sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🏢")
       if getattr(self, "val_include_recycle_bin_contents", False):
@@ -1402,15 +1405,40 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         file_count = sum(int(s.get("fileCount", 0) or 0) for s in data["siteMetrics"].values())
       self.create_stat_card(card_frame, "Folder Count", f"{folder_count:,}", "📁")
       self.create_stat_card(card_frame, "File Count", f"{file_count:,}", "📄")
-      if getattr(self, "val_scan_encrypted_files", False):
-        self.create_stat_card(card_frame, "Total Encrypted File Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
-        self.create_stat_card(card_frame, "Total Encrypted File Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
       self.create_stat_card(card_frame, "Shortcut Count", shallow_ui_helpers.format_stat_value(data.get('shortcutCount', 0)), "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
-      self.create_stat_card(card_frame, "Folder count beyond depth limit 100", shallow_ui_helpers.format_stat_value(data.get('folderCountExceedingDepthLimit', 0)), "📁")
-      self.create_stat_card(card_frame, "File count beyond depth limit 100", shallow_ui_helpers.format_stat_value(data.get('fileCountExceedingDepthLimit', 0)), "📄")
-      self.create_stat_card(card_frame, "Large Resource Count (Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
-      self.create_stat_card(card_frame, "Warning Resource Count (Entities with >200k items)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
+
+      # Cards for sensitivity labels, encryption & depth/threshold metrics (Row 2)
+      card_frame_row2 = ctk.CTkFrame(self.view_results, fg_color="transparent")
+      card_frame_row2.pack(fill="x", pady=(5, 10))
+      if getattr(self, "val_scan_encrypted_files", False):
+        total_enc_files = sum([entry.get("encryptedFileCount", 0) for entry in data.get("siteMetrics", {}).values()])
+        total_enc_size = sum([entry.get("encryptedFileSize", 0) for entry in data.get("siteMetrics", {}).values()])
+        total_labeled_files = (
+            data.get("sensitivityLabeledFileCount", 0)
+            or sum([entry.get("sensitivityLabeledFileCount", 0) for entry in data.get("siteMetrics", {}).values()])
+            or total_enc_files
+        )
+        total_labels = data.get("sensitivityLabelCount", 0)
+        enc_labels = data.get("encryptedSensitivityLabelCount", 0)
+        self.create_stat_card(
+            card_frame_row2,
+            "Sensitivity Labels",
+            f"{total_labels:,} ({enc_labels:,} Encrypted)",
+            "🏷️",
+        )
+        self.create_stat_card(
+            card_frame_row2,
+            "Sensitivity Labeled Files",
+            f"{total_labeled_files:,} ({total_enc_files:,} Encrypted)",
+            "🏷️",
+        )
+        self.create_stat_card(card_frame_row2, "Total Encrypted File Count", f"{total_enc_files:,}", "🔒")
+        self.create_stat_card(card_frame_row2, "Total Encrypted File Size", f"{self.format_size(total_enc_size)}", "🔒")
+      self.create_stat_card(card_frame_row2, "Folder count > depth 100", shallow_ui_helpers.format_stat_value(data.get('folderCountExceedingDepthLimit', 0)), "📁")
+      self.create_stat_card(card_frame_row2, "File count > depth 100", shallow_ui_helpers.format_stat_value(data.get('fileCountExceedingDepthLimit', 0)), "📄")
+      self.create_stat_card(card_frame_row2, "Large Resources (>500k)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
+      self.create_stat_card(card_frame_row2, "Warning Resources (>200k)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
 
       if self.show_eta:
         # Timeline
@@ -1814,7 +1842,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if getattr(self, "val_scan_encrypted_files", False):
           total_encrypted_size = sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()])
           total_encrypted_count = sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()])
+          total_labeled_files = (
+              data.get("sensitivityLabeledFileCount", 0)
+              or sum([entry.get("sensitivityLabeledFileCount", 0) for entry in data.get("siteMetrics", {}).values()])
+              or total_encrypted_count
+          )
+          total_labels = data.get("sensitivityLabelCount", 0)
+          enc_labels = data.get("encryptedSensitivityLabelCount", 0)
           summary_rows.extend([
+              ("Sensitivity Labels", f"{total_labels:,} ({enc_labels:,} Encrypted)"),
+              ("Sensitivity Labeled Files", f"{total_labeled_files:,} ({total_encrypted_count:,} Encrypted)"),
               ("Total Encrypted File Size", self.format_size(total_encrypted_size)),
               ("Total Encrypted File Count", total_encrypted_count),
           ])

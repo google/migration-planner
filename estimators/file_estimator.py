@@ -137,6 +137,10 @@ class FileEstimator(Estimator):
             self.drive_id_to_version_count = {}
             self.drive_id_to_encrypted_file_size = {}
             self.drive_id_to_encrypted_file_count = {}
+            self.drive_id_to_labeled_file_count = {}
+            self.total_sensitivity_label_ids = set()
+            self.encrypted_sensitivity_label_ids = set()
+            self.total_labeled_file_count = 0
             
             drives = []
             subsite_to_drives = {}          # used to calculate effective max Depth
@@ -583,6 +587,10 @@ class FileEstimator(Estimator):
                     if self.config.scan_encrypted_files:
                         metrics["siteMetrics"][top_level_site]["encryptedFileSize"] = metrics["siteMetrics"].get(top_level_site, {}).get("encryptedFileSize", 0) + self.drive_id_to_encrypted_file_size.get(drive_id, 0)
                         metrics["siteMetrics"][top_level_site]["encryptedFileCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("encryptedFileCount", 0) + self.drive_id_to_encrypted_file_count.get(drive_id, 0)
+                        metrics["siteMetrics"][top_level_site]["sensitivityLabeledFileCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("sensitivityLabeledFileCount", 0) + getattr(self, "drive_id_to_labeled_file_count", {}).get(drive_id, 0)
+                        metrics["sensitivityLabelCount"] = len(getattr(self, "total_sensitivity_label_ids", set()))
+                        metrics["encryptedSensitivityLabelCount"] = len(getattr(self, "encrypted_sensitivity_label_ids", set()))
+                        metrics["sensitivityLabeledFileCount"] = getattr(self, "total_labeled_file_count", 0)
                     metrics["siteMetrics"][top_level_site]["folderCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("folderCountExceedingDepthLimit", 0) + drive_metric.get("folderCountExceedingDepthLimit", 0)
                     metrics["siteMetrics"][top_level_site]["fileCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("fileCountExceedingDepthLimit", 0) + drive_metric.get("fileCountExceedingDepthLimit", 0)
                 
@@ -1430,6 +1438,8 @@ class FileEstimator(Estimator):
         failures: List[Dict[str, str]],
     ) -> set:
         encrypted_label_ids = set()
+        all_label_ids = set()
+        self.policy_api_succeeded = False
         token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
         token = token_data["token"]
         session = self.url_invoker.token_manager.get_session()
@@ -1442,12 +1452,16 @@ class FileEstimator(Estimator):
             while labels_url and not self.is_hard_stop_requested():
                 lr = session.get(labels_url, headers=headers, timeout=60)
                 if lr.status_code == 200:
+                    self.policy_api_succeeded = True
                     l_data = lr.json()
 
                     def _collect_protected_labels(label_list):
                         for lbl in label_list:
-                            if lbl.get("hasProtection") is True and lbl.get("id"):
-                                encrypted_label_ids.add(lbl["id"])
+                            lid = str(lbl.get("id") or "").strip()
+                            if lid:
+                                all_label_ids.add(lid.lower())
+                                if lbl.get("hasProtection") is True:
+                                    encrypted_label_ids.add(lid)
                             sublabels = lbl.get("sublabels") or []
                             if sublabels:
                                 _collect_protected_labels(sublabels)
@@ -1457,8 +1471,8 @@ class FileEstimator(Estimator):
                 else:
                     error_msg = (
                         f"SensitivityLabels API returned status {lr.status_code}. "
-                        "Please ensure InformationProtectionPolicy.Read.All (or SensitivityLabels.Read.All) "
-                        "application permission is granted in Microsoft Entra ID."
+                        "Falling back to SharePoint REST Search (InformationProtectionLabelId) "
+                        "and file header inspection for sensitivity label discovery."
                     )
                     if self.logger:
                         self.logger(error_msg)
@@ -1470,6 +1484,8 @@ class FileEstimator(Estimator):
                     return set()
         finally:
             self.url_invoker.token_manager.return_token_slot(token_data)
+        self.total_sensitivity_label_ids = set(all_label_ids)
+        self.encrypted_sensitivity_label_ids = {lid.lower() for lid in encrypted_label_ids}
         return encrypted_label_ids
 
     def _scan_encrypted_files(
@@ -1487,8 +1503,17 @@ class FileEstimator(Estimator):
             from urllib.parse import urlparse
             from util.files_shallow.sp_rest_connector import SpRestConnector
 
+            if not hasattr(self, "drive_id_to_labeled_file_count"):
+                self.drive_id_to_labeled_file_count = {}
+            if not hasattr(self, "total_sensitivity_label_ids"):
+                self.total_sensitivity_label_ids = set()
+            if not hasattr(self, "encrypted_sensitivity_label_ids"):
+                self.encrypted_sensitivity_label_ids = set()
+            self.total_labeled_file_count = 0
+
             encrypted_label_ids = self._get_protected_sensitivity_label_ids(failures)
-            if not encrypted_label_ids:
+            policy_api_ok = getattr(self, "policy_api_succeeded", True)
+            if policy_api_ok and not encrypted_label_ids and not self.total_sensitivity_label_ids:
                 if self.logger:
                     self.logger("No sensitivity labels with hasProtection=True found in tenant.")
                 drive_discovery_progress_metrics.update("encryptedFileCount", 0)
@@ -1542,7 +1567,8 @@ class FileEstimator(Estimator):
                             domain_to_site_urls.setdefault(parsed.netloc, set()).add(str(disp_url).rstrip("/"))
 
             cert_manager = self._get_or_create_cert_token_manager()
-            cert_manager.load_or_generate_all_certificates(self.logger)
+            if hasattr(cert_manager, "load_or_generate_all_certificates"):
+                cert_manager.load_or_generate_all_certificates(self.logger)
             sp_connector = SpRestConnector(
                 cert_manager,
                 max_retries=self.config.retries,
@@ -1551,6 +1577,7 @@ class FileEstimator(Estimator):
 
             seen_files = set()
             total_encrypted_count = 0
+            encrypted_ids_lower = {lid.lower() for lid in encrypted_label_ids} | set(self.encrypted_sensitivity_label_ids)
 
             for domain, target_urls in sorted(domain_to_site_urls.items()):
                 if self.is_hard_stop_requested():
@@ -1559,13 +1586,45 @@ class FileEstimator(Estimator):
                 base_url = f"https://{domain}"
                 path_prefixes = sorted(target_urls) if 1 <= len(target_urls) <= 10 else [base_url]
 
-                rows = sp_connector.search_encrypted_files_by_labels(
-                    base_url=base_url,
-                    encrypted_label_ids=sorted(encrypted_label_ids),
-                    path_prefixes=path_prefixes,
-                    logger=self.logger,
-                    stop_event=self.stop_event,
-                )
+                rows_from_encrypted_only = False
+                rows = []
+                if hasattr(sp_connector, "search_all_labeled_files"):
+                    cand_rows = sp_connector.search_all_labeled_files(
+                        base_url=base_url,
+                        path_prefixes=path_prefixes,
+                        logger=self.logger,
+                        stop_event=self.stop_event,
+                    )
+                    if isinstance(cand_rows, list) and cand_rows:
+                        rows = cand_rows
+                        if hasattr(sp_connector, "detect_encrypted_label_ids_from_samples"):
+                            known_unenc = (
+                                set(self.total_sensitivity_label_ids) - encrypted_ids_lower
+                                if policy_api_ok
+                                else set()
+                            )
+                            disc_all, disc_enc = sp_connector.detect_encrypted_label_ids_from_samples(
+                                rows,
+                                known_encrypted_label_ids=encrypted_ids_lower,
+                                known_unencrypted_label_ids=known_unenc,
+                                logger=self.logger,
+                                stop_event=self.stop_event,
+                            )
+                            if isinstance(disc_all, set):
+                                self.total_sensitivity_label_ids.update(disc_all)
+                            if isinstance(disc_enc, set):
+                                self.encrypted_sensitivity_label_ids.update(disc_enc)
+                                encrypted_ids_lower.update(disc_enc)
+
+                if not rows and encrypted_label_ids:
+                    rows = sp_connector.search_encrypted_files_by_labels(
+                        base_url=base_url,
+                        encrypted_label_ids=sorted(encrypted_label_ids),
+                        path_prefixes=path_prefixes,
+                        logger=self.logger,
+                        stop_event=self.stop_event,
+                    )
+                    rows_from_encrypted_only = True
 
                 for row in rows:
                     raw_path = (
@@ -1602,25 +1661,37 @@ class FileEstimator(Estimator):
                         continue
                     seen_files.add(file_key)
 
+                    row_lid = str(row.get("InformationProtectionLabelId") or "").strip().lower()
+                    if row_lid:
+                        self.total_sensitivity_label_ids.add(row_lid)
+
+                    is_encrypted_row = rows_from_encrypted_only or (row_lid in encrypted_ids_lower)
                     file_size = SpRestConnector._parse_int(row.get("Size"))
                     with self.encryption_metrics_lock:
-                        self.drive_id_to_encrypted_file_count[matched_drive_id] = (
-                            self.drive_id_to_encrypted_file_count.get(matched_drive_id, 0) + 1
+                        self.drive_id_to_labeled_file_count[matched_drive_id] = (
+                            self.drive_id_to_labeled_file_count.get(matched_drive_id, 0) + 1
                         )
-                        self.drive_id_to_encrypted_file_size[matched_drive_id] = (
-                            self.drive_id_to_encrypted_file_size.get(matched_drive_id, 0) + file_size
-                        )
-                    total_encrypted_count += 1
+                        self.total_labeled_file_count += 1
+                        if is_encrypted_row:
+                            self.drive_id_to_encrypted_file_count[matched_drive_id] = (
+                                self.drive_id_to_encrypted_file_count.get(matched_drive_id, 0) + 1
+                            )
+                            self.drive_id_to_encrypted_file_size[matched_drive_id] = (
+                                self.drive_id_to_encrypted_file_size.get(matched_drive_id, 0) + file_size
+                            )
+                            total_encrypted_count += 1
 
             drive_discovery_progress_metrics.update("encryptedFileCount", total_encrypted_count)
+            drive_discovery_progress_metrics.update("sensitivityLabeledFileCount", self.total_labeled_file_count)
             if self.logger:
                 self.logger(
-                    f"Encrypted file scan complete (SharePoint REST postquery): {total_encrypted_count} encrypted files "
-                    f"found across {len(encrypted_label_ids)} protected sensitivity labels."
+                    f"Sensitivity label & encrypted file scan complete (SharePoint REST postquery): "
+                    f"Sensitivity Labels: {len(self.total_sensitivity_label_ids)} ({len(self.encrypted_sensitivity_label_ids)} Encrypted) | "
+                    f"Sensitivity Labeled Files: {self.total_labeled_file_count} ({total_encrypted_count} Encrypted)."
                 )
 
         except Exception as e:
-            self._log_and_fail(e, "_scan_encrypted_files", failures)
+            self._log_and_fail("Error in _scan_encrypted_files", e, failures)
 
     def _fetch_file_versions_size(
         self,
@@ -2502,7 +2573,7 @@ class FileEstimator(Estimator):
                 if path.endswith("/"):
                     path = path[:-1]
                 
-                url = f"{GRAPH_BASE_URL}/sites/{hostname}:{path}?$select=id,isPersonalSite"
+                url = f"{GRAPH_BASE_URL}/sites/{hostname}:{path}?$select=id,webUrl"
                 
                 attempts = 0
                 max_attempts = self.config.retries + 1
@@ -2534,7 +2605,7 @@ class FileEstimator(Estimator):
                 
                 if response_data and "id" in response_data:
                     site_id = response_data["id"]
-                    is_personal = response_data.get("isPersonalSite", False)
+                    is_personal = response_data.get("isPersonalSite", "/personal/" in site_url.lower())
                     url_to_site_id[url] = site_id
                     
                     self.site_to_metadata[site_id] = {"isPersonalSite": is_personal}

@@ -538,6 +538,10 @@ class ShallowFileEstimator(FileEstimator):
         from util.thread_safe_ds import ThreadSafeMap
         self.drive_id_to_encrypted_file_size = {}
         self.drive_id_to_encrypted_file_count = {}
+        self.drive_id_to_labeled_file_count = {}
+        self.total_sensitivity_label_ids = set()
+        self.encrypted_sensitivity_label_ids = set()
+        self.total_labeled_file_count = 0
         self.encryption_metrics_lock = threading.Lock()
         valid_drive_ids = {drive["id"] for drive in drives if "id" in drive}
         shallow_progress_metrics = ThreadSafeMap()
@@ -548,6 +552,9 @@ class ShallowFileEstimator(FileEstimator):
             drives=drives,
             subsite_to_drives=subsite_to_drives,
         )
+        metrics["sensitivityLabelCount"] = len(getattr(self, "total_sensitivity_label_ids", set()))
+        metrics["encryptedSensitivityLabelCount"] = len(getattr(self, "encrypted_sensitivity_label_ids", set()))
+        metrics["sensitivityLabeledFileCount"] = getattr(self, "total_labeled_file_count", 0)
         for subsite_id, drive_ids in subsite_to_drives.items():
           top_level_site = subsite_to_top_level_site.get(subsite_id, subsite_id)
           if top_level_site not in metrics["siteMetrics"]:
@@ -560,6 +567,10 @@ class ShallowFileEstimator(FileEstimator):
             metrics["siteMetrics"][top_level_site]["encryptedFileSize"] = (
                 metrics["siteMetrics"][top_level_site].get("encryptedFileSize", 0)
                 + self.drive_id_to_encrypted_file_size.get(d_id, 0)
+            )
+            metrics["siteMetrics"][top_level_site]["sensitivityLabeledFileCount"] = (
+                metrics["siteMetrics"][top_level_site].get("sensitivityLabeledFileCount", 0)
+                + self.drive_id_to_labeled_file_count.get(d_id, 0)
             )
 
       targets = self._build_library_targets(

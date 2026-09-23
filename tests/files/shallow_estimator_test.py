@@ -1285,6 +1285,99 @@ class EncryptedFilesSharePointSearchTest(unittest.TestCase):
     self.assertIn("IndexDocId>500", req2["Querytext"])
     self.assertEqual(req2["StartRow"], 0)
 
+  def test_sensitivity_labels_and_labeled_files_count(self):
+    """Verify ShallowFileEstimator counts total & encrypted sensitivity labels and labeled files."""
+    cfg = build_config(scan_encrypted_files=True)
+    site = {
+        "id": "siteA",
+        "displayName": "Finance",
+        "webUrl": f"{TENANT}/sites/Finance",
+        "isPersonalSite": False,
+        "drives": ["d1"],
+        "lists": [],
+        "subsites": [],
+    }
+    graph_data = {
+        "root_site": "siteA",
+        "sites": {"siteA": site},
+        "all_sites": [site],
+        "lists": {},
+        "drives": {
+            "d1": {
+                "id": "d1",
+                "name": "Documents",
+                "driveType": "documentLibrary",
+                "webUrl": f"{TENANT}/sites/Finance/Shared%20Documents",
+            },
+        },
+        "items": {},
+        "licenses": [],
+    }
+    invoker = MockUrlInvoker(graph_data)
+    invoker.token_manager.session.custom_responses["/security/dataSecurityAndGovernance/sensitivityLabels"] = (
+        200,
+        {
+            "value": [
+                {"id": "enc-label-1", "name": "Confidential Encrypted", "hasProtection": True, "sublabels": []},
+                {"id": "unenc-label-1", "name": "General", "hasProtection": False, "sublabels": []},
+            ]
+        },
+    )
+    estimator = ShallowFileEstimator(
+        config=cfg,
+        url_invoker=invoker,
+        cert_token_manager=MockCertTokenManager(),
+        logger=lambda *_: None,
+        stop_event=threading.Event(),
+        progress_update_callback=lambda *a, **k: None,
+    )
+    estimator.set_id_to_display_name_map({})
+
+    def fake_get_library_metrics(_self, web_base_url, library_url, logger=None, stop_event=None):
+      return {
+          "item_count": 20,
+          "file_count": 15,
+          "folder_count": 5,
+          "active_size_bytes": 10000,
+          "total_size_bytes": 10000,
+      }
+
+    def fake_search_all_labeled(_self, base_url, path_prefixes=None, logger=None, stop_event=None):
+      return [
+          {
+              "DocId": "10",
+              "Size": "1024",
+              "Path": f"{TENANT}/sites/Finance/Shared Documents/enc1.docx",
+              "UniqueId": "u1",
+              "InformationProtectionLabelId": "enc-label-1",
+          },
+          {
+              "DocId": "11",
+              "Size": "2048",
+              "Path": f"{TENANT}/sites/Finance/Shared Documents/gen1.docx",
+              "UniqueId": "u2",
+              "InformationProtectionLabelId": "unenc-label-1",
+          },
+          {
+              "DocId": "12",
+              "Size": "4096",
+              "Path": f"{TENANT}/sites/Finance/Shared Documents/gen2.docx",
+              "UniqueId": "u3",
+              "InformationProtectionLabelId": "unenc-label-1",
+          },
+      ]
+
+    with mock.patch.object(SpRestConnector, "get_library_metrics", fake_get_library_metrics), \
+         mock.patch.object(SpRestConnector, "search_all_labeled_files", fake_search_all_labeled):
+      res = estimator.calculate_resource_metrics({}, [])
+
+    self.assertEqual(res["sensitivityLabelCount"], 2)
+    self.assertEqual(res["encryptedSensitivityLabelCount"], 1)
+    self.assertEqual(res["sensitivityLabeledFileCount"], 3)
+    self.assertEqual(res["siteMetrics"]["siteA"]["sensitivityLabeledFileCount"], 3)
+    self.assertEqual(res["siteMetrics"]["siteA"]["encryptedFileCount"], 1)
+    self.assertEqual(res["siteMetrics"]["siteA"]["encryptedFileSize"], 1024)
+
 
 if __name__ == "__main__":
   unittest.main()
