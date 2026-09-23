@@ -29,9 +29,10 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import unquote, urlparse
 
-from util.constants import GRAPH_BASE_URL, GRAPH_BETA_BASE_URL
+from util.constants import GRAPH_BASE_URL
 from util.files_shallow.cert_token_manager import CertTokenManager
 
+GRAPH_BETA_BASE_URL = "https://graph.microsoft.com/beta"
 OLE2_RMS_MAGIC_HEADER = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 ENCRYPTED_FILES_CONCURRENCY = 3
 SEARCH_ROW_LIMIT = 500
@@ -138,12 +139,34 @@ def fetch_tenant_sensitivity_labels(
     next_url: Optional[str] = endpoint
     success = False
     while next_url and not (stop_event and stop_event.is_set()):
-      status, body = url_invoker.invoke_url(
-          url=next_url,
-          logger=logger,
-          stop_event=stop_event,
-          context="Fetch Sensitivity Labels",
-      )
+      status = 0
+      body: Any = None
+      if hasattr(url_invoker, "invoke_url") and callable(url_invoker.invoke_url):
+        status, body = url_invoker.invoke_url(
+            url=next_url,
+            logger=logger,
+            stop_event=stop_event,
+            context="Fetch Sensitivity Labels",
+        )
+      elif hasattr(url_invoker, "token_manager") and url_invoker.token_manager is not None:
+        token_data = url_invoker.token_manager.get_valid_token_slot(logger)
+        session = url_invoker.token_manager.get_session()
+        try:
+          resp = session.get(
+              next_url,
+              headers={
+                  "Authorization": f"Bearer {token_data['token']}",
+                  "Content-Type": "application/json",
+              },
+              timeout=60,
+          )
+          status = resp.status_code
+          if status == 200:
+            body = resp.json()
+        except Exception:
+          status = 0
+        finally:
+          url_invoker.token_manager.return_token_slot(token_data)
       if status != 200 or not body:
         break
       try:

@@ -608,7 +608,7 @@ class TestDeepScanEncryptedFilesAndSensitivityLabels(unittest.TestCase):
 
     def test_file_estimator_deep_scan_encrypted_files_phase(self):
         """Verifies FileEstimator._scan_encrypted_files aggregates per-DL metrics into siteMetrics."""
-        from util.utils import ThreadSafeMap
+        from util.thread_safe_ds import ThreadSafeMap
 
         config = ScanConfig(
             tenant_id="test-tenant",
