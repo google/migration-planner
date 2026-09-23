@@ -1194,6 +1194,63 @@ class ShallowScanReportCsvUploadTest(unittest.TestCase):
       if os.path.exists(tmp_path):
         os.remove(tmp_path)
 
+  def test_shallow_scan_default_on_disables_deep_scan_settings(self):
+    """Verify Shallow Scan defaults to True and disables all Deep Scan checkboxes."""
+    from ui.files_shallow import shallow_ui_helpers
+    from ui.files_ui import FileMigrationEstimatorTool
+
+    class DummyVar:
+      def __init__(self, value=False):
+        self._val = value
+      def get(self):
+        return self._val
+      def set(self, val):
+        self._val = val
+
+    class DummyWidget:
+      def __init__(self):
+        self.state = "normal"
+      def configure(self, **kwargs):
+        if "state" in kwargs:
+          self.state = kwargs["state"]
+
+    tool = object.__new__(FileMigrationEstimatorTool)
+    with mock.patch("ui.files_ui.ctk.BooleanVar", side_effect=lambda value=False: DummyVar(value)), \
+         mock.patch("ui.files_ui.ctk.IntVar", side_effect=lambda value=0: DummyVar(value)), \
+         mock.patch("ui.files_ui.MigrationEstimatorTool.setup_variables"):
+      tool.setup_variables()
+
+    self.assertTrue(tool.shallow_scan.get())
+
+    tool.cb_recycle_bin = DummyWidget()
+    tool.cb_file_versions = DummyWidget()
+    tool.cb_encrypted_files = DummyWidget()
+    tool.cb_depth_report = DummyWidget()
+
+    # Pre-set vars to True to confirm on_shallow_scan_toggle resets them to False and disables widgets
+    tool.include_recycle_bin_contents.set(True)
+    tool.include_file_versions.set(True)
+    tool.scan_encrypted_files.set(True)
+    tool.generate_folder_amr_map.set(True)
+
+    shallow_ui_helpers.on_shallow_scan_toggle(tool)
+
+    for var in (
+        tool.include_recycle_bin_contents,
+        tool.include_file_versions,
+        tool.scan_encrypted_files,
+        tool.generate_folder_amr_map,
+    ):
+      self.assertFalse(var.get())
+
+    for widget in (
+        tool.cb_recycle_bin,
+        tool.cb_file_versions,
+        tool.cb_encrypted_files,
+        tool.cb_depth_report,
+    ):
+      self.assertEqual(widget.state, "disabled")
+
 
 if __name__ == "__main__":
   unittest.main()

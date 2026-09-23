@@ -66,7 +66,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
   def setup_variables(self):
     super().setup_variables()
-    self.shallow_scan = ctk.BooleanVar(value=False)
+    self.shallow_scan = ctk.BooleanVar(value=True)
     self.include_personal_sites = ctk.BooleanVar(value=True)
     self.include_team_sites = ctk.BooleanVar(value=False)
     self.include_recycle_bin_contents = ctk.BooleanVar(value=False)
@@ -240,6 +240,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         border_color=COLOR_TEXT_SUB,
     )
     self.cb_depth_report.pack(side="left", padx=10)
+
+    shallow_ui_helpers.on_shallow_scan_toggle(self)
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
