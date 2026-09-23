@@ -767,7 +767,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         if getattr(self, "val_scan_encrypted_files", False):
             enc_cnt = s_data.get("encryptedFileCount", 0)
             lbl_cnt = s_data.get("sensitivityLabeledFileCount", 0) or enc_cnt
-            row_data["Sensitivity Labeled File Count"] = f"{lbl_cnt} ({enc_cnt} Encrypted)"
+            row_data["Sensitivity Labeled File Count"] = lbl_cnt
             row_data["Encrypted File Count"] = enc_cnt
             row_data["Encrypted File Size"] = s_data.get("encryptedFileSize", 0)
             
@@ -1408,9 +1408,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.create_stat_card(card_frame, "Shortcut Count", shallow_ui_helpers.format_stat_value(data.get('shortcutCount', 0)), "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
 
-      # Cards for sensitivity labels, encryption & depth/threshold metrics (Row 2)
+      # Cards for sensitivity labels, encryption & depth/threshold metrics (Row 2 & Row 3)
       card_frame_row2 = ctk.CTkFrame(self.view_results, fg_color="transparent")
-      card_frame_row2.pack(fill="x", pady=(5, 10))
+      card_frame_row2.pack(fill="x", pady=(5, 5))
       if getattr(self, "val_scan_encrypted_files", False):
         total_enc_files = sum([entry.get("encryptedFileCount", 0) for entry in data.get("siteMetrics", {}).values()])
         total_enc_size = sum([entry.get("encryptedFileSize", 0) for entry in data.get("siteMetrics", {}).values()])
@@ -1424,21 +1424,31 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         self.create_stat_card(
             card_frame_row2,
             "Sensitivity Labels",
-            f"{total_labels:,} ({enc_labels:,} Encrypted)",
+            f"{total_labels:,}",
             "🏷️",
         )
         self.create_stat_card(
             card_frame_row2,
+            "Encrypted Sensitivity Labels",
+            f"{enc_labels:,}",
+            "🔒",
+        )
+        self.create_stat_card(
+            card_frame_row2,
             "Sensitivity Labeled Files",
-            f"{total_labeled_files:,} ({total_enc_files:,} Encrypted)",
+            f"{total_labeled_files:,}",
             "🏷️",
         )
         self.create_stat_card(card_frame_row2, "Total Encrypted File Count", f"{total_enc_files:,}", "🔒")
         self.create_stat_card(card_frame_row2, "Total Encrypted File Size", f"{self.format_size(total_enc_size)}", "🔒")
-      self.create_stat_card(card_frame_row2, "Folder count > depth 100", shallow_ui_helpers.format_stat_value(data.get('folderCountExceedingDepthLimit', 0)), "📁")
-      self.create_stat_card(card_frame_row2, "File count > depth 100", shallow_ui_helpers.format_stat_value(data.get('fileCountExceedingDepthLimit', 0)), "📄")
-      self.create_stat_card(card_frame_row2, "Large Resources (>500k)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
-      self.create_stat_card(card_frame_row2, "Warning Resources (>200k)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
+        card_frame_row3 = ctk.CTkFrame(self.view_results, fg_color="transparent")
+        card_frame_row3.pack(fill="x", pady=(5, 10))
+      else:
+        card_frame_row3 = card_frame_row2
+      self.create_stat_card(card_frame_row3, "Folder count > depth 100", shallow_ui_helpers.format_stat_value(data.get('folderCountExceedingDepthLimit', 0)), "📁")
+      self.create_stat_card(card_frame_row3, "File count > depth 100", shallow_ui_helpers.format_stat_value(data.get('fileCountExceedingDepthLimit', 0)), "📄")
+      self.create_stat_card(card_frame_row3, "Large Resources (>500k)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
+      self.create_stat_card(card_frame_row3, "Warning Resources (>200k)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
 
       if self.show_eta:
         # Timeline

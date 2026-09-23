@@ -392,35 +392,6 @@ class MigrationEstimatorTool(ctk.CTk):
       self.create_stat_card(
           card_frame, "Emails", f"{data['total_emails']:,}", "📩"
       )
-      if (
-          data.get("scan_encrypted_email")
-          or data.get("total_encrypted_emails", 0) > 0
-          or data.get("total_labeled_emails", 0) > 0
-      ):
-        total_lbls = data.get("total_sensitivity_labels", 0)
-        enc_lbls = data.get("total_encrypted_sensitivity_labels", 0)
-        total_lbl_emails = data.get(
-            "total_labeled_emails", data.get("total_encrypted_emails", 0)
-        )
-        total_enc_emails = data.get("total_encrypted_emails", 0)
-        self.create_stat_card(
-            card_frame,
-            "Sensitivity Labels",
-            f"{total_lbls:,} ({enc_lbls:,} Encrypted)",
-            "🏷️",
-        )
-        self.create_stat_card(
-            card_frame,
-            "Sensitivity Labeled Emails",
-            f"{total_lbl_emails:,} ({total_enc_emails:,} Encrypted)",
-            "🏷️",
-        )
-        self.create_stat_card(
-            card_frame,
-            "Encrypted Emails",
-            f"{total_enc_emails:,}",
-            "🔒",
-        )
       self.create_stat_card(
           card_frame,
           "Calendar Events",
@@ -444,6 +415,44 @@ class MigrationEstimatorTool(ctk.CTk):
           "👥📧",
           sub=f"({data['total_group_threads']:,} {'Group Thread' if data['total_group_threads'] == 1 else 'Group Threads'})",
       )
+
+      if (
+          data.get("scan_encrypted_email")
+          or data.get("total_encrypted_emails", 0) > 0
+          or data.get("total_labeled_emails", 0) > 0
+      ):
+        card_frame_row2 = ctk.CTkFrame(self.view_results, fg_color="transparent")
+        card_frame_row2.pack(fill="x", pady=(5, 10))
+        total_lbls = data.get("total_sensitivity_labels", 0)
+        enc_lbls = data.get("total_encrypted_sensitivity_labels", 0)
+        total_lbl_emails = data.get(
+            "total_labeled_emails", data.get("total_encrypted_emails", 0)
+        )
+        total_enc_emails = data.get("total_encrypted_emails", 0)
+        self.create_stat_card(
+            card_frame_row2,
+            "Sensitivity Labels",
+            f"{total_lbls:,}",
+            "🏷️",
+        )
+        self.create_stat_card(
+            card_frame_row2,
+            "Encrypted Sensitivity Labels",
+            f"{enc_lbls:,}",
+            "🔒",
+        )
+        self.create_stat_card(
+            card_frame_row2,
+            "Sensitivity Labeled Emails",
+            f"{total_lbl_emails:,}",
+            "🏷️",
+        )
+        self.create_stat_card(
+            card_frame_row2,
+            "Encrypted Emails",
+            f"{total_enc_emails:,}",
+            "🔒",
+        )
 
       # Timeline
       ctk.CTkLabel(

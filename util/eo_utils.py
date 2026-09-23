@@ -183,7 +183,7 @@ def fetch_user_batch_data(
             r_lbl = responses.get(f"{i}_lbl", {})
             lbl_body = r_lbl.get("body", {}) if r_lbl.get("status") == 200 else {}
             lbl_count = max(int(lbl_body.get("@odata.count", 0) or 0), count_val)
-            user["Sensitivity Labeled Email Count"] = f"{lbl_count} ({count_val} Encrypted)"
+            user["Sensitivity Labeled Email Count"] = lbl_count
             batch_labeled_emails_count += lbl_count
             _extract_labels_from_messages(lbl_body.get("value", []))
             next_link = lbl_body.get("@odata.nextLink")
