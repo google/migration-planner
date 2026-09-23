@@ -458,8 +458,22 @@ class MigrationScanner:
       ui_callback: typing.Callable[..., None] | None = None,
   ) -> dict[str, list[str]]:
     """Constructs concurrency bound batch pagination queries for user chats."""
-    counts: dict[str, list[str]] = {}
+    raw_counts: dict[str, list[str]] = {}
     active_queries: dict[str, str] = {}  # user_id -> relative_url
+
+    def _deduplicate_across_users(
+        user_chat_map: dict[str, list[str]]
+    ) -> dict[str, list[str]]:
+      seen_chats: set[str] = set()
+      deduped: dict[str, list[str]] = {}
+      for uid, chat_list in user_chat_map.items():
+        unique_chats = []
+        for cid in chat_list:
+          if cid not in seen_chats:
+            seen_chats.add(cid)
+            unique_chats.append(cid)
+        deduped[uid] = unique_chats
+      return deduped
 
     for user in users:
       user_id = user.get("id") or user.get("userPrincipalName")
@@ -467,14 +481,14 @@ class MigrationScanner:
         continue
       cached = self.db.get_processed_user(user_id)
       if cached is not None:
-        counts[user_id] = cached
+        raw_counts[user_id] = list(dict.fromkeys(cached))
       else:
-        counts[user_id] = []
+        raw_counts[user_id] = []
         # Query up to 50 chats per request to minimize pagination steps
         active_queries[user_id] = f"/users/{user_id}/chats?$select=id&$top=50"
 
     if not active_queries:
-      return counts
+      return _deduplicate_across_users(raw_counts)
 
     # Loop until all pages of chats for all users are fully retrieved
     while active_queries and not self.stop_event.is_set():
@@ -518,8 +532,8 @@ class MigrationScanner:
                 if c.get("id")
             ]
             
-            # Append new chat IDs
-            counts[user_id].extend(chat_id_list)
+            # Append new chat IDs for this user
+            raw_counts[user_id].extend(chat_id_list)
 
             # Check for nextLink pagination
             next_link = body.get("@odata.nextLink")
@@ -532,8 +546,12 @@ class MigrationScanner:
             else:
               # No more pages for this user
               active_queries.pop(user_id, None)
-              # Save complete, deduplicated list to DB
-              self.db.save_processed_user(user_id, counts[user_id])
+              # Deduplicate within this user's own chat list before saving to SQLite:
+              # Graph's /users/{id}/chats pagination is ordered by recent activity, so if a
+              # chat receives a new message while @odata.nextLink pages are being fetched,
+              # the same chat_id can shift across page boundaries and appear on multiple pages.
+              raw_counts[user_id] = list(dict.fromkeys(raw_counts[user_id]))
+              self.db.save_processed_user(user_id, raw_counts[user_id])
           else:
             status_val = response.get("status")
             body = response.get("body", {})
@@ -544,7 +562,9 @@ class MigrationScanner:
               )
             # Remove from active queries on error to avoid infinite loops, but keep whatever was fetched
             active_queries.pop(user_id, None)
-            self.db.save_processed_user(user_id, counts[user_id])
+            # Deduplicate any duplicate chat_ids accumulated across earlier @odata.nextLink pages
+            raw_counts[user_id] = list(dict.fromkeys(raw_counts[user_id]))
+            self.db.save_processed_user(user_id, raw_counts[user_id])
 
         if ui_callback:
           # Update progress based on number of completed users
@@ -570,7 +590,7 @@ class MigrationScanner:
         break
       finally:
         token_manager.return_token_slot(token_data)
-    return counts
+    return _deduplicate_across_users(raw_counts)
 
   def fetch_users_joined_teams_batch(
       self,
@@ -792,9 +812,22 @@ class MigrationScanner:
   ) -> list[dict[str, typing.Any]]:
     """Retrieves absolute unified roster of users across target directory."""
     users = []
-    url = f"{GRAPH_BASE_URL}/users?$select=id,userPrincipalName&$top=999"
+    filter_query = (
+        "userType eq 'Member' and "
+        "assignedPlans/any(c:c/service eq 'TeamspaceAPI' and c/capabilityStatus eq 'Enabled')"
+    )
+    url = (
+        f"{GRAPH_BASE_URL}/users"
+        f"?$filter={filter_query}"
+        "&$select=id,userPrincipalName"
+        "&$top=999"
+        "&$count=true"
+    )
     token_data = token_manager.get_valid_token_slot()
-    headers = {"Authorization": f"Bearer {token_data['token']}"}
+    headers = {
+        "Authorization": f"Bearer {token_data['token']}",
+        "ConsistencyLevel": "eventual",
+    }
     try:
       while url and not self.stop_event.is_set():
         response = self.client.get_with_retry(

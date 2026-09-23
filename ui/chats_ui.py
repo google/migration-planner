@@ -65,7 +65,7 @@ class ChatMigrationEstimatorTool(ctk.CTk):
     self.load_multiplier = ctk.IntVar(value=1)
     self.retries = ctk.IntVar(value=MAX_RETRIES)
     self.backoff = ctk.IntVar(value=BACKOFF)
-    self.eta_max_batches = ctk.IntVar(value=50)
+    self.eta_max_batches = ctk.IntVar(value=DEFAULT_ETA_MAX_BATCHES)
     self.parallel_batches = ctk.IntVar(value=10)
     self.scan_result_csv_path = ctk.StringVar()
     self.id_to_display_name = {}
@@ -374,9 +374,9 @@ class ChatMigrationEstimatorTool(ctk.CTk):
     ).grid(row=1, column=3, sticky="w", padx=5, pady=5)
     slider_max_batches = ctk.CTkSlider(
         eta_settings_frame,
-        from_=10,
-        to=100,
-        number_of_steps=18,
+        from_=MIN_ALLOWED_BATCHES,
+        to=MAX_ALLOWED_BATCHES,
+        number_of_steps=(MAX_ALLOWED_BATCHES - MIN_ALLOWED_BATCHES) // 5,
         variable=self.eta_max_batches,
     )
     slider_max_batches.grid(row=1, column=4, sticky="ew", padx=5, pady=5)
@@ -1661,6 +1661,7 @@ class ChatMigrationEstimatorTool(ctk.CTk):
         load_multiplier=self.load_multiplier.get(),
         retries=self.retries.get(),
         backoff=self.backoff.get(),
+        eta_max_batches=self.eta_max_batches.get(),
         parallel_batches=self.parallel_batches.get(),
         mode=self.mode.get(),
         sample_percentage=self.sample_percentage.get(),
@@ -2007,11 +2008,24 @@ class ChatMigrationEstimatorTool(ctk.CTk):
 
   def _get_all_users_graph(self, manager):
     users = []
-    url = f"{GRAPH_BASE_URL}/users?$select=id,userPrincipalName&$top=999"
+    filter_query = (
+        "userType eq 'Member' and "
+        "assignedPlans/any(c:c/service eq 'TeamspaceAPI' and c/capabilityStatus eq 'Enabled')"
+    )
+    url = (
+        f"{GRAPH_BASE_URL}/users"
+        f"?$filter={filter_query}"
+        "&$select=id,userPrincipalName"
+        "&$top=999"
+        "&$count=true"
+    )
     token_data = manager.get_valid_token_slot()
     token = token_data["token"]
     session = manager.get_session()
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "ConsistencyLevel": "eventual",
+    }
     try:
       while url and not self.stop_scan_event.is_set():
         # Check mid-loop for extremely long tenant scans
@@ -2019,7 +2033,10 @@ class ChatMigrationEstimatorTool(ctk.CTk):
           manager.return_token_slot(token_data)
           token_data = manager.get_valid_token_slot()
           token = token_data["token"]
-          headers = {"Authorization": f"Bearer {token}"}
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "ConsistencyLevel": "eventual",
+          }
 
         r = session.get(url, headers=headers)
         if r.status_code != 200:

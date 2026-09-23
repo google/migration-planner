@@ -362,7 +362,15 @@ class ChatScannerService:
 
       if all_users:
         self.ui_callback("phase_status", source="chats", status="running")
-        chat_counts = scanner.fetch_user_chat_counts_batch(auth, all_users, self.ui_callback)
+        raw_chat_counts = scanner.fetch_user_chat_counts_batch(
+            auth, all_users, self.ui_callback
+        )
+        seen_chats: set[str] = set()
+        chat_counts: dict[str, list[str]] = {}
+        for uid, chats in raw_chat_counts.items():
+          unique_for_user = [cid for cid in chats if cid not in seen_chats]
+          seen_chats.update(unique_for_user)
+          chat_counts[uid] = unique_for_user
 
         private_chats = scanner.db.get_discovered_chat_count()
 
@@ -411,7 +419,23 @@ class ChatScannerService:
             1, int(len(all_ch_tuples) * (sample_percentage / 100.0))
         )
         channel_sample_size = min(len(all_ch_tuples), channel_sample_size)
-        sampled_channels = random.sample(all_ch_tuples, channel_sample_size)
+        cached_ch_keys = (
+            scanner.db.get_processed_channel_keys(channel_sample_size)
+            if hasattr(scanner.db, "get_processed_channel_keys")
+            else None
+        )
+        if isinstance(cached_ch_keys, list) and cached_ch_keys:
+          all_ch_set = set(all_ch_tuples)
+          valid_cached = [pair for pair in cached_ch_keys if pair in all_ch_set]
+          if len(valid_cached) >= channel_sample_size:
+            sampled_channels = valid_cached[:channel_sample_size]
+          else:
+            cached_set = set(valid_cached)
+            remaining_pool = [p for p in all_ch_tuples if p not in cached_set]
+            needed = min(len(remaining_pool), channel_sample_size - len(valid_cached))
+            sampled_channels = valid_cached + random.sample(remaining_pool, needed)
+        else:
+          sampled_channels = random.sample(all_ch_tuples, channel_sample_size)
       else:
         sampled_channels = []
 
@@ -522,7 +546,16 @@ class ChatScannerService:
           u_id = u.get("userPrincipalName") or u.get("id")
           if not u_id:
             continue
-          user_chats_count = len(chat_counts.get(u_id, [])) if u_id in chat_counts else avg_chats
+          lookup_id = (
+              u_id
+              if u_id in chat_counts
+              else (u.get("id") if u.get("id") in chat_counts else None)
+          )
+          user_chats_count = (
+              len(chat_counts[lookup_id])
+              if lookup_id is not None
+              else avg_chats
+          )
           user_map[u_id] = {
               "chats": int(user_chats_count),
               "messages": int(user_chats_count * avg_messages_per_chat),
