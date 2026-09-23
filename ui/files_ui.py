@@ -507,10 +507,14 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "Folder Count > Depth Limit 100",
         "File Count > Depth Limit 100",
     ]
-    is_shallow_report = getattr(self, "val_shallow_scan", False) or any(
-        df[col].astype(str).str.strip().str.upper().str.startswith("N/A").any()
-        for col in na_cols
-        if col in df.columns
+    is_shallow_report = (
+        getattr(self, "val_shallow_scan", False)
+        or "Failed DL Count" in df.columns
+        or any(
+            df[col].astype(str).str.strip().str.upper().str.startswith("N/A").any()
+            for col in na_cols
+            if col in df.columns
+        )
     )
     if is_shallow_report:
       self.val_shallow_scan = True
@@ -530,6 +534,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           default=folder_cnt + file_cnt + shortcut_cnt,
       )
       dl_cnt = _safe_int(row.get("DL Count", 0))
+      failed_dl_cnt = _safe_int(row.get("Failed DL Count", 0))
       
       if "/personal/" in site_id.lower():
         personal_dl_total += dl_cnt
@@ -539,6 +544,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       site_metrics[site_id] = {
           "subsiteCount": _safe_int(row.get("Subsite Count", 0)),
           "dlCount": dl_cnt,
+          "failedDlCount": failed_dl_cnt,
           "listCount": _safe_int(row.get("List Count", 0)),
           "folderCount": folder_cnt,
           "fileCount": file_cnt,
@@ -570,6 +576,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "personalSiteCount": len([k for k in site_metrics.keys() if "/personal/" in k.lower()]),
         "teamSiteCount": len([k for k in site_metrics.keys() if "/personal/" not in k.lower()]),
         "driveCounts": {"documentLibrary": dl_total},
+        "failedDlCount": int(pd.to_numeric(df.get("Failed DL Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "personalSiteDLCount": personal_dl_total,
         "teamSiteDLCount": team_dl_total,
         "folderCount": int(pd.to_numeric(df.get("Folder Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
@@ -741,12 +748,24 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         file_metrics["fileCount"] = sum(
             int(s.get("fileCount", 0) or 0) for s in site_metrics.values()
         )
+      if not file_metrics.get("failedDlCount") and site_metrics:
+        file_metrics["failedDlCount"] = sum(
+            int(s.get("failedDlCount", 0) or 0) for s in site_metrics.values()
+        )
+      is_shallow_mode = bool(
+          file_metrics.get("isShallowScan")
+          or getattr(self, "val_shallow_scan", False)
+      )
       site_data = []
       for site_id, s_data in site_metrics.items():
         row_data = {
             "Site Id": site_id,
             "Subsite Count": s_data.get("subsiteCount", 0),
             "DL Count": s_data.get("dlCount", 0),
+        }
+        if is_shallow_mode:
+          row_data["Failed DL Count"] = s_data.get("failedDlCount", 0)
+        row_data.update({
             "List Count": s_data.get("listCount", 0),
             "Folder Count": s_data.get("folderCount", 0),
             "File Count": s_data.get("fileCount", 0),
@@ -756,8 +775,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             "Entities with > 500k item count": s_data.get("largeResourceCount", 0),
             "Entities with > 200k item count": s_data.get("warningResourceCount", 0),
             "Corpus Size": s_data.get("totalSize", 0),
-            "Resource Count": s_data.get("resourceCount", 0)
-        }
+            "Resource Count": s_data.get("resourceCount", 0),
+        })
         if getattr(self, "val_include_recycle_bin_contents", False):
             row_data["Recycle Bin Item Count"] = s_data.get("recycleBinCount", 0)
             row_data["Recycle Bin Size"] = s_data.get("recycleBinSize", 0)
@@ -832,8 +851,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       shortcuts_summary = shallow_ui_helpers.format_stat_value(
           file_metrics.get("shortcutCount", 0)
       )
+      failed_dls_log = (
+          f" | Failed DLs: {file_metrics.get('failedDlCount', 0):,}"
+          if is_shallow_mode
+          else ""
+      )
       self.log_msg(
-          f"Site Collections: {file_metrics.get('siteCount', 0):,} | Subsites: {file_metrics.get('subsiteCount', 0):,} | DLs: {sum(file_metrics.get('driveCounts', {}).values()):,} |"
+          f"Site Collections: {file_metrics.get('siteCount', 0):,} | Subsites: {file_metrics.get('subsiteCount', 0):,} | DLs: {sum(file_metrics.get('driveCounts', {}).values()):,}{failed_dls_log} |"
           f" Folders: {file_metrics.get('folderCount', 0):,} | Files: {file_metrics.get('fileCount', 0):,} |"
           f" Shortcuts: {shortcuts_summary} | Lists: {file_metrics.get('listCount', 0):,}"
       )
@@ -1391,9 +1415,22 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if getattr(self, "val_include_file_versions", False):
         self.create_stat_card(card_frame, "Total Historical File Version Size", f"{self.format_size(sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "📄")
         self.create_stat_card(card_frame, "Total Historical File Version Count", f"{sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "📄")
-      self.create_stat_card(card_frame, "Site Collection Count", f"{data.get('siteCount'):,}", "🏢")
+      self.create_stat_card(card_frame, "Site Collection\nCount", f"{data.get('siteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsiteCount'):,}", "🏢")
-      self.create_stat_card(card_frame, "Document Library Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
+      self.create_stat_card(card_frame, "Document\nLibrary Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
+      if data.get("isShallowScan") or getattr(self, "val_shallow_scan", False):
+        failed_dl_count = data.get("failedDlCount", 0)
+        if not failed_dl_count and data.get("siteMetrics"):
+          failed_dl_count = sum(
+              int(s.get("failedDlCount", 0) or 0)
+              for s in data["siteMetrics"].values()
+          )
+        self.create_stat_card(
+            card_frame,
+            "Failed Document\nLibrary Count",
+            f"{failed_dl_count:,}",
+            "⚠️",
+        )
       folder_count = data.get("folderCount", 0)
       if not folder_count and data.get("siteMetrics"):
         folder_count = sum(int(s.get("folderCount", 0) or 0) for s in data["siteMetrics"].values())
@@ -1403,14 +1440,14 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.create_stat_card(card_frame, "Folder Count", f"{folder_count:,}", "📁")
       self.create_stat_card(card_frame, "File Count", f"{file_count:,}", "📄")
       if getattr(self, "val_scan_encrypted_files", False):
-        self.create_stat_card(card_frame, "Total Encrypted File Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
-        self.create_stat_card(card_frame, "Total Encrypted File Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
+        self.create_stat_card(card_frame, "Total Encrypted\nFile Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
+        self.create_stat_card(card_frame, "Total Encrypted\nFile Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
       self.create_stat_card(card_frame, "Shortcut Count", shallow_ui_helpers.format_stat_value(data.get('shortcutCount', 0)), "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
-      self.create_stat_card(card_frame, "Folder count beyond depth limit 100", shallow_ui_helpers.format_stat_value(data.get('folderCountExceedingDepthLimit', 0)), "📁")
-      self.create_stat_card(card_frame, "File count beyond depth limit 100", shallow_ui_helpers.format_stat_value(data.get('fileCountExceedingDepthLimit', 0)), "📄")
-      self.create_stat_card(card_frame, "Large Resource Count (Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
-      self.create_stat_card(card_frame, "Warning Resource Count (Entities with >200k items)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
+      self.create_stat_card(card_frame, "Folder count beyond\ndepth limit 100", shallow_ui_helpers.format_stat_value(data.get('folderCountExceedingDepthLimit', 0)), "📁")
+      self.create_stat_card(card_frame, "File count beyond\ndepth limit 100", shallow_ui_helpers.format_stat_value(data.get('fileCountExceedingDepthLimit', 0)), "📄")
+      self.create_stat_card(card_frame, "Large Resource Count\n(Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Warning Resource Count\n(Entities with >200k items)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
 
       if self.show_eta:
         # Timeline
@@ -1702,6 +1739,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     # 3. No empty/null fields/cells present in required columns
     cols_to_check = ({"Entity"} | report_cols) if is_report_csv else set(df.columns)
+    if is_report_csv and "Failed DL Count" in df.columns:
+      cols_to_check.add("Failed DL Count")
     shallow_na_cols = {
         "Shortcut Count",
         "Folder Count > Depth Limit 100",
@@ -1819,12 +1858,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               ("Total Encrypted File Count", total_encrypted_count),
           ])
       
+      is_shallow_export = bool(
+          data.get("isShallowScan") or getattr(self, "val_shallow_scan", False)
+      )
       summary_rows.extend([
           ("Site Collection Count", data.get("siteCount", 0)),
           ("Subsite Count", data.get("subsiteCount", 0)),
           ("Personal (OneDrive) Site / Subsite Count", data.get("personalSiteCount", 0)),
           ("SharePoint Site / Subsite Count", data.get("teamSiteCount", 0)),
           ("DL Count", sum(data.get("driveCounts", {}).values())),
+      ])
+      if is_shallow_export:
+        failed_dl_total = data.get("failedDlCount", 0)
+        if not failed_dl_total and data.get("siteMetrics"):
+          failed_dl_total = sum(
+              int(s.get("failedDlCount", 0) or 0)
+              for s in data["siteMetrics"].values()
+          )
+        summary_rows.append(("Failed DL Count", failed_dl_total))
+      summary_rows.extend([
           ("Personal (OneDrive) DL Count", data.get("personalSiteDLCount", 0)),
           ("SharePoint DL Count", data.get("teamSiteDLCount", 0)),
           ("List Count", data.get("listCount", 0)),
@@ -1906,10 +1958,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if len(data.get("siteMetrics", {}).items()) > 0:
         # Section 6: Site Details
         writer.writerow(["Site Details", ""])
+        dl_cols = ["DL Count", "Failed DL Count"] if is_shallow_export else ["DL Count"]
         if "siteIdToMail" not in data:
-          row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
+          row = ["Site Collection", "Subsite Count"] + dl_cols + ["List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
         else:
-          row = ["Site Collection", "Email Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
+          row = ["Site Collection", "Email Id", "Subsite Count"] + dl_cols + ["List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
 
         if getattr(self, "val_include_recycle_bin_contents", False):
           row.extend(["Recycle Bin Item Count", "Recycle Bin Size"])
@@ -1956,11 +2009,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                 if not match.empty and self.show_eta:
                     batch_name = match["Suggested Batch"].iloc[0]
 
+            site_dl_vals = (
+                [s_data.get("dlCount", 0), s_data.get("failedDlCount", 0)]
+                if is_shallow_export
+                else [s_data.get("dlCount", 0)]
+            )
             if "siteIdToMail" not in data:
               row = [
                   self._get_display_name(site_id), 
                   s_data.get("subsiteCount", 0),
-                  s_data.get("dlCount", 0),
+                  *site_dl_vals,
                   s_data.get("listCount", 0),
                   s_data.get("folderCount", 0),
                   s_data.get("fileCount", 0),
@@ -1981,7 +2039,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                 self._get_display_name(site_id), 
                 data.get("siteIdToMail", {}).get(site_id, ""),
                 s_data.get("subsiteCount", 0),
-                s_data.get("dlCount", 0),
+                *site_dl_vals,
                 s_data.get("listCount", 0),
                 s_data.get("folderCount", 0),
                 s_data.get("fileCount", 0),

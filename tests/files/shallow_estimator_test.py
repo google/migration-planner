@@ -1251,6 +1251,83 @@ class ShallowScanReportCsvUploadTest(unittest.TestCase):
     ):
       self.assertEqual(widget.state, "disabled")
 
+  def test_shallow_scan_site_report_csv_upload_with_failed_dl_count(self):
+    """Verify Shallow Scan site_report.csv with 'Failed DL Count' column validates and parses failedDlCount."""
+    import os
+    import tempfile
+
+    csv_content = (
+        "Site URL/Name,Subsite Count,DL Count,Failed DL Count,List Count,Folder Count,File Count,"
+        "Shortcut Count,Folder Count > Depth Limit 100,File Count > Depth Limit 100,"
+        "Entities with > 500k item count,Entities with > 200k item count,Corpus Size,Suggested Batch\n"
+        "https://smh3v-my.sharepoint.com/personal/bugbash5_smh3v_onmicrosoft_com,0,3,1,4,2,99997,N/A,N/A,N/A,0,0,73.24 MB,Batch 1\n"
+        "https://smh3v.sharepoint.com/sites/marketing,1,5,2,6,200,17540,N/A,N/A,N/A,0,0,540.93 GB,Batch 2\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as tmp:
+      tmp.write(csv_content)
+      tmp_path = tmp.name
+
+    try:
+      tool = self._make_dummy_tool(tmp_path, shallow_toggle=True)
+      config = build_config(user_source="csv", csv_path=tmp_path)
+
+      with mock.patch("ui.files_ui.messagebox.showerror") as mock_err:
+        tool._validate_csv()
+        mock_err.assert_not_called()
+
+      metrics = tool._try_get_metrics_from_csv_report(config)
+      self.assertIsNotNone(metrics)
+      self.assertTrue(metrics["isShallowScan"])
+      self.assertEqual(metrics["failedDlCount"], 3)
+
+      s1 = metrics["siteMetrics"]["https://smh3v-my.sharepoint.com/personal/bugbash5_smh3v_onmicrosoft_com"]
+      self.assertEqual(s1["dlCount"], 3)
+      self.assertEqual(s1["failedDlCount"], 1)
+
+      s2 = metrics["siteMetrics"]["https://smh3v.sharepoint.com/sites/marketing"]
+      self.assertEqual(s2["dlCount"], 5)
+      self.assertEqual(s2["failedDlCount"], 2)
+    finally:
+      if os.path.exists(tmp_path):
+        os.remove(tmp_path)
+
+
+class ShallowFailedDlTrackingTest(ShallowScanBaseTest):
+  """Tests per-site and tenant-wide failedDlCount tracking when a DL REST call fails."""
+
+  def test_failed_dl_count_tracked_per_site_and_tenant_level(self):
+    """Verify failed DL REST calls increment per-site and tenant-level failedDlCount while keeping dlCount as total discovered DLs."""
+    site = self.register_site("siteA", f"{TENANT}/sites/Finance")
+    d1 = self.register_library("d1", f"{TENANT}/sites/Finance/Shared%20Documents")
+    d2 = self.register_library("d2", f"{TENANT}/sites/Finance/RestrictedLib")
+    d3 = self.register_library("d3", f"{TENANT}/sites/Finance/SiteAssets")
+    metrics = self.build_metrics([site])
+    metrics["siteMetrics"][site]["dlCount"] = 3
+    metrics["driveCounts"][site] = 3
+
+    out = self.run_scan(
+        metrics,
+        {site: [d1, d2, d3]},
+        {},
+        {
+            d1: {"item": 20, "files": 15, "size": 1000},
+            d2: RuntimeError("403 Forbidden"),
+            d3: {"item": 10, "files": 8, "size": 500},
+        },
+    )
+
+    self.assertEqual(out["processed"], 3)
+    self.assertEqual(out["failed"], 1)
+    site_metrics = out["metrics"]["siteMetrics"][site]
+    self.assertEqual(site_metrics["dlCount"], 3)
+    self.assertEqual(site_metrics["failedDlCount"], 1)
+    self.assertEqual(site_metrics["fileCount"], 23)
+    self.assertEqual(site_metrics["folderCount"], 7)
+    self.assertEqual(site_metrics["totalSize"], 1500)
+    self.assertEqual(out["metrics"]["failedDlCount"], 1)
+
 
 if __name__ == "__main__":
   unittest.main()
+
+
