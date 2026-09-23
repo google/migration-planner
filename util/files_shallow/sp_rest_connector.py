@@ -17,7 +17,7 @@
 import random
 import threading
 import time
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, unquote, urlparse
 
 from util.files_shallow.cert_token_manager import CertTokenManager
@@ -316,3 +316,284 @@ class SpRestConnector:
         "active_size_bytes": storage["active_size_bytes"],
         "total_size_bytes": storage["total_size_bytes"],
     }
+
+  def _execute_post(
+      self,
+      endpoint: str,
+      payload: Dict[str, Any],
+      base_url: str,
+      domain: str,
+      logger: Callable[[str], None],
+      stop_event: Optional[threading.Event] = None,
+  ) -> Dict[str, Any]:
+    """Executes an authenticated SharePoint REST POST request with retry/backoff."""
+    token_data = self.cert_token_manager.get_valid_token_slot(domain, logger)
+    session = self.cert_token_manager.get_session()
+
+    try:
+      current_try = 0
+      while current_try < self.max_retries:
+        if stop_event and stop_event.is_set():
+          break
+
+        current_try += 1
+
+        with self.lock:
+          now = time.time()
+          if now < self.throttle_until:
+            sleep_sec = self.throttle_until - now
+            logger(
+                f"SharePoint REST throttling active. Waiting {sleep_sec:.1f}s..."
+            )
+            if stop_event and stop_event.wait(timeout=sleep_sec):
+              break
+
+        headers = {
+            "Authorization": f"Bearer {token_data['token']}",
+            "Accept": "application/json;odata=nometadata",
+            "Content-Type": "application/json;odata=verbose",
+        }
+
+        try:
+          resp = session.post(
+              endpoint, json=payload, headers=headers, timeout=60.0
+          )
+        except Exception as req_err:
+          if current_try >= self.max_retries:
+            raise
+          wait_sec = min(float(self.backoff ** (current_try - 1)), 8.0)
+          logger(
+              f"Transient network error querying {base_url} ({req_err}). "
+              f"Retry {current_try}/{self.max_retries} in {wait_sec:.1f}s..."
+          )
+          if stop_event and stop_event.wait(timeout=wait_sec):
+            break
+          continue
+
+        if resp.status_code == 200:
+          return resp.json()
+
+        elif resp.status_code == 404:
+          return {}
+
+        elif resp.status_code == 403:
+          raise PermissionError(
+              f"Access to site {base_url} failed with HTTP 403 Forbidden: {resp.text}"
+          )
+
+        elif resp.status_code == 429:
+          if current_try >= self.max_retries:
+            raise RuntimeError(
+                f"SharePoint REST 429 throttled on {base_url} after {self.max_retries} attempts: {resp.text}"
+            )
+          try:
+            wait_sec = int(float(resp.headers.get("Retry-After", 5)))
+          except (ValueError, TypeError):
+            wait_sec = 5 * current_try
+          wait_sec = min(float(wait_sec), 30.0) + random.uniform(0.1, 1.0)
+          with self.lock:
+            self.throttle_until = max(
+                self.throttle_until, time.time() + wait_sec
+            )
+          logger(
+              f"SharePoint REST 429 on {base_url}. Retrying in {wait_sec:.1f}s..."
+          )
+          if stop_event and stop_event.wait(timeout=wait_sec):
+            break
+          continue
+
+        elif resp.status_code == 401:
+          if current_try >= self.max_retries:
+            raise PermissionError(
+                f"SharePoint REST 401 Unauthorized on {base_url} after {self.max_retries} attempts: {resp.text}"
+            )
+          logger(f"SharePoint REST 401 on {base_url}. Refreshing cert token...")
+          self.cert_token_manager.refresh_token_data(token_data, logger)
+          time.sleep(1.0)
+          continue
+
+        elif resp.status_code in [500, 502, 503, 504]:
+          if current_try >= self.max_retries:
+            raise RuntimeError(
+                f"SharePoint REST server error HTTP {resp.status_code} on {base_url} "
+                f"after {self.max_retries} attempts: {resp.text}"
+            )
+          wait_sec = min(float(self.backoff ** (current_try - 1)), 8.0)
+          logger(
+              f"Transient server error (HTTP {resp.status_code}) on {base_url}. "
+              f"Retry {current_try}/{self.max_retries} in {wait_sec:.1f}s..."
+          )
+          if stop_event and stop_event.wait(timeout=wait_sec):
+            break
+          continue
+
+        else:
+          raise RuntimeError(
+              f"SharePoint REST POST request failed for {base_url} with HTTP "
+              f"{resp.status_code}: {resp.text}"
+          )
+    finally:
+      self.cert_token_manager.return_token_slot(domain, token_data)
+
+    return {}
+
+  @staticmethod
+  def _extract_postquery_rows(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extracts search result rows as key-value dicts from a postquery response."""
+    if not isinstance(data, dict):
+      return []
+
+    postquery = data.get("d", {}).get("postquery", data)
+    if not isinstance(postquery, dict):
+      return []
+
+    primary = postquery.get("PrimaryQueryResult", {})
+    if not isinstance(primary, dict):
+      return []
+
+    relevant = primary.get("RelevantResults", {})
+    if not isinstance(relevant, dict):
+      return []
+
+    table = relevant.get("Table", {})
+    if not isinstance(table, dict):
+      return []
+
+    raw_rows = table.get("Rows", [])
+    if isinstance(raw_rows, dict):
+      raw_rows = raw_rows.get("results", [])
+    if not isinstance(raw_rows, list):
+      return []
+
+    parsed_rows: List[Dict[str, Any]] = []
+    for row in raw_rows:
+      if not isinstance(row, dict):
+        continue
+      raw_cells = row.get("Cells", [])
+      if isinstance(raw_cells, dict):
+        raw_cells = raw_cells.get("results", [])
+      if not isinstance(raw_cells, list):
+        continue
+      row_dict: Dict[str, Any] = {}
+      for cell in raw_cells:
+        if isinstance(cell, dict) and "Key" in cell:
+          row_dict[str(cell["Key"])] = cell.get("Value")
+      if row_dict:
+        parsed_rows.append(row_dict)
+
+    return parsed_rows
+
+  def search_encrypted_files_by_labels(
+      self,
+      base_url: str,
+      encrypted_label_ids: List[str],
+      path_prefixes: Optional[List[str]] = None,
+      logger: Optional[Callable[[str], None]] = None,
+      stop_event: Optional[threading.Event] = None,
+  ) -> List[Dict[str, Any]]:
+    """Queries SharePoint REST `postquery` API for encrypted files using `IndexDocId` cursor pagination.
+
+    Uses `POST {base_url}/_api/search/postquery` sorted by `[DocId]:ascending`
+    with `RowLimit=500` and `IndexDocId > {Last_DocId}` cursor boundaries to
+    retrieve matching labeled files without hitting standard `StartRow` offset
+    limits or Microsoft Graph Search's 1,000-item ceiling.
+    """
+    if logger is None:
+      logger = lambda x: None
+
+    if not encrypted_label_ids:
+      return []
+
+    domain = self._extract_domain(base_url)
+    clean_base_url = base_url.rstrip("/")
+    endpoint = f"{clean_base_url}/_api/search/postquery"
+
+    label_clause = " OR ".join(
+        f'InformationProtectionLabelId:"{lid}"'
+        for lid in sorted(encrypted_label_ids)
+    )
+    if path_prefixes:
+      cleaned_prefixes = [
+          p.rstrip("/") for p in path_prefixes if p and p.startswith("http")
+      ]
+      if cleaned_prefixes:
+        path_clause = " OR ".join(f'Path:"{p}*"' for p in cleaned_prefixes)
+        base_kql = f"({label_clause}) AND ({path_clause}) AND IsDocument:true"
+      else:
+        base_kql = f"({label_clause}) AND IsDocument:true"
+    else:
+      base_kql = f"({label_clause}) AND IsDocument:true"
+
+    select_props = [
+        "DocId",
+        "Size",
+        "Path",
+        "OriginalPath",
+        "ParentLink",
+        "SPWebUrl",
+        "SiteId",
+        "WebId",
+        "ListId",
+        "UniqueId",
+        "InformationProtectionLabelId",
+    ]
+
+    all_rows: List[Dict[str, Any]] = []
+    last_doc_id: Optional[int] = None
+    start_row = 0
+    row_limit = 500
+
+    while not (stop_event and stop_event.is_set()):
+      if last_doc_id is not None:
+        query_text = f"{base_kql} AND IndexDocId>{last_doc_id}"
+        current_start_row = 0
+      else:
+        query_text = base_kql
+        current_start_row = start_row
+
+      payload = {
+          "request": {
+              "__metadata": {
+                  "type": "Microsoft.Office.Server.Search.REST.SearchRequest"
+              },
+              "Querytext": query_text,
+              "RowLimit": row_limit,
+              "StartRow": current_start_row,
+              "TrimDuplicates": False,
+              "SelectProperties": {"results": select_props},
+              "SortList": {
+                  "results": [{"Property": "DocId", "Direction": "0"}]
+              },
+          }
+      }
+
+      resp_data = self._execute_post(
+          endpoint, payload, clean_base_url, domain, logger, stop_event
+      )
+      rows = self._extract_postquery_rows(resp_data)
+      if not rows:
+        break
+
+      all_rows.extend(rows)
+
+      max_batch_doc_id: Optional[int] = None
+      for row in rows:
+        doc_id_val = self._parse_int(row.get("DocId"))
+        if doc_id_val > 0 and (
+            max_batch_doc_id is None or doc_id_val > max_batch_doc_id
+        ):
+          max_batch_doc_id = doc_id_val
+
+      if len(rows) < row_limit:
+        break
+
+      if max_batch_doc_id is not None and (
+          last_doc_id is None or max_batch_doc_id > last_doc_id
+      ):
+        last_doc_id = max_batch_doc_id
+      else:
+        start_row += len(rows)
+        if start_row >= 50000:
+          break
+
+    return all_rows

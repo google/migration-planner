@@ -205,14 +205,17 @@ class EstimatorFactory:
       
       if not use_mocks:
         url_invoker = self.get_url_invoker()
+        cert_manager = self.get_cert_token_manager()
       else:
         url_invoker = self.get_mock_url_invoker(hard_reset=hard_reset, seed=mock_seed)
+        cert_manager = None
       self.files_estimator = FileEstimator(
         self.config,
         url_invoker,
         logger=self.logger,
         stop_event=self.stop_event,
-        progress_update_callback=progress_update_callback
+        progress_update_callback=progress_update_callback,
+        cert_token_manager=cert_manager,
       )
       self.files_estimator.set_id_to_display_name_map(self.id_to_display_name)
     

@@ -555,6 +555,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           "warningResourceCount": _safe_int(row.get("Entities with > 200k item count", 0)),
           "totalSize": _parse_size_str(row.get("Corpus Size", 0)),
           "resourceCount": res_cnt,
+          "encryptedFileCount": _safe_int(row.get("Encrypted File Count", 0)),
+          "encryptedFileSize": _parse_size_str(row.get("Encrypted File Size", 0)),
       }
 
     self.skipped_actual_scan = True
@@ -2085,20 +2087,31 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     if self.val_scan_encrypted_files:
         warning_msg = (
-            "Enabling 'Scan for Encrypted Files (RMS/MIP)' will cause performance degradation "
-            "as it requires fetching content headers for every single file to detect encryption. "
-            "It is highly recommended to only enable this if you need to identify RMS/MIP protected files.\n\n"
-            "Would you still like to continue?"
+            "Scanning for Encrypted Files\n"
+            "(RMS/MIP) uses Microsoft Graph\n"
+            "Sensitivity Labels API & SharePoint\n"
+            "REST Search API (postquery).\n\n"
+            "Please ensure these permissions\n"
+            "are granted with Admin Consent\n"
+            "in Microsoft Entra (Azure AD):\n\n"
+            "1. Microsoft Graph:\n"
+            "   SensitivityLabels.Read.All\n"
+            "   (or InformationProtection\n"
+            "    Policy.Read.All)\n"
+            "2. SharePoint:\n"
+            "   Sites.Read.All\n"
+            "   (with X.509 Certificate Auth)\n\n"
+            "Would you like to continue?"
         )
         should_continue = messagebox.askyesno(
-            title="Performance Warning",
+            title="API Permission Notice - Sensitivity Labels & SharePoint REST",
             message=warning_msg,
             icon="warning",
             parent=self
         )
         if not should_continue:
             return
-      
+
     disclaimer_text = (
         "The estimations provided by this tool are calculated projections"
         " intended for preliminary planning only. Actual migration timelines"
@@ -2119,7 +2132,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config = self._get_scan_configuration()
 
     is_report_upload = self._try_get_metrics_from_csv_report(config) is not None
-    if getattr(self, "val_shallow_scan", False) and not is_report_upload:
+    if (
+        getattr(self, "val_shallow_scan", False)
+        or getattr(self, "val_scan_encrypted_files", False)
+    ) and not is_report_upload:
       if not shallow_ui_helpers.ensure_certificates_and_prompt(self, config, ctk):
         return
 

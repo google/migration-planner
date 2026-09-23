@@ -1195,5 +1195,96 @@ class ShallowScanReportCsvUploadTest(unittest.TestCase):
         os.remove(tmp_path)
 
 
+class EncryptedFilesSharePointSearchTest(unittest.TestCase):
+  """Verifies SharePoint REST postquery encrypted file detection with IndexDocId cursor pagination."""
+
+  def test_extract_postquery_rows_handles_verbose_and_nometadata(self):
+    """_extract_postquery_rows parses both odata=verbose and odata=nometadata structures."""
+    verbose_payload = {
+        "d": {
+            "postquery": {
+                "PrimaryQueryResult": {
+                    "RelevantResults": {
+                        "Table": {
+                            "Rows": {
+                                "results": [
+                                    {
+                                        "Cells": {
+                                            "results": [
+                                                {"Key": "DocId", "Value": "101"},
+                                                {"Key": "Size", "Value": "4096"},
+                                                {"Key": "Path", "Value": "https://contoso.sharepoint.com/sites/HR/Shared Documents/a.docx"},
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    rows = SpRestConnector._extract_postquery_rows(verbose_payload)
+    self.assertEqual(len(rows), 1)
+    self.assertEqual(rows[0]["DocId"], "101")
+    self.assertEqual(rows[0]["Size"], "4096")
+
+  def test_search_encrypted_files_by_labels_cursor_pagination(self):
+    """search_encrypted_files_by_labels paginates using IndexDocId > last_doc_id sorted by DocId ascending."""
+    token_manager = MockCertTokenManager(MockSpSession())
+    connector = SpRestConnector(token_manager, max_retries=2, backoff=1)
+
+    captured_payloads = []
+
+    def fake_execute_post(endpoint, payload, base_url, domain, logger, stop_event=None):
+      captured_payloads.append((endpoint, payload))
+      if len(captured_payloads) == 1:
+        # Return exactly 500 rows with DocId 1..500 to trigger next cursor page
+        rows_data = [
+            {
+                "Cells": [
+                    {"Key": "DocId", "Value": str(i)},
+                    {"Key": "Size", "Value": "1024"},
+                    {"Key": "Path", "Value": f"https://contoso.sharepoint.com/sites/HR/Shared Documents/file_{i}.docx"},
+                    {"Key": "UniqueId", "Value": f"guid-{i}"},
+                ]
+            }
+            for i in range(1, 501)
+        ]
+      else:
+        rows_data = [
+            {
+                "Cells": [
+                    {"Key": "DocId", "Value": "501"},
+                    {"Key": "Size", "Value": "2048"},
+                    {"Key": "Path", "Value": "https://contoso.sharepoint.com/sites/HR/Shared Documents/file_501.docx"},
+                    {"Key": "UniqueId", "Value": "guid-501"},
+                ]
+            }
+        ]
+      return {
+          "PrimaryQueryResult": {
+              "RelevantResults": {"Table": {"Rows": rows_data}}
+          }
+      }
+
+    with mock.patch.object(connector, "_execute_post", side_effect=fake_execute_post):
+      results = connector.search_encrypted_files_by_labels(
+          base_url="https://contoso.sharepoint.com",
+          encrypted_label_ids=["label-guid-1"],
+          path_prefixes=["https://contoso.sharepoint.com/sites/HR"],
+      )
+
+    self.assertEqual(len(results), 501)
+    self.assertEqual(len(captured_payloads), 2)
+    req1 = captured_payloads[0][1]["request"]
+    req2 = captured_payloads[1][1]["request"]
+    self.assertEqual(req1["SortList"]["results"], [{"Property": "DocId", "Direction": "0"}])
+    self.assertNotIn("IndexDocId>", req1["Querytext"])
+    self.assertIn("IndexDocId>500", req2["Querytext"])
+    self.assertEqual(req2["StartRow"], 0)
+
+
 if __name__ == "__main__":
   unittest.main()
