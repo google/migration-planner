@@ -4,25 +4,12 @@
 
 ## What's new
 
-- **Microsoft Teams & Chat Migration Planning**: Full support for scanning and projecting migration timelines for Microsoft Teams, Channels, and Private Chats alongside Exchange Online.
-- **Files in OneDrive / SharePoint Planning**: Support added for metrics related to OneDrive / SharePoint sites.
-- **Process-Level Decoupling Architecture**: Architectural refactoring that decouples the launcher (`migration_planner.py`) and individual workload planners into isolated OS subprocesses to prevent runtime contention, memory corruption, or GIL clashes during highly concurrent MS Graph API scanning.
-- **Bidirectional Navigation**: Addition of a top navigation bar featuring a `← Back to Selector` button for seamless transitions between workload planners.
-
-#### UX change to support new features
-- The startup screen would now show a selector that enables user to select if they want to run Exchange online estimations, Files estimations or Chat Estimations.
-- The progress screen would have three progress bars for Files estimation:
-  - **Site Discovery**: This progress bar will report the progress while scanning all the sites/subsites in the tenant under the root site, along with some other metadata like List count, Drives/DLs count, License units count, etc..
-  - **Drive Discovery**: This progress bar will report the progress while scanning all the folders in the drives found in the site scan.
-  - **Metrics Calculation**: This will show the progress of the metrics (like max depth, folder count, files count, etc.) for the drives.
-- The report screen would display:
-  - **Summary Metrics**: This will display the summary metrics for the entire tenant.
-  - **File Size Distribution**: This will display the distribution of files based on their sizes as per the bucket ranges provided in the input screen.
-
-#### System behaviour changes
-- **Site Discovery** and **Drive Discovery** phases in the progress screen would show indeterminate progress as the total number of sites/folders/files are not known during those phases.
-- However the **Metrics Calculation** phase would be determinate and show proper progress.
-- The logs and CSV report would only be available through the export option and not under the outputs/ directory to minimize report creation latency for huge reports.
+- **Files Shallow Scan (Default Mode for OneDrive & SharePoint)**:
+  - **Fast Tenant-Scale Assessment**: **Shallow Scan** is now enabled by default in the Files Planner, rapidly collecting folder counts, file counts, Document Library counts, and active corpus sizes across OneDrive and SharePoint without traversing full folder trees.
+  - **Guided Certificate Setup**: On first run, the tool automatically generates a local security certificate (`certs/` folder) for each configured App Registration and displays a **Certificate Upload** dialog with a one-click **Copy Path** button and step-by-step upload instructions for Microsoft Entra ID.
+  - **Automated Deep Scan Recommendations**: Sites or Document Libraries exceeding **200k items** (Warning Resources) or **500k items** (Large Resources) are highlighted on the dashboard, marked as `"Deep Scan Recommended"` in the `Suggested Batch` column, and exported to `sites_for_deep_scan.csv` for targeted Deep Scans.
+  - **Failed Document Library Tracking**: Surfaces a **Failed Document Library Count** card on the results dashboard and a `Failed DL Count` column in exported CSV reports if any Document Library fails to scan.
+  - **Site Report CSV Upload for Instant ETA Recalculation**: Upload a previously generated `site_report_<timestamp>.csv` (from either Shallow Scan or Deep Scan, covering both OneDrive and SharePoint sites) via **Upload CSV** to recalculate migration batches and ETAs without re-scanning.
 
 ## DISCLAIMER
 
@@ -36,7 +23,7 @@
 ### Functionality Limitations
 
 *   This tool only provides migration time estimates for the new Data Migration Service with specific enhancements for large scale migrations. It does not cover Google Workspace Migrate, or any other data migration tool.
-*   Microsoft Exchange Online, Microsoft OneDrive / SharePoint and Microsoft Teams / Private Chat scan and migration planning is supported. ETAs are based on Email and Chat/Channel corpus projections.
+*   Microsoft Exchange Online, Microsoft OneDrive / SharePoint and Microsoft Teams / Private Chat scan and migration planning is supported.
 *   **Shared & Private Channels Coverage**:
     - **Private Channels**: Standard/private channels are fully scanned and included if their parent Team is resolved or specified.
     - **Shared Channels**: Shared channels hosted within a user's member Team are included. Shared channels hosted in teams the user is *not* a member of are not discovered by the `/users/{id}/joinedTeams` API and thus are not scanned, unless their host Team is explicitly included in the scan scope.
@@ -77,7 +64,7 @@
 
 ## Introduction
 
-The Migration Planner is a desktop application designed to help deployment partners and IT administrators assess a Microsoft 365 tenant before migration. Through its process-decoupled architecture, administrators can independently assess Exchange Online (Emails, Contacts, Calendars, In-Place Archives, Group Mails), Files in OneDrive / SharePoint or Microsoft Teams (Channels, Private Chats) to provide volume metrics and generate optimized Migration Batch Plans with estimated completion times (ETAs) (not applicable for files estimation).
+The Migration Planner is a desktop application designed to help deployment partners and IT administrators assess a Microsoft 365 tenant before migration. It provides full support for scanning and projecting migration timelines across **Microsoft Exchange Online** (Emails, Contacts, Calendars, In-Place Archives, Shared & Group Mailboxes), **Files in OneDrive / SharePoint** (with both **Shallow Scan** and **Deep Scan** modes), and **Microsoft Teams & Chat** (Teams, Channels, and Private Chats). Through its process-decoupled architecture, administrators can independently assess each workload to collect volume metrics and generate optimized Migration Batch Plans with estimated completion times (ETAs).
 
 ---
 
@@ -100,7 +87,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 3.  **Install Dependencies**: Run the following command:
     ```cmd
-    pip install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi
+    pip install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi cryptography
     ```
 
 #### macOS
@@ -116,7 +103,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 4.  **Install Dependencies**:
     ```bash
-    pip3 install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi
+    pip3 install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi cryptography
     ```
 
 #### Linux (Ubuntu/Debian)
@@ -131,7 +118,7 @@ Please ensure you have **Python 3.10** or newer installed on your system.
     ```
 3.  **Install Dependencies**:
     ```bash
-    pip3 install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi
+    pip3 install customtkinter requests pandas psutil Pillow urllib3 sortedcontainers aiohttp certifi cryptography
     ```
 
 ### 3. Setting up a Virtual Environment (Optional / Corp Policy)
@@ -167,7 +154,7 @@ To scan your tenant, you need to register an app in the Microsoft Entra ID (form
 ### 2. Grant Permissions
 In your new app, go to **API permissions > Add a permission > Microsoft Graph > Application permissions** (NOT Delegated), and assign permissions based on the workloads you plan to scan:
 
-#### Shared Permissions (Required for Both Workloads)
+#### Shared Permissions (Required for All Workloads)
 *   `User.Read.All` (To list users and enumerate rosters)
 *   `Group.Read.All` (To get M365 group and team structures)
 
@@ -187,22 +174,28 @@ In your new app, go to **API permissions > Add a permission > Microsoft Graph > 
 *   `TeamMember.Read.All` (To read team memberships)
 *   `Group.Read.All` (To list teams)
 
-### Files Planner Specific Permissions
-*   `Sites.Read.All` (To list sites)
-*   `Files.Read.All` (To count files)
-*   `LicenseAssignment.Read.All` (To check license information)
+#### Files Planner Specific Permissions
+*   **Microsoft Graph > Application permissions**:
+    *   `Sites.Read.All` (To discover sites, subsites, lists, and document libraries)
+    *   `Files.Read.All` (To read drive items and folder hierarchies)
+    *   `LicenseAssignment.Read.All` (To read tenant license units)
+*   **SharePoint > Application permissions (Required for Shallow Scan)**:
+    *   Go to **API permissions > Add a permission > SharePoint > Application permissions** and select **`Sites.Read.All`**.
 
 5.  Click **Add permissions**.
 6.  **Crucial Step**: Click **"Grant admin consent for [Your Organization]"** and confirm "Yes". All status icons should turn green.
 
-### 3. Get Credentials
-You will need three values for the tool:
+### 3. Get Credentials & Configure Certificate (for Files Shallow Scan)
+You will need three values from your App Registration:
 1.  **Tenant ID**: Found on the app's Overview page ("Directory (tenant) ID").
 2.  **Client ID**: Found on the app's Overview page ("Application (client) ID").
 3.  **Client Secret**:
     *   Go to **Certificates & secrets > New client secret**.
     *   Add a description and click **Add**.
     *   Copy the **"Value"** immediately (you won't see it again).
+4.  **Certificate Upload (For Files Shallow Scan)**:
+    *   You do **not** need to manually create a certificate ahead of time. When you click **"Get Migration Estimates"** in the Files Planner with **Shallow Scan** enabled, the tool automatically generates a `.pem` certificate in the local `certs/` folder and pops up a **Certificate Upload** dialog.
+    *   Click **Copy Path** in the dialog, navigate to your App Registration in the Azure Portal under **Certificates & secrets > Certificates > Upload certificate**, upload the generated `.pem` file, and click **Continue** in the app.
 
 ---
 
@@ -219,9 +212,9 @@ You will need three values for the tool:
 
     *(Ensure you are in your virtual environment if you created one).*
 
-### Process Decoupling Mechanics
-The launcher window (`migration_planner.py`) acts as a lightweight CustomTkinter `SelectorApp`, which can be used to select which estimations need to be run (Exchange Online, Chats or Files).
-All workload planners feature a top navigation bar with a `← Back to Selector` button. Clicking this cleanly terminates the active planner process and respawns a fresh `migration_planner.py` selector session.
+### Startup Selector & Process Decoupling Mechanics
+The startup window (`migration_planner.py`) opens a workload selector that allows you to choose between **Exchange Online**, **Files (OneDrive & SharePoint)**, or **Microsoft Teams & Chat** estimations.
+Selecting a workload launches that planner in an isolated OS subprocess to prevent runtime contention, memory overhead, or GIL clashes during highly concurrent scans. Every planner window features a top navigation bar with a **`← Back to Selector`** button that cleanly closes the active workload and returns you to the main selector screen.
 
 ---
 
@@ -251,46 +244,48 @@ Click **"Show Advanced Settings"** to tune the performance:
 ### Workflow B: Microsoft OneDrive / SharePoint
 
 #### 1. Connect & Source Selection
-*   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret.
+*   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret (multiple App Registrations can be added to scale throughput).
 *   **User Source**:
-    *   **Scan All Sites**: Scans all the Sites in the tenant.
-    *   **Upload CSV**: Allows you to scan a specific subset of users / site collections. Users and Site collections are differentiated by their expected regex. Site collections are expected to start with `https://` or `http://` while users are expected to have the standard email regex.
+    *   **Scan All Sites**: Scans all Personal (OneDrive) and/or SharePoint sites in the tenant.
+    *   **Upload CSV**: Supports two workflows:
+        1. **Targeted Entity Scan (`Entity` CSV)**: Scan a specific subset of OneDrive users (`user@domain.com`) and/or SharePoint site collection URLs (`https://...`). Only one column named `Entity` is required:
+           ```csv
+           Entity
+           bugbash4@smh3v.onmicrosoft.com
+           https://smh3v.sharepoint.com/sites/sc2
+           https://smh3v.sharepoint.com/
+           ```
+           *Note*: Entries are validated against the enabled site types (Personal Sites vs. SharePoint Sites). Invalid entries that fail discovery are skipped and logged.
+        2. **Recalculate ETA from Existing Site Report (`site_report_<timestamp>.csv`)**: If you already ran a Shallow Scan or Deep Scan and want to recalculate migration batches/ETAs (e.g., with a different **Max Parallel Batches** setting) without re-scanning the tenant, upload the previously generated `outputs/<timestamp>/site_report_<timestamp>.csv`. Both OneDrive and SharePoint site report CSVs (from Shallow Scan or Deep Scan) are supported.
+           *Disclaimer*: When recalculating ETAs from an uploaded `site_report.csv`, detailed drill-down tables such as *Large Resources*, *Warning Resources*, and *File Size Distribution* are omitted; refer to your original scan report for those tables.
 
-    Note that for CSV flow, only one column by the name `Entity` is expected. The provided entries under this column are split into SharePoint sites and OneDrive user emails based on their regex. Several validations are added to ensure the integrity of the input CSV. Some of them include validations around not allowing emails if only SharePoint scanning is enabled, or not allowing site collections if only OneDrive scanning is enabled. If the user does not provide a valid CSV or provides a CSV with invalid entries, a error message is displayed and the tool does not proceed with the scan.
-
-    Also if invalid entries that pass the regex checks are provided they'll be skipped during discovery and will not be shown in the final report. Please refer to the logs for details around these invalid entries.
-
-    PFB an example of a valid CSV
-
-    ```csv
-    Entity
-    bugbash4@smh3v.onmicrosoft.com
-    https://smh3v.sharepoint.com/sites/sc2
-    https://smh3v.sharepoint.com/
-
-    ```
-
-    NOTE: If we already have the corpus data and we only want to re-calculate ETA then we can use the "Upload CSV" feature and upload the CSV report generated in the `outputs` directory for the corresponding run (for example `outputs/20260618_103419/site_report_20260618_103419.csv`). Note that this ETA calculation without re-scan would only be performed for legitimate OneDrive exported CSVs only (i.e., only the CSVs containing all the fields present in the original report and only personal oneDrive sites would be supported).
-
-    DISCLAIMER: If using the "Upload CSV" feature to re-calculate ETA, the final output would be missing some metadata like "Large Resources", "File Size Distribution", etc.. So the original corpus report should be used as the source of truth and the generated report without scan should be used only for batch planning.
-
-#### 2. Advanced Settings
-Click **"Show Advanced Settings"** to tune the performance and select your estimation mode:
+#### 2. Advanced Settings: Shallow Scan (Default) vs. Deep Scan
+Click **"Show Advanced Settings"** to configure your scan mode:
+*   **Shallow Scan (Enabled by Default)**:
+    *   The **Shallow Scan** toggle at the top of Advanced Settings is switched **ON** by default.
+    *   Shallow Scan rapidly retrieves total folder counts, file counts, and active corpus sizes per Document Library without enumerating individual folder/file trees.
+    *   While **Shallow Scan** is ON, Deep Scan-specific checkboxes (*Include Recycle Bin Contents*, *Include Historical File Versions*, *Scan for Encrypted Files (RMS/MIP)*, and *Generate Folder Depth Report (>200k items)*) are inactive/disabled.
+*   **Deep Scan (Toggle Shallow Scan OFF)**:
+    *   Switch **Shallow Scan** **OFF** if you need folder depth analysis (`> depth limit 100`), shortcut counts, file size distribution buckets, Recycle Bin sizing, Historical File Versions sizing, Encrypted File detection, or Folder Depth Reports (`amr_folder_hierarchy.csv`).
+    *   **Recommended Workflow**: Run **Shallow Scan** first across your tenant. If any sites or Document Libraries exceed 200k items, Shallow Scan automatically generates a `sites_for_deep_scan.csv` file in the output folder—you can then switch **Shallow Scan** OFF and upload `sites_for_deep_scan.csv` to run a Deep Scan only on those large sites.
 *   **Site Types to Scan**:
-    *   **Personal Sites (OneDrive)**: Scans all the Personal / OneDrive sites in the tenant.
-    *   **SharePoint Sites**: Scans all the SharePoint sites in the tenant.
-*   **Concurrency**: Controls how many parallel threads the tool runs. Note that this number is not the exact number of threads spawned but is a guidance on the thread count.
+    *   **Include Personal Sites (OneDrive)**: Scans Personal / OneDrive sites.
+    *   **Include SharePoint Sites**: Scans SharePoint team and communication sites.
+*   **Concurrency & Max Parallel Batches**: Controls parallel worker threads and the number of parallel migration lanes used for ETA calculation.
 
-#### 3. Starting the Scan
-Click **"Get Migration Estimates"**.
-*   A disclaimer will appear noting that results are estimates. Click **OK** to proceed.
-*   The tool will verify your credentials and permissions before starting.
+#### 3. Starting the Scan & Certificate Prompt (Shallow Scan)
+Click **"Get Migration Estimates"** and accept the estimation disclaimer:
+*   **First-Time Certificate Upload (Shallow Scan)**:
+    *   If no local certificate exists for your Client ID, a **Certificate Upload** window will appear showing the path to the newly generated certificate (`certs/<tenant>_<client_id>.pem`).
+    *   Click **Copy Path**, upload that `.pem` file to your App Registration in Microsoft Entra ID (**Certificates & secrets > Certificates > Upload certificate**), ensure **SharePoint > Application permissions > `Sites.Read.All`** has Admin Consent, and click **Continue**.
+    *   On subsequent runs with the same Client ID and Client Secret, the existing certificate is unlocked automatically without prompting.
+    *   If you changed the Client Secret for an existing Client ID, a **Certificate Decryption Error** dialog lets you either **Retry with existing secret** or **Generate new certificate**.
 
 #### 4. The Scan Page
-Once started, you will see a real-time progress screen:
-*   **Spinners**: Indicate active scanning phases.
-*   **Progress Bars**: Show percentage completion for Site and Drive Discovery along with Metrics Calculations.
-*   **Live Counts**: Updates in real-time as items are discovered.
+Once started, the progress screen tracks three phases:
+*   **1. Site Discovery**: Indeterminate progress bar while discovering all sites, subsites, lists, Document Libraries, and license counts across the tenant.
+*   **2. Drive Discovery**: Scans discovered Document Libraries and updates live folder, file, and failure counts in real time (determinate progress bar in Shallow Scan; indeterminate during folder tree traversal in Deep Scan).
+*   **3. Migration Plan Generation**: Determinate progress bar while computing site metrics, batch assignments, and timeline estimates.
 
 ---
 
@@ -356,19 +351,22 @@ The tool calculates an Estimated Completion Time (ETA) based on the email corpus
 ### Workflow B Results: Microsoft OneDrive / SharePoint
 
 #### 1. Top Level Metrics
-For OneDrive we show the following metrics in the UI report.
+The results dashboard displays summary cards for the scanned OneDrive and SharePoint corpus:
 *   **Total Corpus Size**: Total size of the files discovered in the scan.
-*   **Site Collection Count**: Number of sites discovered in the scan.
+*   **Site Collection Count**: Number of top-level site collections discovered in the scan.
 *   **Subsite Count**: Total distinct subsites identified/scanned.
 *   **Document Library Count**: Number of Document Libraries / Drives identified in the scan.
-*   **Folder Count**: Total distinct folders identified/scanned.
-*   **File Count**: Total distinct files identified/scanned.
-*   **Shortcut Count**: Total distinct shortcuts identified/scanned.
-*   **List Count**: Total distinct lists identified/scanned.
-*   **File Size Distribution**: Distribution of files by size as per the buckets provided in input.
-*   **Large Resources Count**: Number of Resources (folders) whose subtree item count is > 500k.
+*   **Failed Document Library Count** *(Shallow Scan)*: Number of Document Libraries that could not be scanned due to access or API errors.
+*   **Folder Count**: Total folders discovered across scanned Document Libraries.
+*   **File Count**: Total files discovered across scanned Document Libraries.
+*   **Shortcut Count**: Total shortcuts identified (*shown as `N/A` in Shallow Scan*).
+*   **List Count**: Total SharePoint lists identified.
+*   **Folder / File count beyond depth limit 100**: Count of folders and files nested deeper than 100 levels (*shown as `N/A` in Shallow Scan*).
+*   **Large Resource Count (Entities with >500k items)**: Number of sites, subsites, Document Libraries, or folders exceeding 500k items.
+*   **Warning Resource Count (Entities with >200k items)**: Number of sites, subsites, Document Libraries, or folders exceeding 200k items. In **Shallow Scan**, if any entity exceeds 200k items, a banner recommends running a **Deep Scan** on those sites, and their `Suggested Batch` is marked as `"Deep Scan Recommended"`.
+*   **File Size Distribution** *(Deep Scan)*: Distribution of files across size buckets (omitted in Shallow Scan).
 
-The CSV report would include the above mentioned details along with the granular site level details. If both Personal (OneDrive) and SharePoint Sites were scanned then results for both will be shown separately in the CSV report.
+The exported CSV report includes all summary metrics along with granular site-level details (with `Failed DL Count` included right after `DL Count` in Shallow Scan). If both Personal (OneDrive) and SharePoint Sites are scanned, results for both are grouped separately in the full report export.
 
 ---
 
@@ -403,11 +401,12 @@ You can also download just the log file via the **"Export logs"** button or the 
 
 ### Workflow B Outputs: Microsoft OneDrive / SharePoint
 
-Once the scan completes, the artifacts (CSV report and logs) can be downloaded via the "Export logs" and "Export full report" buttons in the UI.
+Once the scan completes, artifacts are saved under `/outputs/<timestamp>/` and can also be exported to a custom location using the **"Export logs"** and **"Export full report"** buttons in the UI:
 
-The artifacts include:
-1.  **Site Report**: A master list of all sites and their details (like folder, file counts, corpus size, etc)
-2.  **Logs**: Detailed execution logs, including system performance (CPU/RAM) and any API errors encountered.
+1.  **Site Report (`site_report_<timestamp>.csv`)**: Site-by-site breakdown of subsites, Document Libraries (`DL Count` and `Failed DL Count` in Shallow Scan), lists, folders, files, corpus size, threshold counts (`>500k` and `>200k`), and `Suggested Batch`.
+2.  **Suggested Batch Files (`suggested_batches/`)**: Individual batch CSV files (`Batch_1.csv`, `Batch_2.csv`, etc.) ready for migration planning.
+3.  **Sites for Deep Scan (`sites_for_deep_scan.csv`)** *(Shallow Scan, when entities >200k items are detected)*: A ready-to-upload `Entity` CSV containing the URLs of sites that exceeded the 200k item threshold so you can run a targeted Deep Scan on them.
+4.  **Logs (`logs_<timestamp>.log`)**: Detailed execution logs, phase runtimes, system resource metrics (CPU/RAM), and any API errors encountered.
 
 ---
 
