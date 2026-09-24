@@ -55,6 +55,7 @@ import subprocess
 import sys
 import customtkinter as ctk
 from util.constants import *
+import ui.utils as ui_utils
 
 class SelectorApp(ctk.CTk):
   """Main application for workload selection."""
@@ -62,7 +63,7 @@ class SelectorApp(ctk.CTk):
   def __init__(self):
     super().__init__()
     self.title("Migration Planner Selector")
-    self.geometry("400x250")
+    ui_utils.center_window(self, 400, 250)
     self.configure(fg_color=COLOR_BACKGROUND)
 
     ctk.CTkLabel(
