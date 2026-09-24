@@ -6,7 +6,7 @@
 
 - **Files Shallow Scan (Default Mode for OneDrive & SharePoint)**:
   - **Fast Tenant-Scale Assessment**: **Shallow Scan** is now enabled by default in the Files Planner, rapidly collecting folder counts, file counts, Document Library counts, and active corpus sizes across OneDrive and SharePoint without traversing full folder trees.
-  - **Guided Certificate Setup**: On first run, the tool automatically generates a local security certificate (`certs/` folder) for each configured App Registration and displays a **Certificate Upload** dialog with a one-click **Copy Path** button and step-by-step upload instructions for Microsoft Entra ID.
+  - **Guided Certificate Setup**: On first run, the tool automatically generates a local security certificate at `certificate/<tenant_id>_<client_id>/certificate.pem` and displays a **Certificate Upload** dialog with a one-click **Copy Path** button and step-by-step upload instructions for Microsoft Entra ID.
   - **Automated Deep Scan Recommendations**: Sites or Document Libraries exceeding **200k items** (Warning Resources) or **500k items** (Large Resources) are highlighted on the dashboard, marked as `"Deep Scan Recommended"` in the `Suggested Batch` column, and exported to `sites_for_deep_scan.csv` for targeted Deep Scans.
   - **Failed Document Library Tracking**: Surfaces a **Failed Document Library Count** card on the results dashboard and a `Failed DL Count` column in exported CSV reports if any Document Library fails to scan.
   - **Site Report CSV Upload for Instant ETA Recalculation**: Upload a previously generated `site_report_<timestamp>.csv` (from either Shallow Scan or Deep Scan, covering both OneDrive and SharePoint sites) via **Upload CSV** to recalculate migration batches and ETAs without re-scanning.
@@ -194,8 +194,8 @@ You will need three values from your App Registration:
     *   Add a description and click **Add**.
     *   Copy the **"Value"** immediately (you won't see it again).
 4.  **Certificate Upload (For Files Shallow Scan)**:
-    *   You do **not** need to manually create a certificate ahead of time. When you click **"Get Migration Estimates"** in the Files Planner with **Shallow Scan** enabled, the tool automatically generates a `.pem` certificate in the local `certs/` folder and pops up a **Certificate Upload** dialog.
-    *   Click **Copy Path** in the dialog, navigate to your App Registration in the Azure Portal under **Certificates & secrets > Certificates > Upload certificate**, upload the generated `.pem` file, and click **Continue** in the app.
+    *   You do **not** need to manually create a certificate ahead of time. When you click **"Get Migration Estimates"** in the Files Planner with **Shallow Scan** enabled, the tool automatically generates `certificate.pem` (and `passkey.pfx`) inside the `certificate/<tenant_id>_<client_id>/` folder in the project root directory and pops up a **Certificate Upload** dialog.
+    *   Click **Copy Path** in the dialog, navigate to your App Registration in the Azure Portal under **Certificates & secrets > Certificates > Upload certificate**, upload the generated `certificate.pem` file, and click **Continue** in the app.
 
 ---
 
@@ -244,7 +244,7 @@ Click **"Show Advanced Settings"** to tune the performance:
 ### Workflow B: Microsoft OneDrive / SharePoint
 
 #### 1. Connect & Source Selection
-*   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret (multiple App Registrations can be added to scale throughput).
+*   **Connect with Microsoft**: Enter your Tenant ID, Client ID, and Client Secret.
 *   **User Source**:
     *   **Scan All Sites**: Scans all Personal (OneDrive) and/or SharePoint sites in the tenant.
     *   **Upload CSV**: Supports two workflows:
@@ -276,10 +276,10 @@ Click **"Show Advanced Settings"** to configure your scan mode:
 #### 3. Starting the Scan & Certificate Prompt (Shallow Scan)
 Click **"Get Migration Estimates"** and accept the estimation disclaimer:
 *   **First-Time Certificate Upload (Shallow Scan)**:
-    *   If no local certificate exists for your Client ID, a **Certificate Upload** window will appear showing the path to the newly generated certificate (`certs/<tenant>_<client_id>.pem`).
-    *   Click **Copy Path**, upload that `.pem` file to your App Registration in Microsoft Entra ID (**Certificates & secrets > Certificates > Upload certificate**), ensure **SharePoint > Application permissions > `Sites.Read.All`** has Admin Consent, and click **Continue**.
-    *   On subsequent runs with the same Client ID and Client Secret, the existing certificate is unlocked automatically without prompting.
-    *   If you changed the Client Secret for an existing Client ID, a **Certificate Decryption Error** dialog lets you either **Retry with existing secret** or **Generate new certificate**.
+    *   If no local certificate exists in `certificate/<tenant_id>_<client_id>/`, a **Certificate Upload** window will appear showing the full path to the newly generated `certificate/<tenant_id>_<client_id>/certificate.pem` file.
+    *   Click **Copy Path**, upload that `certificate.pem` file to your App Registration in Microsoft Entra ID (**Certificates & secrets > Certificates > Upload certificate**), ensure **SharePoint > Application permissions > `Sites.Read.All`** has Admin Consent, and click **Continue**.
+    *   On subsequent runs with the same Client ID and Client Secret, the existing certificate (`certificate/<tenant_id>_<client_id>/passkey.pfx`) is unlocked automatically without prompting.
+    *   If you changed the Client Secret for your App Registration, a **Certificate Decryption Error** dialog lets you either **Retry with existing secret** or **Generate new certificate**.
 
 #### 4. The Scan Page
 Once started, the progress screen tracks three phases:
