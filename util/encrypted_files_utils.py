@@ -190,16 +190,100 @@ class EncryptedFilesSearchRunner:
   def __init__(
       self,
       cert_token_manager: CertTokenManager,
+      url_invoker: Any = None,
       max_retries: int = 5,
       backoff: int = 2,
   ) -> None:
     self.cert_token_manager = cert_token_manager
+    self.url_invoker = url_invoker
     self.max_retries = min(5, max(1, max_retries))
     self.backoff = backoff
     self.throttle_until = 0.0
     self.lock = threading.Lock()
     self.label_protection_lock = threading.Lock()
     self.label_protection_cache: Dict[str, bool] = {}
+    self.cert_auth_unavailable_domains: Set[str] = set()
+    self.graph_search_region = "NAM"
+
+  def _execute_graph_search_fallback(
+      self,
+      query_text: str,
+      row_limit: int,
+      logger: Callable[[str], None],
+      stop_event: Optional[threading.Event] = None,
+  ) -> List[Dict[str, Any]]:
+    """Executes Graph Search fallback (POST /v1.0/search/query) when cert is not uploaded to Azure Portal."""
+    if self.url_invoker is None or not hasattr(self.url_invoker, "token_manager"):
+      return []
+    tm = self.url_invoker.token_manager
+    if tm is None:
+      return []
+    token_data = tm.get_valid_token_slot(logger)
+    session = tm.get_session()
+    try:
+      for reg in [self.graph_search_region, "NAM", "US", "EUR", "APC", "IND"]:
+        if stop_event and stop_event.is_set():
+          break
+        payload = {
+            "requests": [{
+                "entityTypes": ["driveItem"],
+                "query": {"queryString": query_text},
+                "region": reg,
+                "from": 0,
+                "size": min(row_limit, 500),
+                "fields": [
+                    "id",
+                    "size",
+                    "webUrl",
+                    "informationProtectionLabelId",
+                ],
+                "sortProperties": [
+                    {"name": "Size", "isDescending": False},
+                ],
+            }]
+        }
+        try:
+          resp = session.post(
+              f"{GRAPH_BASE_URL}/search/query",
+              headers={
+                  "Authorization": f"Bearer {token_data['token']}",
+                  "Content-Type": "application/json",
+              },
+              json=payload,
+              timeout=30.0,
+          )
+          if resp.status_code == 200:
+            self.graph_search_region = reg
+            data = resp.json()
+            containers = (
+                (data.get("value") or [{}])[0].get("hitsContainers") or [{}]
+            )
+            hits = containers[0].get("hits") or []
+            rows: List[Dict[str, Any]] = []
+            for idx, hit in enumerate(hits, 1):
+              res = hit.get("resource") or {}
+              fields = (res.get("listItem") or {}).get("fields") or {}
+              lid = (
+                  res.get("informationProtectionLabelId")
+                  or fields.get("informationProtectionLabelId")
+                  or fields.get("InformationProtectionLabelId")
+                  or ""
+              )
+              rows.append({
+                  "DocId": idx,
+                  "Size": res.get("size") or fields.get("size") or 0,
+                  "Path": res.get("webUrl") or "",
+                  "OriginalPath": res.get("webUrl") or "",
+                  "InformationProtectionLabelId": lid,
+              })
+            del data
+            del hits
+            return rows
+        except Exception:
+          continue
+    finally:
+      tm.return_token_slot(token_data)
+    return []
 
   def _execute_post(
       self,
@@ -211,7 +295,17 @@ class EncryptedFilesSearchRunner:
       stop_event: Optional[threading.Event] = None,
   ) -> Dict[str, Any]:
     """Executes an authenticated SharePoint REST POST request with retry/backoff."""
-    token_data = self.cert_token_manager.get_valid_token_slot(domain, logger)
+    with self.lock:
+      if domain in self.cert_auth_unavailable_domains:
+        return {"__use_graph_fallback__": True}
+
+    try:
+      token_data = self.cert_token_manager.get_valid_token_slot(domain, logger)
+    except Exception:
+      with self.lock:
+        self.cert_auth_unavailable_domains.add(domain)
+      return {"__use_graph_fallback__": True}
+
     session = self.cert_token_manager.get_session()
 
     try:
@@ -361,6 +455,52 @@ class EncryptedFilesSearchRunner:
       self.label_protection_cache[label_id] = is_enc
     return is_enc
 
+  def has_any_labeled_files_in_tenant(
+      self,
+      sample_web_url: str,
+      logger: Callable[[str], None],
+      stop_event: Optional[threading.Event] = None,
+  ) -> bool:
+    """Performs a fast 1-row pre-check to determine if any sensitivity-labeled files exist."""
+    if not sample_web_url:
+      return True
+    clean_web_url = sample_web_url.rstrip("/")
+    domain = extract_domain(clean_web_url)
+    endpoint = f"{clean_web_url}/_api/search/postquery"
+    hex_clause = " OR ".join(
+        f"InformationProtectionLabelId:{c}*" for c in "0123456789abcdef"
+    )
+    query_text = f"({hex_clause}) AND IsDocument:true"
+    payload = {
+        "request": {
+            "__metadata": {
+                "type": "Microsoft.Office.Server.Search.REST.SearchRequest"
+            },
+            "Querytext": query_text,
+            "RowLimit": 1,
+            "StartRow": 0,
+            "TrimDuplicates": False,
+            "SelectProperties": {
+                "results": ["DocId", "InformationProtectionLabelId"]
+            },
+        }
+    }
+    resp_data = self._execute_post(
+        endpoint, payload, clean_web_url, domain, logger, stop_event
+    )
+    if isinstance(resp_data, dict) and resp_data.get("__use_graph_fallback__"):
+      rows = self._execute_graph_search_fallback(
+          query_text, 1, logger, stop_event
+      )
+      has_rows = bool(rows)
+      del rows
+      return has_rows
+    rows = extract_postquery_rows(resp_data)
+    del resp_data
+    has_rows = bool(rows)
+    del rows
+    return has_rows
+
   def scan_single_library(
       self,
       drive_id: str,
@@ -432,8 +572,14 @@ class EncryptedFilesSearchRunner:
       resp_data = self._execute_post(
           endpoint, payload, clean_web_url, domain, logger, stop_event
       )
-      rows = extract_postquery_rows(resp_data)
-      del resp_data
+      if isinstance(resp_data, dict) and resp_data.get("__use_graph_fallback__"):
+        rows = self._execute_graph_search_fallback(
+            query_text, SEARCH_ROW_LIMIT, logger, stop_event
+        )
+        del resp_data
+      else:
+        rows = extract_postquery_rows(resp_data)
+        del resp_data
 
       if not rows:
         break
@@ -503,20 +649,7 @@ def scan_libraries_for_encrypted_files(
     backoff: int = 2,
     concurrency: int = ENCRYPTED_FILES_CONCURRENCY,
 ) -> None:
-  """Runs the post-Deep-Scan encrypted & sensitivity-labeled files phase with concurrency=3.
-
-  Args:
-    cert_token_manager: Certificate token manager for SharePoint REST Search.
-    url_invoker: Graph URL invoker for fetching sensitivity label definitions.
-    library_targets: List of `(drive_id, web_base_url, library_url)` tuples.
-    on_page_metrics: Callback invoked immediately as each page arrives.
-    on_tenant_labels_discovered: Callback invoked with `(all_label_ids, encrypted_label_ids)`.
-    logger: Logging callback.
-    stop_event: Threading stop event.
-    max_retries: Max retry count per SharePoint REST call.
-    backoff: Exponential backoff base.
-    concurrency: Number of concurrent Document Library workers (default 3).
-  """
+  """Runs the post-Deep-Scan encrypted & sensitivity-labeled files phase with concurrency=3."""
   if not library_targets or (stop_event and stop_event.is_set()):
     return
 
@@ -532,16 +665,33 @@ def scan_libraries_for_encrypted_files(
 
   runner = EncryptedFilesSearchRunner(
       cert_token_manager=cert_token_manager,
+      url_invoker=url_invoker,
       max_retries=max_retries,
       backoff=backoff,
   )
 
+  # If len(library_targets) > 10 and tenant has 0 sensitivity labels configured in Graph,
+  # perform a 1-row search index pre-check before iterating thousands of Document Libraries.
+  if len(library_targets) > 10 and not all_label_ids:
+    sample_web_url = library_targets[0][1]
+    if not runner.has_any_labeled_files_in_tenant(
+        sample_web_url, logger, stop_event
+    ):
+      return
+
   worker_count = max(1, min(concurrency, len(library_targets)))
-  executor = ThreadPoolExecutor(max_workers=worker_count)
-  try:
-    futures = [
-        executor.submit(
-            runner.scan_single_library,
+  target_iter = iter(library_targets)
+  iter_lock = threading.Lock()
+
+  def _worker() -> None:
+    while not (stop_event and stop_event.is_set()):
+      with iter_lock:
+        try:
+          drive_id, web_base_url, library_url = next(target_iter)
+        except StopIteration:
+          return
+      try:
+        runner.scan_single_library(
             drive_id,
             web_base_url,
             library_url,
@@ -552,15 +702,15 @@ def scan_libraries_for_encrypted_files(
             logger,
             stop_event,
         )
-        for drive_id, web_base_url, library_url in library_targets
-    ]
-    for fut in as_completed(futures):
-      if stop_event and stop_event.is_set():
-        break
-      try:
-        fut.result()
       except Exception as exc:
         if logger:
           logger(f"Warning: encrypted files library scan error: {exc}")
+
+  executor = ThreadPoolExecutor(max_workers=worker_count)
+  try:
+    worker_futures = [executor.submit(_worker) for _ in range(worker_count)]
+    for fut in as_completed(worker_futures):
+      fut.result()
   finally:
     executor.shutdown(wait=True)
+

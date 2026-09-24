@@ -275,6 +275,12 @@ class FileEstimator(Estimator):
                         success=success,
                         entity_type="Drives"
                     )
+                    del batch_adj_list
+                    del batch_parent_refs
+                    del batch_folder_nodes
+                    del batch_total_size
+                    del batch_buckets
+                    del batch_metrics
                     time.sleep(0.2)
                 except Exception as e:
                     failed += len(batch)
@@ -307,7 +313,14 @@ class FileEstimator(Estimator):
 
             if self.config.scan_encrypted_files:
                 self.encryption_metrics_lock = threading.Lock()
-                valid_drive_ids = {drive["id"] for drive in drives if "id" in drive}
+                if drive_metrics:
+                    valid_drive_ids = {
+                        d_id
+                        for d_id, dm in drive_metrics.items()
+                        if dm.get("fileCount", 0) > 0
+                    }
+                else:
+                    valid_drive_ids = {drive["id"] for drive in drives if "id" in drive}
                 self._scan_encrypted_files(
                     drive_discovery_progress_metrics,
                     failures,
