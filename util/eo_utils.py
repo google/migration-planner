@@ -180,13 +180,17 @@ def fetch_user_batch_data(
           elif resource_type == "encrypted_messages":
             user["Encrypted Email Count"] = count_val
             batch_encrypted_emails_count += count_val
-            r_lbl = responses.get(f"{i}_lbl", {})
+            r_lbl = responses.pop(f"{i}_lbl", {})
             lbl_body = r_lbl.get("body", {}) if r_lbl.get("status") == 200 else {}
             lbl_count = max(int(lbl_body.get("@odata.count", 0) or 0), count_val)
             user["Sensitivity Labeled Email Count"] = lbl_count
             batch_labeled_emails_count += lbl_count
-            _extract_labels_from_messages(lbl_body.get("value", []))
+            lbl_msgs = lbl_body.pop("value", [])
+            _extract_labels_from_messages(lbl_msgs)
+            del lbl_msgs
             next_link = lbl_body.get("@odata.nextLink")
+            del lbl_body
+            del r_lbl
             extra_pages = 0
             headers_next = {
                 "Authorization": f"Bearer {token_data['token']}",
@@ -198,8 +202,11 @@ def fetch_user_batch_data(
                 if nr.status_code != 200:
                   break
                 nd = nr.json()
-                _extract_labels_from_messages(nd.get("value", []))
+                nd_msgs = nd.pop("value", [])
+                _extract_labels_from_messages(nd_msgs)
+                del nd_msgs
                 next_link = nd.get("@odata.nextLink")
+                del nd
                 extra_pages += 1
               except Exception:
                 break
