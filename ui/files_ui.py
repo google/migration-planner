@@ -784,7 +784,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             row_data["Historical File Version Count"] = s_data.get("versionCount", 0)
             row_data["Historical File Version Size"] = s_data.get("versionSize", 0)
         if getattr(self, "val_scan_encrypted_files", False):
-            row_data["Encrypted File Count"] = s_data.get("encryptedFileCount", 0)
+            enc_cnt = s_data.get("encryptedFileCount", 0)
+            lbl_cnt = s_data.get("sensitivityLabeledFileCount", 0) or enc_cnt
+            row_data["Sensitivity Labeled File Count"] = lbl_cnt
+            row_data["Encrypted File Count"] = enc_cnt
             row_data["Encrypted File Size"] = s_data.get("encryptedFileSize", 0)
             
         site_data.append(row_data)
@@ -1439,15 +1442,49 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         file_count = sum(int(s.get("fileCount", 0) or 0) for s in data["siteMetrics"].values())
       self.create_stat_card(card_frame, "Folder Count", f"{folder_count:,}", "📁")
       self.create_stat_card(card_frame, "File Count", f"{file_count:,}", "📄")
-      if getattr(self, "val_scan_encrypted_files", False):
-        self.create_stat_card(card_frame, "Total Encrypted\nFile Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
-        self.create_stat_card(card_frame, "Total Encrypted\nFile Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
       self.create_stat_card(card_frame, "Shortcut Count", shallow_ui_helpers.format_stat_value(data.get('shortcutCount', 0)), "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
-      self.create_stat_card(card_frame, "Folder count beyond\ndepth limit 100", shallow_ui_helpers.format_stat_value(data.get('folderCountExceedingDepthLimit', 0)), "📁")
-      self.create_stat_card(card_frame, "File count beyond\ndepth limit 100", shallow_ui_helpers.format_stat_value(data.get('fileCountExceedingDepthLimit', 0)), "📄")
-      self.create_stat_card(card_frame, "Large Resource Count\n(Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
-      self.create_stat_card(card_frame, "Warning Resource Count\n(Entities with >200k items)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
+
+      card_frame_row2 = ctk.CTkFrame(self.view_results, fg_color="transparent")
+      card_frame_row2.pack(fill="x", pady=(5, 5))
+      if getattr(self, "val_scan_encrypted_files", False):
+        total_enc_files = sum([entry.get("encryptedFileCount", 0) for entry in data.get("siteMetrics", {}).values()])
+        total_enc_size = sum([entry.get("encryptedFileSize", 0) for entry in data.get("siteMetrics", {}).values()])
+        total_labeled_files = (
+            data.get("sensitivityLabeledFileCount", 0)
+            or sum([entry.get("sensitivityLabeledFileCount", 0) for entry in data.get("siteMetrics", {}).values()])
+            or total_enc_files
+        )
+        total_labels = data.get("sensitivityLabelCount", 0)
+        enc_labels = data.get("encryptedSensitivityLabelCount", 0)
+        self.create_stat_card(
+            card_frame_row2,
+            "Sensitivity Labels",
+            f"{total_labels:,}",
+            "🏷️",
+        )
+        self.create_stat_card(
+            card_frame_row2,
+            "Encrypted Sensitivity Labels",
+            f"{enc_labels:,}",
+            "🔒",
+        )
+        self.create_stat_card(
+            card_frame_row2,
+            "Sensitivity Labeled Files",
+            f"{total_labeled_files:,}",
+            "🏷️",
+        )
+        self.create_stat_card(card_frame_row2, "Total Encrypted\nFile Count", f"{total_enc_files:,}", "🔒")
+        self.create_stat_card(card_frame_row2, "Total Encrypted\nFile Size", f"{self.format_size(total_enc_size)}", "🔒")
+        card_frame_row3 = ctk.CTkFrame(self.view_results, fg_color="transparent")
+        card_frame_row3.pack(fill="x", pady=(5, 10))
+      else:
+        card_frame_row3 = card_frame_row2
+      self.create_stat_card(card_frame_row3, "Folder count beyond\ndepth limit 100", shallow_ui_helpers.format_stat_value(data.get('folderCountExceedingDepthLimit', 0)), "📁")
+      self.create_stat_card(card_frame_row3, "File count beyond\ndepth limit 100", shallow_ui_helpers.format_stat_value(data.get('fileCountExceedingDepthLimit', 0)), "📄")
+      self.create_stat_card(card_frame_row3, "Large Resource Count\n(Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
+      self.create_stat_card(card_frame_row3, "Warning Resource Count\n(Entities with >200k items)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
 
       if self.show_eta:
         # Timeline
@@ -1853,7 +1890,17 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if getattr(self, "val_scan_encrypted_files", False):
           total_encrypted_size = sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()])
           total_encrypted_count = sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()])
+          total_labeled_files = (
+              data.get("sensitivityLabeledFileCount", 0)
+              or sum([entry.get("sensitivityLabeledFileCount", 0) for entry in data.get("siteMetrics", {}).values()])
+              or total_encrypted_count
+          )
+          total_labels = data.get("sensitivityLabelCount", 0)
+          enc_labels = data.get("encryptedSensitivityLabelCount", 0)
           summary_rows.extend([
+              ("Sensitivity Labels", total_labels),
+              ("Encrypted Sensitivity Labels", enc_labels),
+              ("Sensitivity Labeled Files", total_labeled_files),
               ("Total Encrypted File Size", self.format_size(total_encrypted_size)),
               ("Total Encrypted File Count", total_encrypted_count),
           ])
@@ -1971,7 +2018,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           row.extend(["Historical File Version Count", "Historical File Version Size"])
 
         if getattr(self, "val_scan_encrypted_files", False):
-          row.extend(["Encrypted File Count", "Encrypted File Size"])
+          row.extend(["Sensitivity Labeled File Count", "Encrypted File Count", "Encrypted File Size"])
 
         if self.show_eta:
           row.append("Suggested Batch")
@@ -2063,8 +2110,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               ])
 
             if getattr(self, "val_scan_encrypted_files", False):
+              enc_cnt = s_data.get("encryptedFileCount", 0)
+              lbl_cnt = s_data.get("sensitivityLabeledFileCount", 0) or enc_cnt
               row.extend([
-                  s_data.get("encryptedFileCount", 0),
+                  lbl_cnt,
+                  enc_cnt,
                   self.format_size(s_data.get("encryptedFileSize", 0))
               ])
 
@@ -2145,13 +2195,24 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     if self.val_scan_encrypted_files:
         warning_msg = (
-            "Enabling 'Scan for Encrypted Files (RMS/MIP)' will cause performance degradation "
-            "as it requires fetching content headers for every single file to detect encryption. "
-            "It is highly recommended to only enable this if you need to identify RMS/MIP protected files.\n\n"
-            "Would you still like to continue?"
+            "Scanning for Encrypted Files\n"
+            "(RMS/MIP) uses Microsoft Graph\n"
+            "Sensitivity Labels API & SharePoint\n"
+            "REST Search API (postquery).\n\n"
+            "Please ensure these permissions\n"
+            "are granted with Admin Consent\n"
+            "in Microsoft Entra (Azure AD):\n\n"
+            "1. Microsoft Graph:\n"
+            "   SensitivityLabels.Read.All\n"
+            "   (or InformationProtection\n"
+            "    Policy.Read.All)\n"
+            "2. SharePoint:\n"
+            "   Sites.Read.All\n"
+            "   (with X.509 Certificate Auth)\n\n"
+            "Would you like to continue?"
         )
         should_continue = messagebox.askyesno(
-            title="Performance Warning",
+            title="API Permission Notice - Sensitivity Labels & SharePoint REST",
             message=warning_msg,
             icon="warning",
             parent=self
@@ -2179,7 +2240,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config = self._get_scan_configuration()
 
     is_report_upload = self._try_get_metrics_from_csv_report(config) is not None
-    if getattr(self, "val_shallow_scan", False) and not is_report_upload:
+    if (
+        getattr(self, "val_shallow_scan", False)
+        or getattr(self, "val_scan_encrypted_files", False)
+    ) and not is_report_upload:
       if not shallow_ui_helpers.ensure_certificates_and_prompt(self, config, ctk):
         return
 

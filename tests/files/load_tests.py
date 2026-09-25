@@ -37,7 +37,7 @@ class TestFileEstimatorLoad(unittest.TestCase):
             cls.data_path = env_data_path
             
         if not os.path.exists(cls.data_path):
-            raise FileNotFoundError(f"Test data not found at {cls.data_path}. Please run data_state_creator.py first.")
+            raise unittest.SkipTest(f"Test data not found at {cls.data_path}. Run data_state_creator.py to run full synthetic load simulation.")
             
         with open(cls.data_path, "r") as f:
             cls.test_data = json.load(f)
@@ -469,5 +469,227 @@ class TestFileEstimatorLoad(unittest.TestCase):
             if sites_path in session_custom_responses:
                 del session_custom_responses[sites_path]
 
+
+class TestDeepScanEncryptedFilesAndSensitivityLabels(unittest.TestCase):
+    """Unit tests for Deep Scan encrypted files and sensitivity labels scanning."""
+
+    def _build_postquery_response(self, rows):
+        formatted_rows = []
+        for r in rows:
+            cells = [{"Key": k, "Value": str(v)} for k, v in r.items()]
+            formatted_rows.append({"Cells": {"results": cells}})
+        return {
+            "d": {
+                "postquery": {
+                    "PrimaryQueryResult": {
+                        "RelevantResults": {
+                            "Table": {"Rows": {"results": formatted_rows}}
+                        }
+                    }
+                }
+            }
+        }
+
+    def test_streaming_page_aggregation_and_size_ascending_order(self):
+        """Verifies per-page metric updates, Size ascending SortList, and no base_url fallback."""
+        from util.encrypted_files_utils import (
+            EncryptedFilesSearchRunner,
+            scan_libraries_for_encrypted_files,
+        )
+
+        mock_cert_manager = MagicMock()
+        mock_cert_manager.get_valid_token_slot.return_value = {"token": "sp-jwt"}
+        mock_session = MagicMock()
+        mock_cert_manager.get_session.return_value = mock_session
+
+        captured_payloads = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured_payloads.append((url, json))
+            resp = MagicMock()
+            resp.status_code = 200
+            qtext = json["request"]["Querytext"]
+            if "Size>" in qtext:
+                resp.json.return_value = self._build_postquery_response([])
+            elif "dl1" in qtext:
+                resp.json.return_value = self._build_postquery_response([
+                    {
+                        "DocId": "101",
+                        "Size": "1024",
+                        "Path": "https://contoso.sharepoint.com/sites/eng/dl1/a.docx",
+                        "InformationProtectionLabelId": "lbl-enc-1",
+                    },
+                    {
+                        "DocId": "102",
+                        "Size": "2048",
+                        "Path": "https://contoso.sharepoint.com/sites/eng/dl1/b.docx",
+                        "InformationProtectionLabelId": "lbl-plain-1",
+                    },
+                ])
+            else:
+                resp.json.return_value = self._build_postquery_response([
+                    {
+                        "DocId": "201",
+                        "Size": "4096",
+                        "Path": "https://contoso.sharepoint.com/sites/eng/sub1/dl2/c.docx",
+                        "InformationProtectionLabelId": "lbl-enc-1",
+                    },
+                ])
+            return resp
+
+        mock_session.post.side_effect = fake_post
+
+        mock_url_invoker = MagicMock()
+        mock_url_invoker.invoke_url.return_value = (
+            200,
+            json.dumps({
+                "value": [
+                    {"id": "lbl-enc-1", "name": "Confidential Encrypted", "hasProtection": True},
+                    {"id": "lbl-plain-1", "name": "General", "hasProtection": False},
+                ]
+            }),
+        )
+
+        library_targets = [
+            ("drive-1", "https://contoso.sharepoint.com/sites/eng", "https://contoso.sharepoint.com/sites/eng/dl1"),
+            ("drive-2", "https://contoso.sharepoint.com/sites/eng/sub1", "https://contoso.sharepoint.com/sites/eng/sub1/dl2"),
+        ]
+
+        drive_labeled = {}
+        drive_encrypted = {}
+        drive_enc_size = {}
+        discovered_all_labels = set()
+        discovered_enc_labels = set()
+        lock = threading.Lock()
+
+        def on_tenant_labels(all_ids, enc_ids):
+            with lock:
+                discovered_all_labels.update(all_ids)
+                discovered_enc_labels.update(enc_ids)
+
+        def on_page(d_id, lbl_cnt, enc_cnt, enc_sz, all_lbls, enc_lbls):
+            with lock:
+                drive_labeled[d_id] = drive_labeled.get(d_id, 0) + lbl_cnt
+                drive_encrypted[d_id] = drive_encrypted.get(d_id, 0) + enc_cnt
+                drive_enc_size[d_id] = drive_enc_size.get(d_id, 0) + enc_sz
+                discovered_all_labels.update(all_lbls)
+                discovered_enc_labels.update(enc_lbls)
+
+        scan_libraries_for_encrypted_files(
+            cert_token_manager=mock_cert_manager,
+            url_invoker=mock_url_invoker,
+            library_targets=library_targets,
+            on_page_metrics=on_page,
+            on_tenant_labels_discovered=on_tenant_labels,
+            logger=lambda msg: None,
+            concurrency=3,
+        )
+
+        self.assertEqual(drive_labeled["drive-1"], 2)
+        self.assertEqual(drive_encrypted["drive-1"], 1)
+        self.assertEqual(drive_enc_size["drive-1"], 1024)
+        self.assertEqual(drive_labeled["drive-2"], 1)
+        self.assertEqual(drive_encrypted["drive-2"], 1)
+        self.assertEqual(drive_enc_size["drive-2"], 4096)
+        self.assertEqual(discovered_all_labels, {"lbl-enc-1", "lbl-plain-1"})
+        self.assertEqual(discovered_enc_labels, {"lbl-enc-1"})
+
+        # Verify every search query was scoped to a specific DL and ordered by Size ascending
+        self.assertGreaterEqual(len(captured_payloads), 2)
+        for url, payload in captured_payloads:
+            sort_list = payload["request"]["SortList"]["results"]
+            self.assertEqual(sort_list[0], {"Property": "Size", "Direction": 0})
+            self.assertEqual(sort_list[1], {"Property": "DocId", "Direction": 0})
+            qtext = payload["request"]["Querytext"]
+            self.assertTrue(
+                'Path:"https://contoso.sharepoint.com/sites/eng/dl1"' in qtext
+                or 'Path:"https://contoso.sharepoint.com/sites/eng/sub1/dl2"' in qtext
+            )
+
+    def test_file_estimator_deep_scan_encrypted_files_phase(self):
+        """Verifies FileEstimator._scan_encrypted_files aggregates per-DL metrics into siteMetrics."""
+        from util.thread_safe_ds import ThreadSafeMap
+
+        config = ScanConfig(
+            tenant_id="test-tenant",
+            client_ids=["client-1"],
+            client_secrets=["secret-1"],
+            user_source="tenant",
+            csv_path="",
+            scan_email=False,
+            scan_contact=False,
+            scan_calendar=False,
+            scan_in_place_archives=False,
+            scan_shared_mail_boxes=False,
+            scan_group_mail_boxes=False,
+            concurrency=3,
+            load_multiplier=1,
+            retries=1,
+            backoff=1,
+            eta_max_users=5,
+            parallel_batches=5,
+            large_resource_count_limit=50,
+            bucket_ranges=[(0, 10240)],
+            max_allowed_depth=3,
+            scan_encrypted_files=True,
+        )
+        mock_invoker = MagicMock()
+        mock_invoker.invoke_url.return_value = (
+            200,
+            json.dumps({
+                "value": [
+                    {"id": "lbl-1", "name": "Protected", "hasProtection": True},
+                ]
+            }),
+        )
+        mock_cert_mgr = MagicMock()
+        mock_cert_mgr.get_valid_token_slot.return_value = {"token": "sp-jwt"}
+        mock_session = MagicMock()
+        mock_cert_mgr.get_session.return_value = mock_session
+
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = self._build_postquery_response([
+            {
+                "DocId": "500",
+                "Size": "8192",
+                "Path": "https://contoso.sharepoint.com/sites/team/Shared Documents/secret.docx",
+                "InformationProtectionLabelId": "lbl-1",
+            }
+        ])
+        mock_session.post.return_value = resp
+
+        estimator = FileEstimator(
+            config=config,
+            url_invoker=mock_invoker,
+            stop_event=threading.Event(),
+            logger=lambda m: None,
+            progress_update_callback=lambda *a, **k: None,
+            cert_token_manager=mock_cert_mgr,
+        )
+        estimator.set_id_to_display_name_map({
+            "site-1": "https://contoso.sharepoint.com/sites/team",
+            "drive-1": "https://contoso.sharepoint.com/sites/team/Shared Documents",
+        })
+        estimator.encryption_metrics_lock = threading.Lock()
+        progress_map = ThreadSafeMap()
+        failures = []
+
+        estimator._scan_encrypted_files(
+            drive_discovery_progress_metrics=progress_map,
+            failures=failures,
+            valid_drive_ids={"drive-1"},
+            drives=[{"id": "drive-1", "webUrl": "https://contoso.sharepoint.com/sites/team/Shared Documents"}],
+            subsite_to_drives={"site-1": ["drive-1"]},
+        )
+
+        self.assertEqual(estimator.drive_id_to_labeled_file_count.get("drive-1"), 1)
+        self.assertEqual(estimator.drive_id_to_encrypted_file_count.get("drive-1"), 1)
+        self.assertEqual(estimator.drive_id_to_encrypted_file_size.get("drive-1"), 8192)
+        self.assertEqual(len(estimator.total_sensitivity_label_ids), 1)
+        self.assertEqual(len(estimator.encrypted_sensitivity_label_ids), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
+
