@@ -1392,8 +1392,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ).pack(anchor="w", padx=10, pady=(0, 10))
 
       if data.get("isShallowScan") and data.get("tenantLevelWarningResourceCount", 0) > 0:
+          warning_entity_count = data.get("tenantLevelWarningResourceCount", 0)
+          entity_label = "entity contains" if warning_entity_count == 1 else "entities contain"
           rec_text = (
-              f"⚠️ {data.get('tenantLevelWarningResourceCount', 0):,} site(s) contain Document Libraries with >200k items and were excluded from ETA calculations.\n"
+              f"⚠️ {warning_entity_count:,} {entity_label} items >200k. Sites containing these entities were excluded from ETA calculations.\n"
               "Recommendation: Run a Deep Scan with 'Generate Folder Depth Report' enabled on these resources using the exported 'DeepScanRecommended.csv' in suggested_batches."
           )
           ctk.CTkLabel(
