@@ -1327,6 +1327,113 @@ class ShallowFailedDlTrackingTest(ShallowScanBaseTest):
     self.assertEqual(out["metrics"]["failedDlCount"], 1)
 
 
+class ValidateCertificateAuthTest(unittest.TestCase):
+  """Covers the pre-scan certificate auth check used by the Shallow Scan UI."""
+
+  class _FakeSession:
+    def __init__(self, responses):
+      self.responses = responses
+      self.requested = []
+
+    def get(self, url, headers=None, timeout=None):
+      self.requested.append(url)
+      for fragment, resp in self.responses.items():
+        if fragment in url:
+          return resp
+      return MockResponse(404, {})
+
+  def _make_managers(self, graph_resp, sp_resp, cert_error=None):
+    test = self
+
+    class FakeTokenManager:
+      def __init__(self, **kwargs):
+        self.session = test._FakeSession({"sites/root": graph_resp})
+        test.graph_session = self.session
+
+      def __enter__(self):
+        return self
+
+      def __exit__(self, *args):
+        return None
+
+      def authenticate_all(self, current_logger=None):
+        return None
+
+      def get_valid_token_slot(self, current_logger=None):
+        return {"token": "graph-token", "client_id": "client-1"}
+
+    class FakeCertTokenManager(FakeTokenManager):
+      def __init__(self, **kwargs):
+        self.apps = list(zip(kwargs["client_ids"], kwargs["client_secrets"]))
+        self.session = test._FakeSession({"/_api/web": sp_resp})
+        test.sp_session = self.session
+
+      def load_or_generate_all_certificates(self, current_logger=None):
+        return []
+
+      def ensure_domain_authenticated(self, domain, current_logger=None):
+        if cert_error:
+          raise ConnectionError(cert_error)
+
+      def get_valid_token_slot(self, domain, current_logger=None):
+        return {"token": "sp-token", "client_id": "client-1", "domain": domain}
+
+    return FakeTokenManager, FakeCertTokenManager
+
+  def _run(self, graph_resp, sp_resp, cert_error=None):
+    from ui.files_shallow import shallow_ui_helpers
+
+    token_cls, cert_cls = self._make_managers(graph_resp, sp_resp, cert_error)
+    config = mock.Mock(
+        tenant_id="tenant",
+        client_ids=["client-1"],
+        client_secrets=["secret-1"],
+        retries=1,
+        backoff=1,
+    )
+    with mock.patch.object(shallow_ui_helpers, "TokenManager", token_cls), \
+         mock.patch.object(shallow_ui_helpers, "CertTokenManager", cert_cls):
+      return shallow_ui_helpers.validate_certificate_auth(config)
+
+  def test_success_returns_domain(self):
+    ok, detail = self._run(
+        MockResponse(200, {"webUrl": "https://contoso.sharepoint.com"}),
+        MockResponse(200, {"Title": "Root"}),
+    )
+    self.assertTrue(ok)
+    self.assertEqual(detail, "contoso.sharepoint.com")
+    self.assertEqual(
+        self.sp_session.requested,
+        ["https://contoso.sharepoint.com/_api/web?$select=Title"],
+    )
+
+  def test_certificate_token_failure_is_reported(self):
+    ok, detail = self._run(
+        MockResponse(200, {"webUrl": "https://contoso.sharepoint.com"}),
+        MockResponse(200, {"Title": "Root"}),
+        cert_error="AADSTS700027: certificate not registered",
+    )
+    self.assertFalse(ok)
+    self.assertIn("AADSTS700027", detail)
+
+  def test_sharepoint_rest_rejection_is_reported(self):
+    ok, detail = self._run(
+        MockResponse(200, {"webUrl": "https://contoso.sharepoint.com"}),
+        MockResponse(401, {}, text="Unsupported app only token."),
+    )
+    self.assertFalse(ok)
+    self.assertIn("HTTP 401", detail)
+
+  def test_unresolvable_domain_fails_before_certificate_step(self):
+    ok, detail = self._run(
+        MockResponse(403, {}, text="Forbidden"),
+        MockResponse(200, {"Title": "Root"}),
+    )
+    self.assertFalse(ok)
+    self.assertIn("HTTP 403", detail)
+    self.assertFalse(hasattr(self, "sp_session"))
+
+
 if __name__ == "__main__":
   unittest.main()
 
