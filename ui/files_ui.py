@@ -2180,16 +2180,20 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     config = self._get_scan_configuration()
 
+    # Reset logs before certificate steps so their messages land in the scan log.
+    with self.log_lock:
+      self.log_buffer = []
+
     is_report_upload = self._try_get_metrics_from_csv_report(config) is not None
     if getattr(self, "val_shallow_scan", False) and not is_report_upload:
       if not shallow_ui_helpers.ensure_certificates_and_prompt(self, config, ctk):
+        return
+      if not shallow_ui_helpers.run_certificate_auth_check(self, config, ctk):
         return
 
     self.stop_scan_event.clear()
     self.scan_runtime_start = None
     self.current_logs_path = None
-    with self.log_lock:
-      self.log_buffer = []
     self.spinners_active = {}
     self.spinner_indices = {}
     for w in self.scan_container.winfo_children():

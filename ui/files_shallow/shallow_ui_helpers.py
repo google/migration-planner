@@ -15,13 +15,16 @@
 """UI helpers, certificate modal prompt, and Shallow Scan formatting utilities."""
 
 import logging
+import threading
 from tkinter import messagebox
+from urllib.parse import urlparse
 import pandas as pd
 from core.cert_auth import (
     check_certificate_exists,
     generate_certificate,
     load_certificate,
 )
+from util.auth_manager import TokenManager
 from util.constants import (
     COLOR_BACKGROUND,
     COLOR_ERROR,
@@ -41,7 +44,9 @@ from util.constants import (
     FONT_BODY_SMALL,
     FONT_HEADER_MEDIUM,
     FONT_HEADER_SMALL,
+    GRAPH_BASE_URL,
 )
+from util.files_shallow.cert_token_manager import CertTokenManager
 
 logger = logging.getLogger(__name__)
 
@@ -326,7 +331,7 @@ def _show_cert_upload_instructions_modal(
 
   ctk.CTkButton(
       cert_container,
-      text="Continue",
+      text="I have uploaded the Certificate",
       command=on_cert_continue_clicked,
       height=40,
       corner_radius=20,
@@ -407,6 +412,167 @@ def ensure_certificates_and_prompt(tool, config, ctk) -> bool:
         return False
 
   return True
+
+
+def validate_certificate_auth(config, current_logger=None) -> tuple[bool, str]:
+  """Verifies that certificate-based SharePoint REST authentication works.
+
+  Uses only the permissions the scan already requires:
+  1. Resolves the tenant SharePoint domain via Graph (client secret auth).
+  2. Acquires a certificate-signed token for that domain for every app.
+  3. Calls the SharePoint REST root web endpoint with each token.
+
+  This function performs no UI work and is safe to run on a worker thread.
+
+  Returns:
+    Tuple of (success, detail). On success, detail is the SharePoint domain.
+    On failure, detail is a diagnostic message intended for logs only.
+  """
+  try:
+    with TokenManager(
+        tenant_id=config.tenant_id,
+        client_ids=config.client_ids,
+        client_secrets=config.client_secrets,
+        concurrency=1,
+        retries=config.retries,
+        backoff=config.backoff,
+    ) as graph_manager:
+      graph_manager.authenticate_all(current_logger)
+      graph_token = graph_manager.get_valid_token_slot()
+      resp = graph_manager.session.get(
+          f"{GRAPH_BASE_URL}/sites/root?$select=webUrl",
+          headers={"Authorization": f"Bearer {graph_token['token']}"},
+          timeout=30.0,
+      )
+      if resp.status_code != 200:
+        return False, (
+            f"Unable to resolve SharePoint root site (HTTP {resp.status_code}):"
+            f" {resp.text}"
+        )
+      web_url = resp.json().get("webUrl", "")
+
+    domain = urlparse(web_url).netloc
+    if not domain:
+      return False, f"Unable to resolve SharePoint domain from '{web_url}'."
+
+    with CertTokenManager(
+        tenant_id=config.tenant_id,
+        client_ids=config.client_ids,
+        client_secrets=config.client_secrets,
+        concurrency=1,
+        retries=config.retries,
+        backoff=config.backoff,
+    ) as cert_manager:
+      cert_manager.load_or_generate_all_certificates(current_logger)
+      cert_manager.ensure_domain_authenticated(domain, current_logger)
+      # With concurrency=1 the domain pool holds exactly one slot per app.
+      for _ in cert_manager.apps:
+        token_data = cert_manager.get_valid_token_slot(domain, current_logger)
+        resp = cert_manager.session.get(
+            f"https://{domain}/_api/web?$select=Title",
+            headers={
+                "Authorization": f"Bearer {token_data['token']}",
+                "Accept": "application/json;odata=nometadata",
+            },
+            timeout=30.0,
+        )
+        if resp.status_code != 200:
+          return False, (
+              "SharePoint REST check failed for App"
+              f" {token_data['client_id'][:5]}... (HTTP {resp.status_code}):"
+              f" {resp.text}"
+          )
+    return True, domain
+  except Exception as e:  # pylint: disable=broad-except
+    return False, str(e)
+
+
+def run_certificate_auth_check(tool, config, ctk) -> bool:
+  """Runs the certificate auth check behind a blocking progress dialog.
+
+  The check runs on a worker thread so the window stays responsive. On failure,
+  a Retry/Cancel popup is shown; Retry re-runs the check, Cancel aborts.
+
+  Returns:
+    True if certificate authentication succeeded, False if the user cancelled.
+  """
+  while True:
+    outcome = {}
+
+    dialog = ctk.CTkToplevel(tool)
+    dialog.title("Verifying Certificate")
+    dialog.geometry("440x150")
+    dialog.resizable(False, False)
+    dialog.configure(fg_color=COLOR_SURFACE)
+    dialog.transient(tool)
+    dialog.grab_set()
+
+    parent_x = tool.winfo_rootx()
+    parent_y = tool.winfo_rooty()
+    parent_w = tool.winfo_width()
+    parent_h = tool.winfo_height()
+    x = parent_x + (parent_w - 440) // 2
+    y = parent_y + (parent_h - 150) // 2
+    dialog.geometry(f"+{x}+{y}")
+
+    # The in-flight check cannot be interrupted, so ignore the close button.
+    dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+
+    pad_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+    pad_frame.pack(fill="both", expand=True, padx=24, pady=24)
+
+    ctk.CTkLabel(
+        pad_frame,
+        text="Verifying certificate authentication...",
+        font=FONT_BODY_BOLD,
+        text_color=COLOR_TEXT_MAIN,
+        anchor="w",
+    ).pack(anchor="w", pady=(0, 16))
+
+    progress = ctk.CTkProgressBar(
+        pad_frame, mode="indeterminate", progress_color=COLOR_PRIMARY
+    )
+    progress.pack(fill="x")
+    progress.start()
+
+    def _worker():
+      result = validate_certificate_auth(config, tool.log_msg)
+      outcome["result"] = result
+
+    def _poll():
+      if "result" in outcome:
+        progress.stop()
+        dialog.grab_release()
+        dialog.destroy()
+      else:
+        dialog.after(200, _poll)
+
+    tool.log_msg("Verifying certificate authentication with Microsoft...")
+    threading.Thread(target=_worker, daemon=True).start()
+    dialog.after(200, _poll)
+    tool.wait_window(dialog)
+
+    success, detail = outcome.get("result", (False, "Check did not complete."))
+    if success:
+      tool.log_msg(f"Certificate authentication verified for {detail}.")
+      return True
+
+    logger.error(f"Certificate authentication check failed: {detail}")
+    tool.log_msg(f"Certificate authentication check failed: {detail}")
+
+    retry = messagebox.askretrycancel(
+        title="Certificate Authentication Failed",
+        message=(
+            "Certificate authentication is not working. Please check that you"
+            " have uploaded the certificate and that your credentials are"
+            " correct."
+        ),
+        icon="warning",
+        parent=tool,
+    )
+    if not retry:
+      logger.info("Certificate authentication check cancelled by user.")
+      return False
 
 
 def calculate_batches_with_shallow_exclusions(tool, df: pd.DataFrame, license_metrics: dict):
