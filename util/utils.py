@@ -41,6 +41,7 @@ class ScanConfig:
   include_file_versions: bool = False
   scan_encrypted_files: bool = False
   generate_folder_amr_map: bool = False
+  shallow_scan: bool = False
 
 @dataclass
 class RequestResponsePair:

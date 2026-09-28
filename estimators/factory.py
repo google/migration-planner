@@ -4,8 +4,10 @@ from estimators.eo_group_mailbox_estimator import EOGroupMailBoxEstimator
 from estimators.eo_in_place_archive_estimator import EOInPlaceArchiveEstimator
 from estimators.eo_shared_mailbox_estimator import EOSharedMailBoxEstimator
 from estimators.file_estimator import FileEstimator
+from estimators.files_shallow.shallow_file_estimator import ShallowFileEstimator
 from tests.files.mocks import MockUrlInvoker
 from util.auth_manager import TokenManager
+from util.files_shallow.cert_token_manager import CertTokenManager
 from util.connectors import UrlInvoker
 from util.utils import ScanConfig
 import json
@@ -36,6 +38,8 @@ class EstimatorFactory:
     self.mock_url_invoker = None
     self.one_token_per_app_manager = one_token_per_app_manager
     self.child_folder_url_invoker = None
+    self.cert_token_manager = None
+    self.shallow_files_estimator = None
   
   def isEmpty(self, data):
     return data is None or len(data) == 0
@@ -54,6 +58,20 @@ class EstimatorFactory:
       )
     
     return self.manager
+
+  def get_cert_token_manager(self):
+    if not self.cert_token_manager:
+      if self.isEmpty(self.config.client_ids) or self.isEmpty(self.config.client_secrets) or self.isEmpty(self.config.tenant_id):
+        raise Exception("Missing credentials for certificate token manager!!")
+      self.cert_token_manager = CertTokenManager(
+        self.config.tenant_id,
+        self.config.client_ids,
+        self.config.client_secrets,
+        self.config.concurrency,
+        self.config.retries,
+        self.config.backoff,
+      )
+    return self.cert_token_manager
 
   def set_id_to_display_name(self, id_to_display_name):
     self.id_to_display_name = (
@@ -199,6 +217,23 @@ class EstimatorFactory:
       self.files_estimator.set_id_to_display_name_map(self.id_to_display_name)
     
     return self.files_estimator 
+
+  def get_shallow_files_estimator(self, progress_update_callback=lambda x: None, hard_reset=False):
+    if self.shallow_files_estimator is None or hard_reset:
+      if self.shallow_files_estimator is not None:
+        self.shallow_files_estimator.shutdown()
+      url_invoker = self.get_url_invoker()
+      cert_manager = self.get_cert_token_manager()
+      self.shallow_files_estimator = ShallowFileEstimator(
+        self.config,
+        url_invoker,
+        cert_manager,
+        logger=self.logger,
+        stop_event=self.stop_event,
+        progress_update_callback=progress_update_callback
+      )
+      self.shallow_files_estimator.set_id_to_display_name_map(self.id_to_display_name)
+    return self.shallow_files_estimator
 
   def get_email_estimator(self, hard_reset=False):
     if self.email_estimator is None or hard_reset:

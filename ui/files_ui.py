@@ -1,5 +1,6 @@
 from ui.exchange_online_ui import MigrationEstimatorTool
 from ui import utils as ui_utils
+from ui.files_shallow import shallow_ui_helpers
 from util.constants import *
 from datetime import timedelta, datetime
 import os
@@ -65,6 +66,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
   def setup_variables(self):
     super().setup_variables()
+    self.shallow_scan = ctk.BooleanVar(value=True)
     self.include_personal_sites = ctk.BooleanVar(value=True)
     self.include_team_sites = ctk.BooleanVar(value=False)
     self.include_recycle_bin_contents = ctk.BooleanVar(value=False)
@@ -85,8 +87,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
   # VIEW: CONFIGURATION
   # ==========================
   def build_config_view(self):
-    # """Builds the Configuration View."""
-    
+    # Clean up orphaned CTkEntry write traces on variables from any previously destroyed config view
+    for attr in self.__dict__.values():
+      if isinstance(attr, ctk.Variable):
+        for mode, cb_name in list(attr.trace_info()):
+          if "textvariable_callback" in cb_name:
+            try:
+              attr.trace_remove(mode, cb_name)
+            except Exception:
+              pass
+
     ui_utils.build_configuration_view(self, ctk)
 
     # Header
@@ -109,21 +119,23 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.scroll_connect, fg_color="transparent"
     )
     source_selection_frame.pack(fill="x", anchor="w")
-    ctk.CTkRadioButton(
+    self.rb_scan_all = ctk.CTkRadioButton(
       source_selection_frame,
       text="Scan All Sites",
       variable=self.user_source,
       value="tenant",
       border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=20)
-    ctk.CTkRadioButton(
+    )
+    self.rb_scan_all.pack(side="left", padx=20)
+    self.rb_upload_csv = ctk.CTkRadioButton(
       source_selection_frame,
       text="Upload CSV",
       variable=self.user_source,
       value="csv",
       border_color=COLOR_TEXT_SUB,
-    ).pack(side="left")
-    ctk.CTkButton(
+    )
+    self.rb_upload_csv.pack(side="left")
+    self.btn_browse_csv = ctk.CTkButton(
       source_selection_frame,
       text="Browse",
       command=self.browse_user_csv,
@@ -133,7 +145,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       border_width=1,
       text_color=COLOR_PRIMARY,
       corner_radius=16,
-    ).pack(side="left", padx=10)
+    )
+    self.btn_browse_csv.pack(side="left", padx=10)
     ctk.CTkLabel(
       source_selection_frame,
       textvariable=self.user_csv_path,
@@ -142,6 +155,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     # Advanced Settings
     ui_utils.build_advanced_settings_frame(self, ctk)
+
+    # Shallow Scan Toggle
+    shallow_ui_helpers.build_shallow_scan_toggle(self, ctk)
     
     # Site Options
     ctk.CTkLabel(
@@ -154,23 +170,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     site_options_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
     site_options_frame.pack(fill="x", padx=15)
     
-    ctk.CTkCheckBox(
+    self.cb_personal_sites = ctk.CTkCheckBox(
         site_options_frame,
         text="Personal Sites (OneDrive)",
         variable=self.include_personal_sites,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_personal_sites.pack(side="left", padx=10)
     
-    ctk.CTkCheckBox(
+    self.cb_sharepoint_sites = ctk.CTkCheckBox(
         site_options_frame,
         text="SharePoint Sites",
         variable=self.include_team_sites,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_sharepoint_sites.pack(side="left", padx=10)
 
     # Additional Settings
     ctk.CTkLabel(
@@ -183,41 +201,47 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     additional_settings_frame = ctk.CTkFrame(self.adv_frame, fg_color="transparent")
     additional_settings_frame.pack(fill="x", padx=15)
 
-    ctk.CTkCheckBox(
+    self.cb_recycle_bin = ctk.CTkCheckBox(
         additional_settings_frame,
         text="Include Recycle Bin Contents",
         variable=self.include_recycle_bin_contents,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_recycle_bin.pack(side="left", padx=10)
 
-    ctk.CTkCheckBox(
+    self.cb_file_versions = ctk.CTkCheckBox(
         additional_settings_frame,
         text="Include Historical File Versions in Corpus Size",
         variable=self.include_file_versions,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_file_versions.pack(side="left", padx=10)
 
-    ctk.CTkCheckBox(
+    self.cb_encrypted_files = ctk.CTkCheckBox(
         additional_settings_frame,
         text="Scan for Encrypted Files (RMS/MIP)",
         variable=self.scan_encrypted_files,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_encrypted_files.pack(side="left", padx=10)
 
-    ctk.CTkCheckBox(
+    self.cb_depth_report = ctk.CTkCheckBox(
         additional_settings_frame,
         text="Generate Depth Report for Large Resources",
         variable=self.generate_folder_amr_map,
         corner_radius=4,
         fg_color=COLOR_PRIMARY,
         border_color=COLOR_TEXT_SUB,
-    ).pack(side="left", padx=10)
+    )
+    self.cb_depth_report.pack(side="left", padx=10)
+
+    shallow_ui_helpers.on_shallow_scan_toggle(self)
     
     # Concurrency settings
     ui_utils.build_concurrency_settings_slider(self, ctk, useConcurrencyHeading=True)
@@ -231,6 +255,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     elif isinstance(msg, dict):
       mtype = msg.get("type")
       if mtype == "site_discovery":
+        if getattr(self, "scan_runtime_start", None) is None:
+          self.scan_runtime_start = time.time()
         if not self.view_progress.winfo_viewable():
           self.show_progress_view()
         count = msg.get("count", 0)
@@ -282,29 +308,45 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               widget_bar.set(1.0)
       elif mtype == "drive_discovery":
         count = msg.get("count", 0)
+        failed = msg.get("failed", 0)
         folder_count = msg.get("folderCount", 0)
         file_count = msg.get("fileCount", 0)
         shortcut_count = msg.get("shortcutCount", 0)
         version_count = msg.get("versionCount", 0)
         encrypted_file_count = msg.get("encryptedFileCount", 0)
+        extra_text = msg.get("extra_text", "")
+        progress = msg.get("progress", None)
         status = msg.get("status", "Scanning...")
         if "drives" in self.prog_widgets:
           widget = self.prog_widgets["drives"]["lbl"]
           bar = self.prog_widgets["drives"]["bar"]
           if status == "Fetching...":
-            bar.configure(mode="indeterminate")
-            bar.start()
-          text = f"Drives: {count}"
-          if folder_count > 0:
-            text += f" | Folders: {folder_count}"
-          if file_count > 0:
-            text += f" | Files: {file_count}"
-          if shortcut_count > 0:
-            text += f" | Shortcuts: {shortcut_count}"
-          if version_count > 0:
-            text += f" | Versions: {version_count}"
-          if encrypted_file_count > 0:
-            text += f" | Encrypted Files: {encrypted_file_count}"
+            if bar.cget("mode") != "indeterminate":
+              bar.configure(mode="indeterminate")
+              bar.start()
+          elif progress is not None and bar.winfo_exists():
+            if bar.cget("mode") == "indeterminate":
+              bar.stop()
+              bar.configure(mode="determinate")
+            bar.set(progress)
+
+          is_shallow = getattr(self, "val_shallow_scan", False)
+          if extra_text and count == 0:
+            text = extra_text
+          else:
+            if failed > 0 or is_shallow:
+              succeeded = max(0, count - failed)
+              text = f"Drives: {succeeded} succeeded | {failed} failed"
+            else:
+              text = f"Drives: {count}"
+            if is_shallow or folder_count > 0 or file_count > 0:
+              text += f" | Folders: {folder_count} | Files: {file_count}"
+            if isinstance(shortcut_count, (int, float)) and shortcut_count > 0:
+              text += f" | Shortcuts: {shortcut_count}"
+            if version_count > 0:
+              text += f" | Versions: {version_count}"
+            if encrypted_file_count > 0:
+              text += f" | Encrypted Files: {encrypted_file_count}"
           if widget.winfo_exists():
             widget.configure(
                 text=text
@@ -412,7 +454,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       return None
       
     try:
-      df = pd.read_csv(config.csv_path)
+      df = pd.read_csv(config.csv_path, keep_default_na=False)
     except Exception:
       return None
 
@@ -437,6 +479,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     # Removed strict '/personal/' check to support SharePoint sites
 
+    def _safe_int(val, default=0):
+      num = pd.to_numeric(val, errors="coerce")
+      if pd.isna(num):
+        return default
+      return int(num)
+
     def _parse_size_str(val):
       if isinstance(val, (int, float)):
         return float(val)
@@ -454,17 +502,39 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       }
       return num * multipliers.get(unit, 1)
 
+    na_cols = [
+        "Shortcut Count",
+        "Folder Count > Depth Limit 100",
+        "File Count > Depth Limit 100",
+    ]
+    is_shallow_report = (
+        getattr(self, "val_shallow_scan", False)
+        or "Failed DL Count" in df.columns
+        or any(
+            df[col].astype(str).str.strip().str.upper().str.startswith("N/A").any()
+            for col in na_cols
+            if col in df.columns
+        )
+    )
+    if is_shallow_report:
+      self.val_shallow_scan = True
+      config.shallow_scan = True
+
     site_metrics = {}
     personal_dl_total = 0
     team_dl_total = 0
     
     for _, row in df.iterrows():
       site_id = str(row[id_col]).strip()
-      folder_cnt = int(pd.to_numeric(row.get("Folder Count", 0), errors="coerce") or 0)
-      file_cnt = int(pd.to_numeric(row.get("File Count", 0), errors="coerce") or 0)
-      shortcut_cnt = int(pd.to_numeric(row.get("Shortcut Count", 0), errors="coerce") or 0)
-      res_cnt = int(pd.to_numeric(row.get("Resource Count", folder_cnt + file_cnt + shortcut_cnt), errors="coerce") or 0)
-      dl_cnt = int(pd.to_numeric(row.get("DL Count", 0), errors="coerce") or 0)
+      folder_cnt = _safe_int(row.get("Folder Count", 0))
+      file_cnt = _safe_int(row.get("File Count", 0))
+      shortcut_cnt = _safe_int(row.get("Shortcut Count", 0))
+      res_cnt = _safe_int(
+          row.get("Resource Count"),
+          default=folder_cnt + file_cnt + shortcut_cnt,
+      )
+      dl_cnt = _safe_int(row.get("DL Count", 0))
+      failed_dl_cnt = _safe_int(row.get("Failed DL Count", 0))
       
       if "/personal/" in site_id.lower():
         personal_dl_total += dl_cnt
@@ -472,16 +542,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         team_dl_total += dl_cnt
         
       site_metrics[site_id] = {
-          "subsiteCount": int(pd.to_numeric(row.get("Subsite Count", 0), errors="coerce") or 0),
+          "subsiteCount": _safe_int(row.get("Subsite Count", 0)),
           "dlCount": dl_cnt,
-          "listCount": int(pd.to_numeric(row.get("List Count", 0), errors="coerce") or 0),
+          "failedDlCount": failed_dl_cnt,
+          "listCount": _safe_int(row.get("List Count", 0)),
           "folderCount": folder_cnt,
           "fileCount": file_cnt,
-          "shortcutCount": shortcut_cnt,
-          "folderCountExceedingDepthLimit": int(pd.to_numeric(row.get("Folder Count > Depth Limit 100", 0), errors="coerce") or 0),
-          "fileCountExceedingDepthLimit": int(pd.to_numeric(row.get("File Count > Depth Limit 100", 0), errors="coerce") or 0),
-          "largeResourceCount": int(pd.to_numeric(row.get("Entities with > 500k item count", 0), errors="coerce") or 0),
-          "warningResourceCount": int(pd.to_numeric(row.get("Entities with > 200k item count", 0), errors="coerce") or 0),
+          "shortcutCount": "N/A" if is_shallow_report else shortcut_cnt,
+          "folderCountExceedingDepthLimit": (
+              "N/A"
+              if is_shallow_report
+              else _safe_int(row.get("Folder Count > Depth Limit 100", 0))
+          ),
+          "fileCountExceedingDepthLimit": (
+              "N/A"
+              if is_shallow_report
+              else _safe_int(row.get("File Count > Depth Limit 100", 0))
+          ),
+          "largeResourceCount": _safe_int(row.get("Entities with > 500k item count", 0)),
+          "warningResourceCount": _safe_int(row.get("Entities with > 200k item count", 0)),
           "totalSize": _parse_size_str(row.get("Corpus Size", 0)),
           "resourceCount": res_cnt,
       }
@@ -490,20 +569,34 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     dl_total = personal_dl_total + team_dl_total
     
     return {
+        "isShallowScan": is_shallow_report,
         "siteMetrics": site_metrics,
         "siteCount": len(df),
         "subsiteCount": int(pd.to_numeric(df.get("Subsite Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "personalSiteCount": len([k for k in site_metrics.keys() if "/personal/" in k.lower()]),
         "teamSiteCount": len([k for k in site_metrics.keys() if "/personal/" not in k.lower()]),
         "driveCounts": {"documentLibrary": dl_total},
+        "failedDlCount": int(pd.to_numeric(df.get("Failed DL Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "personalSiteDLCount": personal_dl_total,
         "teamSiteDLCount": team_dl_total,
         "folderCount": int(pd.to_numeric(df.get("Folder Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "fileCount": int(pd.to_numeric(df.get("File Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
-        "shortcutCount": int(pd.to_numeric(df.get("Shortcut Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "shortcutCount": (
+            "N/A"
+            if is_shallow_report
+            else int(pd.to_numeric(df.get("Shortcut Count", pd.Series([0])), errors="coerce").fillna(0).sum())
+        ),
         "listCount": int(pd.to_numeric(df.get("List Count", pd.Series([0])), errors="coerce").fillna(0).sum()),
-        "folderCountExceedingDepthLimit": int(pd.to_numeric(df.get("Folder Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
-        "fileCountExceedingDepthLimit": int(pd.to_numeric(df.get("File Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum()),
+        "folderCountExceedingDepthLimit": (
+            "N/A"
+            if is_shallow_report
+            else int(pd.to_numeric(df.get("Folder Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum())
+        ),
+        "fileCountExceedingDepthLimit": (
+            "N/A"
+            if is_shallow_report
+            else int(pd.to_numeric(df.get("File Count > Depth Limit 100", pd.Series([0])), errors="coerce").fillna(0).sum())
+        ),
         "tenantLevelLargeResourceCount": int(pd.to_numeric(df.get("Entities with > 500k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "tenantLevelWarningResourceCount": int(pd.to_numeric(df.get("Entities with > 200k item count", pd.Series([0])), errors="coerce").fillna(0).sum()),
         "siteClassification": {site_id: "personal" if "/personal/" in site_id.lower() else "teams" for site_id in site_metrics.keys()},
@@ -592,16 +685,41 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       failures = []
       if file_metrics is None:
         manager = self.factory.get_manager()
-        manager.authenticate_all(self.log_msg, required_scopes=["Sites.Read.All", "Files.Read.All", "LicenseAssignment.Read.All"])
-        estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
+        manager.authenticate_all(
+            self.log_msg,
+            required_scopes=[
+                "Sites.Read.All",
+                "Files.Read.All",
+                "LicenseAssignment.Read.All",
+            ],
+        )
+        if config.shallow_scan:
+          estimator = self.factory.get_shallow_files_estimator(
+              progress_update_callback=self.ui_update, hard_reset=True
+          )
+        else:
+          estimator = self.factory.get_files_estimator(
+              progress_update_callback=self.ui_update, hard_reset=True
+          )
 
         # Calculate resource metrics for the tenant. Progress update to be made directly in the backend.
         input_map = self._get_input_from_csv_if_uploaded(config)
+        if getattr(self, "scan_runtime_start", None) is None:
+          self.scan_runtime_start = time.time()
         file_metrics = estimator.calculate_resource_metrics(input_map, failures)
       else:
+        if getattr(self, "scan_runtime_start", None) is None:
+          self.scan_runtime_start = time.time()
         estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
         self.ui_update("site_discovery", status="Done", count=file_metrics.get("siteCount", 0))
-        self.ui_update("drive_discovery", status="Done", count=sum(file_metrics.get("driveCounts", {}).values()))
+        self.ui_update(
+            "drive_discovery",
+            status="Done",
+            count=sum(file_metrics.get("driveCounts", {}).values()),
+            folderCount=file_metrics.get("folderCount", 0),
+            fileCount=file_metrics.get("fileCount", 0),
+            progress=1.0,
+        )
         self.ui_update("scan_progress", source="drive_parsing", progress=1.0)
         self.ui_update("phase_status", source="drive_parsing", status="complete")
 
@@ -612,18 +730,42 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         self.log_msg(prefix + str(failure))
 
       self.log_msg("=" * 60)
+      # ==========================================
+      # PHASE 3: MIGRATION PLAN GENERATION
+      # ==========================================
+      t_plan_gen_start = time.time()
       self.ui_update("scan_progress", source="plan_generation", progress=0.5, status="running", extra_text="Calculating migration batches...")
       
       # Extract siteMetrics and build DataFrame
       site_metrics = file_metrics.get("siteMetrics", {})
       if not site_metrics:
         raise Exception("No sites were scanned successfully. Please check Azure app permissions or organization access policies.")
+      if not file_metrics.get("folderCount") and site_metrics:
+        file_metrics["folderCount"] = sum(
+            int(s.get("folderCount", 0) or 0) for s in site_metrics.values()
+        )
+      if not file_metrics.get("fileCount") and site_metrics:
+        file_metrics["fileCount"] = sum(
+            int(s.get("fileCount", 0) or 0) for s in site_metrics.values()
+        )
+      if not file_metrics.get("failedDlCount") and site_metrics:
+        file_metrics["failedDlCount"] = sum(
+            int(s.get("failedDlCount", 0) or 0) for s in site_metrics.values()
+        )
+      is_shallow_mode = bool(
+          file_metrics.get("isShallowScan")
+          or getattr(self, "val_shallow_scan", False)
+      )
       site_data = []
       for site_id, s_data in site_metrics.items():
         row_data = {
             "Site Id": site_id,
             "Subsite Count": s_data.get("subsiteCount", 0),
             "DL Count": s_data.get("dlCount", 0),
+        }
+        if is_shallow_mode:
+          row_data["Failed DL Count"] = s_data.get("failedDlCount", 0)
+        row_data.update({
             "List Count": s_data.get("listCount", 0),
             "Folder Count": s_data.get("folderCount", 0),
             "File Count": s_data.get("fileCount", 0),
@@ -633,8 +775,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             "Entities with > 500k item count": s_data.get("largeResourceCount", 0),
             "Entities with > 200k item count": s_data.get("warningResourceCount", 0),
             "Corpus Size": s_data.get("totalSize", 0),
-            "Resource Count": s_data.get("resourceCount", 0)
-        }
+            "Resource Count": s_data.get("resourceCount", 0),
+        })
         if getattr(self, "val_include_recycle_bin_contents", False):
             row_data["Recycle Bin Item Count"] = s_data.get("recycleBinCount", 0)
             row_data["Recycle Bin Size"] = s_data.get("recycleBinSize", 0)
@@ -649,7 +791,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       df = pd.DataFrame(site_data)
       
       if self.show_eta:
-        df_final, batches_list, total_eta, buckets = self.calculate_migration_batches(df, file_metrics.get("licenseMetrics", {}))
+        df_final, batches_list, total_eta, buckets = (
+            shallow_ui_helpers.calculate_batches_with_shallow_exclusions(
+                self, df, file_metrics.get("licenseMetrics", {})
+            )
+        )
         
         file_metrics["batches"] = batches_list
         file_metrics["buckets"] = buckets
@@ -657,7 +803,26 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         file_metrics["df"] = df_final
         base_df = df_final
       else:
+        if getattr(self, "val_shallow_scan", False) and "Entities with > 200k item count" in df.columns:
+          numeric_warn = pd.to_numeric(df["Entities with > 200k item count"], errors="coerce").fillna(0)
+          df["Suggested Batch"] = numeric_warn.apply(lambda v: "Deep Scan Recommended" if v > 0 else "")
         base_df = df
+
+      t_plan_gen_end = time.time()
+      plan_gen_duration = t_plan_gen_end - t_plan_gen_start
+      self.log_msg(
+          f"[Phase 3: Migration Plan Generation] Completed in {plan_gen_duration:.2f}s"
+          f" ({timedelta(seconds=int(round(plan_gen_duration)))})"
+      )
+
+      # ==========================================
+      # PHASE 4: FINAL DASHBOARD PREPARATION
+      # ==========================================
+      t_dash_prep_start = time.time()
+      if "phase_runtimes" not in file_metrics:
+        file_metrics["phase_runtimes"] = {}
+      file_metrics["phase_runtimes"]["plan_generation_seconds"] = plan_gen_duration
+      file_metrics["phase_runtimes"]["dash_prep_start"] = t_dash_prep_start
 
       self.ui_update(
           "scan_progress",
@@ -673,21 +838,28 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       report_path = os.path.join(output_dir, f"site_report_{ts}.csv")
       logs_path = os.path.join(output_dir, f"logs_{ts}.log")
+      self.current_logs_path = logs_path
 
       monitor.stop()
       monitor.join()
-      elapsed = str(timedelta(seconds=int(time.time() - start_time)))
       avg_cpu, max_cpu, avg_ram, max_ram = monitor.get_stats()
       total_ram_gb = psutil.virtual_memory().total / (1024**3)
       total_cpu_cores = psutil.cpu_count(logical=True)
 
       total_corpus = sum([s_data.get("totalSize", 0) for s_data in site_metrics.values()])
       self.log_msg("\n" + "=" * 40)
-      self.log_msg(f"TOTAL TIME: {elapsed}")
+      shortcuts_summary = shallow_ui_helpers.format_stat_value(
+          file_metrics.get("shortcutCount", 0)
+      )
+      failed_dls_log = (
+          f" | Failed DLs: {file_metrics.get('failedDlCount', 0):,}"
+          if is_shallow_mode
+          else ""
+      )
       self.log_msg(
-          f"Site Collections: {file_metrics.get('siteCount', 0):,} | Subsites: {file_metrics.get('subsiteCount', 0):,} | DLs: {sum(file_metrics.get('driveCounts', {}).values()):,} |"
+          f"Site Collections: {file_metrics.get('siteCount', 0):,} | Subsites: {file_metrics.get('subsiteCount', 0):,} | DLs: {sum(file_metrics.get('driveCounts', {}).values()):,}{failed_dls_log} |"
           f" Folders: {file_metrics.get('folderCount', 0):,} | Files: {file_metrics.get('fileCount', 0):,} |"
-          f" Shortcuts: {file_metrics.get('shortcutCount', 0):,} | Lists: {file_metrics.get('listCount', 0):,}"
+          f" Shortcuts: {shortcuts_summary} | Lists: {file_metrics.get('listCount', 0):,}"
       )
       self.log_msg(f"Total Size: {self.format_size(total_corpus)}")
       self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
@@ -724,8 +896,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           amr_df.to_csv(amr_path, index=False)
           self.log_msg(f"Depth report exported to: {amr_path}")
       
-      if self.show_eta:
-        unique_batches = df_output["Suggested Batch"].unique()
+      if "Suggested Batch" in df_output.columns:
+        unique_batches = df_output["Suggested Batch"].dropna().unique()
         for batch in unique_batches:
           if not batch:
             continue
@@ -889,83 +1061,127 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     fallback_plan = None
     min_batches_seen = float("inf")
 
-    def get_batch_eta(subset_df):
-      def _get_qps_from_license_count():
-        # Calculate number of licenses required
-        is_sp = getattr(self, "val_include_team_sites", False)
-        base_qps = 4.4 if is_sp else 4.8
-        
-        license_count = licenseMetrics.get("totalAllotedUnits", {}).get("User", 0) + licenseMetrics.get("totalAllotedUnits", {}).get("Company", 0)
-        
-        if license_count <= 1000:
-          qps = base_qps
-        elif license_count <= 5000:
-          qps = base_qps * 2
-        elif license_count <= 15000:
-          qps = base_qps * 3
-        elif license_count <= 50000:
-          qps = base_qps * 4
-        else:
-          qps = base_qps * 5
-        
-        return qps * 0.8
+    def _get_qps_from_license_count():
+      # Calculate number of licenses required
+      is_sp = getattr(self, "val_include_team_sites", False)
+      base_qps = 4.4 if is_sp else 4.8
 
-      estimator = self.factory.get_files_estimator()
-      items = []
-      for _, row in subset_df.iterrows():
-        items.append({
-            "size": row.get("Corpus Size", 0),
-            "files": int(row.get("File Count", 0)),
-            "folders": int(row.get("Folder Count", 0)),
-            "shortcuts": int(row.get("Shortcut Count", 0)),
-            "encrypted_files": int(row.get("Encrypted File Count", 0)) if "Encrypted File Count" in subset_df.columns else 0,
-            "encrypted_size": float(row.get("Encrypted File Size", 0)) if "Encrypted File Size" in subset_df.columns else 0.0
-        })
-        
+      license_count = (
+          licenseMetrics.get("totalAllotedUnits", {}).get("User", 0)
+          + licenseMetrics.get("totalAllotedUnits", {}).get("Company", 0)
+      )
+
+      if license_count <= 1000:
+        qps = base_qps
+      elif license_count <= 5000:
+        qps = base_qps * 2
+      elif license_count <= 15000:
+        qps = base_qps * 3
+      elif license_count <= 50000:
+        qps = base_qps * 4
+      else:
+        qps = base_qps * 5
+
+      return qps * 0.8
+
+    estimator = self.factory.get_files_estimator()
+    qps_limit = _get_qps_from_license_count()
+    has_enc_files = "Encrypted File Count" in df_sorted_base.columns
+    has_enc_size = "Encrypted File Size" in df_sorted_base.columns
+
+    def _eta_from_totals(total_size, total_files, total_enc_files=0, total_enc_size=0.0):
       data = {
-        "items": items,
-        "FILES_GLOBAL_COUNT_LIMIT": _get_qps_from_license_count(),
-        "FILES_GLOBAL_CORPUS_SIZE_LIMIT": FILES_GLOBAL_CORPUS_SIZE_LIMIT,
+          "items": [{
+              "size": total_size,
+              "files": total_files,
+              "encrypted_files": total_enc_files,
+              "encrypted_size": total_enc_size,
+          }],
+          "FILES_GLOBAL_COUNT_LIMIT": qps_limit,
+          "FILES_GLOBAL_CORPUS_SIZE_LIMIT": FILES_GLOBAL_CORPUS_SIZE_LIMIT,
       }
       return estimator.calculate_migration_eta(data)
+
+    # Precompute single-site ETA once per row (invariant across target_hours and lanes)
+    sorted_rows = [row for _, row in df_sorted_base.iterrows()]
+    site_etas = [
+        _eta_from_totals(
+            row.get("Corpus Size", 0),
+            int(row.get("File Count", 0)),
+            int(row.get("Encrypted File Count", 0)) if has_enc_files else 0,
+            float(row.get("Encrypted File Size", 0)) if has_enc_size else 0.0,
+        )
+        for row in sorted_rows
+    ]
+
+    # Precompute greedy lane assignment and interleaved lane DataFrames once per lane count (1..num_parallel)
+    prepared_lanes_by_parallel = {}
+    for current_parallel in range(1, num_parallel + 1):
+      lanes = [{"total_time": 0.0, "sites": []} for _ in range(current_parallel)]
+      for row, site_time in zip(sorted_rows, site_etas):
+        target_lane = min(lanes, key=lambda l: l["total_time"])
+        target_lane["sites"].append(row)
+        target_lane["total_time"] += site_time
+
+      prepared_lanes = []
+      for lane_idx, lane in enumerate(lanes):
+        if not lane["sites"]:
+          continue
+        lane_df = pd.DataFrame(lane["sites"])
+        lane_size = len(lane_df)
+        K = max(1, lane_size // 10)  # Dynamic bucket size (number of buckets)
+
+        lane_df["temp_index"] = range(lane_size)
+        lane_df["bucket"] = lane_df["temp_index"] % K
+
+        # Sort by bucket to interleave, then by temp_index to maintain order within bucket
+        lane_df = (
+            lane_df.sort_values(by=["bucket", "temp_index"])
+            .drop(columns=["temp_index", "bucket"])
+            .reset_index(drop=True)
+        )
+
+        lane_rows = [r for _, r in lane_df.iterrows()]
+        sizes_list = [r.get("Corpus Size", 0) for r in lane_rows]
+        files_list = [int(r.get("File Count", 0)) for r in lane_rows]
+        enc_files_list = (
+            [int(r.get("Encrypted File Count", 0)) for r in lane_rows]
+            if has_enc_files
+            else None
+        )
+        enc_sizes_list = (
+            [float(r.get("Encrypted File Size", 0)) for r in lane_rows]
+            if has_enc_size
+            else None
+        )
+        prepared_lanes.append(
+            (lane_idx, lane_df, sizes_list, files_list, enc_files_list, enc_sizes_list)
+        )
+      prepared_lanes_by_parallel[current_parallel] = prepared_lanes
 
     # Iterate through candidates
     for target_hours in candidate_hours:
       for current_parallel in range(1, num_parallel + 1):
-        df_sorted = df_sorted_base.copy()
-        df_sorted["Suggested Batch"] = ""
-
-        # 2. Greedy Lane Assignment
-        lanes = [{"total_time": 0.0, "sites": []} for _ in range(current_parallel)]
-        
-        for _, row in df_sorted.iterrows():
-          # Calculate time for this single site
-          site_df = pd.DataFrame([row])
-          site_time = get_batch_eta(site_df)
-          
-          # Find lane with min total time
-          target_lane = min(lanes, key=lambda l: l["total_time"])
-          target_lane["sites"].append(row)
-          target_lane["total_time"] += site_time
-
         # 3. Per-Lane Batching (Binary Search)
         final_buckets = []
-        
-        for lane_idx, lane in enumerate(lanes):
-          lane_df = pd.DataFrame(lane["sites"])
-          if lane_df.empty:
-            continue
 
-          # Interleave lane_df to mix sizes (Small to Large)
-          lane_size = len(lane_df)
-          K = max(1, lane_size // 10) # Dynamic bucket size (number of buckets)
-          
-          lane_df['temp_index'] = range(lane_size)
-          lane_df['bucket'] = lane_df['temp_index'] % K
-          
-          # Sort by bucket to interleave, then by temp_index to maintain order within bucket
-          lane_df = lane_df.sort_values(by=['bucket', 'temp_index']).drop(columns=['temp_index', 'bucket']).reset_index(drop=True)
-          
+        for (
+            lane_idx,
+            lane_df,
+            sizes_list,
+            files_list,
+            enc_files_list,
+            enc_sizes_list,
+        ) in prepared_lanes_by_parallel[current_parallel]:
+
+          def _slice_eta(s_idx, e_idx):
+            return _eta_from_totals(
+                sum(sizes_list[s_idx:e_idx]),
+                sum(files_list[s_idx:e_idx]),
+                sum(enc_files_list[s_idx:e_idx]) if enc_files_list is not None else 0,
+                sum(enc_sizes_list[s_idx:e_idx]) if enc_sizes_list is not None else 0.0,
+            )
+
           total_users = len(lane_df)
           start_idx = 0
           raw_chunks = []
@@ -977,31 +1193,27 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             current_min = min(user_min_limit, remaining_users)
 
             # Binary Search for Optimal Size
-            min_subset = lane_df.iloc[start_idx : start_idx + current_min]
-            if get_batch_eta(min_subset) > target_hours:
+            if _slice_eta(start_idx, start_idx + current_min) > target_hours:
               chosen_size = current_min
+            elif _slice_eta(start_idx, start_idx + current_max) <= target_hours:
+              chosen_size = current_max
             else:
-              max_subset = lane_df.iloc[start_idx : start_idx + current_max]
-              if get_batch_eta(max_subset) <= target_hours:
-                chosen_size = current_max
-              else:
-                low = current_min
-                high = current_max
-                chosen_size = high
-                while low <= high:
-                  mid = (low + high) // 2
-                  subset = lane_df.iloc[start_idx : start_idx + mid]
-                  eta = get_batch_eta(subset)
+              low = current_min
+              high = current_max
+              chosen_size = high
+              while low <= high:
+                mid = (low + high) // 2
+                eta = _slice_eta(start_idx, start_idx + mid)
 
-                  if eta > target_hours:
-                    chosen_size = mid
-                    high = mid - 1
-                  else:
-                    low = mid + 1
+                if eta > target_hours:
+                  chosen_size = mid
+                  high = mid - 1
+                else:
+                  low = mid + 1
 
             end_idx = start_idx + chosen_size
             final_subset = lane_df.iloc[start_idx:end_idx]
-            w_eta = get_batch_eta(final_subset)
+            w_eta = _slice_eta(start_idx, end_idx)
 
             raw_chunks.append({
                 "start_idx": start_idx,
@@ -1026,7 +1238,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
         # 4. Consolidation & Naming
         total_eta = max(b["total"] for b in final_buckets) if final_buckets else 0
-        
+
         all_chunks_with_time = []
         for b_idx, b in enumerate(final_buckets):
           current_time = 0.0
@@ -1043,10 +1255,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           batch_name = f"Batch {i+1}"
           chunk["name"] = batch_name
           final_batches_list.append(chunk)
-          
-          for _, row in chunk["df_subset"].iterrows():
-              site_id = row["Site Id"]
-              df_sorted.loc[df_sorted["Site Id"] == site_id, "Suggested Batch"] = batch_name
 
         num_batches = len(final_batches_list)
         self.log_msg(
@@ -1057,20 +1265,37 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         if num_batches <= max_allowed_batches:
           if total_eta < best_total_eta:
             best_total_eta = total_eta
-            best_plan = (df_sorted, final_batches_list, total_eta, final_buckets)
+            best_plan = (final_batches_list, total_eta, final_buckets)
 
         if num_batches < min_batches_seen:
           min_batches_seen = num_batches
-          fallback_plan = (df_sorted, final_batches_list, total_eta, final_buckets)
+          fallback_plan = (final_batches_list, total_eta, final_buckets)
 
     if best_plan is not None:
-      df_final, final_batches_list, total_eta, buckets = best_plan
+      final_batches_list, total_eta, buckets = best_plan
     else:
-      df_final, final_batches_list, total_eta, buckets = fallback_plan
+      final_batches_list, total_eta, buckets = fallback_plan
+
+    df_final = df_sorted_base.copy()
+    site_to_batch = {}
+    for chunk in final_batches_list:
+      batch_name = chunk["name"]
+      for site_id in chunk["df_subset"]["Site Id"]:
+        site_to_batch[site_id] = batch_name
+    df_final["Suggested Batch"] = df_final["Site Id"].map(
+        lambda sid: site_to_batch.get(sid, "")
+    )
 
     return df_final, final_batches_list, total_eta, buckets
 
+  def format_metric(self, value):
+    if isinstance(value, str):
+      return value
+    return super().format_metric(value)
+
   def format_size(self, size_in_bytes):
+    if isinstance(size_in_bytes, str):
+      return size_in_bytes
     if size_in_bytes >= 1024**5:
       return f"{size_in_bytes / (1024**5):.2f} PB"
     elif size_in_bytes >= 1024**4:
@@ -1166,6 +1391,21 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               text_color=COLOR_TEXT_MAIN,
           ).pack(anchor="w", padx=10, pady=(0, 10))
 
+      if data.get("isShallowScan") and data.get("tenantLevelWarningResourceCount", 0) > 0:
+          warning_entity_count = data.get("tenantLevelWarningResourceCount", 0)
+          entity_label = "entity contains" if warning_entity_count == 1 else "entities contain"
+          rec_text = (
+              f"⚠️ {warning_entity_count:,} {entity_label} items >200k. Sites containing these entities were excluded from ETA calculations.\n"
+              "Recommendation: Run a Deep Scan with 'Generate Folder Depth Report' enabled on these resources using the exported 'DeepScanRecommended.csv' in suggested_batches."
+          )
+          ctk.CTkLabel(
+              self.view_results,
+              text=rec_text,
+              font=FONT_BODY_BOLD,
+              text_color=COLOR_TEXT_MAIN,
+              justify="left",
+          ).pack(anchor="w", padx=10, pady=(0, 10))
+
       # Cards for simple metrics
       card_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
       card_frame.pack(fill="x", pady=10)
@@ -1177,20 +1417,39 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if getattr(self, "val_include_file_versions", False):
         self.create_stat_card(card_frame, "Total Historical File Version Size", f"{self.format_size(sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "📄")
         self.create_stat_card(card_frame, "Total Historical File Version Count", f"{sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "📄")
-      self.create_stat_card(card_frame, "Site Collection Count", f"{data.get('siteCount'):,}", "🏢")
+      self.create_stat_card(card_frame, "Site Collection\nCount", f"{data.get('siteCount'):,}", "🏢")
       self.create_stat_card(card_frame, "Subsite Count", f"{data.get('subsiteCount'):,}", "🏢")
-      self.create_stat_card(card_frame, "Document Library Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
-      self.create_stat_card(card_frame, "Folder Count", f"{data.get('folderCount', 0):,}", "📁")
-      self.create_stat_card(card_frame, "File Count", f"{data.get('fileCount', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Document\nLibrary Count", f"{sum(data.get('driveCounts', {}).values()):,}", "📁")
+      if data.get("isShallowScan") or getattr(self, "val_shallow_scan", False):
+        failed_dl_count = data.get("failedDlCount", 0)
+        if not failed_dl_count and data.get("siteMetrics"):
+          failed_dl_count = sum(
+              int(s.get("failedDlCount", 0) or 0)
+              for s in data["siteMetrics"].values()
+          )
+        self.create_stat_card(
+            card_frame,
+            "Failed Document\nLibrary Count",
+            f"{failed_dl_count:,}",
+            "⚠️",
+        )
+      folder_count = data.get("folderCount", 0)
+      if not folder_count and data.get("siteMetrics"):
+        folder_count = sum(int(s.get("folderCount", 0) or 0) for s in data["siteMetrics"].values())
+      file_count = data.get("fileCount", 0)
+      if not file_count and data.get("siteMetrics"):
+        file_count = sum(int(s.get("fileCount", 0) or 0) for s in data["siteMetrics"].values())
+      self.create_stat_card(card_frame, "Folder Count", f"{folder_count:,}", "📁")
+      self.create_stat_card(card_frame, "File Count", f"{file_count:,}", "📄")
       if getattr(self, "val_scan_encrypted_files", False):
-        self.create_stat_card(card_frame, "Total Encrypted File Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
-        self.create_stat_card(card_frame, "Total Encrypted File Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
-      self.create_stat_card(card_frame, "Shortcut Count", f"{data.get('shortcutCount', 0):,}", "🔗")
+        self.create_stat_card(card_frame, "Total Encrypted\nFile Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
+        self.create_stat_card(card_frame, "Total Encrypted\nFile Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
+      self.create_stat_card(card_frame, "Shortcut Count", shallow_ui_helpers.format_stat_value(data.get('shortcutCount', 0)), "🔗")
       self.create_stat_card(card_frame, "List Count", f"{data.get('listCount', 0):,}", "🗃️")
-      self.create_stat_card(card_frame, "Folder count beyond depth limit 100", f"{data.get('folderCountExceedingDepthLimit', 0):,}", "📁")
-      self.create_stat_card(card_frame, "File count beyond depth limit 100", f"{data.get('fileCountExceedingDepthLimit', 0):,}", "📄")
-      self.create_stat_card(card_frame, "Large Resource Count (Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
-      self.create_stat_card(card_frame, "Warning Resource Count (Entities with >200k items)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
+      self.create_stat_card(card_frame, "Folder count beyond\ndepth limit 100", shallow_ui_helpers.format_stat_value(data.get('folderCountExceedingDepthLimit', 0)), "📁")
+      self.create_stat_card(card_frame, "File count beyond\ndepth limit 100", shallow_ui_helpers.format_stat_value(data.get('fileCountExceedingDepthLimit', 0)), "📄")
+      self.create_stat_card(card_frame, "Large Resource Count\n(Entities with >500k items)", f"{data.get('tenantLevelLargeResourceCount', 0):,}", "📄")
+      self.create_stat_card(card_frame, "Warning Resource Count\n(Entities with >200k items)", f"{data.get('tenantLevelWarningResourceCount', 0):,}", "⚠️")
 
       if self.show_eta:
         # Timeline
@@ -1210,12 +1469,36 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             text_color=COLOR_TEXT_SUB,
         ).pack(anchor="w", padx=10, pady=(0, 10))
 
-        # Total Footer
-        foot = ctk.CTkFrame(self.view_results, fg_color="transparent")
-        foot.pack(fill="x", pady=10)
+      # Total Footer (Estimated Time & Total Scan Runtime)
+      foot = ctk.CTkFrame(self.view_results, fg_color="transparent")
+      foot.pack(fill="x", pady=10)
+      if self.show_eta:
         self.create_summary_box(
             foot, self.format_eta(data["total_eta"]), "Estimated Time"
         )
+
+      runtime_box = ctk.CTkFrame(
+          foot,
+          fg_color=COLOR_SURFACE,
+          height=90,
+          corner_radius=12,
+          border_color=COLOR_OUTLINE_LIGHT,
+          border_width=1,
+      )
+      runtime_box.pack(side="left", padx=10, expand=True, fill="x")
+      self.lbl_scan_runtime_val = ctk.CTkLabel(
+          runtime_box,
+          text=data.get("total_runtime", "0:00:00"),
+          font=FONT_HEADER_MEDIUM,
+          text_color=COLOR_TEXT_MAIN,
+      )
+      self.lbl_scan_runtime_val.pack(pady=(20, 0))
+      ctk.CTkLabel(
+          runtime_box,
+          text="Total Scan Runtime",
+          font=FONT_BODY_MEDIUM,
+          text_color=COLOR_TEXT_SUB,
+      ).pack(pady=(0, 20))
 
       # Container for Paginated Content
       self.paginated_frame = ctk.CTkFrame(
@@ -1225,7 +1508,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
       # File Size Distribution
       dist_data = data.get("tenantLevelFileSizeDistribution", data.get("fileSizeDistribution"))
-      if dist_data:
+      if dist_data and not data.get("isShallowScan"):
           ctk.CTkLabel(
               self.view_results,
               text="File Size Distribution",
@@ -1350,6 +1633,58 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         self.selected_page_size = "50"
         self.render_paginated_view(0)
 
+      self.update_idletasks()
+      end_time = time.time()
+      if "total_runtime" not in data:
+        start_t = getattr(self, "scan_runtime_start", None)
+        if start_t is not None:
+          total_seconds = max(0, int(round(end_time - start_t)))
+          data["total_runtime"] = str(timedelta(seconds=total_seconds))
+        else:
+          data["total_runtime"] = "0:00:00"
+
+      if hasattr(self, "lbl_scan_runtime_val") and self.lbl_scan_runtime_val.winfo_exists():
+        self.lbl_scan_runtime_val.configure(text=data["total_runtime"])
+
+      phase_runtimes = data.get("phase_runtimes", {})
+      dash_prep_start = phase_runtimes.get("dash_prep_start")
+      if dash_prep_start is not None:
+        dash_prep_sec = max(0.0, end_time - dash_prep_start)
+        phase_runtimes["dash_prep_seconds"] = dash_prep_sec
+      else:
+        dash_prep_sec = phase_runtimes.get("dash_prep_seconds", 0.0)
+
+      with self.log_lock:
+        already_logged = any("TOTAL TIME:" in line for line in self.log_buffer)
+      if not already_logged:
+        self.log_msg(
+            f"[Phase 4: Final Dashboard Preparation] Completed in {dash_prep_sec:.2f}s"
+            f" ({timedelta(seconds=int(round(dash_prep_sec)))})"
+        )
+
+        site_disc_sec = phase_runtimes.get("site_discovery_seconds", 0.0)
+        drive_disc_sec = phase_runtimes.get("drive_discovery_seconds", 0.0)
+        plan_gen_sec = phase_runtimes.get("plan_generation_seconds", 0.0)
+
+        self.log_msg("\n" + "=" * 50)
+        self.log_msg("⏱️ Scan Runtime Breakdown:")
+        self.log_msg(f"  • Site Discovery:            {timedelta(seconds=int(round(site_disc_sec)))} ({site_disc_sec:.2f}s)")
+        self.log_msg(f"  • Drive Discovery:           {timedelta(seconds=int(round(drive_disc_sec)))} ({drive_disc_sec:.2f}s)")
+        self.log_msg(f"  • Migration Plan Generation: {timedelta(seconds=int(round(plan_gen_sec)))} ({plan_gen_sec:.2f}s)")
+        self.log_msg(f"  • Final Dashboard Prep:      {timedelta(seconds=int(round(dash_prep_sec)))} ({dash_prep_sec:.2f}s)")
+        self.log_msg("-" * 50)
+        self.log_msg(f"TOTAL TIME: {data['total_runtime']}")
+        self.log_msg("=" * 50)
+
+        if getattr(self, "current_logs_path", None):
+          try:
+            with self.log_lock:
+              log_content = "\n".join(self.log_buffer)
+            with open(self.current_logs_path, "w", encoding="utf-8") as f:
+              f.write(log_content)
+          except Exception:
+            pass
+
     except Exception as e:
       for w in self.view_results.winfo_children():
         w.destroy()
@@ -1367,7 +1702,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       raise ValueError("CSV path invalid or file not found.")
 
     try:
-      df = pd.read_csv(csv_path)
+      df = pd.read_csv(csv_path, keep_default_na=False)
     except Exception as e:
       messagebox.showerror("Validation Error", f"Failed to read CSV file: {e}")
       raise ValueError(f"Failed to read CSV file: {e}")
@@ -1379,17 +1714,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       messagebox.showerror("Validation Error", "CSV file is empty.")
       raise ValueError("CSV file is empty.")
 
-    # 2. No empty/null fields/cells present in any row
-    if df.isnull().any().any():
-      messagebox.showerror("Validation Error", "CSV contains empty or null values.")
-      raise ValueError("CSV contains empty or null values.")
-
-    for col in df.columns:
-      if (df[col].astype(str).str.strip() == "").any():
-        messagebox.showerror("Validation Error", f"CSV contains empty values in column '{col}'.")
-        raise ValueError(f"CSV contains empty values in column '{col}'.")
-
-    # 3. Check columns and types
+    # 2. Check columns and identify whether this is a site report CSV
     include_personal = self.include_personal_sites.get()
     include_team = self.include_team_sites.get()
 
@@ -1414,6 +1739,27 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     }
     is_report_csv = "Entity" in df.columns and report_cols.issubset(df.columns)
 
+    # 3. No empty/null fields/cells present in required columns
+    cols_to_check = ({"Entity"} | report_cols) if is_report_csv else set(df.columns)
+    if is_report_csv and "Failed DL Count" in df.columns:
+      cols_to_check.add("Failed DL Count")
+    shallow_na_cols = {
+        "Shortcut Count",
+        "Folder Count > Depth Limit 100",
+        "File Count > Depth Limit 100",
+    }
+    invalid_null_tokens = {"", "null", "nan", "none", "#n/a", "#na", "<na>"}
+    for col in df.columns:
+      if col not in cols_to_check:
+        continue
+      cleaned = df[col].astype(str).str.strip()
+      lowered = cleaned.str.lower()
+      bad_tokens = set(invalid_null_tokens)
+      if not (is_report_csv and col in shallow_na_cols):
+        bad_tokens.update({"n/a", "na"})
+      if lowered.isin(bad_tokens).any():
+        messagebox.showerror("Validation Error", "CSV contains empty or null values.")
+        raise ValueError("CSV contains empty or null values.")
 
     if set(df.columns) != expected_cols and not is_report_csv:
       messagebox.showerror("Validation Error", "CSV must contain exactly the 'Entity' column or valid site report columns.")
@@ -1514,12 +1860,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               ("Total Encrypted File Count", total_encrypted_count),
           ])
       
+      is_shallow_export = bool(
+          data.get("isShallowScan") or getattr(self, "val_shallow_scan", False)
+      )
       summary_rows.extend([
           ("Site Collection Count", data.get("siteCount", 0)),
           ("Subsite Count", data.get("subsiteCount", 0)),
           ("Personal (OneDrive) Site / Subsite Count", data.get("personalSiteCount", 0)),
           ("SharePoint Site / Subsite Count", data.get("teamSiteCount", 0)),
           ("DL Count", sum(data.get("driveCounts", {}).values())),
+      ])
+      if is_shallow_export:
+        failed_dl_total = data.get("failedDlCount", 0)
+        if not failed_dl_total and data.get("siteMetrics"):
+          failed_dl_total = sum(
+              int(s.get("failedDlCount", 0) or 0)
+              for s in data["siteMetrics"].values()
+          )
+        summary_rows.append(("Failed DL Count", failed_dl_total))
+      summary_rows.extend([
           ("Personal (OneDrive) DL Count", data.get("personalSiteDLCount", 0)),
           ("SharePoint DL Count", data.get("teamSiteDLCount", 0)),
           ("List Count", data.get("listCount", 0)),
@@ -1529,7 +1888,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           ("Folder count beyond depth limit 100", data.get("folderCountExceedingDepthLimit", 0)),
           ("File count beyond depth limit 100", data.get("fileCountExceedingDepthLimit", 0)),
           ("Large Resource Count (Entities with >500k items)", data.get("tenantLevelLargeResourceCount", 0)),
-          ("Warning Resource Count (Entities with >200k items)", data.get("tenantLevelWarningResourceCount", 0))
+          ("Warning Resource Count (Entities with >200k items)", data.get("tenantLevelWarningResourceCount", 0)),
+          ("Total Scan Runtime", data.get("total_runtime", "N/A"))
       ])
       
       for label, val in summary_rows:
@@ -1544,17 +1904,18 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       writer.writerow([]) # Blank line separator
       
       # Section 3: File Size Distribution
-      writer.writerow(["File Size Distribution", ""])
-      writer.writerow(["Range", "Count"])
-      dist_data = data.get("tenantLevelFileSizeDistribution", {})
-      buckets = dist_data.get("buckets", [])
-      for bucket in buckets:
-        range_vals = bucket.get("sizeRange", (0, 0))
-        range_str = format_range(range_vals[0], range_vals[1])
-        count = bucket.get("count", 0)
-        writer.writerow([range_str, count])
-        
-      writer.writerow([]) # Blank line separator
+      if not data.get("isShallowScan"):
+        writer.writerow(["File Size Distribution", ""])
+        writer.writerow(["Range", "Count"])
+        dist_data = data.get("tenantLevelFileSizeDistribution", {})
+        buckets = dist_data.get("buckets", [])
+        for bucket in buckets:
+          range_vals = bucket.get("sizeRange", (0, 0))
+          range_str = format_range(range_vals[0], range_vals[1])
+          count = bucket.get("count", 0)
+          writer.writerow([range_str, count])
+          
+        writer.writerow([]) # Blank line separator
       
       # Section 4: Large Resources
       if len(data.get("tenantLevelLargeResources", [])) > 0:
@@ -1599,10 +1960,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if len(data.get("siteMetrics", {}).items()) > 0:
         # Section 6: Site Details
         writer.writerow(["Site Details", ""])
+        dl_cols = ["DL Count", "Failed DL Count"] if is_shallow_export else ["DL Count"]
         if "siteIdToMail" not in data:
-          row = ["Site Collection", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
+          row = ["Site Collection", "Subsite Count"] + dl_cols + ["List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
         else:
-          row = ["Site Collection", "Email Id", "Subsite Count", "DL Count", "List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
+          row = ["Site Collection", "Email Id", "Subsite Count"] + dl_cols + ["List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Entities with > 200k item count", "Corpus Size"]
 
         if getattr(self, "val_include_recycle_bin_contents", False):
           row.extend(["Recycle Bin Item Count", "Recycle Bin Size"])
@@ -1649,11 +2011,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                 if not match.empty and self.show_eta:
                     batch_name = match["Suggested Batch"].iloc[0]
 
+            site_dl_vals = (
+                [s_data.get("dlCount", 0), s_data.get("failedDlCount", 0)]
+                if is_shallow_export
+                else [s_data.get("dlCount", 0)]
+            )
             if "siteIdToMail" not in data:
               row = [
                   self._get_display_name(site_id), 
                   s_data.get("subsiteCount", 0),
-                  s_data.get("dlCount", 0),
+                  *site_dl_vals,
                   s_data.get("listCount", 0),
                   s_data.get("folderCount", 0),
                   s_data.get("fileCount", 0),
@@ -1674,7 +2041,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                 self._get_display_name(site_id), 
                 data.get("siteIdToMail", {}).get(site_id, ""),
                 s_data.get("subsiteCount", 0),
-                s_data.get("dlCount", 0),
+                *site_dl_vals,
                 s_data.get("listCount", 0),
                 s_data.get("folderCount", 0),
                 s_data.get("fileCount", 0),
@@ -1718,6 +2085,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     config.include_file_versions = self.val_include_file_versions
     config.scan_encrypted_files = self.val_scan_encrypted_files
     config.generate_folder_amr_map = self.val_generate_folder_amr_map
+    config.shallow_scan = getattr(self, "val_shallow_scan", False)
     return config
 
   def start_scan(self):    
@@ -1749,6 +2117,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self._validate_csv()
 
     # Save values to regular variables to avoid thread-safety issues in Tkinter
+    self.val_shallow_scan = self.shallow_scan.get()
     self.val_include_personal_sites = self.include_personal_sites.get()
     self.val_include_team_sites = self.include_team_sites.get()
     self.val_include_recycle_bin_contents = self.include_recycle_bin_contents.get()
@@ -1811,9 +2180,20 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     config = self._get_scan_configuration()
 
-    self.stop_scan_event.clear()
+    # Reset logs before certificate steps so their messages land in the scan log.
     with self.log_lock:
       self.log_buffer = []
+
+    is_report_upload = self._try_get_metrics_from_csv_report(config) is not None
+    if getattr(self, "val_shallow_scan", False) and not is_report_upload:
+      if not shallow_ui_helpers.ensure_certificates_and_prompt(self, config, ctk):
+        return
+      if not shallow_ui_helpers.run_certificate_auth_check(self, config, ctk):
+        return
+
+    self.stop_scan_event.clear()
+    self.scan_runtime_start = None
+    self.current_logs_path = None
     self.spinners_active = {}
     self.spinner_indices = {}
     for w in self.scan_container.winfo_children():
@@ -1823,7 +2203,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     self.create_progress_row(self.scan_container, "sites", "Site Discovery", mode="determinate")
     self.create_progress_row(self.scan_container, "drives", "Drive Discovery", mode="determinate")
-    self.create_progress_row(self.scan_container, "drive_parsing", "Metrics Calculation", mode="determinate")
+    if not self.val_shallow_scan:
+      self.create_progress_row(self.scan_container, "drive_parsing", "Metrics Calculation", mode="determinate")
 
     if self.show_eta:
       plan_text = "Generating Migration Plan"

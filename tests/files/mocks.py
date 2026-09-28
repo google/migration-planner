@@ -7,10 +7,24 @@ import threading
 import os
 
 class MockResponse:
-    def __init__(self, status_code: int, body: Dict[str, Any]):
+    def __init__(self, status_code: int, body: Dict[str, Any], text: str = None, headers: Dict[str, str] = None):
         self.status_code = status_code
         self.body = body
-        
+        # SpRestConnector reads resp.text on its 403/429/500/catch-all paths and
+        # resp.headers on 429. Both are optional so existing callers are unaffected.
+        self._text = text
+        self.headers = headers if headers is not None else {}
+
+    @property
+    def text(self) -> str:
+        """Serialises the body only if a caller actually reads it."""
+        if self._text is not None:
+            return self._text
+        try:
+            return json.dumps(self.body)
+        except (TypeError, ValueError):
+            return str(self.body)
+
     def json(self):
         return self.body
 
@@ -221,3 +235,82 @@ class MockUrlInvoker:
                 responses.append({"id": req_id, "status": 404, "body": {"error": {"message": f"Not Found: {path}"}}})
                 
         return responses
+
+
+class MockSpSession:
+    """Fake requests session for SharePoint REST calls used by Shallow Scan.
+
+    Responses are registered against a substring of the endpoint URL. A key may
+    be given several responses, which are then consumed in order and the last
+    one repeats, so retry paths such as 429-then-200 can be exercised.
+
+    Thread-safe: `_scan_document_libraries` drives this from a ThreadPoolExecutor,
+    so the call log and the response queues are guarded by a lock.
+    """
+
+    def __init__(self):
+        self.responses = {}
+        self.calls = []
+        self.lock = threading.Lock()
+
+    def register(self, url_fragment: str, *responses: MockResponse):
+        """Registers one or more responses for endpoints containing the fragment."""
+        with self.lock:
+            self.responses[url_fragment] = list(responses)
+
+    def get(self, url: str, headers: Dict[str, str] = None, timeout: float = None, **kwargs):
+        with self.lock:
+            self.calls.append(url)
+            for fragment, queued in self.responses.items():
+                if fragment in url:
+                    # Consume until one remains so the final response repeats.
+                    return queued.pop(0) if len(queued) > 1 else queued[0]
+
+        return MockResponse(404, {"error": {"message": f"Not Found: {url}"}})
+
+    def get_calls(self) -> List[str]:
+        """Returns a snapshot of every endpoint requested so far."""
+        with self.lock:
+            return list(self.calls)
+
+
+class MockCertTokenManager:
+    """Domain-keyed certificate token manager fake for Shallow Scan.
+
+    Mirrors the subset of CertTokenManager that SpRestConnector depends on. Token
+    slots are handed out without any real authentication, and refresh calls are
+    recorded so HTTP 401 handling can be asserted.
+    """
+
+    def __init__(self, session: MockSpSession = None):
+        self.session = session if session is not None else MockSpSession()
+        self.authenticated_domains = []
+        self.refresh_calls = []
+        self.lock = threading.Lock()
+
+    def ensure_domain_authenticated(self, sharepoint_domain: str, current_logger=None):
+        with self.lock:
+            if sharepoint_domain not in self.authenticated_domains:
+                self.authenticated_domains.append(sharepoint_domain)
+
+    def get_valid_token_slot(self, sharepoint_domain: str, current_logger=None) -> Dict[str, Any]:
+        self.ensure_domain_authenticated(sharepoint_domain, current_logger)
+        return {
+            "token": "mock-sp-token",
+            "expires_at": time.time() + 3600,
+            "client_id": "mock-client-id",
+            "domain": sharepoint_domain,
+        }
+
+    def return_token_slot(self, sharepoint_domain: str, token_data: Dict[str, Any]):
+        pass
+
+    def refresh_token_data(self, token_data: Dict[str, Any], current_logger=None) -> bool:
+        with self.lock:
+            self.refresh_calls.append(token_data.get("domain"))
+        token_data["token"] = "mock-sp-token-refreshed"
+        token_data["expires_at"] = time.time() + 3600
+        return True
+
+    def get_session(self) -> MockSpSession:
+        return self.session
