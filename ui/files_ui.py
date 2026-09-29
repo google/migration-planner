@@ -12,6 +12,7 @@ import threading
 from util.monitoring import ResourceMonitor
 from estimators.factory import EstimatorFactory
 from util.enums import FailureType
+from util import run_logger
 import json
 import pandas as pd
 import math
@@ -63,6 +64,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     super().__init__()
     self.factory = None
+    self._runtime_summary_logged = False
+    run_logger.install_exception_hooks()
+
+  def report_callback_exception(self, exc, val, tb):
+    """Logs uncaught Tk callback exceptions, which bypass sys.excepthook."""
+    run_logger.log_exception("Unhandled exception in UI callback", (exc, val, tb))
+    super().report_callback_exception(exc, val, tb)
 
   def setup_variables(self):
     super().setup_variables()
@@ -837,8 +845,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       os.makedirs(output_dir, exist_ok=True)
       
       report_path = os.path.join(output_dir, f"site_report_{ts}.csv")
-      logs_path = os.path.join(output_dir, f"logs_{ts}.log")
-      self.current_logs_path = logs_path
 
       monitor.stop()
       monitor.join()
@@ -914,11 +920,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           safe_name = batch.replace(" ", "")
           batch_path = os.path.join(batches_dir, f"{safe_name}.csv")
           batch_export.to_csv(batch_path, index=False)
-        
-      with self.log_lock:
-        log_content = "\n".join(self.log_buffer)
-      with open(logs_path, "w", encoding="utf-8") as f:
-        f.write(log_content)
       
       self.ui_update("phase_status", source="plan_generation", status="complete")
       time.sleep(2)
@@ -983,16 +984,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if not f:
         return
 
-      # Fast, non-blocking shallow snapshot under lock to minimize lock contention
-      with self.log_lock:
-        logs_snapshot = list(self.log_buffer)
-
-      # Offload string formatting and disk I/O to a background daemon thread
+      # Logs are flushed to the live run file per line; copy it off the UI thread.
       def _write_logs_to_disk():
         try:
-          content = "\n".join(logs_snapshot)
-          with open(f, "w", encoding="utf-8") as file:
-            file.write(content)
+          run_logger.export_to(f)
         except Exception as e:
           self.log_msg(f"Failed to export logs to {f}: {e}")
 
@@ -1001,18 +996,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       self.log_msg(f"Error initiating log export: {e}")
 
   def log_msg(self, text):
-    """Appends log text with an ISO-like timestamp."""
-    if text is None:
-      return
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    s_text = str(text)
-    prefix = ""
-    while s_text.startswith("\n"):
-      prefix += "\n"
-      s_text = s_text[1:]
-    formatted_text = f"{prefix}[{ts}] {s_text}"
-    with self.log_lock:
-      self.log_buffer.append(formatted_text)
+    """Writes log text to the live run log file with an ISO-like timestamp."""
+    run_logger.log(text)
 
   def stop_scan_logic(self):
     self.btn_action_primary.configure(state="disabled", text="Stopping scan...")
@@ -1654,9 +1639,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       else:
         dash_prep_sec = phase_runtimes.get("dash_prep_seconds", 0.0)
 
-      with self.log_lock:
-        already_logged = any("TOTAL TIME:" in line for line in self.log_buffer)
-      if not already_logged:
+      if not self._runtime_summary_logged:
+        self._runtime_summary_logged = True
         self.log_msg(
             f"[Phase 4: Final Dashboard Preparation] Completed in {dash_prep_sec:.2f}s"
             f" ({timedelta(seconds=int(round(dash_prep_sec)))})"
@@ -1675,15 +1659,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         self.log_msg("-" * 50)
         self.log_msg(f"TOTAL TIME: {data['total_runtime']}")
         self.log_msg("=" * 50)
-
-        if getattr(self, "current_logs_path", None):
-          try:
-            with self.log_lock:
-              log_content = "\n".join(self.log_buffer)
-            with open(self.current_logs_path, "w", encoding="utf-8") as f:
-              f.write(log_content)
-          except Exception:
-            pass
 
     except Exception as e:
       for w in self.view_results.winfo_children():
@@ -2180,9 +2155,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     config = self._get_scan_configuration()
 
-    # Reset logs before certificate steps so their messages land in the scan log.
-    with self.log_lock:
-      self.log_buffer = []
+    # Start a new run log before certificate steps so their messages land in it.
+    run_logger.start_run("files")
+    self._runtime_summary_logged = False
 
     is_report_upload = self._try_get_metrics_from_csv_report(config) is not None
     if getattr(self, "val_shallow_scan", False) and not is_report_upload:
@@ -2193,7 +2168,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     self.stop_scan_event.clear()
     self.scan_runtime_start = None
-    self.current_logs_path = None
     self.spinners_active = {}
     self.spinner_indices = {}
     for w in self.scan_container.winfo_children():
