@@ -408,7 +408,8 @@ Once the scan completes, the tool creates a folder in the `/outputs` directory n
 It contains:
 1.  **User Report (`user_report.csv`)**: A master list of all users, their item counts, and their suggested Batch (e.g., "Batch 1").
 2.  **Batch Files (`suggested batches/`)**: Individual CSV files (Batch1.csv, Batch2.csv) ready for use in migration tool. Headers are formatted as **Source Exchange Email**.
-3.  **Logs (`logs.log`)**: Detailed execution logs, including system performance (CPU/RAM) and any API errors encountered.
+
+Execution logs are written live to `/logs/exchange_<timestamp>.log`, with each line flushed to disk as soon as it's logged, so the log survives crashes and force-quits. A new log file is created each time **Start scan** is clicked. The log contains detailed execution steps, system resource metrics (CPU/RAM), API errors, and full tracebacks of any unhandled exceptions.
 
 You can also download just the log file via the **"Export logs"** button or the user report via the **"Export full report"** button and save them in a custom location on your system.
 

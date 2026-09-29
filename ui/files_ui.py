@@ -65,12 +65,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     super().__init__()
     self.factory = None
     self._runtime_summary_logged = False
-    run_logger.install_exception_hooks()
-
-  def report_callback_exception(self, exc, val, tb):
-    """Logs uncaught Tk callback exceptions, which bypass sys.excepthook."""
-    run_logger.log_exception("Unhandled exception in UI callback", (exc, val, tb))
-    super().report_callback_exception(exc, val, tb)
 
   def setup_variables(self):
     super().setup_variables()
@@ -970,34 +964,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         corner_radius=20,
     )
     self.btn_export_logs.pack(side="right", pady=15)
-
-  def export_logs(self):
-    """Exports logs accumulated so far asynchronously and non-disruptively."""
-    try:
-      ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-      f = filedialog.asksaveasfilename(
-          parent=self,
-          initialfile=f"logs_{ts}.log",
-          defaultextension=".log",
-          filetypes=[("Log Files", "*.log"), ("All Files", "*.*")],
-      )
-      if not f:
-        return
-
-      # Logs are flushed to the live run file per line; copy it off the UI thread.
-      def _write_logs_to_disk():
-        try:
-          run_logger.export_to(f)
-        except Exception as e:
-          self.log_msg(f"Failed to export logs to {f}: {e}")
-
-      threading.Thread(target=_write_logs_to_disk, daemon=True).start()
-    except Exception as e:
-      self.log_msg(f"Error initiating log export: {e}")
-
-  def log_msg(self, text):
-    """Writes log text to the live run log file with an ISO-like timestamp."""
-    run_logger.log(text)
 
   def stop_scan_logic(self):
     self.btn_action_primary.configure(state="disabled", text="Stopping scan...")
