@@ -8,6 +8,7 @@ __pycache__/
 .env
 env/
 outputs/
+logs/
 data/
 test_*.py
 .DS_Store
