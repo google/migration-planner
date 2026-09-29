@@ -27,6 +27,7 @@ from util.enums import FailureType
 from util.monitoring import ResourceMonitor
 from util.utils import ScanConfig
 from util.constants import *
+from util import run_logger
 
 class ChatMigrationEstimatorTool(ctk.CTk):
   """Main Application Class for Migration Planner."""
@@ -42,9 +43,8 @@ class ChatMigrationEstimatorTool(ctk.CTk):
     self.geometry("950x900")
 
     self.log_queue = queue.Queue()
-    self.log_buffer = []
-    self.log_lock = threading.Lock()
     self.stop_scan_event = threading.Event()
+    run_logger.install_exception_hooks()
 
     self.spinners_active = {}
     self.spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -53,6 +53,11 @@ class ChatMigrationEstimatorTool(ctk.CTk):
     self.setup_variables()
     self.create_widgets()
     self.after(100, self.process_log_queue)
+
+  def report_callback_exception(self, exc, val, tb):
+    """Logs uncaught Tk callback exceptions, which bypass sys.excepthook."""
+    run_logger.log_exception("Unhandled exception in UI callback", (exc, val, tb))
+    super().report_callback_exception(exc, val, tb)
 
   def setup_variables(self):
     """Initializes all Tkinter variables."""
@@ -1369,17 +1374,28 @@ class ChatMigrationEstimatorTool(ctk.CTk):
       self.export_report(self.last_scan_data)
 
   def export_logs(self):
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    f = filedialog.asksaveasfilename(
-        initialfile=f"logs_{ts}.log",
-        defaultextension=".log",
-        filetypes=[("Log Files", "*.log"), ("All Files", "*.*")],
-    )
-    if f:
-      with self.log_lock:
-        content = "\n".join(self.log_buffer)
-      with open(f, "w", encoding="utf-8") as file:
-        file.write(content)
+    """Exports logs accumulated so far asynchronously and non-disruptively."""
+    try:
+      ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+      f = filedialog.asksaveasfilename(
+          parent=self,
+          initialfile=f"logs_{ts}.log",
+          defaultextension=".log",
+          filetypes=[("Log Files", "*.log"), ("All Files", "*.*")],
+      )
+      if not f:
+        return
+
+      # Logs are flushed to the live run file per line; copy it off the UI thread.
+      def _write_logs_to_disk():
+        try:
+          run_logger.export_to(f)
+        except Exception as e:
+          self.log_msg(f"Failed to export logs to {f}: {e}")
+
+      threading.Thread(target=_write_logs_to_disk, daemon=True).start()
+    except Exception as e:
+      self.log_msg(f"Error initiating log export: {e}")
 
   # ==========================
   # LOGIC & EXECUTION
@@ -1398,7 +1414,7 @@ class ChatMigrationEstimatorTool(ctk.CTk):
 
   def update_progress(self, msg):
     if isinstance(msg, str):
-      self.log_buffer.append(msg)
+      self.log_msg(msg)
     elif isinstance(msg, dict):
       mtype = msg.get("type")
       if mtype == "user_discovery":
@@ -1552,8 +1568,7 @@ class ChatMigrationEstimatorTool(ctk.CTk):
 
     self.stop_scan_event.clear()
     self.chat_scan_results = None
-    with self.log_lock:
-      self.log_buffer = []
+    run_logger.start_run("chat")
     self.spinners_active = {}
     self.spinner_indices = {}
     for w in self.scan_container.winfo_children():
@@ -1580,12 +1595,11 @@ class ChatMigrationEstimatorTool(ctk.CTk):
   def stop_scan_logic(self):
     self.btn_action_primary.configure(state="disabled", text="Stopping scan...")
     self.stop_scan_event.set()
-    with self.log_lock:
-      self.log_buffer.append("Scan Stopped.")
+    self.log_msg("Scan Stopped.")
 
   def log_msg(self, text):
-    with self.log_lock:
-      self.log_buffer.append(text)
+    """Writes log text to the live run log file with an ISO-like timestamp."""
+    run_logger.log(text)
 
   def ui_update(self, type, **kwargs):
     data = {"type": type}
@@ -1954,8 +1968,6 @@ class ChatMigrationEstimatorTool(ctk.CTk):
     output_dir = os.path.join("outputs", ts)
     os.makedirs(output_dir, exist_ok=True)
 
-    logs_path = os.path.join(output_dir, f"logs_{ts}.log")
-
     if hasattr(self, "df_teams_output") and self.df_teams_output is not None:
       teams_report_path = os.path.join(output_dir, f"teams_report_{ts}.csv")
       self.df_teams_output.to_csv(teams_report_path, index=False)
@@ -1971,11 +1983,6 @@ class ChatMigrationEstimatorTool(ctk.CTk):
         safe_name = batch.replace(" ", "")
         batch_path = os.path.join(teams_batches_dir, f"{safe_name}.csv")
         batch_export.to_csv(batch_path, index=False)
-
-    with self.log_lock:
-      log_content = "\n".join(self.log_buffer)
-    with open(logs_path, "w", encoding="utf-8") as f:
-      f.write(log_content)
 
     result_data = {
         "total_users": 0,
