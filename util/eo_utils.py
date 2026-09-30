@@ -33,6 +33,9 @@ def fetch_user_batch_data(
 
   batch_emails_count = 0
   batch_encrypted_emails_count = 0
+  batch_labeled_emails_count = 0
+  batch_all_label_ids = set()
+  batch_encrypted_label_ids = set()
   batch_contacts_count = 0
   batch_cals_count = 0
   batch_events_count = 0
@@ -40,39 +43,95 @@ def fetch_user_batch_data(
   b_failed = 0
   failed_details = []
 
+  msip_prop = "String {00020386-0000-0000-C000-000000000046} Name msip_labels"
+  cc_prop = "String {00020386-0000-0000-C000-000000000046} Name Content-Class"
+
   for i, user in enumerate(user_chunk):
     user_id = user["User ID / Group ID"]
     req_id = str(i)
     if resource_type == "calendars":
       url = f"/users/{user_id}/calendars?$select=id,name&$top=100"
+      batch_requests.append({
+          "id": req_id,
+          "method": "GET",
+          "url": url,
+          "headers": {"ConsistencyLevel": "eventual"},
+      })
     elif resource_type == "encrypted_messages":
-      prop_id = "String {00020386-0000-0000-C000-000000000046} Name Content-Class"
-      filter_expr = f"singleValueExtendedProperties/Any(ep: ep/id eq '{prop_id}' and ep/value eq 'rpmsg.message')"
-      url = f"/users/{user_id}/messages?$filter={urllib.parse.quote(filter_expr)}&$count=true&$top=1&$select=id"
+      enc_filter = f"singleValueExtendedProperties/Any(ep: ep/id eq '{cc_prop}' and ep/value eq 'rpmsg.message')"
+      enc_url = f"/users/{user_id}/messages?$filter={urllib.parse.quote(enc_filter)}&$count=true&$top=1&$select=id"
+      batch_requests.append({
+          "id": req_id,
+          "method": "GET",
+          "url": enc_url,
+          "headers": {"ConsistencyLevel": "eventual"},
+      })
+      lbl_filter = f"singleValueExtendedProperties/Any(ep: ep/id eq '{msip_prop}' and ep/value ne null)"
+      lbl_expand = f"singleValueExtendedProperties($filter=id eq '{msip_prop}' or id eq '{cc_prop}')"
+      lbl_url = (
+          f"/users/{user_id}/messages?"
+          f"$filter={urllib.parse.quote(lbl_filter)}"
+          f"&$count=true&$top=999&$select=id"
+          f"&$expand={urllib.parse.quote(lbl_expand)}"
+      )
+      batch_requests.append({
+          "id": f"{i}_lbl",
+          "method": "GET",
+          "url": lbl_url,
+          "headers": {"ConsistencyLevel": "eventual"},
+      })
     else:
       url = f"/users/{user_id}/{resource_type}?$count=true&$top=1&$select=id"
-    batch_requests.append({
-        "id": req_id,
-        "method": "GET",
-        "url": url,
-        "headers": {"ConsistencyLevel": "eventual"},
-    })
+      batch_requests.append({
+          "id": req_id,
+          "method": "GET",
+          "url": url,
+          "headers": {"ConsistencyLevel": "eventual"},
+      })
+
+  def _extract_labels_from_messages(msg_list):
+    import re
+    for msg in (msg_list or []):
+      msip_val = ""
+      cc_val = ""
+      for ep in (msg.get("singleValueExtendedProperties") or []):
+        ep_id = str(ep.get("id") or "")
+        if "msip_labels" in ep_id:
+          msip_val = str(ep.get("value") or "")
+        elif "Content-Class" in ep_id:
+          cc_val = str(ep.get("value") or "")
+      guids = [
+          g.lower()
+          for g in re.findall(
+              r"MSIP_Label_([0-9a-fA-F-]{36})_Enabled=True",
+              msip_val,
+              re.IGNORECASE,
+          )
+      ]
+      batch_all_label_ids.update(guids)
+      if cc_val.lower() == "rpmsg.message":
+        batch_encrypted_label_ids.update(guids)
 
   try:
     url_invoker = UrlInvoker(
         token_manager,
         None, None, None, None
     )
-    responses = url_invoker.execute_batch_request(
-        session,
-        batch_url,
-        token_manager,
-        token_data,
-        batch_requests,
-        logger,
-        stop_event=stop_event,
-        context=resource_type,
-    )
+    responses = {}
+    for sub_idx in range(0, len(batch_requests), 20):
+      sub_batch = batch_requests[sub_idx : sub_idx + 20]
+      sub_resp = url_invoker.execute_batch_request(
+          session,
+          batch_url,
+          token_manager,
+          token_data,
+          sub_batch,
+          logger,
+          stop_event=stop_event,
+          context=resource_type,
+      )
+      if sub_resp:
+        responses.update(sub_resp)
 
     b_failed = 0
 
@@ -121,6 +180,36 @@ def fetch_user_batch_data(
           elif resource_type == "encrypted_messages":
             user["Encrypted Email Count"] = count_val
             batch_encrypted_emails_count += count_val
+            r_lbl = responses.pop(f"{i}_lbl", {})
+            lbl_body = r_lbl.get("body", {}) if r_lbl.get("status") == 200 else {}
+            lbl_count = max(int(lbl_body.get("@odata.count", 0) or 0), count_val)
+            user["Sensitivity Labeled Email Count"] = lbl_count
+            batch_labeled_emails_count += lbl_count
+            lbl_msgs = lbl_body.pop("value", [])
+            _extract_labels_from_messages(lbl_msgs)
+            del lbl_msgs
+            next_link = lbl_body.get("@odata.nextLink")
+            del lbl_body
+            del r_lbl
+            extra_pages = 0
+            headers_next = {
+                "Authorization": f"Bearer {token_data['token']}",
+                "ConsistencyLevel": "eventual",
+            }
+            while next_link and extra_pages < 4 and not (stop_event and stop_event.is_set()):
+              try:
+                nr = session.get(next_link, headers=headers_next, timeout=30)
+                if nr.status_code != 200:
+                  break
+                nd = nr.json()
+                nd_msgs = nd.pop("value", [])
+                _extract_labels_from_messages(nd_msgs)
+                del nd_msgs
+                next_link = nd.get("@odata.nextLink")
+                del nd
+                extra_pages += 1
+              except Exception:
+                break
           else:
             user["Contact Count"] = count_val
             batch_contacts_count += count_val
@@ -154,6 +243,9 @@ def fetch_user_batch_data(
   return {
       "emails": batch_emails_count,
       "encrypted_emails": batch_encrypted_emails_count,
+      "labeled_emails": batch_labeled_emails_count,
+      "all_label_ids": batch_all_label_ids,
+      "encrypted_label_ids": batch_encrypted_label_ids,
       "contacts": batch_contacts_count,
       "calendars": batch_cals_count,
       "events": batch_events_count,
