@@ -11,9 +11,9 @@ from util.connectors import UrlInvoker
 from util.utils import ScanConfig, Bucket, FileSizeDistribution, LargeResource, create_batches, create_request_to_response_map, get_batch_responses_map, get_relative_url, process_pagination_responses
 from util.enums import FailureType, ResourceType
 from util.thread_safe_ds import ThreadSafeMap, ThreadSafeSortedSet, AtomicInt
-from util import file_encryption_detector
 from util.constants import ENCRYPTED_FILE_ETA_MULTIPLIER
 
+import re
 import traceback
 import json
 
@@ -51,7 +51,8 @@ class FileEstimator(Estimator):
         url_invoker: UrlInvoker, 
         logger: Optional[Callable[[str], None]] = None, 
         stop_event: Optional[threading.Event] = None,
-        progress_update_callback: Optional[Callable[[int], None]] = None
+        progress_update_callback: Optional[Callable[[int], None]] = None,
+        cert_token_manager: Optional[Any] = None,
     ):
         super().__init__()
         self.config = config
@@ -61,6 +62,7 @@ class FileEstimator(Estimator):
         self.executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
         self.tree_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
         self.progress_update_callback = progress_update_callback
+        self.cert_token_manager = cert_token_manager
         self.condition = threading.Condition()
 
     def get_resource_type(self) -> str:
@@ -135,6 +137,10 @@ class FileEstimator(Estimator):
             self.drive_id_to_version_count = {}
             self.drive_id_to_encrypted_file_size = {}
             self.drive_id_to_encrypted_file_count = {}
+            self.drive_id_to_labeled_file_count = {}
+            self.total_sensitivity_label_ids = set()
+            self.encrypted_sensitivity_label_ids = set()
+            self.total_labeled_file_count = 0
             
             drives = []
             subsite_to_drives = {}          # used to calculate effective max Depth
@@ -269,6 +275,12 @@ class FileEstimator(Estimator):
                         success=success,
                         entity_type="Drives"
                     )
+                    del batch_adj_list
+                    del batch_parent_refs
+                    del batch_folder_nodes
+                    del batch_total_size
+                    del batch_buckets
+                    del batch_metrics
                     time.sleep(0.2)
                 except Exception as e:
                     failed += len(batch)
@@ -298,6 +310,24 @@ class FileEstimator(Estimator):
 
             time.sleep(5)
             self.progress_update_callback("phase_status", source="drive_parsing", status="complete")
+
+            if self.config.scan_encrypted_files:
+                self.encryption_metrics_lock = threading.Lock()
+                if drive_metrics:
+                    valid_drive_ids = {
+                        d_id
+                        for d_id, dm in drive_metrics.items()
+                        if dm.get("fileCount", 0) > 0
+                    }
+                else:
+                    valid_drive_ids = {drive["id"] for drive in drives if "id" in drive}
+                self._scan_encrypted_files(
+                    drive_discovery_progress_metrics,
+                    failures,
+                    valid_drive_ids,
+                    drives=drives,
+                    subsite_to_drives=subsite_to_drives,
+                )
 
             self.progress_update_callback("phase_status", source="plan_generation", status="running")
             metrics["driveMetrics"] = drive_metrics
@@ -570,6 +600,10 @@ class FileEstimator(Estimator):
                     if self.config.scan_encrypted_files:
                         metrics["siteMetrics"][top_level_site]["encryptedFileSize"] = metrics["siteMetrics"].get(top_level_site, {}).get("encryptedFileSize", 0) + self.drive_id_to_encrypted_file_size.get(drive_id, 0)
                         metrics["siteMetrics"][top_level_site]["encryptedFileCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("encryptedFileCount", 0) + self.drive_id_to_encrypted_file_count.get(drive_id, 0)
+                        metrics["siteMetrics"][top_level_site]["sensitivityLabeledFileCount"] = metrics["siteMetrics"].get(top_level_site, {}).get("sensitivityLabeledFileCount", 0) + getattr(self, "drive_id_to_labeled_file_count", {}).get(drive_id, 0)
+                        metrics["sensitivityLabelCount"] = len(getattr(self, "total_sensitivity_label_ids", set()))
+                        metrics["encryptedSensitivityLabelCount"] = len(getattr(self, "encrypted_sensitivity_label_ids", set()))
+                        metrics["sensitivityLabeledFileCount"] = getattr(self, "total_labeled_file_count", 0)
                     metrics["siteMetrics"][top_level_site]["folderCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("folderCountExceedingDepthLimit", 0) + drive_metric.get("folderCountExceedingDepthLimit", 0)
                     metrics["siteMetrics"][top_level_site]["fileCountExceedingDepthLimit"] =  metrics["siteMetrics"].get(top_level_site, {}).get("fileCountExceedingDepthLimit", 0) + drive_metric.get("fileCountExceedingDepthLimit", 0)
                 
@@ -1393,59 +1427,202 @@ class FileEstimator(Estimator):
             self._log_and_fail("Error in _get_drives", e, failures)
             return 0, 0
 
-    def _check_file_encryption(
+    def _get_or_create_cert_token_manager(self):
+        if self.cert_token_manager is not None:
+            return self.cert_token_manager
+        from util.files_shallow.cert_token_manager import CertTokenManager
+        self.cert_token_manager = CertTokenManager(
+            tenant_id=self.config.tenant_id,
+            client_ids=self.config.client_ids,
+            client_secrets=self.config.client_secrets,
+            concurrency=self.config.concurrency,
+            retries=self.config.retries,
+            backoff=self.config.backoff,
+        )
+        return self.cert_token_manager
+
+    @staticmethod
+    def _normalize_sp_url(url: str) -> str:
+        from urllib.parse import unquote
+        return unquote(str(url or "")).strip().rstrip("/").lower()
+
+    def _get_protected_sensitivity_label_ids(
         self,
-        drive_id: str,
-        item_id: str,
-        file_size: int,
         failures: List[Dict[str, str]],
+    ) -> set:
+        encrypted_label_ids = set()
+        all_label_ids = set()
+        self.policy_api_succeeded = False
+        token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
+        token = token_data["token"]
+        session = self.url_invoker.token_manager.get_session()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        try:
+            labels_url = f"{GRAPH_BASE_URL}/security/dataSecurityAndGovernance/sensitivityLabels?$select=id,name,hasProtection,sublabels"
+            while labels_url and not self.is_hard_stop_requested():
+                lr = session.get(labels_url, headers=headers, timeout=60)
+                if lr.status_code == 200:
+                    self.policy_api_succeeded = True
+                    l_data = lr.json()
+
+                    def _collect_protected_labels(label_list):
+                        for lbl in label_list:
+                            lid = str(lbl.get("id") or "").strip()
+                            if lid:
+                                all_label_ids.add(lid.lower())
+                                if lbl.get("hasProtection") is True:
+                                    encrypted_label_ids.add(lid)
+                            sublabels = lbl.get("sublabels") or []
+                            if sublabels:
+                                _collect_protected_labels(sublabels)
+
+                    _collect_protected_labels(l_data.get("value", []))
+                    labels_url = l_data.get("@odata.nextLink")
+                else:
+                    error_msg = (
+                        f"SensitivityLabels API returned status {lr.status_code}. "
+                        "Falling back to SharePoint REST Search (InformationProtectionLabelId) "
+                        "and file header inspection for sensitivity label discovery."
+                    )
+                    if self.logger:
+                        self.logger(error_msg)
+                    failures.append({
+                        "type": FailureType.FAILURE_STATUS_CODE_ERROR,
+                        "statusCode": lr.status_code,
+                        "message": error_msg,
+                    })
+                    return set()
+        finally:
+            self.url_invoker.token_manager.return_token_slot(token_data)
+        self.total_sensitivity_label_ids = set(all_label_ids)
+        self.encrypted_sensitivity_label_ids = {lid.lower() for lid in encrypted_label_ids}
+        return encrypted_label_ids
+
+    def _scan_encrypted_files(
+        self,
         drive_discovery_progress_metrics: ThreadSafeMap,
-        completed_drives: AtomicInt,
-        total_drives: int
+        failures: List[Dict[str, str]],
+        valid_drive_ids: Optional[set] = None,
+        drives: Optional[List[Dict[str, Any]]] = None,
+        subsite_to_drives: Optional[Dict[str, List[Any]]] = None,
     ):
         if self.is_hard_stop_requested():
             return
 
         try:
-            url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}/content"
-            
-            token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
-            token = token_data["token"]
-            session = self.url_invoker.token_manager.get_session()
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Range": "bytes=0-10239" # 10 KB
-            }
-            
-            try:
-                r = session.get(url, headers=headers, timeout=60)
-                if r.status_code in [200, 206]: # 206 Partial Content
-                    content = r.content
-                    status = file_encryption_detector.detect_encryption(content)
-                    if file_encryption_detector.is_encrypted(status):
-                        with self.encryption_metrics_lock:
-                            self.drive_id_to_encrypted_file_count[drive_id] = self.drive_id_to_encrypted_file_count.get(drive_id, 0) + 1
-                            self.drive_id_to_encrypted_file_size[drive_id] = self.drive_id_to_encrypted_file_size.get(drive_id, 0) + file_size
-                        
-                        drive_discovery_progress_metrics.increment("encryptedFileCount")
-                else:
-                    # Log error if needed
-                    pass
-            finally:
-                self.url_invoker.token_manager.return_token_slot(token_data)
+            from urllib.parse import urlparse
+            from util.encrypted_files_utils import (
+                ENCRYPTED_FILES_CONCURRENCY,
+                scan_libraries_for_encrypted_files,
+            )
 
-            self.processed_encryption_count.increment()
-            if self.processed_encryption_count.get_value() % 10 == 0:
-                self.progress_update_callback(
-                    "drive_discovery",
-                    count=completed_drives.get_value(),
-                    total_drives=total_drives,
-                    **drive_discovery_progress_metrics.get_all()
+            self.drive_id_to_labeled_file_count = {}
+            self.drive_id_to_encrypted_file_count = {}
+            self.drive_id_to_encrypted_file_size = {}
+            self.total_sensitivity_label_ids = set()
+            self.encrypted_sensitivity_label_ids = set()
+            self.total_labeled_file_count = 0
+
+            drive_to_subsite: Dict[str, str] = {}
+            if subsite_to_drives:
+                for subsite_id, s_drive_ids in subsite_to_drives.items():
+                    for cand_id in (s_drive_ids or []):
+                        drive_to_subsite[cand_id] = subsite_id
+
+            library_targets: List[Tuple[str, str, str]] = []
+            for drv in (drives or []):
+                d_id = drv.get("id")
+                if not d_id:
+                    continue
+                if valid_drive_ids and d_id not in valid_drive_ids:
+                    continue
+                library_url = str(drv.get("webUrl") or self.id_to_display.get(d_id, "") or "").strip().rstrip("/")
+                subsite_id = drive_to_subsite.get(d_id, "")
+                web_base_url = str(self.id_to_display.get(subsite_id, "") or "").strip().rstrip("/")
+
+                if not web_base_url and library_url.startswith("http"):
+                    parsed = urlparse(library_url)
+                    path_parts = [p for p in parsed.path.split("/") if p]
+                    if len(path_parts) > 1:
+                        web_base_url = f"{parsed.scheme}://{parsed.netloc}/" + "/".join(path_parts[:-1])
+                    else:
+                        web_base_url = library_url
+                if not library_url and web_base_url.startswith("http"):
+                    library_url = web_base_url
+
+                if library_url.startswith("http") and web_base_url.startswith("http"):
+                    library_targets.append((d_id, web_base_url, library_url))
+
+            if not library_targets:
+                drive_discovery_progress_metrics.update("encryptedFileCount", 0)
+                drive_discovery_progress_metrics.update("sensitivityLabeledFileCount", 0)
+                return
+
+            cert_manager = self._get_or_create_cert_token_manager()
+            if hasattr(cert_manager, "load_or_generate_all_certificates"):
+                cert_manager.load_or_generate_all_certificates(self.logger)
+
+            total_encrypted_count_box = [0]
+
+            def _on_tenant_labels(all_ids: set, encrypted_ids: set) -> None:
+                with self.encryption_metrics_lock:
+                    self.total_sensitivity_label_ids.update(all_ids)
+                    self.encrypted_sensitivity_label_ids.update(encrypted_ids)
+
+            def _on_page_metrics(
+                drive_id: str,
+                page_labeled_count: int,
+                page_encrypted_count: int,
+                page_encrypted_size: int,
+                page_all_labels: set,
+                page_encrypted_labels: set,
+            ) -> None:
+                with self.encryption_metrics_lock:
+                    self.drive_id_to_labeled_file_count[drive_id] = (
+                        self.drive_id_to_labeled_file_count.get(drive_id, 0) + page_labeled_count
+                    )
+                    self.total_labeled_file_count += page_labeled_count
+                    self.drive_id_to_encrypted_file_count[drive_id] = (
+                        self.drive_id_to_encrypted_file_count.get(drive_id, 0) + page_encrypted_count
+                    )
+                    self.drive_id_to_encrypted_file_size[drive_id] = (
+                        self.drive_id_to_encrypted_file_size.get(drive_id, 0) + page_encrypted_size
+                    )
+                    self.total_sensitivity_label_ids.update(page_all_labels)
+                    self.encrypted_sensitivity_label_ids.update(page_encrypted_labels)
+                    total_encrypted_count_box[0] += page_encrypted_count
+                if page_encrypted_count > 0:
+                    drive_discovery_progress_metrics.increment("encryptedFileCount", page_encrypted_count)
+                if page_labeled_count > 0:
+                    drive_discovery_progress_metrics.increment("sensitivityLabeledFileCount", page_labeled_count)
+
+            scan_libraries_for_encrypted_files(
+                cert_token_manager=cert_manager,
+                url_invoker=self.url_invoker,
+                library_targets=library_targets,
+                on_page_metrics=_on_page_metrics,
+                on_tenant_labels_discovered=_on_tenant_labels,
+                logger=self.logger,
+                stop_event=self.stop_event,
+                max_retries=self.config.retries,
+                backoff=self.config.backoff,
+                concurrency=ENCRYPTED_FILES_CONCURRENCY,
+            )
+
+            drive_discovery_progress_metrics.update("encryptedFileCount", total_encrypted_count_box[0])
+            drive_discovery_progress_metrics.update("sensitivityLabeledFileCount", self.total_labeled_file_count)
+            if self.logger:
+                self.logger(
+                    f"Sensitivity label & encrypted file scan complete (SharePoint REST postquery): "
+                    f"Sensitivity Labels: {len(self.total_sensitivity_label_ids)} ({len(self.encrypted_sensitivity_label_ids)} Encrypted) | "
+                    f"Sensitivity Labeled Files: {self.total_labeled_file_count} ({total_encrypted_count_box[0]} Encrypted)."
                 )
 
         except Exception as e:
-            # Log exception
-            pass
+            self._log_and_fail("Error in _scan_encrypted_files", e, failures)
 
     def _fetch_file_versions_size(
         self,
@@ -1550,7 +1727,6 @@ class FileEstimator(Estimator):
     ):
         completed_drives = cumulative_completed_drives if cumulative_completed_drives is not None else AtomicInt(0)
         self.processed_versions_count = AtomicInt(0)
-        self.processed_encryption_count = AtomicInt(0)
         total_drives = total_drives_count if total_drives_count is not None else len(drive_ids)
         
         adj_list: Dict[str, Dict[str, List[str]]] = {}
@@ -1578,11 +1754,8 @@ class FileEstimator(Estimator):
         self.encryption_metrics_lock = threading.Lock()
         self.tree_lock = threading.Lock()
         self.versions_executor = None
-        self.encryption_executor = None
         if self.config.include_file_versions:
             self.versions_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
-        if self.config.scan_encrypted_files:
-            self.encryption_executor = ThreadPoolExecutor(max_workers=self.config.concurrency)
 
         try:
             # use delta api to fetch the folders
@@ -1682,9 +1855,6 @@ class FileEstimator(Estimator):
                         if self.config.include_file_versions and self.versions_executor:
                             self.versions_executor.submit(self._fetch_file_versions_size, drive_id, res_id, failures, drive_discovery_progress_metrics, completed_drives, total_drives)
 
-                        if self.config.scan_encrypted_files and self.encryption_executor:
-                            self.encryption_executor.submit(self._check_file_encryption, drive_id, res_id, file_size, failures, drive_discovery_progress_metrics, completed_drives, total_drives)
-
                     elif "remoteItem" in curr_response:
                         drive_discovery_progress_metrics.increment("shortcutCount")
                         with self.tree_lock:
@@ -1782,8 +1952,6 @@ class FileEstimator(Estimator):
         finally:
             if self.config.include_file_versions and hasattr(self, "versions_executor") and self.versions_executor:
                 self.versions_executor.shutdown(wait=True)
-            if self.config.scan_encrypted_files and hasattr(self, "encryption_executor") and self.encryption_executor:
-                self.encryption_executor.shutdown(wait=True)
 
     def _calculate_drive_metrics(
         self, 
