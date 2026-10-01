@@ -10,6 +10,7 @@
   - **Automated Deep Scan Recommendations**: Sites or Document Libraries exceeding **200k items** (Warning Resources) or **500k items** (Large Resources) are highlighted on the dashboard, marked as `"Deep Scan Recommended"` in the `Suggested Batch` column, and exported to `sites_for_deep_scan.csv` for targeted Deep Scans.
   - **Failed Document Library Tracking**: Surfaces a **Failed Document Library Count** card on the results dashboard and a `Failed DL Count` column in exported CSV reports if any Document Library fails to scan.
   - **Site Report CSV Upload for Instant ETA Recalculation**: Upload a previously generated `site_report_<timestamp>.csv` (from either Shallow Scan or Deep Scan, covering both OneDrive and SharePoint sites) via **Upload CSV** to recalculate migration batches and ETAs without re-scanning.
+  - **Note**: The new feature requires an additional library `cryptography`. Please run `pip install cryptography` or `pip3 install cryptography` if faced with errors like `ModuleNotFoundError: No module named 'cryptography'`
 
 ## DISCLAIMER
 
