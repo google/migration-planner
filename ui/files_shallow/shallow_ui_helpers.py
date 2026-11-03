@@ -14,11 +14,18 @@
 
 """UI helpers, certificate modal prompt, and Shallow Scan formatting utilities."""
 
+import datetime
+import email.utils
 import logging
+import math
 import threading
 from tkinter import messagebox
+from typing import Optional
 from urllib.parse import urlparse
 import pandas as pd
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from core.cert_auth import (
     check_certificate_exists,
     generate_certificate,
@@ -45,6 +52,7 @@ from util.constants import (
     FONT_HEADER_MEDIUM,
     FONT_HEADER_SMALL,
     GRAPH_BASE_URL,
+    THROTTLING_STATUS_CODES,
 )
 from util.files_shallow.cert_token_manager import CertTokenManager
 
@@ -414,6 +422,224 @@ def ensure_certificates_and_prompt(tool, config, ctk) -> bool:
   return True
 
 
+# Transient 5xx retries allowed during the pre-flight check. Throttling
+# (THROTTLING_STATUS_CODES) is never retried here; it is reported instead.
+PREFLIGHT_MAX_RETRIES = 2
+
+# Pre-flight stages, phrased to complete "Stopped while ...".
+_STAGE_SIGN_IN = "signing in to Microsoft Entra ID"
+_STAGE_RESOLVE_DOMAIN = "looking up the SharePoint address via Microsoft Graph"
+_STAGE_CERT_TOKEN = "requesting the certificate-based SharePoint token"
+_STAGE_SHAREPOINT = "calling the SharePoint REST API"
+
+
+class ThrottledError(Exception):
+  """Raised when Microsoft throttles a pre-flight request (HTTP 429/503).
+
+  Attributes:
+    status_code: HTTP status returned by Microsoft.
+    retry_after_seconds: Seconds from the Retry-After header, or None if absent.
+    retry_at: Local time when retrying is expected to succeed, or None.
+    stage: Pre-flight step that was throttled (see _STAGE_* constants).
+    diagnostics: Error codes and request id, for logs and support only.
+  """
+
+  def __init__(
+      self,
+      status_code: int,
+      retry_after_seconds: Optional[int],
+      stage: str,
+      diagnostics: str = "",
+  ) -> None:
+    self.status_code = status_code
+    self.retry_after_seconds = retry_after_seconds
+    self.stage = stage
+    self.diagnostics = diagnostics
+    self.retry_at = (
+        datetime.datetime.now()
+        + datetime.timedelta(seconds=retry_after_seconds)
+        if retry_after_seconds is not None
+        else None
+    )
+    super().__init__(self.summary)
+
+  @classmethod
+  def from_response(cls, response, stage: str) -> "ThrottledError":
+    headers = getattr(response, "headers", None) or {}
+    return cls(
+        status_code=response.status_code,
+        retry_after_seconds=_parse_retry_after(headers.get("Retry-After")),
+        stage=stage,
+        diagnostics=_throttling_diagnostics(response),
+    )
+
+  @property
+  def is_service_busy(self) -> bool:
+    """True for HTTP 503, which can mean throttling or a busy/unavailable service."""
+    return self.status_code == 503
+
+  @property
+  def summary(self) -> str:
+    """One-line message, e.g. 'Microsoft is throttling this app (HTTP 429). Retry after 300 s.'"""
+    if self.retry_after_seconds is None:
+      retry_hint = "Retry in a few minutes."
+    else:
+      retry_hint = f"Retry after {self.retry_after_seconds} s."
+    if self.is_service_busy:
+      return (
+          "Microsoft is throttling this app or the service is busy"
+          f" (HTTP {self.status_code}). {retry_hint}"
+      )
+    return f"Microsoft is throttling this app (HTTP {self.status_code}). {retry_hint}"
+
+  @property
+  def log_message(self) -> str:
+    """Summary plus the throttled step and diagnostics, for the run log."""
+    message = f"{self.summary} Stopped while {self.stage}."
+    if self.diagnostics:
+      message += f" ({self.diagnostics})"
+    return message
+
+  @property
+  def dialog_title(self) -> str:
+    """Title of the throttling dialog shown to the user."""
+    if self.is_service_busy:
+      return "Microsoft Service Busy or Throttling"
+    return "Microsoft Is Throttling This App"
+
+  @property
+  def dialog_message(self) -> str:
+    """Body of the throttling dialog shown to the user."""
+    if self.retry_at is not None:
+      wait_hint = f"Wait until about {self.retry_at:%H:%M} before retrying."
+    else:
+      wait_hint = "Wait a few minutes before retrying."
+    if self.is_service_busy:
+      explanation = (
+          "Microsoft is either temporarily limiting requests from this app in"
+          " your tenant, or the service is busy or briefly unavailable."
+      )
+    else:
+      explanation = (
+          "Microsoft is temporarily limiting requests from this app in your"
+          " tenant. This usually follows heavy scanning, or other tools using"
+          " the same app registration."
+      )
+    return (
+        f"{self.summary}\n\n{explanation}\n\n{wait_hint} Retrying earlier can"
+        " extend the throttling."
+    )
+
+
+def _parse_retry_after(value) -> Optional[int]:
+  """Parses a Retry-After header (delta-seconds or HTTP-date) into seconds."""
+  if value is None:
+    return None
+  value = str(value).strip()
+  if not value:
+    return None
+  try:
+    return max(0, math.ceil(float(value)))
+  except ValueError:
+    pass
+  try:
+    retry_at = email.utils.parsedate_to_datetime(value)
+  except (TypeError, ValueError):
+    return None
+  if retry_at.tzinfo is None:
+    retry_at = retry_at.replace(tzinfo=datetime.timezone.utc)
+  now = datetime.datetime.now(datetime.timezone.utc)
+  return max(0, math.ceil((retry_at - now).total_seconds()))
+
+
+def _throttling_diagnostics(response) -> str:
+  """Extracts error codes and request id from a throttled response."""
+  codes = []
+  try:
+    body = response.json()
+  except Exception:  # pylint: disable=broad-except
+    body = None
+  if isinstance(body, dict):
+    error = body.get("error")
+    if isinstance(error, dict):
+      # Graph and SharePoint: nested {"code": ..., "innerError": {...}}.
+      node = error
+      while isinstance(node, dict) and len(codes) < 5:
+        if node.get("code"):
+          codes.append(str(node["code"]))
+        node = node.get("innerError") or node.get("innererror")
+    elif isinstance(error, str):
+      # Entra ID token endpoint: {"error": ..., "error_codes": [...]}.
+      codes.append(error)
+      codes.extend(f"AADSTS{code}" for code in body.get("error_codes", [])[:3])
+  parts = []
+  if codes:
+    parts.append("error: " + " > ".join(codes))
+  headers = getattr(response, "headers", None) or {}
+  request_id = (
+      headers.get("request-id")
+      or headers.get("x-ms-request-id")
+      or headers.get("SPRequestGuid")
+  )
+  if request_id:
+    parts.append(f"request-id: {request_id}")
+  return ", ".join(parts)
+
+
+def _raise_if_throttled(response, stage: str) -> None:
+  if response.status_code in THROTTLING_STATUS_CODES:
+    raise ThrottledError.from_response(response, stage)
+
+
+def _throttling_from_exception(error: BaseException, stage: str) -> Optional[ThrottledError]:
+  """Finds a throttled HTTP response anywhere in an exception's cause chain.
+
+  TokenManager and CertTokenManager wrap HTTP errors in ConnectionError, so the
+  original requests.HTTPError (and its response) is on __cause__.
+  """
+  seen = set()
+  current = error
+  while current is not None and id(current) not in seen:
+    seen.add(id(current))
+    response = getattr(current, "response", None)
+    if getattr(response, "status_code", None) in THROTTLING_STATUS_CODES:
+      return ThrottledError.from_response(response, stage)
+    current = current.__cause__ or current.__context__
+  return None
+
+
+def _call_raising_throttling(func, stage: str):
+  """Runs func, converting a throttled HTTP failure into ThrottledError."""
+  try:
+    return func()
+  except Exception as error:  # pylint: disable=broad-except
+    throttled = _throttling_from_exception(error, stage)
+    if throttled is not None:
+      raise throttled from error
+    raise
+
+
+def _apply_preflight_retry_policy(session) -> None:
+  """Stops a session from silently waiting out Microsoft throttling.
+
+  The shared session policy honours Retry-After on 429/503 with no cap, up to
+  config.retries times, which made this check look frozen for up to ~50
+  minutes. Here throttled responses are returned immediately so they can be
+  reported, and only brief transient 5xx errors are retried.
+  """
+  if not isinstance(session, requests.Session):
+    return  # Test doubles provide their own session.
+  retry = Retry(
+      total=PREFLIGHT_MAX_RETRIES,
+      backoff_factor=1,
+      status_forcelist=[500, 502, 504],
+      allowed_methods=["GET", "POST"],
+      respect_retry_after_header=False,
+      raise_on_status=False,
+  )
+  session.mount("https://", HTTPAdapter(max_retries=retry))
+
+
 def validate_certificate_auth(config, current_logger=None) -> tuple[bool, str]:
   """Verifies that certificate-based SharePoint REST authentication works.
 
@@ -427,7 +653,12 @@ def validate_certificate_auth(config, current_logger=None) -> tuple[bool, str]:
   Returns:
     Tuple of (success, detail). On success, detail is the SharePoint domain.
     On failure, detail is a diagnostic message intended for logs only.
+
+  Raises:
+    ThrottledError: Microsoft throttled one of the requests (HTTP 429/503).
+      Raised immediately instead of waiting out Retry-After.
   """
+  log = current_logger or (lambda _msg: None)
   try:
     with TokenManager(
         tenant_id=config.tenant_id,
@@ -437,13 +668,18 @@ def validate_certificate_auth(config, current_logger=None) -> tuple[bool, str]:
         retries=config.retries,
         backoff=config.backoff,
     ) as graph_manager:
-      graph_manager.authenticate_all(current_logger)
+      _apply_preflight_retry_policy(graph_manager.session)
+      _call_raising_throttling(
+          lambda: graph_manager.authenticate_all(current_logger), _STAGE_SIGN_IN
+      )
       graph_token = graph_manager.get_valid_token_slot()
+      log("Certificate check: looking up the SharePoint address via Microsoft Graph...")
       resp = graph_manager.session.get(
           f"{GRAPH_BASE_URL}/sites/root?$select=webUrl",
           headers={"Authorization": f"Bearer {graph_token['token']}"},
           timeout=30.0,
       )
+      _raise_if_throttled(resp, _STAGE_RESOLVE_DOMAIN)
       if resp.status_code != 200:
         return False, (
             f"Unable to resolve SharePoint root site (HTTP {resp.status_code}):"
@@ -463,8 +699,13 @@ def validate_certificate_auth(config, current_logger=None) -> tuple[bool, str]:
         retries=config.retries,
         backoff=config.backoff,
     ) as cert_manager:
+      _apply_preflight_retry_policy(cert_manager.session)
       cert_manager.load_or_generate_all_certificates(current_logger)
-      cert_manager.ensure_domain_authenticated(domain, current_logger)
+      log(f"Certificate check: requesting a certificate-based SharePoint token for {domain}...")
+      _call_raising_throttling(
+          lambda: cert_manager.ensure_domain_authenticated(domain, current_logger),
+          _STAGE_CERT_TOKEN,
+      )
       # With concurrency=1 the domain pool holds exactly one slot per app.
       for _ in cert_manager.apps:
         token_data = cert_manager.get_valid_token_slot(domain, current_logger)
@@ -476,6 +717,7 @@ def validate_certificate_auth(config, current_logger=None) -> tuple[bool, str]:
             },
             timeout=30.0,
         )
+        _raise_if_throttled(resp, _STAGE_SHAREPOINT)
         if resp.status_code != 200:
           return False, (
               "SharePoint REST check failed for App"
@@ -483,6 +725,8 @@ def validate_certificate_auth(config, current_logger=None) -> tuple[bool, str]:
               f" {resp.text}"
           )
     return True, domain
+  except ThrottledError:
+    raise
   except Exception as e:  # pylint: disable=broad-except
     return False, str(e)
 
@@ -491,7 +735,9 @@ def run_certificate_auth_check(tool, config, ctk) -> bool:
   """Runs the certificate auth check behind a blocking progress dialog.
 
   The check runs on a worker thread so the window stays responsive. On failure,
-  a Retry/Cancel popup is shown; Retry re-runs the check, Cancel aborts.
+  a Retry/Cancel popup is shown; Retry re-runs the check, Cancel aborts. If
+  Microsoft throttles the app (HTTP 429/503), the check stops immediately and a
+  dedicated throttling popup states when to retry.
 
   Returns:
     True if certificate authentication succeeded, False if the user cancelled.
@@ -536,11 +782,18 @@ def run_certificate_auth_check(tool, config, ctk) -> bool:
     progress.start()
 
     def _worker():
-      result = validate_certificate_auth(config, tool.log_msg)
-      outcome["result"] = result
+      try:
+        outcome["result"] = validate_certificate_auth(config, tool.log_msg)
+      except ThrottledError as throttled:
+        outcome["throttled"] = throttled
+      except Exception as error:  # pylint: disable=broad-except
+        outcome["result"] = (False, f"Unexpected error: {error}")
+      finally:
+        # Always signal completion so the progress dialog can never hang.
+        outcome["done"] = True
 
     def _poll():
-      if "result" in outcome:
+      if outcome.get("done"):
         progress.stop()
         dialog.grab_release()
         dialog.destroy()
@@ -551,6 +804,21 @@ def run_certificate_auth_check(tool, config, ctk) -> bool:
     threading.Thread(target=_worker, daemon=True).start()
     dialog.after(200, _poll)
     tool.wait_window(dialog)
+
+    throttled = outcome.get("throttled")
+    if throttled is not None:
+      logger.warning(f"Certificate authentication check stopped: {throttled.log_message}")
+      tool.log_msg(f"Certificate authentication check stopped: {throttled.log_message}")
+      retry = messagebox.askretrycancel(
+          title=throttled.dialog_title,
+          message=throttled.dialog_message,
+          icon="warning",
+          parent=tool,
+      )
+      if not retry:
+        logger.info("Certificate authentication check cancelled by user (throttled).")
+        return False
+      continue
 
     success, detail = outcome.get("result", (False, "Check did not complete."))
     if success:

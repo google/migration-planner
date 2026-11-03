@@ -22,6 +22,10 @@ MAX_RETRIES: int = 10
 BACKOFF: int = 2
 SHOW_LOAD_MULTIPLIER = False
 USE_MSFT_BACKOFF = True
+# HTTP statuses Microsoft returns when throttling an app: 429 (Too Many
+# Requests) from Graph, Entra ID and SharePoint, and 503 (Server Too Busy)
+# from SharePoint. Both usually carry a Retry-After header.
+THROTTLING_STATUS_CODES: tuple[int, ...] = (429, 503)
 
 # Chat Estimation Cost Weights (Seconds)
 BLENDED_MSG_COST_SEC: float = 0.75
