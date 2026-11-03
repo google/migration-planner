@@ -115,7 +115,7 @@ class TokenManager:
 
   def authenticate_all(self, current_logger: Callable[[str], None] = None, required_scopes: list[str] | None = None) -> None:   # backward compatibility
     """Authenticates all configured applications and validates scopes."""
-    self.log_msg("info", f"Authenticating {len(self.apps)} applications...", current_logger)
+    self.log_msg("info", f"Signing in {len(self.apps)} app(s) to Microsoft Entra ID...", current_logger)
     url = TOKEN_URL_TEMPLATE.format(self.tenant_id)
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
@@ -167,7 +167,14 @@ class TokenManager:
         self.tokens.append(token_data)
         for _ in range(self.concurrency):
           self.token_queue.put(token_data)
-        self.log_msg("info", f"App {client_id[:5]}... authenticated and verified.", current_logger)
+        # Only claim what was established: a token was issued, and permissions
+        # were confirmed only if required_scopes were checked above. Later
+        # calls can still fail (e.g. throttling), so avoid "verified".
+        if required_scopes:
+          signed_in_msg = f"App {client_id[:5]}...: signed in; required API permissions confirmed."
+        else:
+          signed_in_msg = f"App {client_id[:5]}...: signed in (access token issued)."
+        self.log_msg("info", signed_in_msg, current_logger)
 
       except requests.exceptions.RequestException as error:
         error_text = ""

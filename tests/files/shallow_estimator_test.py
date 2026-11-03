@@ -1554,7 +1554,8 @@ class ValidateCertificateAuthTest(unittest.TestCase):
           return resp
       return MockResponse(404, {})
 
-  def _make_managers(self, graph_resp, sp_resp, cert_error=None):
+  def _make_managers(self, graph_resp, sp_resp, cert_error=None,
+                     cert_exception=None):
     test = self
 
     class FakeTokenManager:
@@ -1584,6 +1585,8 @@ class ValidateCertificateAuthTest(unittest.TestCase):
         return []
 
       def ensure_domain_authenticated(self, domain, current_logger=None):
+        if cert_exception:
+          raise cert_exception
         if cert_error:
           raise ConnectionError(cert_error)
 
@@ -1592,10 +1595,12 @@ class ValidateCertificateAuthTest(unittest.TestCase):
 
     return FakeTokenManager, FakeCertTokenManager
 
-  def _run(self, graph_resp, sp_resp, cert_error=None):
+  def _run(self, graph_resp, sp_resp, cert_error=None, cert_exception=None):
     from ui.files_shallow import shallow_ui_helpers
 
-    token_cls, cert_cls = self._make_managers(graph_resp, sp_resp, cert_error)
+    token_cls, cert_cls = self._make_managers(
+        graph_resp, sp_resp, cert_error, cert_exception
+    )
     config = mock.Mock(
         tenant_id="tenant",
         client_ids=["client-1"],
@@ -1644,6 +1649,149 @@ class ValidateCertificateAuthTest(unittest.TestCase):
     self.assertFalse(ok)
     self.assertIn("HTTP 403", detail)
     self.assertFalse(hasattr(self, "sp_session"))
+
+  _GRAPH_THROTTLE_BODY = {
+      "error": {
+          "code": "activityLimitReached",
+          "message": "The request has been throttled",
+          "innerError": {
+              "code": "throttledRequest",
+              "innerError": {"code": "forbiddenQuota"},
+          },
+      }
+  }
+
+  def test_graph_throttling_fails_fast_with_retry_after(self):
+    from ui.files_shallow import shallow_ui_helpers
+
+    with self.assertRaises(shallow_ui_helpers.ThrottledError) as ctx:
+      self._run(
+          MockResponse(
+              429,
+              self._GRAPH_THROTTLE_BODY,
+              headers={"Retry-After": "300", "request-id": "req-123"},
+          ),
+          MockResponse(200, {"Title": "Root"}),
+      )
+    err = ctx.exception
+    self.assertEqual(err.status_code, 429)
+    self.assertEqual(err.retry_after_seconds, 300)
+    self.assertEqual(
+        err.summary,
+        "Microsoft is throttling this app (HTTP 429). Retry after 300 s.",
+    )
+    self.assertIn("looking up the SharePoint address", err.log_message)
+    self.assertIn(
+        "activityLimitReached > throttledRequest > forbiddenQuota",
+        err.log_message,
+    )
+    self.assertIn("request-id: req-123", err.log_message)
+    self.assertNotIn("certificate", err.dialog_message.lower())
+    self.assertEqual(err.dialog_title, "Microsoft Is Throttling This App")
+    # Throttled before the certificate step, so SharePoint is never called.
+    self.assertFalse(hasattr(self, "sp_session"))
+
+  def test_sharepoint_503_is_reported_as_throttling(self):
+    from ui.files_shallow import shallow_ui_helpers
+
+    with self.assertRaises(shallow_ui_helpers.ThrottledError) as ctx:
+      self._run(
+          MockResponse(200, {"webUrl": "https://contoso.sharepoint.com"}),
+          MockResponse(503, {}, text="Server Too Busy",
+                       headers={"Retry-After": "120"}),
+      )
+    self.assertEqual(ctx.exception.status_code, 503)
+    self.assertEqual(ctx.exception.retry_after_seconds, 120)
+    self.assertIn("calling the SharePoint REST API", ctx.exception.log_message)
+    self.assertEqual(
+        ctx.exception.summary,
+        "Microsoft is throttling this app or the service is busy (HTTP 503)."
+        " Retry after 120 s.",
+    )
+    self.assertEqual(
+        ctx.exception.dialog_title, "Microsoft Service Busy or Throttling"
+    )
+    self.assertIn("busy or briefly unavailable", ctx.exception.dialog_message)
+
+  def test_throttled_certificate_token_request_is_detected_via_cause(self):
+    import requests
+    from ui.files_shallow import shallow_ui_helpers
+
+    http_error = requests.HTTPError(
+        response=MockResponse(
+            429,
+            {"error": "temporarily_unavailable", "error_codes": [50196]},
+            headers={"Retry-After": "60"},
+        )
+    )
+    wrapped = ConnectionError("Microsoft throttled the certificate token request")
+    wrapped.__cause__ = http_error
+
+    with self.assertRaises(shallow_ui_helpers.ThrottledError) as ctx:
+      self._run(
+          MockResponse(200, {"webUrl": "https://contoso.sharepoint.com"}),
+          MockResponse(200, {"Title": "Root"}),
+          cert_exception=wrapped,
+      )
+    self.assertEqual(ctx.exception.retry_after_seconds, 60)
+    self.assertIn("certificate-based SharePoint token", ctx.exception.log_message)
+    self.assertIn("temporarily_unavailable > AADSTS50196", ctx.exception.log_message)
+
+  def test_throttling_without_retry_after_suggests_a_few_minutes(self):
+    from ui.files_shallow import shallow_ui_helpers
+
+    with self.assertRaises(shallow_ui_helpers.ThrottledError) as ctx:
+      self._run(
+          MockResponse(429, {}),
+          MockResponse(200, {"Title": "Root"}),
+      )
+    self.assertIsNone(ctx.exception.retry_after_seconds)
+    self.assertEqual(
+        ctx.exception.summary,
+        "Microsoft is throttling this app (HTTP 429). Retry in a few minutes.",
+    )
+
+  def test_non_throttling_cause_is_still_a_normal_failure(self):
+    import requests
+
+    http_error = requests.HTTPError(response=MockResponse(401, {}))
+    wrapped = ConnectionError("AADSTS700027: certificate not registered")
+    wrapped.__cause__ = http_error
+
+    ok, detail = self._run(
+        MockResponse(200, {"webUrl": "https://contoso.sharepoint.com"}),
+        MockResponse(200, {"Title": "Root"}),
+        cert_exception=wrapped,
+    )
+    self.assertFalse(ok)
+    self.assertIn("AADSTS700027", detail)
+
+  def test_retry_after_http_date_is_parsed(self):
+    import datetime
+    import email.utils
+    from ui.files_shallow import shallow_ui_helpers
+
+    future = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        seconds=120
+    )
+    seconds = shallow_ui_helpers._parse_retry_after(
+        email.utils.format_datetime(future, usegmt=True)
+    )
+    self.assertTrue(115 <= seconds <= 120, seconds)
+    self.assertIsNone(shallow_ui_helpers._parse_retry_after("not-a-date"))
+
+  def test_preflight_retry_policy_does_not_wait_out_throttling(self):
+    import requests
+    from ui.files_shallow import shallow_ui_helpers
+
+    session = requests.Session()
+    shallow_ui_helpers._apply_preflight_retry_policy(session)
+    retry = session.get_adapter("https://graph.microsoft.com").max_retries
+    self.assertFalse(retry.is_retry("GET", 429, has_retry_after=True))
+    self.assertFalse(retry.is_retry("GET", 503, has_retry_after=True))
+    self.assertTrue(retry.is_retry("GET", 500, has_retry_after=False))
+    self.assertEqual(retry.total, shallow_ui_helpers.PREFLIGHT_MAX_RETRIES)
+    session.close()
 
 
 if __name__ == "__main__":
