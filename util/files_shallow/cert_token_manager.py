@@ -29,7 +29,7 @@ import requests
 
 from core import cert_auth
 from util.auth_manager import TokenManager
-from util.constants import TOKEN_URL_TEMPLATE
+from util.constants import THROTTLING_STATUS_CODES, TOKEN_URL_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -193,13 +193,24 @@ class CertTokenManager(TokenManager):
       }
     except requests.exceptions.RequestException as error:
       error_detail = ""
+      status_code = None
       if error.response is not None:
         error_detail = f": {error.response.text}"
-      msg = (
-          f"Certificate authentication failed for {sharepoint_domain} "
-          f"(App {client_id[:5]}...){error_detail}. Ensure certificate.pem is "
-          "uploaded to Azure App Registration under Certificates & secrets."
-      )
+        status_code = error.response.status_code
+      if status_code in THROTTLING_STATUS_CODES:
+        # Throttling is unrelated to the certificate, so don't point users at
+        # re-uploading certificate.pem.
+        msg = (
+            f"Microsoft throttled the certificate token request for "
+            f"{sharepoint_domain} (App {client_id[:5]}..., HTTP "
+            f"{status_code}){error_detail}."
+        )
+      else:
+        msg = (
+            f"Certificate authentication failed for {sharepoint_domain} "
+            f"(App {client_id[:5]}...){error_detail}. Ensure certificate.pem is "
+            "uploaded to Azure App Registration under Certificates & secrets."
+        )
       if current_logger:
         current_logger(msg)
       raise ConnectionError(msg) from error
