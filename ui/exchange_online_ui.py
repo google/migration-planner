@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import urllib.parse
+import webbrowser
 
 from util.connectors import TokenManager, UrlInvoker
 from util.monitoring import ResourceMonitor
