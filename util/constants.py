@@ -85,6 +85,16 @@ IPA_ETA_MULTIPLIER = 1.1
 FILES_GLOBAL_COUNT_LIMIT = 4  # 4 files/folders per second
 FILES_GLOBAL_CORPUS_SIZE_LIMIT = (400 * 1024 * 1024 * 1024) // 3600  # 400 GB per hour in bytes per second
 ENCRYPTED_FILE_ETA_MULTIPLIER = 0.5 # 0.5x speed for encrypted files
+# Batching: a batch's largest sites should be similar in file count so they finish together.
+SITE_SIMILARITY_GROUP_SIZE = 5 # A group of similar large sites grows up to this many; the check looks at a batch's 5 largest
+SITE_SIMILARITY_MAX_RATIO = 1.5 # A batch's large sites must be within this ratio of its largest (by file count)
+BATCH_LEADER_MIN_FILES = 100_000 # Only sites with this many files can start a batch; the similarity check only covers such sites
+GROUP_MEMBER_MIN_FILES = 10_000 # Sites below this are always fillers; sites from here up to BATCH_LEADER_MIN_FILES can join a group but not start one
+FILES_MAX_SITES_PER_BATCH = 5000 # Hard limit on sites in one batch
+FILES_MIN_SITES_PER_BATCH = 20 # Hard minimum sites in one batch (a report with fewer sites becomes one batch)
+FILES_MAX_BATCHES = 50 # A plan never has more batches, unless the 5,000-site limit needs more
+BATCH_TARGET_TOLERANCE = 1.15 # A batch's head stops growing above this x the target batch time
+BATCH_PLAN_ETA_TOLERANCE = 0.001 # Plans within 0.1% of the best total ETA count as equally fast
 
 ENABLE_CALENDAR_ETA = False
 ETA_CALENDAR_GLOBAL_LIMIT = 50

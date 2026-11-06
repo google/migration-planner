@@ -15,6 +15,7 @@ python3 -m unittest tests.<package>.<module>
 | --- | --- | --- |
 | Files - shallow scan | `python3 -m unittest tests.files.shallow_estimator_test` | No |
 | Files - deep scan load | `python3 -m unittest tests.files.load_tests` | Yes |
+| Files - batching & ETA | `python3 -m unittest tests.files.files_batching_test tests.files.files_eta_test` | No |
 | Chat | `python3 -m unittest tests.chat.estimator_test tests.chat.scanner_test` | No |
 | EO in-place archives - sanity | `python3 -m unittest tests.eo_in_place_archives.sanity_tests` | No |
 | EO in-place archives - load | `python3 -m unittest tests.eo_in_place_archives.load_tests` | Yes |

@@ -383,6 +383,15 @@ The results dashboard displays summary cards for the scanned OneDrive and ShareP
 
 The exported CSV report includes all summary metrics along with granular site-level details (with `Failed DL Count` included right after `DL Count` in Shallow Scan). If both Personal (OneDrive) and SharePoint Sites are scanned, results for both are grouped separately in the full report export.
 
+#### 2. Timeline Estimates & Batching (OneDrive / SharePoint)
+*   **Batch speed**: Each batch migrates at up to 400 GB/hour and at a files/second rate of 4.4 (SharePoint) or 4.8 (OneDrive), multiplied by the tenant's license tier (×1 up to 1,000 licenses, ×2 up to 5,000, ×3 up to 15,000, ×4 up to 50,000, ×5 above) and reduced by 20% as a buffer.
+*   **Lanes**: The selected number of parallel batches ("lanes") run independently, each running its batches one after another. The **Total ETA** is the duration of the busiest lane. The plan keeps the Total ETA as low as possible; the rules below never make it slower.
+*   **Similar-size largest sites**: Only sites with 100k+ files can start a batch. A batch led by such a site gets up to 5 large sites (by file count) within 1.5× of its largest, so they finish around the same time and the batch doesn't wait on one large site. Sites with 10k–100k files can join such a group but can't start one; sites under 10k files only fill batches. Batches without a 100k+ site are balanced purely by time. Folders don't count towards ETA or batching.
+*   **Balanced batches**: Sites limited by file count and sites limited by size are mixed in the same batch, so both the files/second and the 400 GB/hour limits are used and batches take a similar time.
+*   **Very large sites**: A site with no similar-size peers (e.g. 1.3M files when the next largest has 560k) leads its own batch with only small sites alongside it. This isn't counted as a similarity miss; batches whose large sites aren't within 1.5× are listed in the log.
+*   **Fewer batches**: Batches that run one after another in the same lane are merged whenever the result stays within 5,000 sites and keeps its large sites similar.
+*   **Limits**: Every batch holds between 20 and 5,000 sites (a report with fewer than 20 sites becomes one batch), so some lanes may stay unused for small reports. There are never more than 50 batches (or the configured maximum, if lower) unless the 5,000-site limit needs more (over 250,000 sites).
+
 ---
 
 ### Workflow C Results: Microsoft Teams & Chat Planner
