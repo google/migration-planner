@@ -791,7 +791,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       
       if self.show_eta:
         df_final, batches_list, total_eta, buckets = (
-            shallow_ui_helpers.calculate_batches_with_shallow_exclusions(
+            shallow_ui_helpers.calculate_shallow_scan_batches(
                 self, df, file_metrics.get("licenseMetrics", {})
             )
         )
@@ -802,9 +802,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         file_metrics["df"] = df_final
         base_df = df_final
       else:
-        if getattr(self, "val_shallow_scan", False) and "Entities with > 500k item count" in df.columns:
-          numeric_large = pd.to_numeric(df["Entities with > 500k item count"], errors="coerce").fillna(0)
-          df["Suggested Batch"] = numeric_large.apply(lambda v: "Deep Scan Recommended" if v > 0 else "")
         base_df = df
 
       t_plan_gen_end = time.time()
@@ -893,24 +890,34 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           amr_df.to_csv(amr_path, index=False)
           self.log_msg(f"Depth report exported to: {amr_path}")
       
+      def _build_entity_export(rows):
+        mapping = file_metrics.get("siteIdToMail")
+        if mapping:
+          row_orig_ids = original_site_ids.loc[rows.index]
+          entities = row_orig_ids.map(mapping).fillna(rows["Site URL/Name"])
+          return pd.DataFrame({"Entity": entities})
+        return rows[["Site URL/Name"]].rename(columns={"Site URL/Name": "Entity"})
+
       if "Suggested Batch" in df_output.columns:
         unique_batches = df_output["Suggested Batch"].dropna().unique()
         for batch in unique_batches:
           if not batch:
             continue
           batch_data = df_output[df_output["Suggested Batch"] == batch].copy()
-          mapping = file_metrics.get("siteIdToMail")
-          if mapping:
-            batch_orig_ids = original_site_ids.loc[batch_data.index]
-            entities = batch_orig_ids.map(mapping).fillna(batch_data["Site URL/Name"])
-            batch_export = pd.DataFrame({"Entity": entities})
-          else:
-            batch_export = batch_data[["Site URL/Name"]].rename(
-                columns={"Site URL/Name": "Entity"}
-            )
+          batch_export = _build_entity_export(batch_data)
           safe_name = batch.replace(" ", "")
           batch_path = os.path.join(batches_dir, f"{safe_name}.csv")
           batch_export.to_csv(batch_path, index=False)
+
+      # Sites with >500k-item entities are planned into regular batches above and
+      # additionally listed here, since those entities must be split before migration.
+      deep_scan_mask = shallow_ui_helpers.get_deep_scan_recommended_mask(self, df_output)
+      if deep_scan_mask.any():
+        deep_scan_path = os.path.join(
+            batches_dir, shallow_ui_helpers.DEEP_SCAN_RECOMMENDED_FILENAME
+        )
+        _build_entity_export(df_output[deep_scan_mask]).to_csv(deep_scan_path, index=False)
+        self.log_msg(f"Deep Scan recommended sites exported to: {deep_scan_path}")
       
       self.ui_update("phase_status", source="plan_generation", status="complete")
       time.sleep(2)

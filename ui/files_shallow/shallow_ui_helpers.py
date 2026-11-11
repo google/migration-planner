@@ -849,6 +849,9 @@ SHALLOW_NA_COLS = [
     "File Count > Depth Limit 100",
 ]
 
+LARGE_RESOURCE_COL = "Entities with > 500k item count"
+DEEP_SCAN_RECOMMENDED_FILENAME = "DeepScanRecommended.csv"
+
 
 def _calculate_batches_with_na_columns(tool, df: pd.DataFrame, license_metrics: dict):
   """Runs batch calculation, temporarily treating 'N/A' metric columns as 0.
@@ -886,94 +889,59 @@ def _calculate_batches_with_na_columns(tool, df: pd.DataFrame, license_metrics: 
 
 
 def get_large_resource_banner_text(tool, data: dict):
-  """Returns the Shallow Scan banner describing how >500k sites affected the ETA.
+  """Returns the Shallow Scan warning banner for entities with >500k items.
 
-  Live API scans keep the original banner. For uploaded site reports (ETA
-  recalculation only), the banner follows the Shallow Scan toggle and always
-  states whether >500k sites were excluded. Returns None when Shallow Scan is
-  off (Deep Scan ETA shows no banner) or when there is nothing to report.
+  Sites containing these entities are still planned into migration batches, but
+  the entities must be split into smaller entities before migration. Live API
+  scans show the banner when the scan was a Shallow Scan; uploaded site reports
+  (ETA recalculation only) follow the Shallow Scan toggle. Returns None when
+  Shallow Scan does not apply or when there are no >500k entities.
   """
   large_entity_count = int(data.get("tenantLevelLargeResourceCount", 0) or 0)
-  entity_label = "entity contains" if large_entity_count == 1 else "entities contain"
-
-  if not getattr(tool, "skipped_actual_scan", False):
-    if data.get("isShallowScan") and large_entity_count > 0:
-      return (
-          f"⚠️ {large_entity_count:,} {entity_label} items >500k. Sites containing these entities were excluded from ETA calculations.\n"
-          "Recommendation: Run a Deep Scan with 'Generate Depth Report for Large Resources' enabled on these resources using the exported 'DeepScanRecommended.csv' in suggested_batches."
-      )
+  if large_entity_count <= 0:
     return None
 
-  is_shallow = getattr(tool, "val_shallow_scan", False)
+  if getattr(tool, "skipped_actual_scan", False):
+    is_shallow = getattr(tool, "val_shallow_scan", False)
+  else:
+    is_shallow = bool(data.get("isShallowScan"))
   if not is_shallow:
     return None
 
-  show_eta = getattr(tool, "show_eta", True)
-
-  df = data.get("df")
-  if df is not None and "Suggested Batch" in df.columns:
-    excluded_site_count = int((df["Suggested Batch"] == "Deep Scan Recommended").sum())
-  else:
-    # No plan DataFrame (e.g. ETA hidden): Shallow Scan still marks every large site.
-    excluded_site_count = sum(
-        1
-        for s in data.get("siteMetrics", {}).values()
-        if int(pd.to_numeric(s.get("largeResourceCount", 0), errors="coerce") or 0) > 0
-    )
-
-  if excluded_site_count > 0:
-    site_label = "site" if excluded_site_count == 1 else "sites"
-    verb = "was" if excluded_site_count == 1 else "were"
-    return (
-        f"⚠️ {large_entity_count:,} {entity_label} items >500k. {excluded_site_count:,} {site_label}"
-        f" containing these entities {verb} excluded from ETA calculations.\n"
-        "Recommendation: Run a Deep Scan with 'Generate Depth Report for Large Resources' enabled on"
-        " these resources using the exported 'DeepScanRecommended.csv' in suggested_batches."
-    )
-  if show_eta:
-    return (
-        "ℹ️ Shallow Scan: No entities with >500k items found. All sites are included in ETA"
-        " calculations."
-    )
-  return None
+  entity_label = "entity contains" if large_entity_count == 1 else "entities contain"
+  return (
+      f"⚠️ {large_entity_count:,} {entity_label} items >500k. Entities with >500k items"
+      " must be split into smaller entities before migration.\n"
+      f"See {DEEP_SCAN_RECOMMENDED_FILENAME} in suggested_batches."
+  )
 
 
-def calculate_batches_with_shallow_exclusions(tool, df: pd.DataFrame, license_metrics: dict):
-  """Excludes sites with >500k items from ETA calculation during Shallow Scan.
+def get_deep_scan_recommended_mask(tool, df: pd.DataFrame) -> pd.Series:
+  """Flags sites containing >500k-item entities when Shallow Scan applies.
 
-  Exclusion is driven solely by the Shallow Scan toggle. When the toggle is off,
-  every site (including ones with >500k-item entities) is planned like a Deep
-  Scan, even if the data came from an uploaded Shallow Scan site report.
-
-  Marks excluded sites with Suggested Batch = 'Deep Scan Recommended' so they
-  are natively exported to outputs/<ts>/suggested_batches/DeepScanRecommended.csv.
+  Driven solely by the Shallow Scan toggle. When the toggle is off, no site is
+  flagged (Deep Scan behavior), even for an uploaded Shallow Scan site report.
+  Flagged sites are exported to
+  outputs/<ts>/suggested_batches/DeepScanRecommended.csv.
   """
-  if not getattr(tool, "val_shallow_scan", False):
-    return _calculate_batches_with_na_columns(tool, df, license_metrics)
+  if not getattr(tool, "val_shallow_scan", False) or LARGE_RESOURCE_COL not in df.columns:
+    return pd.Series(False, index=df.index)
+  return pd.to_numeric(df[LARGE_RESOURCE_COL], errors="coerce").fillna(0) > 0
 
-  large_col = "Entities with > 500k item count"
-  if large_col not in df.columns:
-    numeric_large = pd.Series([0] * len(df), index=df.index)
-  else:
-    numeric_large = pd.to_numeric(df[large_col], errors="coerce").fillna(0)
 
-  df_eligible = df[numeric_large == 0].copy()
-  df_excluded = df[numeric_large > 0].copy()
+def calculate_shallow_scan_batches(tool, df: pd.DataFrame, license_metrics: dict):
+  """Plans migration batches for every site, including ones with >500k items.
 
-  if not df_excluded.empty:
-    df_excluded["Suggested Batch"] = "Deep Scan Recommended"
+  Sites with >500k-item entities are planned like any other site. During
+  Shallow Scan they are additionally reported in DeepScanRecommended.csv (see
+  get_deep_scan_recommended_mask), since those entities must be split into
+  smaller entities before migration.
+  """
+  large_site_count = int(get_deep_scan_recommended_mask(tool, df).sum())
+  if large_site_count > 0:
     tool.log_msg(
-        f"[Shallow Scan] Excluding {len(df_excluded)} site(s) with >500k items "
-        "from ETA calculation (marked as 'Deep Scan Recommended')."
+        f"[Shallow Scan] Including {large_site_count} site(s) with >500k items in batch"
+        " planning. Entities with >500k items must be split into smaller entities"
+        " before migration."
     )
-
-  if not df_eligible.empty:
-    df_eligible_final, batches_list, total_eta, buckets = (
-        _calculate_batches_with_na_columns(tool, df_eligible, license_metrics)
-    )
-  else:
-    df_eligible_final = df_eligible
-    batches_list, total_eta, buckets = [], 0.0, []
-
-  df_combined = pd.concat([df_eligible_final, df_excluded], ignore_index=True)
-  return df_combined, batches_list, total_eta, buckets
+  return _calculate_batches_with_na_columns(tool, df, license_metrics)

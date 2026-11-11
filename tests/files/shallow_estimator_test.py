@@ -1321,7 +1321,7 @@ class ShallowScanReportCsvUploadTest(unittest.TestCase):
 
 
 class ShallowDeepScanRecommendedTest(unittest.TestCase):
-  """Verifies only sites with >500k-item entities are marked 'Deep Scan Recommended'."""
+  """Verifies >500k-item sites are planned normally and flagged for DeepScanRecommended.csv."""
 
   def _make_tool(self, shallow_toggle: bool = True):
     import pandas as pd
@@ -1333,8 +1333,8 @@ class ShallowDeepScanRecommendedTest(unittest.TestCase):
     )
     return tool, pd
 
-  def test_only_large_resource_sites_are_excluded(self):
-    """A site with a >500k entity is excluded; a 300k-item site is planned normally."""
+  def test_large_resource_sites_are_planned_and_flagged(self):
+    """A site with a >500k entity is planned like any other site and flagged for Deep Scan."""
     from ui.files_shallow import shallow_ui_helpers
 
     tool, pd = self._make_tool()
@@ -1344,19 +1344,19 @@ class ShallowDeepScanRecommendedTest(unittest.TestCase):
         {"Site Id": "small", "File Count": 100, "Entities with > 500k item count": 0},
     ])
 
-    df_final, _, _, _ = shallow_ui_helpers.calculate_batches_with_shallow_exclusions(
-        tool, df, {}
-    )
+    df_final, _, _, _ = shallow_ui_helpers.calculate_shallow_scan_batches(tool, df, {})
 
     batches = dict(zip(df_final["Site Id"], df_final["Suggested Batch"]))
-    self.assertEqual(batches["large"], "Deep Scan Recommended")
-    self.assertEqual(batches["mid"], "Batch 1")
-    self.assertEqual(batches["small"], "Batch 1")
+    self.assertEqual(batches, {"large": "Batch 1", "mid": "Batch 1", "small": "Batch 1"})
     planned_df = tool.calculate_migration_batches.call_args[0][0]
-    self.assertEqual(sorted(planned_df["Site Id"]), ["mid", "small"])
+    self.assertEqual(sorted(planned_df["Site Id"]), ["large", "mid", "small"])
+    tool.log_msg.assert_called_once()
+
+    mask = shallow_ui_helpers.get_deep_scan_recommended_mask(tool, df_final)
+    self.assertEqual(df_final.loc[mask, "Site Id"].tolist(), ["large"])
 
   def test_legacy_200k_column_is_ignored(self):
-    """A legacy '>200k' column no longer triggers exclusion."""
+    """A legacy '>200k' column does not flag a site for Deep Scan."""
     from ui.files_shallow import shallow_ui_helpers
 
     tool, pd = self._make_tool()
@@ -1365,14 +1365,13 @@ class ShallowDeepScanRecommendedTest(unittest.TestCase):
          "Entities with > 200k item count": 3},
     ])
 
-    df_final, _, _, _ = shallow_ui_helpers.calculate_batches_with_shallow_exclusions(
-        tool, df, {}
-    )
+    df_final, _, _, _ = shallow_ui_helpers.calculate_shallow_scan_batches(tool, df, {})
 
     self.assertEqual(df_final["Suggested Batch"].iloc[0], "Batch 1")
+    self.assertFalse(shallow_ui_helpers.get_deep_scan_recommended_mask(tool, df_final).any())
 
   def test_toggle_off_plans_large_resource_sites_like_deep_scan(self):
-    """With the toggle OFF, >500k sites from a shallow report are planned, and N/A columns are restored."""
+    """With the toggle OFF, >500k sites are planned, not flagged, and N/A columns are restored."""
     from ui.files_shallow import shallow_ui_helpers
 
     tool, pd = self._make_tool(shallow_toggle=False)
@@ -1381,9 +1380,7 @@ class ShallowDeepScanRecommendedTest(unittest.TestCase):
         {"Site Id": "small", "Shortcut Count": "N/A", "Entities with > 500k item count": 0},
     ])
 
-    df_final, _, _, _ = shallow_ui_helpers.calculate_batches_with_shallow_exclusions(
-        tool, df, {}
-    )
+    df_final, _, _, _ = shallow_ui_helpers.calculate_shallow_scan_batches(tool, df, {})
 
     batches = dict(zip(df_final["Site Id"], df_final["Suggested Batch"]))
     self.assertEqual(batches, {"large": "Batch 1", "small": "Batch 1"})
@@ -1392,6 +1389,7 @@ class ShallowDeepScanRecommendedTest(unittest.TestCase):
     self.assertEqual(planned_df["Shortcut Count"].tolist(), [0, 0])
     self.assertEqual(df_final["Shortcut Count"].tolist(), ["N/A", "N/A"])
     tool.log_msg.assert_not_called()
+    self.assertFalse(shallow_ui_helpers.get_deep_scan_recommended_mask(tool, df_final).any())
 
   def test_toggle_on_keeps_real_deep_scan_values(self):
     """With the toggle ON, numeric Shortcut/Depth values from a deep report are not forced to N/A."""
@@ -1403,15 +1401,22 @@ class ShallowDeepScanRecommendedTest(unittest.TestCase):
         {"Site Id": "small", "Shortcut Count": 7, "Entities with > 500k item count": 0},
     ])
 
-    df_final, _, _, _ = shallow_ui_helpers.calculate_batches_with_shallow_exclusions(
-        tool, df, {}
-    )
+    df_final, _, _, _ = shallow_ui_helpers.calculate_shallow_scan_batches(tool, df, {})
 
     shortcuts = dict(zip(df_final["Site Id"], df_final["Shortcut Count"]))
     batches = dict(zip(df_final["Site Id"], df_final["Suggested Batch"]))
     self.assertEqual(shortcuts, {"large": 5, "small": 7})
-    self.assertEqual(batches["large"], "Deep Scan Recommended")
-    self.assertEqual(batches["small"], "Batch 1")
+    self.assertEqual(batches, {"large": "Batch 1", "small": "Batch 1"})
+
+  def test_mask_without_large_resource_column(self):
+    """Missing '>500k' column flags no sites."""
+    import pandas as pd
+    from ui.files_shallow import shallow_ui_helpers
+
+    tool = mock.Mock()
+    tool.val_shallow_scan = True
+    df = pd.DataFrame([{"Site Id": "a"}])
+    self.assertFalse(shallow_ui_helpers.get_deep_scan_recommended_mask(tool, df).any())
 
   def _banner(self, shallow_toggle, df_batches, large_counts, show_eta=True,
               report_upload=True, is_shallow_scan=None):
@@ -1450,7 +1455,7 @@ class ShallowDeepScanRecommendedTest(unittest.TestCase):
         {"Site Id": "b", **na_row, "Entities with > 500k item count": 1},
     ])
 
-    df_final, batches, total_eta, _ = shallow_ui_helpers.calculate_batches_with_shallow_exclusions(
+    df_final, batches, total_eta, _ = shallow_ui_helpers.calculate_shallow_scan_batches(
         tool, df, {}
     )
 
@@ -1460,17 +1465,23 @@ class ShallowDeepScanRecommendedTest(unittest.TestCase):
     self.assertEqual(total_eta, 1.0)
     self.assertEqual(
         dict(zip(df_final["Site Id"], df_final["Suggested Batch"])),
-        {"a": "Batch 1", "b": "Deep Scan Recommended"},
+        {"a": "Batch 1", "b": "Batch 1"},
     )
 
-  def test_banner_live_shallow_scan_keeps_original_text(self):
-    """Live Shallow Scan with >500k entities keeps the original banner text."""
-    text = self._banner(True, ["Deep Scan Recommended", "Batch 1"], [2, 0], report_upload=False)
+  def test_banner_live_shallow_scan_warns_to_split(self):
+    """Live Shallow Scan with >500k entities warns that they must be split before migration."""
+    text = self._banner(True, ["Batch 1", "Batch 1"], [2, 0], report_upload=False)
     self.assertEqual(
         text,
-        "⚠️ 2 entities contain items >500k. Sites containing these entities were excluded from ETA calculations.\n"
-        "Recommendation: Run a Deep Scan with 'Generate Depth Report for Large Resources' enabled on these resources using the exported 'DeepScanRecommended.csv' in suggested_batches.",
+        "⚠️ 2 entities contain items >500k. Entities with >500k items must be split into"
+        " smaller entities before migration.\n"
+        "See DeepScanRecommended.csv in suggested_batches.",
     )
+
+  def test_banner_singular_entity(self):
+    """A single >500k entity uses singular wording."""
+    text = self._banner(True, ["Batch 1"], [1], report_upload=False)
+    self.assertTrue(text.startswith("⚠️ 1 entity contains items >500k."))
 
   def test_banner_live_shallow_scan_without_large_sites_shows_nothing(self):
     """Live Shallow Scan with no >500k entities shows no banner (original behavior)."""
@@ -1480,15 +1491,14 @@ class ShallowDeepScanRecommendedTest(unittest.TestCase):
     """Live Deep Scan shows no banner even with >500k entities (original behavior)."""
     self.assertIsNone(self._banner(False, ["Batch 1"], [2], report_upload=False))
 
-  def test_banner_toggle_on_with_exclusions(self):
-    """Toggle ON with excluded sites shows the exclusion warning."""
-    text = self._banner(True, ["Deep Scan Recommended", "Batch 1"], [2, 0])
-    self.assertIn("1 site containing these entities was excluded", text)
+  def test_banner_toggle_on_with_large_sites(self):
+    """Toggle ON with >500k sites shows the split warning."""
+    text = self._banner(True, ["Batch 1", "Batch 1"], [2, 0])
+    self.assertIn("must be split into smaller entities before migration", text)
 
   def test_banner_toggle_on_without_large_sites(self):
-    """Toggle ON with no >500k sites confirms all sites are included."""
-    text = self._banner(True, ["Batch 1", "Batch 1"], [0, 0])
-    self.assertIn("No entities with >500k items found", text)
+    """Toggle ON with no >500k sites shows no banner."""
+    self.assertIsNone(self._banner(True, ["Batch 1", "Batch 1"], [0, 0]))
 
   def test_banner_toggle_off_with_large_sites(self):
     """Toggle OFF (Deep Scan ETA) shows no banner even with >500k sites."""
@@ -1501,7 +1511,7 @@ class ShallowDeepScanRecommendedTest(unittest.TestCase):
   def test_banner_toggle_on_eta_hidden(self):
     """Toggle ON with ETA hidden still warns about large sites."""
     text = self._banner(True, None, [2, 0], show_eta=False)
-    self.assertIn("1 site containing these entities was excluded from ETA calculations", text)
+    self.assertIn("must be split into smaller entities before migration", text)
 
 
 class ShallowFailedDlTrackingTest(ShallowScanBaseTest):
