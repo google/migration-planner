@@ -530,6 +530,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     site_metrics = {}
     personal_dl_total = 0
     team_dl_total = 0
+    versions_corpus_col = shallow_ui_helpers.VERSIONS_CORPUS_COL
+    versions_files_col = shallow_ui_helpers.VERSIONS_FILE_COUNT_COL
+    has_version_cols = versions_corpus_col in df.columns and versions_files_col in df.columns
+    version_rows = 0
+    version_fallback_rows = 0
     
     for _, row in df.iterrows():
       site_id = str(row[id_col]).strip()
@@ -571,10 +576,24 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           "resourceCount": res_cnt,
       }
 
+      if has_version_cols:
+        # Optional Shallow Scan versions columns; blank/N/A rows fall back to active values.
+        raw_corpus = str(row.get(versions_corpus_col, "")).strip()
+        versions_files = pd.to_numeric(row.get(versions_files_col), errors="coerce")
+        s_entry = site_metrics[site_id]
+        if raw_corpus and not raw_corpus.upper().startswith("N/A") and not pd.isna(versions_files):
+          s_entry["versionsCorpusSize"] = _parse_size_str(raw_corpus)
+          s_entry["versionsEstimatedFileCount"] = int(versions_files)
+          version_rows += 1
+        else:
+          s_entry["versionsCorpusSize"] = s_entry["totalSize"]
+          s_entry["versionsEstimatedFileCount"] = file_cnt
+          version_fallback_rows += 1
+
     self.skipped_actual_scan = True
     dl_total = personal_dl_total + team_dl_total
     
-    return {
+    report_metrics = {
         "isShallowScan": is_shallow_report,
         "siteMetrics": site_metrics,
         "siteCount": len(df),
@@ -609,6 +628,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "tenantLevelFileSizeDistribution": {},
         "tenantLevelLargeResources": [],
     }
+    if version_rows > 0:
+      report_metrics.update({
+          "hasVersionEstimates": True,
+          "versionsCorpusSize": sum(s.get("versionsCorpusSize", 0) for s in site_metrics.values()),
+          "versionsEstimatedFileCount": sum(
+              s.get("versionsEstimatedFileCount", 0) for s in site_metrics.values()
+          ),
+          "versionFallbackRows": version_fallback_rows,
+      })
+    return report_metrics
 
   def _get_input_from_csv_if_uploaded(self, config):
     if self.user_source.get() != "csv":
@@ -756,6 +785,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             int(s.get("failedDlCount", 0) or 0) for s in site_metrics.values()
         )
       is_shallow_mode = bool(file_metrics.get("isShallowScan"))
+      if (
+          getattr(self, "val_include_file_versions", False)
+          and self.skipped_actual_scan
+          and not file_metrics.get("hasVersionEstimates")
+      ):
+        self.log_msg(
+            "[WARNING] 'Include Historical File Versions in Corpus Size' is enabled, but the"
+            f" uploaded site report has no '{shallow_ui_helpers.VERSIONS_CORPUS_COL}' /"
+            f" '{shallow_ui_helpers.VERSIONS_FILE_COUNT_COL}' values. Proceeding without"
+            " file versions."
+        )
+        self.val_include_file_versions = False
+      use_version_estimates = shallow_ui_helpers.uses_version_estimates(self, file_metrics)
+      if use_version_estimates and file_metrics.get("versionFallbackRows"):
+        self.log_msg(
+            f"[WARNING] {file_metrics['versionFallbackRows']} site(s) in the uploaded site report"
+            " have no file versions values; their current Corpus Size and File Count are"
+            " used instead."
+        )
       site_data = []
       for site_id, s_data in site_metrics.items():
         row_data = {
@@ -776,10 +824,18 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             "Corpus Size": s_data.get("totalSize", 0),
             "Resource Count": s_data.get("resourceCount", 0),
         })
+        if use_version_estimates:
+            # Placed after Corpus Size once Resource Count is dropped on export.
+            row_data[shallow_ui_helpers.VERSIONS_CORPUS_COL] = s_data.get(
+                "versionsCorpusSize", s_data.get("totalSize", 0)
+            )
+            row_data[shallow_ui_helpers.VERSIONS_FILE_COUNT_COL] = s_data.get(
+                "versionsEstimatedFileCount", s_data.get("fileCount", 0)
+            )
         if getattr(self, "val_include_recycle_bin_contents", False):
             row_data["Recycle Bin Item Count"] = s_data.get("recycleBinCount", 0)
             row_data["Recycle Bin Size"] = s_data.get("recycleBinSize", 0)
-        if getattr(self, "val_include_file_versions", False):
+        if getattr(self, "val_include_file_versions", False) and not use_version_estimates:
             row_data["Historical File Version Count"] = s_data.get("versionCount", 0)
             row_data["Historical File Version Size"] = s_data.get("versionSize", 0)
         if getattr(self, "val_scan_encrypted_files", False):
@@ -866,6 +922,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       original_site_ids = df_output["Site Id"].copy()
       df_output["Site Id"] = df_output["Site Id"].apply(self._get_display_name)
       df_output["Corpus Size"] = df_output["Corpus Size"].apply(self.format_size)
+      if shallow_ui_helpers.VERSIONS_CORPUS_COL in df_output.columns:
+        df_output[shallow_ui_helpers.VERSIONS_CORPUS_COL] = df_output[
+            shallow_ui_helpers.VERSIONS_CORPUS_COL
+        ].apply(self.format_size)
       if "Recycle Bin Size" in df_output.columns:
         df_output["Recycle Bin Size"] = df_output["Recycle Bin Size"].apply(self.format_size)
       if "Historical File Version Size" in df_output.columns:
@@ -1243,13 +1303,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       ).pack(anchor="w", padx=10, pady=(0, 5))
 
       include_recycle = getattr(self, "val_include_recycle_bin_contents", False)
-      include_versions = getattr(self, "val_include_file_versions", False)
 
       note_parts = []
       if include_recycle:
           note_parts.append("Recycle Bin contents")
-      if include_versions:
-          note_parts.append("Historical File Versions")
 
       if note_parts:
           note_text = f"Note: {' and '.join(note_parts)} are accounted for in Corpus Size calculations but will not be migrated."
@@ -1274,11 +1331,18 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       card_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
       card_frame.pack(fill="x", pady=10)
 
-      self.create_stat_card(card_frame, "Total Corpus Size", f"{self.format_size(sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🏢")
+      use_version_estimates = shallow_ui_helpers.uses_version_estimates(self, data)
+      if use_version_estimates:
+        versions_corpus = data.get("versionsCorpusSize") or sum(
+            entry.get("versionsCorpusSize", 0) for entry in data.get("siteMetrics", {}).values()
+        )
+        self.create_stat_card(card_frame, "Total Corpus Size\n(incl. Versions)", f"{self.format_size(versions_corpus)}", "🏢")
+      else:
+        self.create_stat_card(card_frame, "Total Corpus Size", f"{self.format_size(sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🏢")
       if getattr(self, "val_include_recycle_bin_contents", False):
         self.create_stat_card(card_frame, "Total Recycle Bin Size", f"{self.format_size(sum([entry.get('recycleBinSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🗑️")
         self.create_stat_card(card_frame, "Total Recycle Bin Item Count", f"{sum([entry.get('recycleBinCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🗑️")
-      if getattr(self, "val_include_file_versions", False):
+      if getattr(self, "val_include_file_versions", False) and not use_version_estimates:
         self.create_stat_card(card_frame, "Total Historical File Version Size", f"{self.format_size(sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "📄")
         self.create_stat_card(card_frame, "Total Historical File Version Count", f"{sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "📄")
       self.create_stat_card(card_frame, "Site Collection\nCount", f"{data.get('siteCount'):,}", "🏢")
@@ -1305,6 +1369,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         file_count = sum(int(s.get("fileCount", 0) or 0) for s in data["siteMetrics"].values())
       self.create_stat_card(card_frame, "Folder Count", f"{folder_count:,}", "📁")
       self.create_stat_card(card_frame, "File Count", f"{file_count:,}", "📄")
+      if use_version_estimates:
+        versions_files = data.get("versionsEstimatedFileCount") or sum(
+            int(entry.get("versionsEstimatedFileCount", 0) or 0)
+            for entry in data.get("siteMetrics", {}).values()
+        )
+        self.create_stat_card(card_frame, "Estimated Files\n(incl. Versions)", f"{int(versions_files):,}", "📄")
       if getattr(self, "val_scan_encrypted_files", False):
         self.create_stat_card(card_frame, "Total Encrypted\nFile Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
         self.create_stat_card(card_frame, "Total Encrypted\nFile Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
@@ -1674,13 +1744,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       # Section 1: Summary Metrics
       writer.writerow(["Summary Metrics", "Value"])
       include_recycle = getattr(self, "val_include_recycle_bin_contents", False)
-      include_versions = getattr(self, "val_include_file_versions", False)
+      use_version_estimates = shallow_ui_helpers.uses_version_estimates(self, data)
 
       note_parts = []
       if include_recycle:
           note_parts.append("Recycle Bin contents")
-      if include_versions:
-          note_parts.append("Historical File Versions")
 
       if note_parts:
           note_text = f"Note: {' and '.join(note_parts)} are accounted for in Corpus Size calculations but will not be migrated."
@@ -1690,6 +1758,17 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       summary_rows = [
           ("Total Corpus Size", self.format_size(total_corpus_size)),
       ]
+      if use_version_estimates:
+          summary_rows.extend([
+              (
+                  "Total Corpus Size (incl. Versions)",
+                  self.format_size(sum(entry.get("versionsCorpusSize", 0) for entry in data.get("siteMetrics", {}).values())),
+              ),
+              (
+                  "Estimated File Count (incl. Versions)",
+                  sum(int(entry.get("versionsEstimatedFileCount", 0) or 0) for entry in data.get("siteMetrics", {}).values()),
+              ),
+          ])
       if getattr(self, "val_include_recycle_bin_contents", False):
           total_recycle_bin_size = sum([entry.get('recycleBinSize', 0) for entry in data.get('siteMetrics', {}).values()])
           total_recycle_bin_count = sum([entry.get('recycleBinCount', 0) for entry in data.get('siteMetrics', {}).values()])
@@ -1697,7 +1776,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               ("Total Recycle Bin Size", self.format_size(total_recycle_bin_size)),
               ("Total Recycle Bin Item Count", total_recycle_bin_count),
           ])
-      if getattr(self, "val_include_file_versions", False):
+      if getattr(self, "val_include_file_versions", False) and not use_version_estimates:
           total_version_size = sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()])
           total_version_count = sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()])
           summary_rows.extend([
@@ -1794,11 +1873,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           row = ["Site Collection", "Subsite Count"] + dl_cols + ["List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Corpus Size"]
         else:
           row = ["Site Collection", "Email Id", "Subsite Count"] + dl_cols + ["List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Corpus Size"]
+        corpus_col_idx = len(row) - 1
+
+        if use_version_estimates:
+          row.extend([shallow_ui_helpers.VERSIONS_CORPUS_COL, shallow_ui_helpers.VERSIONS_FILE_COUNT_COL])
 
         if getattr(self, "val_include_recycle_bin_contents", False):
           row.extend(["Recycle Bin Item Count", "Recycle Bin Size"])
 
-        if getattr(self, "val_include_file_versions", False):
+        if getattr(self, "val_include_file_versions", False) and not use_version_estimates:
           row.extend(["Historical File Version Count", "Historical File Version Size"])
 
         if getattr(self, "val_scan_encrypted_files", False):
@@ -1885,7 +1968,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                   self.format_size(s_data.get("recycleBinSize", 0))
               ])
 
-            if getattr(self, "val_include_file_versions", False):
+            if use_version_estimates:
+              row[corpus_col_idx + 1:corpus_col_idx + 1] = [
+                  self.format_size(s_data.get("versionsCorpusSize", s_data.get("totalSize", 0))),
+                  s_data.get("versionsEstimatedFileCount", s_data.get("fileCount", 0)),
+              ]
+
+            if getattr(self, "val_include_file_versions", False) and not use_version_estimates:
               row.extend([
                   s_data.get("versionCount", 0),
                   self.format_size(s_data.get("versionSize", 0))
@@ -1954,7 +2043,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()
 
-    if self.val_include_file_versions:
+    # Shallow Scan estimates versions from StorageMetrics at no extra cost.
+    if self.val_include_file_versions and not self.val_shallow_scan:
         warning_msg = (
             "Enabling 'Include Historical File Versions in Corpus Size' will cause severe performance degradation "
             "as it requires fetching versions for every single file. "

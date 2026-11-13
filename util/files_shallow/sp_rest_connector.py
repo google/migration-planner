@@ -243,6 +243,7 @@ class SpRestConnector:
         - file_count: TotalFileCount (recursive files count in the library)
         - active_size_bytes: TotalFileStreamSize (current versions only)
         - total_size_bytes: TotalSize (including version history and metadata)
+        - additional_size_bytes: AdditionalFileStreamSize
     """
     if logger is None:
       logger = lambda x: None
@@ -271,6 +272,9 @@ class SpRestConnector:
             storage_metrics.get("TotalFileStreamSize")
         ),
         "total_size_bytes": self._parse_int(storage_metrics.get("TotalSize")),
+        "additional_size_bytes": self._parse_int(
+            storage_metrics.get("AdditionalFileStreamSize")
+        ),
     }
 
   def get_library_metrics(
@@ -297,6 +301,7 @@ class SpRestConnector:
         - folder_count: max(0, item_count - file_count)
         - active_size_bytes: active file stream size in bytes (TotalFileStreamSize)
         - total_size_bytes: total storage size including versions (TotalSize)
+        - additional_size_bytes: AdditionalFileStreamSize
     """
     if logger is None:
       logger = lambda x: None
@@ -315,4 +320,5 @@ class SpRestConnector:
         "folder_count": max(0, item_count - file_count),
         "active_size_bytes": storage["active_size_bytes"],
         "total_size_bytes": storage["total_size_bytes"],
+        "additional_size_bytes": storage["additional_size_bytes"],
     }

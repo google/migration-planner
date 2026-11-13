@@ -51,6 +51,56 @@ class LibraryTarget:
   top_level_site_id: str
 
 
+# Buffer added on top of the estimated file count including versions (10%).
+VERSION_FILE_COUNT_BUFFER_PERCENT = 10
+
+
+def estimate_library_versions(
+    file_count: int,
+    active_size: int,
+    total_size: int,
+    additional_size: int,
+) -> Tuple[int, int]:
+  """Estimates one library's corpus size and file count including versions.
+
+  Each historical version is treated as a file of the library's average size:
+    corpus_incl_versions = max(TotalSize - AdditionalFileStreamSize,
+                               TotalFileStreamSize)
+    estimated_files = ceil(1.1 * corpus_incl_versions / average_file_size)
+  where average_file_size = TotalFileStreamSize / TotalFileCount. Integer math
+  is used so a library without versions yields exactly ceil(1.1 * files).
+
+  Edge cases:
+    - No files: (TotalFileStreamSize, 0), as there is nothing to extrapolate.
+    - Files but zero stream size (all empty files): ceil(1.1 * files).
+
+  Args:
+    file_count: TotalFileCount.
+    active_size: TotalFileStreamSize in bytes.
+    total_size: TotalSize in bytes.
+    additional_size: AdditionalFileStreamSize in bytes.
+
+  Returns:
+    (corpus size including versions in bytes, estimated file count including
+    versions).
+  """
+  file_count = max(0, int(file_count))
+  active_size = max(0, int(active_size))
+  if file_count == 0:
+    return active_size, 0
+
+  corpus_incl_versions = max(int(total_size) - int(additional_size), active_size)
+  buffer_num = 100 + VERSION_FILE_COUNT_BUFFER_PERCENT
+  if active_size == 0:
+    return corpus_incl_versions, -(-file_count * buffer_num // 100)
+
+  # ceil(corpus * file_count / active_size * 1.1) without floating point error.
+  estimated_files = -(
+      -corpus_incl_versions * file_count * buffer_num // (active_size * 100)
+  )
+  return corpus_incl_versions, estimated_files
+
+
 class ShallowFileEstimator(FileEstimator):
   """Estimates files corpus metrics using SharePoint REST StorageMetrics & ItemCount APIs."""
 
@@ -76,9 +126,14 @@ class ShallowFileEstimator(FileEstimator):
     )
     self.cert_token_manager = cert_token_manager
 
+  @property
+  def include_versions(self) -> bool:
+    """Whether the versions-inclusive corpus and file estimate is collected."""
+    return bool(getattr(self.config, "include_file_versions", False))
+
   def _initialize_metrics_structure(self) -> Dict[str, Any]:
     """Creates the initial metrics dictionary structure for Shallow Scan."""
-    return {
+    metrics = {
         "isShallowScan": True,
         "driveMetrics": {},
         "siteMetrics": {},
@@ -107,6 +162,11 @@ class ShallowFileEstimator(FileEstimator):
         "tenantLevelLargeResources": [],
         "tenantLevelLargeResourceCount": 0,
     }
+    if self.include_versions:
+      metrics["hasVersionEstimates"] = True
+      metrics["versionsCorpusSize"] = 0
+      metrics["versionsEstimatedFileCount"] = 0
+    return metrics
 
   def _prepare_root_sites(self, metrics: Dict[str, Any]) -> None:
     """Filters siteMetrics to root site collections and sets default fields."""
@@ -129,6 +189,9 @@ class ShallowFileEstimator(FileEstimator):
       s_data.setdefault("largeResourceCount", 0)
       s_data.setdefault("totalSize", 0)
       s_data.setdefault("resourceCount", 0)
+      if self.include_versions:
+        s_data.setdefault("versionsCorpusSize", 0)
+        s_data.setdefault("versionsEstimatedFileCount", 0)
 
   def _build_library_targets(
       self,
@@ -382,6 +445,13 @@ class ShallowFileEstimator(FileEstimator):
       folder_cnt = library_metrics["folder_count"]
       active_size_bytes = library_metrics["active_size_bytes"]
       resource_cnt = max(item_cnt, folder_cnt + file_cnt)
+      if self.include_versions:
+        versions_corpus, versions_files = estimate_library_versions(
+            file_cnt,
+            active_size_bytes,
+            library_metrics.get("total_size_bytes", 0),
+            library_metrics.get("additional_size_bytes", 0),
+        )
 
       with lock:
         s_meta = metrics["siteMetrics"][target.top_level_site_id]
@@ -400,7 +470,16 @@ class ShallowFileEstimator(FileEstimator):
             "resourceCount": resource_cnt,
             "totalSize": active_size_bytes,
         }
+        if self.include_versions:
+          s_meta["versionsCorpusSize"] += versions_corpus
+          s_meta["versionsEstimatedFileCount"] += versions_files
+          metrics["driveMetrics"][target.drive_id].update({
+              "versionsCorpusSize": versions_corpus,
+              "versionsEstimatedFileCount": versions_files,
+          })
 
+        # >500k thresholds (and DeepScanRecommended.csv) use active item counts
+        # only, never the file count estimate including versions.
         self._flag_threshold_breaches(
             metrics,
             s_meta,
@@ -459,6 +538,20 @@ class ShallowFileEstimator(FileEstimator):
     metrics["tenantLevelLargeResourceCount"] = len(
         metrics["tenantLevelLargeResources"]
     )
+    if self.include_versions:
+      metrics["versionsCorpusSize"] = sum(
+          int(s.get("versionsCorpusSize", 0) or 0)
+          for s in metrics["siteMetrics"].values()
+      )
+      metrics["versionsEstimatedFileCount"] = sum(
+          int(s.get("versionsEstimatedFileCount", 0) or 0)
+          for s in metrics["siteMetrics"].values()
+      )
+      self.logger(
+          "[Phase 2] File versions estimate | Corpus Size (incl. Versions):"
+          f" {metrics['versionsCorpusSize']:,} bytes | Estimated File Count"
+          f" (incl. Versions): {metrics['versionsEstimatedFileCount']:,}"
+      )
     metrics["siteClassification"] = {
         site_id: "personal" if self._is_subsite_personal(site_id) else "teams"
         for site_id in metrics["siteMetrics"].keys()
