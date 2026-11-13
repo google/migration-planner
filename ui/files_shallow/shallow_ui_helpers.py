@@ -97,6 +97,8 @@ def on_shallow_scan_toggle(tool):
 
   Shallow Scan reads aggregate StorageMetrics and ItemCounts only, so settings
   that require per-file requests or a folder tree are cleared and disabled.
+  'Include Historical File Versions' stays available: Shallow Scan estimates
+  versions from the same StorageMetrics response at no extra cost.
   Source selection is left untouched: OneDrive, SharePoint, or both are all
   supported, since every document library is scanned through the same
   per-library REST path.
@@ -105,7 +107,6 @@ def on_shallow_scan_toggle(tool):
 
   additional_checkboxes = [
       (tool.include_recycle_bin_contents, getattr(tool, "cb_recycle_bin", None)),
-      (tool.include_file_versions, getattr(tool, "cb_file_versions", None)),
       (tool.scan_encrypted_files, getattr(tool, "cb_encrypted_files", None)),
       (tool.generate_folder_amr_map, getattr(tool, "cb_depth_report", None)),
   ]
@@ -851,6 +852,8 @@ SHALLOW_NA_COLS = [
 
 LARGE_RESOURCE_COL = "Entities with > 500k item count"
 DEEP_SCAN_RECOMMENDED_FILENAME = "DeepScanRecommended.csv"
+VERSIONS_CORPUS_COL = "Corpus Size (incl. Versions)"
+VERSIONS_FILE_COUNT_COL = "Estimated File Count (incl. Versions)"
 
 
 def _calculate_batches_with_na_columns(tool, df: pd.DataFrame, license_metrics: dict):
@@ -921,12 +924,65 @@ def get_deep_scan_recommended_mask(tool, df: pd.DataFrame) -> pd.Series:
 
   Driven solely by the Shallow Scan toggle. When the toggle is off, no site is
   flagged (Deep Scan behavior), even for an uploaded Shallow Scan site report.
-  Flagged sites are exported to
+  The >500k count is based on active items only; the file count estimate
+  including versions never affects it. Flagged sites are exported to
   outputs/<ts>/suggested_batches/DeepScanRecommended.csv.
   """
   if not getattr(tool, "val_shallow_scan", False) or LARGE_RESOURCE_COL not in df.columns:
     return pd.Series(False, index=df.index)
   return pd.to_numeric(df[LARGE_RESOURCE_COL], errors="coerce").fillna(0) > 0
+
+
+def uses_version_estimates(tool, data: dict) -> bool:
+  """Whether the Shallow Scan versions-inclusive corpus/file estimate applies.
+
+  True only when the 'Include Historical File Versions' checkbox is on AND the
+  data carries the estimate (a live Shallow Scan with versions enabled, or an
+  uploaded site report containing the versions columns).
+  """
+  return bool(
+      getattr(tool, "val_include_file_versions", False)
+      and data.get("hasVersionEstimates")
+  )
+
+
+def _calculate_batches_with_version_estimates(
+    tool, df: pd.DataFrame, license_metrics: dict
+):
+  """Plans with versions-inclusive Corpus Size / File Count when available.
+
+  When the versions columns are present, ETAs are computed on the corpus size
+  and estimated file count including versions. Active (current version)
+  values are restored afterwards for display in the site report and Batch
+  Details.
+  """
+  if VERSIONS_CORPUS_COL not in df.columns or VERSIONS_FILE_COUNT_COL not in df.columns:
+    return _calculate_batches_with_na_columns(tool, df, license_metrics)
+
+  active_size = dict(
+      zip(df["Site Id"], pd.to_numeric(df["Corpus Size"], errors="coerce").fillna(0))
+  )
+  active_files = dict(
+      zip(df["Site Id"], pd.to_numeric(df["File Count"], errors="coerce").fillna(0))
+  )
+
+  df_plan = df.copy()
+  df_plan["Corpus Size"] = pd.to_numeric(df[VERSIONS_CORPUS_COL], errors="coerce").fillna(0)
+  df_plan["File Count"] = pd.to_numeric(df[VERSIONS_FILE_COUNT_COL], errors="coerce").fillna(0)
+
+  df_final, batches_list, total_eta, buckets = _calculate_batches_with_na_columns(
+      tool, df_plan, license_metrics
+  )
+
+  df_final["Corpus Size"] = df_final["Site Id"].map(active_size).fillna(0)
+  df_final["File Count"] = df_final["Site Id"].map(active_files).fillna(0).astype(int)
+  # Bucket batches are the same dict objects, so this updates both views.
+  for b in batches_list:
+    site_ids = b["df_subset"]["Site Id"]
+    b["corpus_size"] = float(sum(active_size.get(s, 0) for s in site_ids))
+    b["file_count"] = int(sum(active_files.get(s, 0) for s in site_ids))
+
+  return df_final, batches_list, total_eta, buckets
 
 
 def calculate_shallow_scan_batches(tool, df: pd.DataFrame, license_metrics: dict):
@@ -935,7 +991,8 @@ def calculate_shallow_scan_batches(tool, df: pd.DataFrame, license_metrics: dict
   Sites with >500k-item entities are planned like any other site. During
   Shallow Scan they are additionally reported in DeepScanRecommended.csv (see
   get_deep_scan_recommended_mask), since those entities must be split into
-  smaller entities before migration.
+  smaller entities before migration. When the versions columns are present,
+  ETAs include the estimated file versions.
   """
   large_site_count = int(get_deep_scan_recommended_mask(tool, df).sum())
   if large_site_count > 0:
@@ -944,4 +1001,4 @@ def calculate_shallow_scan_batches(tool, df: pd.DataFrame, license_metrics: dict
         " planning. Entities with >500k items must be split into smaller entities"
         " before migration."
     )
-  return _calculate_batches_with_na_columns(tool, df, license_metrics)
+  return _calculate_batches_with_version_estimates(tool, df, license_metrics)

@@ -72,15 +72,18 @@ def build_config(**overrides):
   return ScanConfig(**params)
 
 
-def storage_body(file_count, stream_size, total_size=None):
+def storage_body(file_count, stream_size, total_size=None, additional_size=None):
   """Builds a GetFolderByServerRelativeUrl StorageMetrics response body."""
-  return {
+  body = {
       "StorageMetrics": {
           "TotalFileCount": file_count,
           "TotalFileStreamSize": stream_size,
           "TotalSize": total_size if total_size is not None else stream_size,
       }
   }
+  if additional_size is not None:
+    body["StorageMetrics"]["AdditionalFileStreamSize"] = additional_size
+  return body
 
 
 class SplitLibraryEndpointTest(unittest.TestCase):
@@ -428,7 +431,9 @@ class ShallowScanBaseTest(unittest.TestCase):
         return {"ItemCount": data["item"]}
       if isinstance(data.get("storage"), BaseException):
         raise data["storage"]
-      return storage_body(data["files"], data["size"])
+      return storage_body(
+          data["files"], data["size"], data.get("total"), data.get("additional")
+      )
 
     targets = self.estimator._build_library_targets(
         metrics, subsite_to_drives, subsite_to_top_level_site, failures
@@ -1193,7 +1198,11 @@ class ShallowScanReportCsvUploadTest(unittest.TestCase):
         os.remove(tmp_path)
 
   def test_shallow_scan_default_on_disables_deep_scan_settings(self):
-    """Verify Shallow Scan defaults to True and disables all Deep Scan checkboxes."""
+    """Verify Shallow Scan defaults to True and disables Deep-Scan-only checkboxes.
+
+    'Include Historical File Versions' stays enabled and keeps its value, since
+    Shallow Scan estimates versions from StorageMetrics.
+    """
     from ui.files_shallow import shallow_ui_helpers
     from ui.files_ui import FileMigrationEstimatorTool
 
@@ -1235,7 +1244,6 @@ class ShallowScanReportCsvUploadTest(unittest.TestCase):
 
     for var in (
         tool.include_recycle_bin_contents,
-        tool.include_file_versions,
         tool.scan_encrypted_files,
         tool.generate_folder_amr_map,
     ):
@@ -1243,11 +1251,13 @@ class ShallowScanReportCsvUploadTest(unittest.TestCase):
 
     for widget in (
         tool.cb_recycle_bin,
-        tool.cb_file_versions,
         tool.cb_encrypted_files,
         tool.cb_depth_report,
     ):
       self.assertEqual(widget.state, "disabled")
+
+    self.assertTrue(tool.include_file_versions.get())
+    self.assertEqual(tool.cb_file_versions.state, "normal")
 
   def test_shallow_scan_site_report_csv_upload_with_failed_dl_count(self):
     """Verify Shallow Scan site_report.csv with 'Failed DL Count' column validates and parses failedDlCount."""
