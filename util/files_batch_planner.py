@@ -23,7 +23,19 @@ from typing import Callable, List, NamedTuple, Sequence, Tuple
 import pandas as pd
 
 P90_QUANTILE = 0.9
-MAX_TAIL_GROUP_SIZE = 5
+
+
+def get_max_tail_group_size(license_count: int) -> int:
+  """Returns k, the cap on n_tail, by license tier.
+
+  <=1,000 licenses -> 1; 1,001-5,000 -> 2; >5,000 -> 3. When licenses could not
+  be determined (count 0), the lowest tier applies.
+  """
+  if license_count <= 1000:
+    return 1
+  if license_count <= 5000:
+    return 2
+  return 3
 
 
 class LanePlan(NamedTuple):
@@ -49,11 +61,13 @@ def get_p90_threshold(sorted_etas: Sequence[float]) -> float:
   return float(pd.Series(sorted_etas, dtype=float).quantile(P90_QUANTILE))
 
 
-def compute_tail_group_size(tail_count: int, num_lanes: int) -> int:
-  """Returns n_tail = floor(tail_count / num_lanes), clamped to [1, 5]."""
+def compute_tail_group_size(
+    tail_count: int, num_lanes: int, max_group_size: int
+) -> int:
+  """Returns n_tail = floor(tail_count / num_lanes), clamped to [1, max_group_size]."""
   if tail_count <= 0:
     return 1
-  return max(1, min(MAX_TAIL_GROUP_SIZE, tail_count // max(1, num_lanes)))
+  return max(1, min(max_group_size, tail_count // max(1, num_lanes)))
 
 
 def split_tail_into_groups(tail_count: int, group_size: int) -> List[int]:
@@ -94,12 +108,14 @@ def plan_p90_lanes(
     num_lanes: int,
     max_sites_per_batch: int,
     group_eta_fn: Callable[[List[int]], float],
+    max_tail_group_size: int,
 ) -> LanePlan:
   """Assigns sites to lanes and batches using the P90-tail algorithm.
 
   1. Sites with ETA strictly above the P90 ETA form the tail.
-  2. n_tail = clamp(floor(tail / lanes), 1, 5); the tail is grouped n_tail at a
-     time from the highest ETA down (see split_tail_into_groups).
+  2. n_tail = clamp(floor(tail / lanes), 1, k), where k is the license-tier cap
+     (see get_max_tail_group_size); the tail is grouped n_tail at a time from
+     the highest ETA down (see split_tail_into_groups).
   3. Tail groups are greedily assigned to the least-loaded lane. Consecutive
      tail groups in the same lane are merged while <= max_sites_per_batch.
   4. Remaining sites are greedily assigned site by site to the least-loaded
@@ -112,18 +128,22 @@ def plan_p90_lanes(
     max_sites_per_batch: Maximum number of sites in a single batch.
     group_eta_fn: Returns the ETA of migrating the given site positions as one
       batch. Used to load lanes with tail group ETAs.
+    max_tail_group_size: k, the cap on n_tail (clamped to at least 1).
 
   Returns:
     A LanePlan. Lane ties are broken by the lowest lane index.
   """
   num_lanes = max(1, int(num_lanes))
   max_sites_per_batch = max(1, int(max_sites_per_batch))
+  max_tail_group_size = max(1, int(max_tail_group_size))
   num_sites = len(sorted_etas)
 
   p90_threshold = get_p90_threshold(sorted_etas)
   # sorted_etas is descending, so the tail is always a prefix.
   tail_count = sum(1 for eta in sorted_etas if eta > p90_threshold)
-  tail_group_size = compute_tail_group_size(tail_count, num_lanes)
+  tail_group_size = compute_tail_group_size(
+      tail_count, num_lanes, max_tail_group_size
+  )
 
   lane_times = [0.0] * num_lanes
   lane_tail_groups: List[List[List[int]]] = [[] for _ in range(num_lanes)]

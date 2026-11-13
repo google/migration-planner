@@ -1119,9 +1119,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     1. Compute each site's ETA and sort sites in descending ETA order.
     2. Sites with ETA strictly above the P90 ETA form the tail. They are grouped
-       n_tail = clamp(floor(tail / lanes), 1, 5) at a time and greedily assigned
-       to the least-loaded lane as orange "P90" batches (merged per lane while
-       <= the max sites per batch).
+       n_tail = clamp(floor(tail / lanes), 1, k) at a time, where k is set by
+       license tier (<=1,000 -> 1, 1,001-5,000 -> 2, >5,000 -> 3), and greedily
+       assigned to the least-loaded lane as orange "P90" batches (merged per
+       lane while <= the max sites per batch).
     3. Remaining sites are greedily assigned site by site to the least-loaded
        lane, then cut into batches of up to the max sites per batch in
        descending ETA order.
@@ -1210,9 +1211,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           sum(enc_sizes[p] for p in positions),
       )
 
-    # 2-3. P90 tail batches + greedy lane assignment of remaining sites
+    # 2-3. P90 tail batches + greedy lane assignment of remaining sites.
+    # n_tail is capped by license tier (k): <=1,000 -> 1, 1,001-5,000 -> 2, >5,000 -> 3.
+    max_tail_group_size = files_batch_planner.get_max_tail_group_size(
+        get_total_license_count(licenseMetrics)
+    )
     plan = files_batch_planner.plan_p90_lanes(
-        sorted_etas, num_lanes, max_sites_per_batch, _positions_eta
+        sorted_etas, num_lanes, max_sites_per_batch, _positions_eta, max_tail_group_size
     )
 
     def _build_batch(positions, is_p90):
@@ -1269,7 +1274,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.log_msg(
         f"[Batch Planning] {len(rows):,} sites | P90 ETA threshold:"
         f" {self.format_eta(plan.p90_threshold)} | P90 sites: {plan.tail_count:,}"
-        f" (n_tail={plan.tail_group_size}) | {num_lanes} lanes | Generated"
+        f" (n_tail={plan.tail_group_size}, k={max_tail_group_size}) | {num_lanes} lanes | Generated"
         f" {len(final_batches_list)} batches ({num_p90_batches} P90) | Total ETA:"
         f" {self.format_eta(total_eta)}"
     )
