@@ -56,6 +56,27 @@ def get_bucket_column_header(low, high):
   return f"Files {format_range(low, high)}"
 
 
+def get_total_license_count(license_metrics):
+  """Returns total enabled SharePoint license units (User + Company)."""
+  units = (license_metrics or {}).get("totalAllotedUnits", {})
+  return int(units.get("User", 0) or 0) + int(units.get("Company", 0) or 0)
+
+
+def get_license_fallback_banner_text(data):
+  """Returns the dashboard warning when licenses could not be determined, else None.
+
+  Applies to live scans and site report uploads alike: ETAs then assume the
+  lowest license tier.
+  """
+  reason = (data.get("licenseMetrics") or {}).get("fetchError")
+  if not reason:
+    return None
+  return (
+      f"⚠️ License count could not be determined ({reason}). ETAs assume the lowest"
+      " license tier (≤1,000 licenses) and may be overestimated."
+  )
+
+
 class FileMigrationEstimatorTool(MigrationEstimatorTool):
   def __init__(self):
     try:
@@ -639,6 +660,42 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       })
     return report_metrics
 
+  def _get_license_metrics_for_report_upload(self, config, failures):
+    """Fetches tenant licenses so uploaded site report ETAs use the real license tier.
+
+    Credentials are optional for site report uploads. When they are blank,
+    incomplete, invalid, lack LicenseAssignment.Read.All, or the license API
+    fails, the returned metrics carry a 'fetchError' reason and ETAs fall back
+    to the lowest license tier.
+    """
+    if not (config.tenant_id or config.client_ids or config.client_secrets):
+      return {"fetchError": "no credentials provided"}
+    if (
+        not (config.tenant_id and config.client_ids and config.client_secrets)
+        or len(config.client_ids) != len(config.client_secrets)
+    ):
+      return {"fetchError": "incomplete credentials"}
+
+    self.log_msg("Fetching tenant licenses for ETA calculation...")
+    try:
+      manager = self.factory.get_manager()
+      manager.authenticate_all(self.log_msg, required_scopes=["LicenseAssignment.Read.All"])
+    except ValueError as err:
+      self.log_msg(f"[ERROR] License fetch skipped: {err}")
+      return {"fetchError": "app is missing the LicenseAssignment.Read.All permission"}
+    except Exception as err:
+      self.log_msg(f"[ERROR] License fetch skipped: {err}")
+      return {"fetchError": "sign-in failed; verify Tenant ID, Client ID and Client Secret"}
+
+    # Created after sign-in so its URL invoker uses the authenticated token manager.
+    estimator = self.factory.get_files_estimator(
+        progress_update_callback=self.ui_update, hard_reset=True
+    )
+    license_metrics = estimator.get_license_metrics(failures)
+    if not license_metrics.get("fetchError"):
+      self.log_msg(f"Licenses fetched: {get_total_license_count(license_metrics):,}")
+    return license_metrics
+
   def _get_input_from_csv_if_uploaded(self, config):
     if self.user_source.get() != "csv":
       return {}
@@ -742,8 +799,17 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       else:
         if getattr(self, "scan_runtime_start", None) is None:
           self.scan_runtime_start = time.time()
+        self.ui_update("site_discovery", status="Fetching...", count=0)
+        file_metrics["licenseMetrics"] = self._get_license_metrics_for_report_upload(
+            config, failures
+        )
         estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
-        self.ui_update("site_discovery", status="Done", count=file_metrics.get("siteCount", 0))
+        self.ui_update(
+            "site_discovery",
+            status="Done",
+            count=file_metrics.get("siteCount", 0),
+            licenseCount=get_total_license_count(file_metrics["licenseMetrics"]),
+        )
         self.ui_update(
             "drive_discovery",
             status="Done",
@@ -754,6 +820,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         )
         self.ui_update("scan_progress", source="drive_parsing", progress=1.0)
         self.ui_update("phase_status", source="drive_parsing", status="complete")
+
+      license_fetch_error = (file_metrics.get("licenseMetrics") or {}).get("fetchError")
+      if license_fetch_error:
+        self.log_msg(
+            f"[WARNING] License count could not be determined ({license_fetch_error})."
+            " ETAs assume the lowest license tier (≤1,000 licenses) and may be overestimated."
+        )
 
       self.log_msg("\n" + "=" * 60)
       self.log_msg("📊 Failures and Warnings:")
@@ -1327,6 +1400,16 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               justify="left",
           ).pack(anchor="w", padx=10, pady=(0, 10))
 
+      license_text = get_license_fallback_banner_text(data) if self.show_eta else None
+      if license_text:
+          ctk.CTkLabel(
+              self.view_results,
+              text=license_text,
+              font=FONT_BODY_BOLD,
+              text_color=COLOR_TEXT_MAIN,
+              justify="left",
+          ).pack(anchor="w", padx=10, pady=(0, 10))
+
       # Cards for simple metrics
       card_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
       card_frame.pack(fill="x", pady=10)
@@ -1828,6 +1911,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       # Section 2: License Metrics
       license_data = data.get("licenseMetrics", {})
       writer.writerow(["Total License Count", license_data.get("totalAllotedUnits", {}).get("User", 0) + license_data.get("totalAllotedUnits", {}).get("Company", 0)])
+      license_note = get_license_fallback_banner_text(data)
+      if license_note:
+        writer.writerow([license_note.replace("⚠️ ", "Note: ", 1)])
       
       writer.writerow([]) # Blank line separator
       
