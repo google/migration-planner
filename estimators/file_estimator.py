@@ -1123,12 +1123,27 @@ class FileEstimator(Estimator):
             self._log_and_fail("Error in _get_list_count", e, failures)
             return 0
 
+    def get_license_metrics(self, failures: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Fetches tenant SharePoint license metrics without running a scan.
+
+        Used when ETAs are recalculated from an uploaded site report. Requires
+        an authenticated token manager on the URL invoker.
+        """
+        return self._get_license_metrics({"licenseCount": 0}, failures)
+
     def _get_license_metrics(
         self,
         site_discovery_progress_metrics: Dict[str, int],
         failures: List[Dict[str, str]]
     ) -> Dict[str, Any]:
+        """Fetches SharePoint license metrics from Graph subscribedSkus.
+
+        If any page fails, partial results are discarded and the returned dict
+        carries a 'fetchError' reason, so callers can warn that the lowest
+        license tier is assumed for ETAs.
+        """
         licenses = []
+        fetch_error = None
         url = "https://graph.microsoft.com/v1.0/subscribedSkus?$select=prepaidUnits,consumedUnits,servicePlans,appliesTo"
         token_data = self.url_invoker.token_manager.get_valid_token_slot(self.logger)
         token = token_data["token"]
@@ -1143,24 +1158,39 @@ class FileEstimator(Estimator):
                     token = token_data["token"]
                     headers = {"Authorization": f"Bearer {token}"}
 
+                d = None
                 attempts = 0
                 max_attempts = self.config.retries + 1
                 while attempts < max_attempts and not self.is_hard_stop_requested():
                     try:
                         r = session.get(url, headers=headers, timeout=180)
                         if r.status_code != 200:
+                            try:
+                                detail = r.json().get("error", {}).get("message", "")
+                            except ValueError:
+                                detail = r.text
+                            fetch_error = f"license API returned HTTP {r.status_code}"
+                            failures.append({
+                                "type": FailureType.FAILURE_STATUS_CODE_ERROR.name,
+                                "statusCode": r.status_code,
+                                "message": f"Error in fetching licenses: HTTP {r.status_code} {str(detail)[:300]}",
+                            })
                             break
                         d = r.json()
                         break
                     except Exception as e:
                         attempts += 1
                         if attempts == max_attempts:
+                            fetch_error = "license API request failed"
                             self._log_and_fail("Error in fetching licenses", e, failures)
                             break
                         elif self.logger is not None:
                             wait_time = min(10, max(2, self.config.backoff) ** (attempts - 1))
                             self.logger(f"Error in fetching licenses. Attempt count: {attempts} | Retrying in {wait_time} seconds...")
                             time.sleep(wait_time)
+
+                if d is None:
+                    break
 
                 all_licenses = d.get("value", [])
                 sharepoint_licenses = [
@@ -1175,9 +1205,15 @@ class FileEstimator(Estimator):
                 url = d.get("@odata.nextLink")
 
         except Exception as e:
+            fetch_error = "license metrics could not be processed"
             self._log_and_fail("Error in _get_license_metrics", e, failures)
         finally:
             self.url_invoker.token_manager.return_token_slot(token_data)
+
+        if fetch_error:
+            # Never use partial results; callers fall back to the lowest tier.
+            licenses = []
+            site_discovery_progress_metrics["licenseCount"] = 0
         
         license_metrics = {
             "totalLicenseCount": {
@@ -1193,6 +1229,8 @@ class FileEstimator(Estimator):
                 "Company": 0
             }
         }
+        if fetch_error:
+            license_metrics["fetchError"] = fetch_error
         for license in licenses:
             applies_to = license.get("appliesTo", "")
             if applies_to == "User":
