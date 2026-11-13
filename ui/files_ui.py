@@ -2,6 +2,7 @@ from ui.exchange_online_ui import MigrationEstimatorTool
 from ui import utils as ui_utils
 from ui.files_shallow import shallow_ui_helpers
 from util.constants import *
+from util import files_batch_planner
 from datetime import timedelta, datetime
 import os
 import customtkinter as ctk
@@ -75,7 +76,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.include_file_versions = ctk.BooleanVar(value=False)
     self.scan_encrypted_files = ctk.BooleanVar(value=False)
     self.generate_folder_amr_map = ctk.BooleanVar(value=False)
-    self.eta_min_users = ctk.IntVar(value=1000)
     self.eta_max_users = ctk.IntVar(value=5000)
     self.parallel_batches = ctk.IntVar(value=5)
 
@@ -873,8 +873,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if "Encrypted File Size" in df_output.columns:
         df_output["Encrypted File Size"] = df_output["Encrypted File Size"].apply(self.format_size)
       df_output.rename(columns={"Site Id": "Site URL/Name"}, inplace=True)
-      if "SortMetric" in df_output.columns:
-        df_output.drop(columns=["SortMetric"], inplace=True)
       if "Resource Count" in df_output.columns:
         df_output.drop(columns=["Resource Count"], inplace=True)
       
@@ -984,6 +982,19 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     super().build_results_view()
 
   def calculate_migration_batches(self, df, licenseMetrics):
+    """Plans migration batches using the P90-tail algorithm.
+
+    1. Compute each site's ETA and sort sites in descending ETA order.
+    2. Sites with ETA strictly above the P90 ETA form the tail. They are grouped
+       n_tail = clamp(floor(tail / lanes), 1, 5) at a time and greedily assigned
+       to the least-loaded lane as orange "P90" batches (merged per lane while
+       <= the max sites per batch).
+    3. Remaining sites are greedily assigned site by site to the least-loaded
+       lane, then cut into batches of up to the max sites per batch in
+       descending ETA order.
+
+    See util/files_batch_planner.py for the lane/batch planning details.
+    """
     # Ensure numeric columns
     if "Resource Count" not in df.columns:
       df["Resource Count"] = 0
@@ -995,26 +1006,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     else:
       df["Corpus Size"] = pd.to_numeric(df["Corpus Size"], errors="coerce").fillna(0)
 
-    df["SortMetric"] = df.apply(
-      lambda x: max(
-          (x["Corpus Size"] / FILES_GLOBAL_CORPUS_SIZE_LIMIT), (x["Resource Count"] / FILES_GLOBAL_COUNT_LIMIT)
-      ),
-      axis=1,
-    )
-    # 1. Sort Sites (Descending - Heaviest first)
-    df_sorted_base = df.sort_values(by="SortMetric", ascending=False).copy()
-
-    user_min_limit = self.val_eta_min_users
-    user_max_limit = self.val_eta_max_users
-    num_parallel = self.val_parallel_batches
-    max_allowed_batches = self.val_eta_max_batches
-
-    candidate_hours = [3, 6, 12, 18, 24, 36, 48, 72, 120, 168, 240, 360, 480, 720, 1080, 1440]
-
-    best_total_eta = float("inf")
-    best_plan = None
-    fallback_plan = None
-    min_batches_seen = float("inf")
+    num_lanes = max(1, int(self.val_parallel_batches))
+    max_sites_per_batch = max(1, int(self.val_eta_max_users))
 
     def _get_qps_from_license_count():
       # Calculate number of licenses required
@@ -1041,8 +1034,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     estimator = self.factory.get_files_estimator()
     qps_limit = _get_qps_from_license_count()
-    has_enc_files = "Encrypted File Count" in df_sorted_base.columns
-    has_enc_size = "Encrypted File Size" in df_sorted_base.columns
+    has_enc_files = "Encrypted File Count" in df.columns
+    has_enc_size = "Encrypted File Size" in df.columns
 
     def _eta_from_totals(total_size, total_files, total_enc_files=0, total_enc_size=0.0):
       data = {
@@ -1057,179 +1050,96 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       }
       return estimator.calculate_migration_eta(data)
 
-    # Precompute single-site ETA once per row (invariant across target_hours and lanes)
-    sorted_rows = [row for _, row in df_sorted_base.iterrows()]
-    site_etas = [
-        _eta_from_totals(
-            row.get("Corpus Size", 0),
-            int(row.get("File Count", 0)),
-            int(row.get("Encrypted File Count", 0)) if has_enc_files else 0,
-            float(row.get("Encrypted File Size", 0)) if has_enc_size else 0.0,
-        )
-        for row in sorted_rows
+    # 1. Per-site ETA, then sort sites in descending ETA order (stable on ties)
+    rows = [row for _, row in df.iterrows()]
+    sizes = [row.get("Corpus Size", 0) for row in rows]
+    files = [int(row.get("File Count", 0)) for row in rows]
+    enc_files = [int(row.get("Encrypted File Count", 0)) if has_enc_files else 0 for row in rows]
+    enc_sizes = [float(row.get("Encrypted File Size", 0)) if has_enc_size else 0.0 for row in rows]
+    etas = [
+        _eta_from_totals(sizes[i], files[i], enc_files[i], enc_sizes[i])
+        for i in range(len(rows))
     ]
+    order = sorted(range(len(rows)), key=lambda i: etas[i], reverse=True)
 
-    # Precompute greedy lane assignment and interleaved lane DataFrames once per lane count (1..num_parallel)
-    prepared_lanes_by_parallel = {}
-    for current_parallel in range(1, num_parallel + 1):
-      lanes = [{"total_time": 0.0, "sites": []} for _ in range(current_parallel)]
-      for row, site_time in zip(sorted_rows, site_etas):
-        target_lane = min(lanes, key=lambda l: l["total_time"])
-        target_lane["sites"].append(row)
-        target_lane["total_time"] += site_time
+    df_sorted_base = df.iloc[order].copy()
+    sizes = [sizes[i] for i in order]
+    files = [files[i] for i in order]
+    enc_files = [enc_files[i] for i in order]
+    enc_sizes = [enc_sizes[i] for i in order]
+    sorted_etas = [etas[i] for i in order]
 
-      prepared_lanes = []
-      for lane_idx, lane in enumerate(lanes):
-        if not lane["sites"]:
-          continue
-        lane_df = pd.DataFrame(lane["sites"])
-        lane_size = len(lane_df)
-        K = max(1, lane_size // 10)  # Dynamic bucket size (number of buckets)
+    def _positions_eta(positions):
+      return _eta_from_totals(
+          sum(sizes[p] for p in positions),
+          sum(files[p] for p in positions),
+          sum(enc_files[p] for p in positions),
+          sum(enc_sizes[p] for p in positions),
+      )
 
-        lane_df["temp_index"] = range(lane_size)
-        lane_df["bucket"] = lane_df["temp_index"] % K
+    # 2-3. P90 tail batches + greedy lane assignment of remaining sites
+    plan = files_batch_planner.plan_p90_lanes(
+        sorted_etas, num_lanes, max_sites_per_batch, _positions_eta
+    )
 
-        # Sort by bucket to interleave, then by temp_index to maintain order within bucket
-        lane_df = (
-            lane_df.sort_values(by=["bucket", "temp_index"])
-            .drop(columns=["temp_index", "bucket"])
-            .reset_index(drop=True)
-        )
+    def _build_batch(positions, is_p90):
+      subset = df_sorted_base.iloc[positions]
+      batch = {
+          "sites": len(subset),
+          "dl_count": int(subset["DL Count"].sum()) if "DL Count" in subset.columns else 0,
+          "resource_count": int(subset["Resource Count"].sum()),
+          "folder_count": int(subset["Folder Count"].sum()) if "Folder Count" in subset.columns else 0,
+          "file_count": int(subset["File Count"].sum()) if "File Count" in subset.columns else 0,
+          "shortcut_count": int(subset["Shortcut Count"].sum()) if "Shortcut Count" in subset.columns else 0,
+          "corpus_size": float(subset["Corpus Size"].sum()) if "Corpus Size" in subset.columns else 0.0,
+          "eta": _positions_eta(positions),
+          "df_subset": subset,
+          "is_p90": is_p90,
+      }
+      if is_p90:
+        batch["color"] = COLOR_P90_BATCH
+        batch["text_color"] = COLOR_P90_BATCH_TEXT
+        batch["legend"] = "P90 (largest sites) batches"
+      return batch
 
-        lane_rows = [r for _, r in lane_df.iterrows()]
-        sizes_list = [r.get("Corpus Size", 0) for r in lane_rows]
-        files_list = [int(r.get("File Count", 0)) for r in lane_rows]
-        enc_files_list = (
-            [int(r.get("Encrypted File Count", 0)) for r in lane_rows]
-            if has_enc_files
-            else None
-        )
-        enc_sizes_list = (
-            [float(r.get("Encrypted File Size", 0)) for r in lane_rows]
-            if has_enc_size
-            else None
-        )
-        prepared_lanes.append(
-            (lane_idx, lane_df, sizes_list, files_list, enc_files_list, enc_sizes_list)
-        )
-      prepared_lanes_by_parallel[current_parallel] = prepared_lanes
+    buckets = []
+    for lane_idx, lane_batches in enumerate(plan.lanes):
+      if not lane_batches:
+        continue
+      chunks = [_build_batch(positions, is_p90) for positions, is_p90 in lane_batches]
+      buckets.append({
+          "id": lane_idx + 1,
+          "total": sum(c["eta"] for c in chunks),
+          "batches": chunks,
+      })
 
-    # Iterate through candidates
-    for target_hours in candidate_hours:
-      for current_parallel in range(1, num_parallel + 1):
-        # 3. Per-Lane Batching (Binary Search)
-        final_buckets = []
+    # 4. Consolidation & Naming (numbered by proposed start time)
+    total_eta = max(b["total"] for b in buckets) if buckets else 0
 
-        for (
-            lane_idx,
-            lane_df,
-            sizes_list,
-            files_list,
-            enc_files_list,
-            enc_sizes_list,
-        ) in prepared_lanes_by_parallel[current_parallel]:
+    all_chunks_with_time = []
+    for b_idx, b in enumerate(buckets):
+      current_time = 0.0
+      for chunk in b["batches"]:
+        chunk["start_time"] = current_time
+        chunk["bucket_idx"] = b_idx
+        current_time += chunk["eta"]
+        all_chunks_with_time.append(chunk)
 
-          def _slice_eta(s_idx, e_idx):
-            return _eta_from_totals(
-                sum(sizes_list[s_idx:e_idx]),
-                sum(files_list[s_idx:e_idx]),
-                sum(enc_files_list[s_idx:e_idx]) if enc_files_list is not None else 0,
-                sum(enc_sizes_list[s_idx:e_idx]) if enc_sizes_list is not None else 0.0,
-            )
+    all_chunks_with_time.sort(key=lambda x: (x["start_time"], x["bucket_idx"]))
 
-          total_users = len(lane_df)
-          start_idx = 0
-          raw_chunks = []
+    final_batches_list = []
+    for i, chunk in enumerate(all_chunks_with_time):
+      chunk["name"] = f"Batch {i+1}"
+      final_batches_list.append(chunk)
 
-          # Partitioning Loop (Same as original but within lane)
-          while start_idx < total_users:
-            remaining_users = total_users - start_idx
-            current_max = min(remaining_users, user_max_limit)
-            current_min = min(user_min_limit, remaining_users)
-
-            # Binary Search for Optimal Size
-            if _slice_eta(start_idx, start_idx + current_min) > target_hours:
-              chosen_size = current_min
-            elif _slice_eta(start_idx, start_idx + current_max) <= target_hours:
-              chosen_size = current_max
-            else:
-              low = current_min
-              high = current_max
-              chosen_size = high
-              while low <= high:
-                mid = (low + high) // 2
-                eta = _slice_eta(start_idx, start_idx + mid)
-
-                if eta > target_hours:
-                  chosen_size = mid
-                  high = mid - 1
-                else:
-                  low = mid + 1
-
-            end_idx = start_idx + chosen_size
-            final_subset = lane_df.iloc[start_idx:end_idx]
-            w_eta = _slice_eta(start_idx, end_idx)
-
-            raw_chunks.append({
-                "start_idx": start_idx,
-                "end_idx": end_idx,
-                "sites": len(final_subset),
-                "dl_count": int(final_subset["DL Count"].sum()) if "DL Count" in final_subset.columns else 0,
-                "resource_count": int(final_subset["Resource Count"].sum()),
-                "folder_count": int(final_subset["Folder Count"].sum()) if "Folder Count" in final_subset.columns else 0,
-                "file_count": int(final_subset["File Count"].sum()) if "File Count" in final_subset.columns else 0,
-                "shortcut_count": int(final_subset["Shortcut Count"].sum()) if "Shortcut Count" in final_subset.columns else 0,
-                "corpus_size": float(final_subset["Corpus Size"].sum()) if "Corpus Size" in final_subset.columns else 0.0,
-                "eta": w_eta,
-                "df_subset": final_subset
-            })
-            start_idx = end_idx
-
-          final_buckets.append({
-              "id": lane_idx + 1,
-              "total": sum(c["eta"] for c in raw_chunks),
-              "batches": raw_chunks
-          })
-
-        # 4. Consolidation & Naming
-        total_eta = max(b["total"] for b in final_buckets) if final_buckets else 0
-
-        all_chunks_with_time = []
-        for b_idx, b in enumerate(final_buckets):
-          current_time = 0.0
-          for chunk in b["batches"]:
-            chunk["start_time"] = current_time
-            chunk["bucket_idx"] = b_idx
-            current_time += chunk["eta"]
-            all_chunks_with_time.append(chunk)
-
-        all_chunks_with_time.sort(key=lambda x: (x["start_time"], x["bucket_idx"]))
-
-        final_batches_list = []
-        for i, chunk in enumerate(all_chunks_with_time):
-          batch_name = f"Batch {i+1}"
-          chunk["name"] = batch_name
-          final_batches_list.append(chunk)
-
-        num_batches = len(final_batches_list)
-        self.log_msg(
-            f"Evaluated Target {target_hours}h with {current_parallel} lanes: Generated {num_batches} batches | Total ETA: {self.format_eta(total_eta)}"
-        )
-
-        # 5. Selection Logic
-        if num_batches <= max_allowed_batches:
-          if total_eta < best_total_eta:
-            best_total_eta = total_eta
-            best_plan = (final_batches_list, total_eta, final_buckets)
-
-        if num_batches < min_batches_seen:
-          min_batches_seen = num_batches
-          fallback_plan = (final_batches_list, total_eta, final_buckets)
-
-    if best_plan is not None:
-      final_batches_list, total_eta, buckets = best_plan
-    else:
-      final_batches_list, total_eta, buckets = fallback_plan
+    num_p90_batches = sum(1 for c in final_batches_list if c["is_p90"])
+    self.log_msg(
+        f"[Batch Planning] {len(rows):,} sites | P90 ETA threshold:"
+        f" {self.format_eta(plan.p90_threshold)} | P90 sites: {plan.tail_count:,}"
+        f" (n_tail={plan.tail_group_size}) | {num_lanes} lanes | Generated"
+        f" {len(final_batches_list)} batches ({num_p90_batches} P90) | Total ETA:"
+        f" {self.format_eta(total_eta)}"
+    )
 
     df_final = df_sorted_base.copy()
     site_to_batch = {}
@@ -1295,7 +1205,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     w_width = max(20, pixel_width)
 
     bar = ctk.CTkFrame(
-        f, width=w_width, height=16, fg_color=COLOR_BATCH_BAR, corner_radius=8
+        f,
+        width=w_width,
+        height=16,
+        fg_color=batch.get("color", COLOR_BATCH_BAR),
+        corner_radius=8,
     )
     bar.pack(side="left", padx=10)
     ctk.CTkLabel(
@@ -2037,10 +1951,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.val_include_file_versions = self.include_file_versions.get()
     self.val_scan_encrypted_files = self.scan_encrypted_files.get()
     self.val_generate_folder_amr_map = self.generate_folder_amr_map.get()
-    self.val_eta_min_users = self.eta_min_users.get()
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()
-    self.val_eta_max_batches = self.eta_max_batches.get()
 
     if self.val_include_file_versions:
         warning_msg = (
