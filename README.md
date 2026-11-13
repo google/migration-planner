@@ -383,6 +383,12 @@ The results dashboard displays summary cards for the scanned OneDrive and ShareP
 
 The exported CSV report includes all summary metrics along with granular site-level details (with `Failed DL Count` included right after `DL Count` in Shallow Scan). If both Personal (OneDrive) and SharePoint Sites are scanned, results for both are grouped separately in the full report export.
 
+#### 2. Timeline Estimates & Parallel Batches (P90 Batch Planning)
+*   **Site Ordering**: Each site's ETA is calculated and sites are sorted in Descending Order (Heaviest -> Lightest) by ETA.
+*   **P90 Batches**: Sites whose ETA is above the 90th-percentile ETA are grouped `n_tail` at a time (largest first), where `n_tail` = (number of P90 sites ÷ **Parallel Batches**), rounded down and clamped between 1 and 5. These groups are greedily assigned to the least-loaded lane and shown in **orange** in the Gantt chart and Batch Details. P90 batches in the same lane are merged while they hold ≤ 5,000 sites.
+*   **Remaining Sites**: Assigned one by one to the least-loaded lane, then split within each lane (heaviest first) into batches of up to 5,000 sites.
+*   **Total ETA** = The duration of the single longest bucket (lane).
+
 ---
 
 ### Workflow C Results: Microsoft Teams & Chat Planner

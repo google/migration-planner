@@ -61,6 +61,8 @@ COLOR_SECONDARY_HOVER = "#F1F3F4"  # Light Gray for hover
 COLOR_SURFACE_HOVER = "#EFF6FF"  # Light Blue for surface hover
 COLOR_SURFACE_VARIANT = "#F8F9FA"  # Light Gray for advanced settings
 COLOR_BATCH_BAR = "#8AB4F8"  # Light Blue for batch bars
+COLOR_P90_BATCH = "#FA7B17"  # Google Orange for P90 (largest sites) batches
+COLOR_P90_BATCH_TEXT = "#1F1F1F"  # High emphasis text on P90 batches
 
 # --- Fonts ---
 FONT_HEADER_LARGE = ("Roboto", 32, "bold")
@@ -82,7 +84,6 @@ ETA_EMAIL_BATCH_TIME = 6
 
 IPA_ETA_MULTIPLIER = 1.1
 
-FILES_GLOBAL_COUNT_LIMIT = 4  # 4 files/folders per second
 FILES_GLOBAL_CORPUS_SIZE_LIMIT = (400 * 1024 * 1024 * 1024) // 3600  # 400 GB per hour in bytes per second
 ENCRYPTED_FILE_ETA_MULTIPLIER = 0.5 # 0.5x speed for encrypted files
 
