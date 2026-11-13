@@ -9,7 +9,7 @@
   - **Guided Certificate Setup**: On first run, the tool automatically generates a local security certificate at `certificate/<tenant_id>_<client_id>/certificate.pem` and displays a **Certificate Upload** dialog with a one-click **Copy Path** button and step-by-step upload instructions for Microsoft Entra ID.
   - **Automated Deep Scan Recommendations**: Sites containing an entity (Site, Subsite, or Document Library) exceeding **500k items** (Large Resources) are included in batch planning and ETA calculations like any other site, and are additionally exported to `suggested_batches/DeepScanRecommended.csv` for targeted Deep Scans. A warning reminds you that entities with >500k items must be split into smaller entities before migration.
   - **Failed Document Library Tracking**: Surfaces a **Failed Document Library Count** card on the results dashboard and a `Failed DL Count` column in exported CSV reports if any Document Library fails to scan.
-  - **Site Report CSV Upload for Instant ETA Recalculation**: Upload a previously generated `site_report_<timestamp>.csv` (from either Shallow Scan or Deep Scan, covering both OneDrive and SharePoint sites) via **Upload CSV** to recalculate migration batches and ETAs without re-scanning.
+  - **Site Report CSV Upload for Instant ETA Recalculation**: Upload a previously generated `site_report_<timestamp>.csv` (from either Shallow Scan or Deep Scan, covering both OneDrive and SharePoint sites) via **Upload CSV** to recalculate migration batches and ETAs without re-scanning. If app credentials are provided, the tenant's license count is fetched so ETAs use the correct license tier; otherwise the lowest tier is assumed and a warning is shown.
   - **Note**: The new feature requires an additional library `cryptography`. Please run `pip install cryptography` or `pip3 install cryptography` if faced with errors like `ModuleNotFoundError: No module named 'cryptography'`
 
 ## DISCLAIMER
@@ -271,6 +271,7 @@ Click **"Show Advanced Settings"** to tune the performance:
            ```
            *Note*: Entries are validated against the enabled site types (Personal Sites vs. SharePoint Sites). Invalid entries that fail discovery are skipped and logged.
         2. **Recalculate ETA from Existing Site Report (`site_report_<timestamp>.csv`)**: If you already ran a Shallow Scan or Deep Scan and want to recalculate migration batches/ETAs (e.g., with a different **Max Parallel Batches** setting) without re-scanning the tenant, upload the previously generated `outputs/<timestamp>/site_report_<timestamp>.csv`. Both OneDrive and SharePoint site report CSVs (from Shallow Scan or Deep Scan) are supported.
+           *License tier*: ETAs depend on the tenant's SharePoint license count. If **Tenant ID**, **Client ID** and **Client Secret** are provided, the tool signs in and fetches licenses from Microsoft Graph (`subscribedSkus`; only the `LicenseAssignment.Read.All` permission is needed, no certificate). Credentials are optional: if they are blank, incomplete, invalid, lack the permission, or the license call fails, ETAs assume the lowest license tier (≤1,000 licenses) and the results dashboard shows a warning banner with the reason.
            *Disclaimer*: When recalculating ETAs from an uploaded `site_report.csv`, detailed drill-down tables such as *Large Resources* and *File Size Distribution* are omitted; refer to your original scan report for those tables.
 
 #### 2. Advanced Settings: Shallow Scan (Default) vs. Deep Scan
@@ -278,9 +279,10 @@ Click **"Show Advanced Settings"** to configure your scan mode:
 *   **Shallow Scan (Enabled by Default)**:
     *   The **Shallow Scan** toggle at the top of Advanced Settings is switched **ON** by default.
     *   Shallow Scan rapidly retrieves total folder counts, file counts, and active corpus sizes per Document Library without enumerating individual folder/file trees.
-    *   While **Shallow Scan** is ON, Deep Scan-specific checkboxes (*Include Recycle Bin Contents*, *Include Historical File Versions*, *Scan for Encrypted Files (RMS/MIP)*, and *Generate Depth Report for Large Resources*) are inactive/disabled.
+    *   While **Shallow Scan** is ON, Deep Scan-specific checkboxes (*Include Recycle Bin Contents*, *Scan for Encrypted Files (RMS/MIP)*, and *Generate Depth Report for Large Resources*) are inactive/disabled.
+    *   **Include Historical File Versions** stays available in Shallow Scan at no extra cost. For each Document Library, the corpus including versions is estimated as `TotalSize − AdditionalFileStreamSize` (never below the active size), and every version is treated as a file of the library's average size: estimated files = corpus incl. versions ÷ (`TotalFileStreamSize` ÷ `TotalFileCount`), plus a 10% buffer, rounded up. ETAs then use these values. The dashboard shows **Total Corpus Size (incl. Versions)** and an **Estimated Files (incl. Versions)** card. The site report and exported report add `Corpus Size (incl. Versions)` and `Estimated File Count (incl. Versions)` columns, while `Corpus Size` and `File Count` keep the active (current version) values. Site reports without these columns still upload: with versions ticked, the tool logs a warning and proceeds without versions.
 *   **Deep Scan (Toggle Shallow Scan OFF)**:
-    *   Switch **Shallow Scan** **OFF** if you need folder depth analysis (`> depth limit 100`), shortcut counts, file size distribution buckets, Recycle Bin sizing, Historical File Versions sizing, Encrypted File detection, or Depth Reports for Large Resources (`suggested_batches/depth_report.csv`).
+    *   Switch **Shallow Scan** **OFF** if you need folder depth analysis (`> depth limit 100`), shortcut counts, file size distribution buckets, Recycle Bin sizing, exact per-file Historical File Versions sizing, Encrypted File detection, or Depth Reports for Large Resources (`suggested_batches/depth_report.csv`).
     *   **Recommended Workflow**: Run **Shallow Scan** first across your tenant. If any sites, Subsites, or Document Libraries exceed 500k items, Shallow Scan automatically generates a `suggested_batches/DeepScanRecommended.csv` file in the output folder—you can then switch **Shallow Scan** OFF and upload `DeepScanRecommended.csv` to run a Deep Scan only on those large sites.
 *   **Site Types to Scan**:
     *   **Include Personal Sites (OneDrive)**: Scans Personal / OneDrive sites.
@@ -382,6 +384,12 @@ The results dashboard displays summary cards for the scanned OneDrive and ShareP
 *   **File Size Distribution** *(Deep Scan)*: Distribution of files across size buckets (omitted in Shallow Scan).
 
 The exported CSV report includes all summary metrics along with granular site-level details (with `Failed DL Count` included right after `DL Count` in Shallow Scan). If both Personal (OneDrive) and SharePoint Sites are scanned, results for both are grouped separately in the full report export.
+
+#### 2. Timeline Estimates & Parallel Batches (P90 Batch Planning)
+*   **Site Ordering**: Each site's ETA is calculated and sites are sorted in Descending Order (Heaviest -> Lightest) by ETA.
+*   **P90 Batches**: Sites whose ETA is above the 90th-percentile ETA are grouped `n_tail` at a time (largest first), where `n_tail` = (number of P90 sites ÷ **Parallel Batches**), rounded down and clamped between 1 and `k`. `k` depends on the license tier: ≤1,000 licenses → 1, 1,001–5,000 → 2, >5,000 → 3 (the lowest tier applies if licenses could not be determined). These groups are greedily assigned to the least-loaded lane and shown in **orange** in the Gantt chart and Batch Details. P90 batches in the same lane are merged while they hold ≤ 5,000 sites.
+*   **Remaining Sites**: Assigned one by one to the least-loaded lane, then split within each lane (heaviest first) into batches of up to 5,000 sites.
+*   **Total ETA** = The duration of the single longest bucket (lane).
 
 ---
 

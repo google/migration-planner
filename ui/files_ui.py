@@ -2,6 +2,7 @@ from ui.exchange_online_ui import MigrationEstimatorTool
 from ui import utils as ui_utils
 from ui.files_shallow import shallow_ui_helpers
 from util.constants import *
+from util import files_batch_planner
 from datetime import timedelta, datetime
 import os
 import customtkinter as ctk
@@ -55,6 +56,27 @@ def get_bucket_column_header(low, high):
   return f"Files {format_range(low, high)}"
 
 
+def get_total_license_count(license_metrics):
+  """Returns total enabled SharePoint license units (User + Company)."""
+  units = (license_metrics or {}).get("totalAllotedUnits", {})
+  return int(units.get("User", 0) or 0) + int(units.get("Company", 0) or 0)
+
+
+def get_license_fallback_banner_text(data):
+  """Returns the dashboard warning when licenses could not be determined, else None.
+
+  Applies to live scans and site report uploads alike: ETAs then assume the
+  lowest license tier.
+  """
+  reason = (data.get("licenseMetrics") or {}).get("fetchError")
+  if not reason:
+    return None
+  return (
+      f"⚠️ License count could not be determined ({reason}). ETAs assume the lowest"
+      " license tier (≤1,000 licenses) and may be overestimated."
+  )
+
+
 class FileMigrationEstimatorTool(MigrationEstimatorTool):
   def __init__(self):
     try:
@@ -75,7 +97,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.include_file_versions = ctk.BooleanVar(value=False)
     self.scan_encrypted_files = ctk.BooleanVar(value=False)
     self.generate_folder_amr_map = ctk.BooleanVar(value=False)
-    self.eta_min_users = ctk.IntVar(value=1000)
     self.eta_max_users = ctk.IntVar(value=5000)
     self.parallel_batches = ctk.IntVar(value=5)
 
@@ -530,6 +551,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     site_metrics = {}
     personal_dl_total = 0
     team_dl_total = 0
+    versions_corpus_col = shallow_ui_helpers.VERSIONS_CORPUS_COL
+    versions_files_col = shallow_ui_helpers.VERSIONS_FILE_COUNT_COL
+    has_version_cols = versions_corpus_col in df.columns and versions_files_col in df.columns
+    version_rows = 0
+    version_fallback_rows = 0
     
     for _, row in df.iterrows():
       site_id = str(row[id_col]).strip()
@@ -571,10 +597,24 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           "resourceCount": res_cnt,
       }
 
+      if has_version_cols:
+        # Optional Shallow Scan versions columns; blank/N/A rows fall back to active values.
+        raw_corpus = str(row.get(versions_corpus_col, "")).strip()
+        versions_files = pd.to_numeric(row.get(versions_files_col), errors="coerce")
+        s_entry = site_metrics[site_id]
+        if raw_corpus and not raw_corpus.upper().startswith("N/A") and not pd.isna(versions_files):
+          s_entry["versionsCorpusSize"] = _parse_size_str(raw_corpus)
+          s_entry["versionsEstimatedFileCount"] = int(versions_files)
+          version_rows += 1
+        else:
+          s_entry["versionsCorpusSize"] = s_entry["totalSize"]
+          s_entry["versionsEstimatedFileCount"] = file_cnt
+          version_fallback_rows += 1
+
     self.skipped_actual_scan = True
     dl_total = personal_dl_total + team_dl_total
     
-    return {
+    report_metrics = {
         "isShallowScan": is_shallow_report,
         "siteMetrics": site_metrics,
         "siteCount": len(df),
@@ -609,6 +649,52 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         "tenantLevelFileSizeDistribution": {},
         "tenantLevelLargeResources": [],
     }
+    if version_rows > 0:
+      report_metrics.update({
+          "hasVersionEstimates": True,
+          "versionsCorpusSize": sum(s.get("versionsCorpusSize", 0) for s in site_metrics.values()),
+          "versionsEstimatedFileCount": sum(
+              s.get("versionsEstimatedFileCount", 0) for s in site_metrics.values()
+          ),
+          "versionFallbackRows": version_fallback_rows,
+      })
+    return report_metrics
+
+  def _get_license_metrics_for_report_upload(self, config, failures):
+    """Fetches tenant licenses so uploaded site report ETAs use the real license tier.
+
+    Credentials are optional for site report uploads. When they are blank,
+    incomplete, invalid, lack LicenseAssignment.Read.All, or the license API
+    fails, the returned metrics carry a 'fetchError' reason and ETAs fall back
+    to the lowest license tier.
+    """
+    if not (config.tenant_id or config.client_ids or config.client_secrets):
+      return {"fetchError": "no credentials provided"}
+    if (
+        not (config.tenant_id and config.client_ids and config.client_secrets)
+        or len(config.client_ids) != len(config.client_secrets)
+    ):
+      return {"fetchError": "incomplete credentials"}
+
+    self.log_msg("Fetching tenant licenses for ETA calculation...")
+    try:
+      manager = self.factory.get_manager()
+      manager.authenticate_all(self.log_msg, required_scopes=["LicenseAssignment.Read.All"])
+    except ValueError as err:
+      self.log_msg(f"[ERROR] License fetch skipped: {err}")
+      return {"fetchError": "app is missing the LicenseAssignment.Read.All permission"}
+    except Exception as err:
+      self.log_msg(f"[ERROR] License fetch skipped: {err}")
+      return {"fetchError": "sign-in failed; verify Tenant ID, Client ID and Client Secret"}
+
+    # Created after sign-in so its URL invoker uses the authenticated token manager.
+    estimator = self.factory.get_files_estimator(
+        progress_update_callback=self.ui_update, hard_reset=True
+    )
+    license_metrics = estimator.get_license_metrics(failures)
+    if not license_metrics.get("fetchError"):
+      self.log_msg(f"Licenses fetched: {get_total_license_count(license_metrics):,}")
+    return license_metrics
 
   def _get_input_from_csv_if_uploaded(self, config):
     if self.user_source.get() != "csv":
@@ -713,8 +799,17 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       else:
         if getattr(self, "scan_runtime_start", None) is None:
           self.scan_runtime_start = time.time()
+        self.ui_update("site_discovery", status="Fetching...", count=0)
+        file_metrics["licenseMetrics"] = self._get_license_metrics_for_report_upload(
+            config, failures
+        )
         estimator = self.factory.get_files_estimator(progress_update_callback=self.ui_update, hard_reset=True)
-        self.ui_update("site_discovery", status="Done", count=file_metrics.get("siteCount", 0))
+        self.ui_update(
+            "site_discovery",
+            status="Done",
+            count=file_metrics.get("siteCount", 0),
+            licenseCount=get_total_license_count(file_metrics["licenseMetrics"]),
+        )
         self.ui_update(
             "drive_discovery",
             status="Done",
@@ -725,6 +820,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         )
         self.ui_update("scan_progress", source="drive_parsing", progress=1.0)
         self.ui_update("phase_status", source="drive_parsing", status="complete")
+
+      license_fetch_error = (file_metrics.get("licenseMetrics") or {}).get("fetchError")
+      if license_fetch_error:
+        self.log_msg(
+            f"[WARNING] License count could not be determined ({license_fetch_error})."
+            " ETAs assume the lowest license tier (≤1,000 licenses) and may be overestimated."
+        )
 
       self.log_msg("\n" + "=" * 60)
       self.log_msg("📊 Failures and Warnings:")
@@ -756,6 +858,25 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             int(s.get("failedDlCount", 0) or 0) for s in site_metrics.values()
         )
       is_shallow_mode = bool(file_metrics.get("isShallowScan"))
+      if (
+          getattr(self, "val_include_file_versions", False)
+          and self.skipped_actual_scan
+          and not file_metrics.get("hasVersionEstimates")
+      ):
+        self.log_msg(
+            "[WARNING] 'Include Historical File Versions in Corpus Size' is enabled, but the"
+            f" uploaded site report has no '{shallow_ui_helpers.VERSIONS_CORPUS_COL}' /"
+            f" '{shallow_ui_helpers.VERSIONS_FILE_COUNT_COL}' values. Proceeding without"
+            " file versions."
+        )
+        self.val_include_file_versions = False
+      use_version_estimates = shallow_ui_helpers.uses_version_estimates(self, file_metrics)
+      if use_version_estimates and file_metrics.get("versionFallbackRows"):
+        self.log_msg(
+            f"[WARNING] {file_metrics['versionFallbackRows']} site(s) in the uploaded site report"
+            " have no file versions values; their current Corpus Size and File Count are"
+            " used instead."
+        )
       site_data = []
       for site_id, s_data in site_metrics.items():
         row_data = {
@@ -776,10 +897,18 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
             "Corpus Size": s_data.get("totalSize", 0),
             "Resource Count": s_data.get("resourceCount", 0),
         })
+        if use_version_estimates:
+            # Placed after Corpus Size once Resource Count is dropped on export.
+            row_data[shallow_ui_helpers.VERSIONS_CORPUS_COL] = s_data.get(
+                "versionsCorpusSize", s_data.get("totalSize", 0)
+            )
+            row_data[shallow_ui_helpers.VERSIONS_FILE_COUNT_COL] = s_data.get(
+                "versionsEstimatedFileCount", s_data.get("fileCount", 0)
+            )
         if getattr(self, "val_include_recycle_bin_contents", False):
             row_data["Recycle Bin Item Count"] = s_data.get("recycleBinCount", 0)
             row_data["Recycle Bin Size"] = s_data.get("recycleBinSize", 0)
-        if getattr(self, "val_include_file_versions", False):
+        if getattr(self, "val_include_file_versions", False) and not use_version_estimates:
             row_data["Historical File Version Count"] = s_data.get("versionCount", 0)
             row_data["Historical File Version Size"] = s_data.get("versionSize", 0)
         if getattr(self, "val_scan_encrypted_files", False):
@@ -866,6 +995,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       original_site_ids = df_output["Site Id"].copy()
       df_output["Site Id"] = df_output["Site Id"].apply(self._get_display_name)
       df_output["Corpus Size"] = df_output["Corpus Size"].apply(self.format_size)
+      if shallow_ui_helpers.VERSIONS_CORPUS_COL in df_output.columns:
+        df_output[shallow_ui_helpers.VERSIONS_CORPUS_COL] = df_output[
+            shallow_ui_helpers.VERSIONS_CORPUS_COL
+        ].apply(self.format_size)
       if "Recycle Bin Size" in df_output.columns:
         df_output["Recycle Bin Size"] = df_output["Recycle Bin Size"].apply(self.format_size)
       if "Historical File Version Size" in df_output.columns:
@@ -873,8 +1006,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       if "Encrypted File Size" in df_output.columns:
         df_output["Encrypted File Size"] = df_output["Encrypted File Size"].apply(self.format_size)
       df_output.rename(columns={"Site Id": "Site URL/Name"}, inplace=True)
-      if "SortMetric" in df_output.columns:
-        df_output.drop(columns=["SortMetric"], inplace=True)
       if "Resource Count" in df_output.columns:
         df_output.drop(columns=["Resource Count"], inplace=True)
       
@@ -984,6 +1115,20 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     super().build_results_view()
 
   def calculate_migration_batches(self, df, licenseMetrics):
+    """Plans migration batches using the P90-tail algorithm.
+
+    1. Compute each site's ETA and sort sites in descending ETA order.
+    2. Sites with ETA strictly above the P90 ETA form the tail. They are grouped
+       n_tail = clamp(floor(tail / lanes), 1, k) at a time, where k is set by
+       license tier (<=1,000 -> 1, 1,001-5,000 -> 2, >5,000 -> 3), and greedily
+       assigned to the least-loaded lane as orange "P90" batches (merged per
+       lane while <= the max sites per batch).
+    3. Remaining sites are greedily assigned site by site to the least-loaded
+       lane, then cut into batches of up to the max sites per batch in
+       descending ETA order.
+
+    See util/files_batch_planner.py for the lane/batch planning details.
+    """
     # Ensure numeric columns
     if "Resource Count" not in df.columns:
       df["Resource Count"] = 0
@@ -995,26 +1140,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     else:
       df["Corpus Size"] = pd.to_numeric(df["Corpus Size"], errors="coerce").fillna(0)
 
-    df["SortMetric"] = df.apply(
-      lambda x: max(
-          (x["Corpus Size"] / FILES_GLOBAL_CORPUS_SIZE_LIMIT), (x["Resource Count"] / FILES_GLOBAL_COUNT_LIMIT)
-      ),
-      axis=1,
-    )
-    # 1. Sort Sites (Descending - Heaviest first)
-    df_sorted_base = df.sort_values(by="SortMetric", ascending=False).copy()
-
-    user_min_limit = self.val_eta_min_users
-    user_max_limit = self.val_eta_max_users
-    num_parallel = self.val_parallel_batches
-    max_allowed_batches = self.val_eta_max_batches
-
-    candidate_hours = [3, 6, 12, 18, 24, 36, 48, 72, 120, 168, 240, 360, 480, 720, 1080, 1440]
-
-    best_total_eta = float("inf")
-    best_plan = None
-    fallback_plan = None
-    min_batches_seen = float("inf")
+    num_lanes = max(1, int(self.val_parallel_batches))
+    max_sites_per_batch = max(1, int(self.val_eta_max_users))
 
     def _get_qps_from_license_count():
       # Calculate number of licenses required
@@ -1041,8 +1168,8 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
     estimator = self.factory.get_files_estimator()
     qps_limit = _get_qps_from_license_count()
-    has_enc_files = "Encrypted File Count" in df_sorted_base.columns
-    has_enc_size = "Encrypted File Size" in df_sorted_base.columns
+    has_enc_files = "Encrypted File Count" in df.columns
+    has_enc_size = "Encrypted File Size" in df.columns
 
     def _eta_from_totals(total_size, total_files, total_enc_files=0, total_enc_size=0.0):
       data = {
@@ -1057,179 +1184,100 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       }
       return estimator.calculate_migration_eta(data)
 
-    # Precompute single-site ETA once per row (invariant across target_hours and lanes)
-    sorted_rows = [row for _, row in df_sorted_base.iterrows()]
-    site_etas = [
-        _eta_from_totals(
-            row.get("Corpus Size", 0),
-            int(row.get("File Count", 0)),
-            int(row.get("Encrypted File Count", 0)) if has_enc_files else 0,
-            float(row.get("Encrypted File Size", 0)) if has_enc_size else 0.0,
-        )
-        for row in sorted_rows
+    # 1. Per-site ETA, then sort sites in descending ETA order (stable on ties)
+    rows = [row for _, row in df.iterrows()]
+    sizes = [row.get("Corpus Size", 0) for row in rows]
+    files = [int(row.get("File Count", 0)) for row in rows]
+    enc_files = [int(row.get("Encrypted File Count", 0)) if has_enc_files else 0 for row in rows]
+    enc_sizes = [float(row.get("Encrypted File Size", 0)) if has_enc_size else 0.0 for row in rows]
+    etas = [
+        _eta_from_totals(sizes[i], files[i], enc_files[i], enc_sizes[i])
+        for i in range(len(rows))
     ]
+    order = sorted(range(len(rows)), key=lambda i: etas[i], reverse=True)
 
-    # Precompute greedy lane assignment and interleaved lane DataFrames once per lane count (1..num_parallel)
-    prepared_lanes_by_parallel = {}
-    for current_parallel in range(1, num_parallel + 1):
-      lanes = [{"total_time": 0.0, "sites": []} for _ in range(current_parallel)]
-      for row, site_time in zip(sorted_rows, site_etas):
-        target_lane = min(lanes, key=lambda l: l["total_time"])
-        target_lane["sites"].append(row)
-        target_lane["total_time"] += site_time
+    df_sorted_base = df.iloc[order].copy()
+    sizes = [sizes[i] for i in order]
+    files = [files[i] for i in order]
+    enc_files = [enc_files[i] for i in order]
+    enc_sizes = [enc_sizes[i] for i in order]
+    sorted_etas = [etas[i] for i in order]
 
-      prepared_lanes = []
-      for lane_idx, lane in enumerate(lanes):
-        if not lane["sites"]:
-          continue
-        lane_df = pd.DataFrame(lane["sites"])
-        lane_size = len(lane_df)
-        K = max(1, lane_size // 10)  # Dynamic bucket size (number of buckets)
+    def _positions_eta(positions):
+      return _eta_from_totals(
+          sum(sizes[p] for p in positions),
+          sum(files[p] for p in positions),
+          sum(enc_files[p] for p in positions),
+          sum(enc_sizes[p] for p in positions),
+      )
 
-        lane_df["temp_index"] = range(lane_size)
-        lane_df["bucket"] = lane_df["temp_index"] % K
+    # 2-3. P90 tail batches + greedy lane assignment of remaining sites.
+    # n_tail is capped by license tier (k): <=1,000 -> 1, 1,001-5,000 -> 2, >5,000 -> 3.
+    max_tail_group_size = files_batch_planner.get_max_tail_group_size(
+        get_total_license_count(licenseMetrics)
+    )
+    plan = files_batch_planner.plan_p90_lanes(
+        sorted_etas, num_lanes, max_sites_per_batch, _positions_eta, max_tail_group_size
+    )
 
-        # Sort by bucket to interleave, then by temp_index to maintain order within bucket
-        lane_df = (
-            lane_df.sort_values(by=["bucket", "temp_index"])
-            .drop(columns=["temp_index", "bucket"])
-            .reset_index(drop=True)
-        )
+    def _build_batch(positions, is_p90):
+      subset = df_sorted_base.iloc[positions]
+      batch = {
+          "sites": len(subset),
+          "dl_count": int(subset["DL Count"].sum()) if "DL Count" in subset.columns else 0,
+          "resource_count": int(subset["Resource Count"].sum()),
+          "folder_count": int(subset["Folder Count"].sum()) if "Folder Count" in subset.columns else 0,
+          "file_count": int(subset["File Count"].sum()) if "File Count" in subset.columns else 0,
+          "shortcut_count": int(subset["Shortcut Count"].sum()) if "Shortcut Count" in subset.columns else 0,
+          "corpus_size": float(subset["Corpus Size"].sum()) if "Corpus Size" in subset.columns else 0.0,
+          "eta": _positions_eta(positions),
+          "df_subset": subset,
+          "is_p90": is_p90,
+      }
+      if is_p90:
+        batch["color"] = COLOR_P90_BATCH
+        batch["text_color"] = COLOR_P90_BATCH_TEXT
+        batch["legend"] = "P90 (largest sites) batches"
+      return batch
 
-        lane_rows = [r for _, r in lane_df.iterrows()]
-        sizes_list = [r.get("Corpus Size", 0) for r in lane_rows]
-        files_list = [int(r.get("File Count", 0)) for r in lane_rows]
-        enc_files_list = (
-            [int(r.get("Encrypted File Count", 0)) for r in lane_rows]
-            if has_enc_files
-            else None
-        )
-        enc_sizes_list = (
-            [float(r.get("Encrypted File Size", 0)) for r in lane_rows]
-            if has_enc_size
-            else None
-        )
-        prepared_lanes.append(
-            (lane_idx, lane_df, sizes_list, files_list, enc_files_list, enc_sizes_list)
-        )
-      prepared_lanes_by_parallel[current_parallel] = prepared_lanes
+    buckets = []
+    for lane_idx, lane_batches in enumerate(plan.lanes):
+      if not lane_batches:
+        continue
+      chunks = [_build_batch(positions, is_p90) for positions, is_p90 in lane_batches]
+      buckets.append({
+          "id": lane_idx + 1,
+          "total": sum(c["eta"] for c in chunks),
+          "batches": chunks,
+      })
 
-    # Iterate through candidates
-    for target_hours in candidate_hours:
-      for current_parallel in range(1, num_parallel + 1):
-        # 3. Per-Lane Batching (Binary Search)
-        final_buckets = []
+    # 4. Consolidation & Naming (numbered by proposed start time)
+    total_eta = max(b["total"] for b in buckets) if buckets else 0
 
-        for (
-            lane_idx,
-            lane_df,
-            sizes_list,
-            files_list,
-            enc_files_list,
-            enc_sizes_list,
-        ) in prepared_lanes_by_parallel[current_parallel]:
+    all_chunks_with_time = []
+    for b_idx, b in enumerate(buckets):
+      current_time = 0.0
+      for chunk in b["batches"]:
+        chunk["start_time"] = current_time
+        chunk["bucket_idx"] = b_idx
+        current_time += chunk["eta"]
+        all_chunks_with_time.append(chunk)
 
-          def _slice_eta(s_idx, e_idx):
-            return _eta_from_totals(
-                sum(sizes_list[s_idx:e_idx]),
-                sum(files_list[s_idx:e_idx]),
-                sum(enc_files_list[s_idx:e_idx]) if enc_files_list is not None else 0,
-                sum(enc_sizes_list[s_idx:e_idx]) if enc_sizes_list is not None else 0.0,
-            )
+    all_chunks_with_time.sort(key=lambda x: (x["start_time"], x["bucket_idx"]))
 
-          total_users = len(lane_df)
-          start_idx = 0
-          raw_chunks = []
+    final_batches_list = []
+    for i, chunk in enumerate(all_chunks_with_time):
+      chunk["name"] = f"Batch {i+1}"
+      final_batches_list.append(chunk)
 
-          # Partitioning Loop (Same as original but within lane)
-          while start_idx < total_users:
-            remaining_users = total_users - start_idx
-            current_max = min(remaining_users, user_max_limit)
-            current_min = min(user_min_limit, remaining_users)
-
-            # Binary Search for Optimal Size
-            if _slice_eta(start_idx, start_idx + current_min) > target_hours:
-              chosen_size = current_min
-            elif _slice_eta(start_idx, start_idx + current_max) <= target_hours:
-              chosen_size = current_max
-            else:
-              low = current_min
-              high = current_max
-              chosen_size = high
-              while low <= high:
-                mid = (low + high) // 2
-                eta = _slice_eta(start_idx, start_idx + mid)
-
-                if eta > target_hours:
-                  chosen_size = mid
-                  high = mid - 1
-                else:
-                  low = mid + 1
-
-            end_idx = start_idx + chosen_size
-            final_subset = lane_df.iloc[start_idx:end_idx]
-            w_eta = _slice_eta(start_idx, end_idx)
-
-            raw_chunks.append({
-                "start_idx": start_idx,
-                "end_idx": end_idx,
-                "sites": len(final_subset),
-                "dl_count": int(final_subset["DL Count"].sum()) if "DL Count" in final_subset.columns else 0,
-                "resource_count": int(final_subset["Resource Count"].sum()),
-                "folder_count": int(final_subset["Folder Count"].sum()) if "Folder Count" in final_subset.columns else 0,
-                "file_count": int(final_subset["File Count"].sum()) if "File Count" in final_subset.columns else 0,
-                "shortcut_count": int(final_subset["Shortcut Count"].sum()) if "Shortcut Count" in final_subset.columns else 0,
-                "corpus_size": float(final_subset["Corpus Size"].sum()) if "Corpus Size" in final_subset.columns else 0.0,
-                "eta": w_eta,
-                "df_subset": final_subset
-            })
-            start_idx = end_idx
-
-          final_buckets.append({
-              "id": lane_idx + 1,
-              "total": sum(c["eta"] for c in raw_chunks),
-              "batches": raw_chunks
-          })
-
-        # 4. Consolidation & Naming
-        total_eta = max(b["total"] for b in final_buckets) if final_buckets else 0
-
-        all_chunks_with_time = []
-        for b_idx, b in enumerate(final_buckets):
-          current_time = 0.0
-          for chunk in b["batches"]:
-            chunk["start_time"] = current_time
-            chunk["bucket_idx"] = b_idx
-            current_time += chunk["eta"]
-            all_chunks_with_time.append(chunk)
-
-        all_chunks_with_time.sort(key=lambda x: (x["start_time"], x["bucket_idx"]))
-
-        final_batches_list = []
-        for i, chunk in enumerate(all_chunks_with_time):
-          batch_name = f"Batch {i+1}"
-          chunk["name"] = batch_name
-          final_batches_list.append(chunk)
-
-        num_batches = len(final_batches_list)
-        self.log_msg(
-            f"Evaluated Target {target_hours}h with {current_parallel} lanes: Generated {num_batches} batches | Total ETA: {self.format_eta(total_eta)}"
-        )
-
-        # 5. Selection Logic
-        if num_batches <= max_allowed_batches:
-          if total_eta < best_total_eta:
-            best_total_eta = total_eta
-            best_plan = (final_batches_list, total_eta, final_buckets)
-
-        if num_batches < min_batches_seen:
-          min_batches_seen = num_batches
-          fallback_plan = (final_batches_list, total_eta, final_buckets)
-
-    if best_plan is not None:
-      final_batches_list, total_eta, buckets = best_plan
-    else:
-      final_batches_list, total_eta, buckets = fallback_plan
+    num_p90_batches = sum(1 for c in final_batches_list if c["is_p90"])
+    self.log_msg(
+        f"[Batch Planning] {len(rows):,} sites | P90 ETA threshold:"
+        f" {self.format_eta(plan.p90_threshold)} | P90 sites: {plan.tail_count:,}"
+        f" (n_tail={plan.tail_group_size}, k={max_tail_group_size}) | {num_lanes} lanes | Generated"
+        f" {len(final_batches_list)} batches ({num_p90_batches} P90) | Total ETA:"
+        f" {self.format_eta(total_eta)}"
+    )
 
     df_final = df_sorted_base.copy()
     site_to_batch = {}
@@ -1295,7 +1343,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     w_width = max(20, pixel_width)
 
     bar = ctk.CTkFrame(
-        f, width=w_width, height=16, fg_color=COLOR_BATCH_BAR, corner_radius=8
+        f,
+        width=w_width,
+        height=16,
+        fg_color=batch.get("color", COLOR_BATCH_BAR),
+        corner_radius=8,
     )
     bar.pack(side="left", padx=10)
     ctk.CTkLabel(
@@ -1329,13 +1381,10 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       ).pack(anchor="w", padx=10, pady=(0, 5))
 
       include_recycle = getattr(self, "val_include_recycle_bin_contents", False)
-      include_versions = getattr(self, "val_include_file_versions", False)
 
       note_parts = []
       if include_recycle:
           note_parts.append("Recycle Bin contents")
-      if include_versions:
-          note_parts.append("Historical File Versions")
 
       if note_parts:
           note_text = f"Note: {' and '.join(note_parts)} are accounted for in Corpus Size calculations but will not be migrated."
@@ -1356,15 +1405,32 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               justify="left",
           ).pack(anchor="w", padx=10, pady=(0, 10))
 
+      license_text = get_license_fallback_banner_text(data) if self.show_eta else None
+      if license_text:
+          ctk.CTkLabel(
+              self.view_results,
+              text=license_text,
+              font=FONT_BODY_BOLD,
+              text_color=COLOR_TEXT_MAIN,
+              justify="left",
+          ).pack(anchor="w", padx=10, pady=(0, 10))
+
       # Cards for simple metrics
       card_frame = ctk.CTkFrame(self.view_results, fg_color="transparent")
       card_frame.pack(fill="x", pady=10)
 
-      self.create_stat_card(card_frame, "Total Corpus Size", f"{self.format_size(sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🏢")
+      use_version_estimates = shallow_ui_helpers.uses_version_estimates(self, data)
+      if use_version_estimates:
+        versions_corpus = data.get("versionsCorpusSize") or sum(
+            entry.get("versionsCorpusSize", 0) for entry in data.get("siteMetrics", {}).values()
+        )
+        self.create_stat_card(card_frame, "Total Corpus Size\n(incl. Versions)", f"{self.format_size(versions_corpus)}", "🏢")
+      else:
+        self.create_stat_card(card_frame, "Total Corpus Size", f"{self.format_size(sum([entry.get('totalSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🏢")
       if getattr(self, "val_include_recycle_bin_contents", False):
         self.create_stat_card(card_frame, "Total Recycle Bin Size", f"{self.format_size(sum([entry.get('recycleBinSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🗑️")
         self.create_stat_card(card_frame, "Total Recycle Bin Item Count", f"{sum([entry.get('recycleBinCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🗑️")
-      if getattr(self, "val_include_file_versions", False):
+      if getattr(self, "val_include_file_versions", False) and not use_version_estimates:
         self.create_stat_card(card_frame, "Total Historical File Version Size", f"{self.format_size(sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "📄")
         self.create_stat_card(card_frame, "Total Historical File Version Count", f"{sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "📄")
       self.create_stat_card(card_frame, "Site Collection\nCount", f"{data.get('siteCount'):,}", "🏢")
@@ -1391,6 +1457,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         file_count = sum(int(s.get("fileCount", 0) or 0) for s in data["siteMetrics"].values())
       self.create_stat_card(card_frame, "Folder Count", f"{folder_count:,}", "📁")
       self.create_stat_card(card_frame, "File Count", f"{file_count:,}", "📄")
+      if use_version_estimates:
+        versions_files = data.get("versionsEstimatedFileCount") or sum(
+            int(entry.get("versionsEstimatedFileCount", 0) or 0)
+            for entry in data.get("siteMetrics", {}).values()
+        )
+        self.create_stat_card(card_frame, "Estimated Files\n(incl. Versions)", f"{int(versions_files):,}", "📄")
       if getattr(self, "val_scan_encrypted_files", False):
         self.create_stat_card(card_frame, "Total Encrypted\nFile Count", f"{sum([entry.get('encryptedFileCount', 0) for entry in data.get('siteMetrics', {}).values()]):,}", "🔒")
         self.create_stat_card(card_frame, "Total Encrypted\nFile Size", f"{self.format_size(sum([entry.get('encryptedFileSize', 0) for entry in data.get('siteMetrics', {}).values()]))}", "🔒")
@@ -1760,13 +1832,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       # Section 1: Summary Metrics
       writer.writerow(["Summary Metrics", "Value"])
       include_recycle = getattr(self, "val_include_recycle_bin_contents", False)
-      include_versions = getattr(self, "val_include_file_versions", False)
+      use_version_estimates = shallow_ui_helpers.uses_version_estimates(self, data)
 
       note_parts = []
       if include_recycle:
           note_parts.append("Recycle Bin contents")
-      if include_versions:
-          note_parts.append("Historical File Versions")
 
       if note_parts:
           note_text = f"Note: {' and '.join(note_parts)} are accounted for in Corpus Size calculations but will not be migrated."
@@ -1776,6 +1846,17 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       summary_rows = [
           ("Total Corpus Size", self.format_size(total_corpus_size)),
       ]
+      if use_version_estimates:
+          summary_rows.extend([
+              (
+                  "Total Corpus Size (incl. Versions)",
+                  self.format_size(sum(entry.get("versionsCorpusSize", 0) for entry in data.get("siteMetrics", {}).values())),
+              ),
+              (
+                  "Estimated File Count (incl. Versions)",
+                  sum(int(entry.get("versionsEstimatedFileCount", 0) or 0) for entry in data.get("siteMetrics", {}).values()),
+              ),
+          ])
       if getattr(self, "val_include_recycle_bin_contents", False):
           total_recycle_bin_size = sum([entry.get('recycleBinSize', 0) for entry in data.get('siteMetrics', {}).values()])
           total_recycle_bin_count = sum([entry.get('recycleBinCount', 0) for entry in data.get('siteMetrics', {}).values()])
@@ -1783,7 +1864,7 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
               ("Total Recycle Bin Size", self.format_size(total_recycle_bin_size)),
               ("Total Recycle Bin Item Count", total_recycle_bin_count),
           ])
-      if getattr(self, "val_include_file_versions", False):
+      if getattr(self, "val_include_file_versions", False) and not use_version_estimates:
           total_version_size = sum([entry.get('versionSize', 0) for entry in data.get('siteMetrics', {}).values()])
           total_version_count = sum([entry.get('versionCount', 0) for entry in data.get('siteMetrics', {}).values()])
           summary_rows.extend([
@@ -1835,6 +1916,9 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
       # Section 2: License Metrics
       license_data = data.get("licenseMetrics", {})
       writer.writerow(["Total License Count", license_data.get("totalAllotedUnits", {}).get("User", 0) + license_data.get("totalAllotedUnits", {}).get("Company", 0)])
+      license_note = get_license_fallback_banner_text(data)
+      if license_note:
+        writer.writerow([license_note.replace("⚠️ ", "Note: ", 1)])
       
       writer.writerow([]) # Blank line separator
       
@@ -1880,11 +1964,15 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
           row = ["Site Collection", "Subsite Count"] + dl_cols + ["List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Corpus Size"]
         else:
           row = ["Site Collection", "Email Id", "Subsite Count"] + dl_cols + ["List Count", "Folder Count", "File Count", "Shortcut Count", "Folder Count > Depth Limit 100", "File Count > Depth Limit 100", "Entities with > 500k item count", "Corpus Size"]
+        corpus_col_idx = len(row) - 1
+
+        if use_version_estimates:
+          row.extend([shallow_ui_helpers.VERSIONS_CORPUS_COL, shallow_ui_helpers.VERSIONS_FILE_COUNT_COL])
 
         if getattr(self, "val_include_recycle_bin_contents", False):
           row.extend(["Recycle Bin Item Count", "Recycle Bin Size"])
 
-        if getattr(self, "val_include_file_versions", False):
+        if getattr(self, "val_include_file_versions", False) and not use_version_estimates:
           row.extend(["Historical File Version Count", "Historical File Version Size"])
 
         if getattr(self, "val_scan_encrypted_files", False):
@@ -1971,7 +2059,13 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
                   self.format_size(s_data.get("recycleBinSize", 0))
               ])
 
-            if getattr(self, "val_include_file_versions", False):
+            if use_version_estimates:
+              row[corpus_col_idx + 1:corpus_col_idx + 1] = [
+                  self.format_size(s_data.get("versionsCorpusSize", s_data.get("totalSize", 0))),
+                  s_data.get("versionsEstimatedFileCount", s_data.get("fileCount", 0)),
+              ]
+
+            if getattr(self, "val_include_file_versions", False) and not use_version_estimates:
               row.extend([
                   s_data.get("versionCount", 0),
                   self.format_size(s_data.get("versionSize", 0))
@@ -2037,12 +2131,11 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
     self.val_include_file_versions = self.include_file_versions.get()
     self.val_scan_encrypted_files = self.scan_encrypted_files.get()
     self.val_generate_folder_amr_map = self.generate_folder_amr_map.get()
-    self.val_eta_min_users = self.eta_min_users.get()
     self.val_eta_max_users = self.eta_max_users.get()
     self.val_parallel_batches = self.parallel_batches.get()
-    self.val_eta_max_batches = self.eta_max_batches.get()
 
-    if self.val_include_file_versions:
+    # Shallow Scan estimates versions from StorageMetrics at no extra cost.
+    if self.val_include_file_versions and not self.val_shallow_scan:
         warning_msg = (
             "Enabling 'Include Historical File Versions in Corpus Size' will cause severe performance degradation "
             "as it requires fetching versions for every single file. "

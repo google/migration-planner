@@ -728,6 +728,29 @@ class MigrationEstimatorTool(ctk.CTk):
           text_color=COLOR_TEXT_SUB,
       ).pack(anchor="w", padx=20, pady=(0, 15))
 
+      # Optional legend for batches that define a custom color (e.g. Files P90 batches)
+      legend_entries = {}
+      for w in batches:
+        if w.get("color") and w.get("legend"):
+          legend_entries.setdefault(w["legend"], w["color"])
+      if legend_entries:
+        legend_row = ctk.CTkFrame(master_container, fg_color="transparent")
+        legend_row.pack(anchor="w", padx=20, pady=(0, 10))
+        for legend_text, legend_color in legend_entries.items():
+          ctk.CTkFrame(
+              legend_row,
+              width=14,
+              height=14,
+              fg_color=legend_color,
+              corner_radius=3,
+          ).pack(side="left", padx=(0, 6))
+          ctk.CTkLabel(
+              legend_row,
+              text=legend_text,
+              font=FONT_BODY_MEDIUM,
+              text_color=COLOR_TEXT_SUB,
+          ).pack(side="left", padx=(0, 16))
+
       # 3. Parallel Batches Plan (Gantt Chart)
       if buckets:
         # Timeline Scale Header
@@ -794,7 +817,7 @@ class MigrationEstimatorTool(ctk.CTk):
             if batch["name"] in page_batch_names:
               segment = ctk.CTkFrame(
                   inner_track,
-                  fg_color=COLOR_TONAL_BG,
+                  fg_color=batch.get("color", COLOR_TONAL_BG),
                   corner_radius=12,
                   border_width=1,
                   border_color="white",
@@ -815,7 +838,7 @@ class MigrationEstimatorTool(ctk.CTk):
                   segment,
                   text=label_text,
                   font=("Roboto", 10, "bold"),
-                  text_color=COLOR_TONAL_TEXT,
+                  text_color=batch.get("text_color", COLOR_TONAL_TEXT),
               ).place(relx=0.5, rely=0.5, anchor="center", relheight=0.9)
 
             # Keep advancing current_relx so the timeline gaps are accurate
