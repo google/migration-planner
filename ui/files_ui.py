@@ -1217,7 +1217,12 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
         get_total_license_count(licenseMetrics)
     )
     plan = files_batch_planner.plan_p90_lanes(
-        sorted_etas, num_lanes, max_sites_per_batch, _positions_eta, max_tail_group_size
+        sorted_etas,
+        num_lanes,
+        max_sites_per_batch,
+        list(zip(sizes, files, enc_files, enc_sizes)),
+        lambda totals: _eta_from_totals(*totals),
+        max_tail_group_size,
     )
 
     def _build_batch(positions, is_p90):

@@ -389,6 +389,7 @@ The exported CSV report includes all summary metrics along with granular site-le
 *   **Site Ordering**: Each site's ETA is calculated and sites are sorted in Descending Order (Heaviest -> Lightest) by ETA.
 *   **P90 Batches**: Sites whose ETA is above the 90th-percentile ETA are grouped `n_tail` at a time (largest first), where `n_tail` = (number of P90 sites ÷ **Parallel Batches**), rounded down and clamped between 1 and `k`. `k` depends on the license tier: ≤1,000 licenses → 1, 1,001–5,000 → 2, >5,000 → 3 (the lowest tier applies if licenses could not be determined). These groups are greedily assigned to the least-loaded lane and shown in **orange** in the Gantt chart and Batch Details. P90 batches in the same lane are merged while they hold ≤ 5,000 sites.
 *   **Remaining Sites**: Assigned one by one to the least-loaded lane, then split within each lane (heaviest first) into batches of up to 5,000 sites.
+*   **Lane Load**: "Least-loaded" is measured with the same batch ETAs shown in the Gantt chart (each batch's ETA is computed on its combined file count and size, as merged/split), so lane assignment always matches the displayed lane durations.
 *   **Total ETA** = The duration of the single longest bucket (lane).
 
 ---
