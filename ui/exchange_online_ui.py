@@ -413,7 +413,7 @@ class MigrationEstimatorTool(ctk.CTk):
             card_frame,
             "Recoverable Emails",
             f"{data['total_recoverable_emails']:,}",
-            "♻️",
+            "⚖️",
         )
       self.create_stat_card(
           card_frame,
@@ -1092,7 +1092,7 @@ class MigrationEstimatorTool(ctk.CTk):
         f" 📅  |  {contacts_str} 📞 |  {in_place_archive_str} 🗃️ |  {shared_mailbox_str} 👥📧 | {group_mail_box_str} 👥📧"
     )
     if self.last_scan_data.get("total_recoverable_emails") is not None:
-      info += f" | {self.format_metric(batch.get('total_recoverable_emails', 0))} ♻️"
+      info += f" | {self.format_metric(batch.get('total_recoverable_emails', 0))} ⚖️"
     ctk.CTkLabel(
         f,
         text=info,
