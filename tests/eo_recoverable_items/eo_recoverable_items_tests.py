@@ -2,6 +2,7 @@ import threading
 import time
 import unittest
 import urllib.parse
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import MagicMock
@@ -15,27 +16,26 @@ from util.enums import FailureType
 from util.utils import ScanConfig
 
 WELL_KNOWN_TO_LABEL = {wk: label for label, wk in RECOVERABLE_ITEMS_FOLDERS.items()}
+RETRYABLE_STATUSES = (429, 500, 502, 503, 504)
 
 
-def parse_request_url(url: str) -> Tuple[str, str]:
-    """@returns (mailbox, folder label) from a recoverable items request URL."""
-    path = url.split("?")[0]
-    parts = path.strip("/").split("/")
-    # admin/exchange/mailboxes/{mailbox}/folders/{wellKnown}/items
-    return urllib.parse.unquote(parts[3]), WELL_KNOWN_TO_LABEL[parts[5]]
+def request_target(req: Dict[str, Any]) -> Tuple[str, str]:
+    """@returns (mailbox, folder label) of a $batch sub-request."""
+    return urllib.parse.unquote(req["headers"]["mailbox"]), WELL_KNOWN_TO_LABEL[req["headers"]["folder"]]
 
 
 class FakeGraph:
-    """Fake for UrlInvoker.execute_batch_request that records every $batch.
+    """Fake for UrlInvoker.invoke that records every $batch.
 
-    Responses default to 200 with @odata.count from `counts`. Per (mailbox,
-    label) overrides in `responses` replace the response; the value None drops
-    the response entirely (as if retries were exhausted).
+    Like UrlInvoker.invoke, it only returns 2xx responses and retryable
+    (429/5xx) failures; other error responses are dropped. Responses default to
+    200 with @odata.count = `counts[(mailbox, label)]`.
+    `responses[(mailbox, label)]` overrides the response.
     """
 
-    def __init__(self, counts: Optional[Dict[Tuple[str, str], int]] = None, delay: float = 0.0):
-        self.counts = counts or {}
-        self.responses: Dict[Tuple[str, str], Optional[Dict[str, Any]]] = {}
+    def __init__(self, delay: float = 0.0):
+        self.counts: Dict[Tuple[str, str], int] = {}
+        self.responses: Dict[Tuple[str, str], Dict[str, Any]] = {}
         self.delay = delay
         self.batches: List[List[Dict[str, Any]]] = []
         self.lock = threading.Lock()
@@ -44,10 +44,10 @@ class FakeGraph:
         self.raise_error = False
         self.on_batch = None
 
-    def execute_batch_request(self, session, batch_url, token_manager, token_data, requests, logger, stop_event=None, context=""):
-        mailboxes = [parse_request_url(req["url"])[0] for req in requests]
+    def invoke(self, url, batch, logger, stop_event=None, context=""):
+        mailboxes = [request_target(req)[0] for req in batch]
         with self.lock:
-            self.batches.append(requests)
+            self.batches.append(batch)
             for mailbox in mailboxes:
                 self.in_flight_per_mailbox[mailbox] = self.in_flight_per_mailbox.get(mailbox, 0) + 1
                 self.max_in_flight_per_mailbox = max(self.max_in_flight_per_mailbox, self.in_flight_per_mailbox[mailbox])
@@ -58,22 +58,22 @@ class FakeGraph:
                 self.on_batch()
             if self.raise_error:
                 raise ConnectionError("network down")
-            result = {}
-            for req in requests:
-                key = parse_request_url(req["url"])
-                if key in self.responses:
-                    if self.responses[key] is not None:
-                        result[req["id"]] = dict(self.responses[key], id=req["id"])
-                    continue
-                result[req["id"]] = {"id": req["id"], "status": 200, "body": {"@odata.count": self.counts.get(key, 0)}}
-            return result
+            results = []
+            for req in batch:
+                target = request_target(req)
+                count = self.counts.get(target, 0)
+                response = self.responses.get(target, {"status": 200, "body": {"@odata.count": count}})
+                status = response["status"]
+                if 200 <= status < 300 or status in RETRYABLE_STATUSES:
+                    results.append(dict(response, id=str(req["id"])))
+            return results
         finally:
             with self.lock:
                 for mailbox in mailboxes:
                     self.in_flight_per_mailbox[mailbox] -= 1
 
 
-class TestEORecoverableItemsCountMode(unittest.TestCase):
+class TestEORecoverableItemsEstimator(unittest.TestCase):
 
     def setUp(self):
         self.config = ScanConfig(
@@ -92,8 +92,11 @@ class TestEORecoverableItemsCountMode(unittest.TestCase):
         self.stop_event = threading.Event()
         self.graph = FakeGraph()
         self.url_invoker = MagicMock()
-        self.url_invoker.execute_batch_request.side_effect = self.graph.execute_batch_request
+        self.url_invoker.invoke.side_effect = self.graph.invoke
         self.estimator = self._make_estimator()
+
+    def tearDown(self):
+        self.estimator.shutdown()
 
     def _make_estimator(self):
         return EORecoverableItemsEstimator(
@@ -101,6 +104,9 @@ class TestEORecoverableItemsCountMode(unittest.TestCase):
             url_invoker=self.url_invoker,
             stop_event=self.stop_event,
         )
+
+    def _requests(self) -> List[Dict[str, Any]]:
+        return [req for batch in self.graph.batches for req in batch]
 
     def test_counts_per_folder_and_totals(self):
         self.graph.counts = {
@@ -121,60 +127,63 @@ class TestEORecoverableItemsCountMode(unittest.TestCase):
         result = self.estimator.calculate_resource_count({"user_ids": ["a@x.com"]}, [])
         self.assertEqual(result, {"a@x.com": 4})
 
-    def test_request_shape(self):
+    def test_count_request_shape(self):
         self.estimator.get_folder_counts(["o'neil#x@x.com"], [])
-        requests = [req for batch in self.graph.batches for req in batch]
+        requests = self._requests()
 
         self.assertEqual(len(requests), len(RECOVERABLE_ITEMS_FOLDERS))
         for req in requests:
             self.assertEqual(req["method"], "GET")
-            self.assertEqual(req["headers"], {"ConsistencyLevel": "eventual"})
-            self.assertTrue(req["url"].startswith("/admin/exchange/mailboxes/o%27neil%23x@x.com/folders/"))
-            self.assertIn("/items?$filter=type%20eq%20%27IPM.Note%27&$count=true&$top=1&$select=id", req["url"])
-        requested_folders = {parse_request_url(req["url"])[1] for req in requests}
-        self.assertEqual(requested_folders, set(RECOVERABLE_ITEMS_FOLDERS))
+            self.assertEqual(req["headers"]["ConsistencyLevel"], "eventual")
+            self.assertTrue(req["url"].startswith("admin/exchange/mailboxes/o%27neil%23x@x.com/folders/"))
+            self.assertTrue(req["url"].endswith("/items?$filter=type%20eq%20%27IPM.Note%27&$count=true&$top=1&$select=id"))
+        self.assertEqual({request_target(req)[1] for req in requests}, set(RECOVERABLE_ITEMS_FOLDERS))
+
+    def test_recursive_setting_does_not_change_requests(self):
+        self.estimator.get_folder_counts(["a@x.com"], [])
+        urls_off = sorted(req["url"] for req in self._requests())
+        self.graph.batches.clear()
+        self.config.recursive_email_scan = True
+        self.estimator.get_folder_counts(["a@x.com"], [])
+        urls_on = sorted(req["url"] for req in self._requests())
+
+        self.assertEqual(urls_off, urls_on)
+        self.assertTrue(all("/items?$filter=" in url for url in urls_on))
 
     def test_missing_count_is_partial_failure(self):
-        self.graph.counts = {("a@x.com", "Deletions"): 3}
-        self.graph.responses[("a@x.com", "Purges")] = {"status": 200, "body": {"value": []}}
+        self.graph.responses = {("a@x.com", "Purges"): {"status": 200, "body": {"value": []}}}
         failures = []
         result = self.estimator.get_folder_counts(["a@x.com"], failures)
 
         self.assertEqual(result["a@x.com"]["Purges"], 0)
-        self.assertEqual(result["a@x.com"]["Deletions"], 3)
         self.assertEqual(len(failures), 1)
         self.assertTrue(failures[0]["isPartial"])
         self.assertEqual(failures[0]["type"], FailureType.INVALID_DATA)
         self.assertEqual(failures[0]["folderId"], "Purges")
         self.assertEqual(failures[0]["userId"], "a@x.com")
 
-    def test_error_statuses_are_partial_failures(self):
-        self.graph.responses[("a@x.com", "DiscoveryHolds")] = {
-            "status": 404, "body": {"error": {"code": "ErrorFolderNotFound", "message": "Folder not found."}}
+    def test_error_responses_are_partial_failures(self):
+        self.graph.counts = {("a@x.com", "Deletions"): 3}
+        self.graph.responses = {
+            ("a@x.com", "DiscoveryHolds"): {"status": 404, "body": {"error": {"message": "Folder not found."}}},
+            ("a@x.com", "Versions"): {"status": 503, "body": {"error": {"message": "Service unavailable."}}},
         }
-        self.graph.responses[("a@x.com", "Versions")] = {
-            "status": 403, "body": {"error": {"code": "ErrorAccessDenied", "message": "Access is denied."}}
-        }
-        self.graph.responses[("a@x.com", "Purges")] = None  # dropped after retries
         failures = []
         result = self.estimator.get_folder_counts(["a@x.com"], failures)
 
-        self.assertEqual(sum(result["a@x.com"].values()), 0)
+        self.assertEqual(result["a@x.com"]["Deletions"], 3)
         by_folder = {f["folderId"]: f for f in failures}
-        self.assertEqual(set(by_folder), {"DiscoveryHolds", "Versions", "Purges"})
+        self.assertEqual(set(by_folder), {"DiscoveryHolds", "Versions"})
+        # invoke drops non-retryable errors, so the 404 surfaces as a missing response.
         self.assertEqual(by_folder["DiscoveryHolds"]["type"], FailureType.NOT_FOUND)
-        self.assertEqual(by_folder["DiscoveryHolds"]["statusCode"], 404)
         self.assertEqual(by_folder["Versions"]["type"], FailureType.FAILURE_STATUS_CODE_ERROR)
-        self.assertEqual(by_folder["Versions"]["message"], "Access is denied.")
-        self.assertEqual(by_folder["Purges"]["type"], FailureType.NOT_FOUND)
-        self.assertIsNone(by_folder["Purges"]["statusCode"])
+        self.assertEqual(by_folder["Versions"]["statusCode"], 503)
+        self.assertEqual(by_folder["Versions"]["message"], "Service unavailable.")
         self.assertTrue(all(f["isPartial"] for f in failures))
 
     def test_all_folders_failed_is_single_full_failure(self):
         for label in RECOVERABLE_ITEMS_FOLDERS:
-            self.graph.responses[("a@x.com", label)] = {
-                "status": 404, "body": {"error": {"message": "Mailbox not found."}}
-            }
+            self.graph.responses[("a@x.com", label)] = {"status": 404, "body": {"error": {"message": "Mailbox not found."}}}
         self.graph.counts = {("b@x.com", "Deletions"): 4}
         failures = []
         result = self.estimator.get_folder_counts(["a@x.com", "b@x.com"], failures)
@@ -184,7 +193,6 @@ class TestEORecoverableItemsCountMode(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertFalse(failures[0]["isPartial"])
         self.assertEqual(failures[0]["userId"], "a@x.com")
-        self.assertIn("Mailbox not found.", failures[0]["message"])
 
     def test_batch_exception_fails_all_folders(self):
         self.graph.raise_error = True
@@ -195,31 +203,28 @@ class TestEORecoverableItemsCountMode(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertFalse(failures[0]["isPartial"])
 
-    def test_batch_composition_limits(self):
+    def test_batch_composition_and_rounds(self):
         mailboxes = [f"user{i}@x.com" for i in range(25)]
         self.estimator.get_folder_counts(mailboxes, [])
 
-        mailboxes_per_batch = self.config.graph_batch_size // RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH
-        batches_per_round = -(-len(mailboxes) // mailboxes_per_batch)
-        rounds = -(-len(RECOVERABLE_ITEMS_FOLDERS) // RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
-        self.assertEqual(len(self.graph.batches), batches_per_round * rounds)
         for batch in self.graph.batches:
             self.assertLessEqual(len(batch), self.config.graph_batch_size)
-            per_mailbox: Dict[str, int] = {}
-            for req in batch:
-                mailbox = parse_request_url(req["url"])[0]
-                per_mailbox[mailbox] = per_mailbox.get(mailbox, 0) + 1
-            self.assertLessEqual(max(per_mailbox.values()), RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
+        # Round 1 (first two folders) completes before round 2 starts.
+        labels = list(RECOVERABLE_ITEMS_FOLDERS)
+        batch_labels = [{request_target(req)[1] for req in batch} for batch in self.graph.batches]
+        first_round = set(labels[:RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH])
+        round_of_batch = [0 if labels_in_batch <= first_round else 1 for labels_in_batch in batch_labels]
+        self.assertEqual(round_of_batch, sorted(round_of_batch))
         # Every (mailbox, folder) requested exactly once.
-        requested = [parse_request_url(req["url"]) for batch in self.graph.batches for req in batch]
-        self.assertEqual(len(requested), len(set(requested)))
-        self.assertEqual(len(requested), len(mailboxes) * len(RECOVERABLE_ITEMS_FOLDERS))
+        targets = [request_target(req) for req in self._requests()]
+        self.assertEqual(len(targets), len(set(targets)))
+        self.assertEqual(len(targets), len(mailboxes) * len(RECOVERABLE_ITEMS_FOLDERS))
 
     def test_duplicate_mailboxes_requested_once(self):
         self.graph.counts = {("A@x.com", "Deletions"): 9}
         result = self.estimator.get_folder_counts(["A@x.com", "a@X.com", "b@x.com"], [])
 
-        requested = [parse_request_url(req["url"])[0].lower() for batch in self.graph.batches for req in batch]
+        requested = [request_target(req)[0].lower() for req in self._requests()]
         self.assertEqual(requested.count("a@x.com"), len(RECOVERABLE_ITEMS_FOLDERS))
         self.assertEqual(result["A@x.com"]["Deletions"], 9)
         self.assertEqual(result["a@X.com"]["Deletions"], 9)
@@ -227,19 +232,24 @@ class TestEORecoverableItemsCountMode(unittest.TestCase):
 
     def test_parallel_calls_never_exceed_per_mailbox_limit(self):
         # Mirrors the scan pipeline: concurrent calls over disjoint mailbox
-        # chunks of min(concurrency // 10, 20), for several slider values.
-        self.graph.delay = 0.005
+        # chunks of min(concurrency // 10, 20).
+        self.graph.delay = 0.003
         mailboxes = [f"user{i}@x.com" for i in range(200)]
         for concurrency in (10, 30, 100):
             with self.subTest(concurrency=concurrency):
+                self.config.concurrency = concurrency
+                estimator = self._make_estimator()
                 chunk_size = min(concurrency // 10, 20)
                 tasks = [mailboxes[i:i + chunk_size] for i in range(0, len(mailboxes), chunk_size)]
-                with ThreadPoolExecutor(max_workers=concurrency) as executor:
-                    list(executor.map(lambda task: self.estimator.get_folder_counts(task, []), tasks))
+                try:
+                    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                        list(executor.map(lambda task: estimator.get_folder_counts(task, []), tasks))
+                finally:
+                    estimator.shutdown()
 
                 self.assertLessEqual(self.graph.max_in_flight_per_mailbox, RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
 
-    def test_stop_event_halts_further_batches(self):
+    def test_stop_event_halts_next_round(self):
         def stop_after_first_batch():
             self.stop_event.set()
         self.graph.on_batch = stop_after_first_batch
@@ -251,11 +261,6 @@ class TestEORecoverableItemsCountMode(unittest.TestCase):
         self.assertEqual(result["a@x.com"]["Deletions"], 1)
         self.assertEqual(result["a@x.com"]["Versions"], 0)
         self.assertEqual(failures, [])
-
-    def test_hierarchy_mode_not_implemented(self):
-        self.config.recursive_email_scan = True
-        with self.assertRaises(NotImplementedError):
-            self.estimator.get_folder_counts(["a@x.com"], [])
 
     def test_invalid_input(self):
         with self.assertRaises(Exception):
