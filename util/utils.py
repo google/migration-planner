@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from util.constants import DEFAULT_ETA_MAX_BATCHES
+from util.constants import DEFAULT_ETA_MAX_BATCHES, DEFAULT_GRAPH_BATCH_SIZE
 from util.enums import FailureType, ResourceType
 
 @dataclass
@@ -27,7 +27,8 @@ class ScanConfig:
   backoff: int = 2
   eta_max_users: int = 5000
   eta_max_batches: int = DEFAULT_ETA_MAX_BATCHES
-  parallel_batches: int = 10
+  parallel_batches: int = 10    # Number of parallel migration plan lanes (UI slider)
+  graph_batch_size: int = DEFAULT_GRAPH_BATCH_SIZE    # Sub-requests per Graph $batch call
   hierarchial_crawl_batch_limit: int = 4
   mode: str = "heuristics"
   sample_percentage: int = 10

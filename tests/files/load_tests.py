@@ -63,7 +63,7 @@ class TestFileEstimatorLoad(unittest.TestCase):
             retries=1,
             backoff=1,
             eta_max_users=5,
-            parallel_batches=5,
+            graph_batch_size=5,
             large_resource_count_limit=50,
             bucket_ranges=[(0, 10240), (10241, 102400), (102401, 1048576), (1048577, float("inf"))],
             max_allowed_depth=3
