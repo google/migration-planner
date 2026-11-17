@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 from estimators.eo_recoverable_items_estimator import EORecoverableItemsEstimator
 from util.constants import (
     RECOVERABLE_ITEMS_FOLDERS,
-    RECOVERABLE_ITEMS_MAILBOXES_PER_TASK,
     RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH,
 )
 from util.enums import FailureType
@@ -200,11 +199,12 @@ class TestEORecoverableItemsCountMode(unittest.TestCase):
         mailboxes = [f"user{i}@x.com" for i in range(25)]
         self.estimator.get_folder_counts(mailboxes, [])
 
-        groups = -(-len(mailboxes) // RECOVERABLE_ITEMS_MAILBOXES_PER_TASK)
+        mailboxes_per_batch = self.config.graph_batch_size // RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH
+        batches_per_round = -(-len(mailboxes) // mailboxes_per_batch)
         rounds = -(-len(RECOVERABLE_ITEMS_FOLDERS) // RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
-        self.assertEqual(len(self.graph.batches), groups * rounds)
+        self.assertEqual(len(self.graph.batches), batches_per_round * rounds)
         for batch in self.graph.batches:
-            self.assertLessEqual(len(batch), 20)
+            self.assertLessEqual(len(batch), self.config.graph_batch_size)
             per_mailbox: Dict[str, int] = {}
             for req in batch:
                 mailbox = parse_request_url(req["url"])[0]
@@ -226,17 +226,18 @@ class TestEORecoverableItemsCountMode(unittest.TestCase):
         self.assertEqual(self.estimator.get_folder_totals()["Deletions"], 9)
 
     def test_parallel_calls_never_exceed_per_mailbox_limit(self):
-        # Mirrors the scan pipeline: concurrent calls over disjoint mailboxes.
-        self.graph.delay = 0.01
+        # Mirrors the scan pipeline: concurrent calls over disjoint mailbox
+        # chunks of min(concurrency // 10, 20), for several slider values.
+        self.graph.delay = 0.005
         mailboxes = [f"user{i}@x.com" for i in range(200)]
-        tasks = [
-            mailboxes[i:i + RECOVERABLE_ITEMS_MAILBOXES_PER_TASK]
-            for i in range(0, len(mailboxes), RECOVERABLE_ITEMS_MAILBOXES_PER_TASK)
-        ]
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            list(executor.map(lambda task: self.estimator.get_folder_counts(task, []), tasks))
+        for concurrency in (10, 30, 100):
+            with self.subTest(concurrency=concurrency):
+                chunk_size = min(concurrency // 10, 20)
+                tasks = [mailboxes[i:i + chunk_size] for i in range(0, len(mailboxes), chunk_size)]
+                with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                    list(executor.map(lambda task: self.estimator.get_folder_counts(task, []), tasks))
 
-        self.assertLessEqual(self.graph.max_in_flight_per_mailbox, RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
+                self.assertLessEqual(self.graph.max_in_flight_per_mailbox, RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
 
     def test_stop_event_halts_further_batches(self):
         def stop_after_first_batch():

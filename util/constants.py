@@ -123,6 +123,4 @@ RECOVERABLE_ITEMS_FOLDERS: dict[str, str] = {
 RECOVERABLE_ITEMS_COLUMNS: dict[str, str] = {
     label: f"Recoverable {label} Count" for label in RECOVERABLE_ITEMS_FOLDERS
 }
-# Unique mailboxes handled by one scan task. A task sends one $batch at a time.
-RECOVERABLE_ITEMS_MAILBOXES_PER_TASK: int = 10
 RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH: int = 2

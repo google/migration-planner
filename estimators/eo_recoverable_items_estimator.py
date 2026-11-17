@@ -8,7 +8,6 @@ from util.connectors import UrlInvoker
 from util.constants import (
     GRAPH_BASE_URL,
     RECOVERABLE_ITEMS_FOLDERS,
-    RECOVERABLE_ITEMS_MAILBOXES_PER_TASK,
     RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH,
 )
 from util.enums import FailureType
@@ -22,13 +21,13 @@ IPM_NOTE_FILTER = "type eq 'IPM.Note'"
 class EORecoverableItemsEstimator(Estimator):
     """Counts emails in the Recoverable Items folders of primary mailboxes.
 
-    Mailboxes are identified by UPN. Each call processes its mailboxes in
-    sequential groups of RECOVERABLE_ITEMS_MAILBOXES_PER_TASK, and each group in
-    sequential rounds of one $batch. A round never carries more than
-    RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH requests for the same
-    mailbox, and a call never has more than one $batch in flight, so a mailbox
-    owned by one call never sees more than that many concurrent requests.
-    Callers must not pass the same mailbox to two concurrent calls.
+    Mailboxes are identified by UPN. The folders are queried in sequential
+    rounds of RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH folders, and
+    each round is sent as sequential $batch calls of at most graph_batch_size
+    requests, with all of a mailbox's requests for the round in the same $batch.
+    A call never has more than one $batch in flight, so a mailbox owned by one
+    call never sees more than that many concurrent requests. Callers must not
+    pass the same mailbox to two concurrent calls.
     """
 
     def __init__(
@@ -85,12 +84,7 @@ class EORecoverableItemsEstimator(Estimator):
             key: {label: 0 for label in RECOVERABLE_ITEMS_FOLDERS} for key in unique_mailboxes
         }
 
-        keys = list(unique_mailboxes)
-        for start in range(0, len(keys), RECOVERABLE_ITEMS_MAILBOXES_PER_TASK):
-            if self.is_hard_stop_requested():
-                break
-            group = keys[start:start + RECOVERABLE_ITEMS_MAILBOXES_PER_TASK]
-            self._count_group(group, unique_mailboxes, counts, failures)
+        self._count_mailboxes(list(unique_mailboxes), unique_mailboxes, counts, failures)
 
         for folder_counts in counts.values():
             for label, count in folder_counts.items():
@@ -102,9 +96,9 @@ class EORecoverableItemsEstimator(Estimator):
         """@returns Aggregate count per folder label across all calls."""
         return {label: total.get_value() for label, total in self.folder_totals.items()}
 
-    def _count_group(
+    def _count_mailboxes(
             self,
-            group: List[str],
+            keys: List[str],
             unique_mailboxes: Dict[str, str],
             counts: Dict[str, Dict[str, int]],
             failures: List[Dict[str, Any]]
@@ -114,22 +108,25 @@ class EORecoverableItemsEstimator(Estimator):
             labels[i:i + RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH]
             for i in range(0, len(labels), RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
         ]
-        folder_failures: Dict[str, List[Dict[str, Any]]] = {key: [] for key in group}
+        mailboxes_per_batch = max(1, self.config.graph_batch_size // RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
+        folder_failures: Dict[str, List[Dict[str, Any]]] = {key: [] for key in keys}
 
         for round_labels in rounds:
-            if self.is_hard_stop_requested():
-                break
-            requests, request_map = self._build_round(group, unique_mailboxes, round_labels)
-            responses = self._execute_batch(requests)
+            for start in range(0, len(keys), mailboxes_per_batch):
+                if self.is_hard_stop_requested():
+                    break
+                group = keys[start:start + mailboxes_per_batch]
+                requests, request_map = self._build_round(group, unique_mailboxes, round_labels)
+                responses = self._execute_batch(requests)
 
-            for req_id, (key, label) in request_map.items():
-                count, failure = self._parse_count_response(
-                    responses.get(req_id), unique_mailboxes[key], label
-                )
-                if failure is not None:
-                    folder_failures[key].append(failure)
-                else:
-                    counts[key][label] = count
+                for req_id, (key, label) in request_map.items():
+                    count, failure = self._parse_count_response(
+                        responses.get(req_id), unique_mailboxes[key], label
+                    )
+                    if failure is not None:
+                        folder_failures[key].append(failure)
+                    else:
+                        counts[key][label] = count
 
         for key, mailbox_failures in folder_failures.items():
             if not mailbox_failures:
