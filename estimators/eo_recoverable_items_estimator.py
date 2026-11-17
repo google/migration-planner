@@ -1,6 +1,7 @@
-from collections import Counter
+from collections import Counter, deque
+from dataclasses import dataclass
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
 import urllib.parse
 
 from estimators.estimator import Estimator
@@ -12,20 +13,35 @@ from util.constants import (
 )
 from util.enums import FailureType
 from util.thread_safe_ds import AtomicInt
-from util.utils import ScanConfig
+from util.utils import ScanConfig, get_relative_url
 
 # Only plain emails are counted in $count mode.
 IPM_NOTE_FILTER = "type eq 'IPM.Note'"
+FOLDER_SELECT = "$select=id,childFolderCount,totalItemCount"
+
+
+@dataclass
+class _WorkItem:
+    """One Graph request pending for a mailbox."""
+    kind: str               # "count", "root" or "children"
+    label: str              # Recoverable Items folder label
+    url: str                # Relative URL sent in the $batch
+    depth: int = 0          # Depth below the Recoverable Items folder (children only)
+    folder_id: Optional[str] = None
 
 
 class EORecoverableItemsEstimator(Estimator):
     """Counts emails in the Recoverable Items folders of primary mailboxes.
 
-    Mailboxes are identified by UPN. The folders are queried in sequential
-    rounds of RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH folders, and
-    each round is sent as sequential $batch calls of at most graph_batch_size
-    requests, with all of a mailbox's requests for the round in the same $batch.
-    A call never has more than one $batch in flight, so a mailbox owned by one
+    Mailboxes are identified by UPN. Two modes, chosen by the Recursive setting:
+    - $count mode: IPM.Note $count of each folder.
+    - Hierarchy mode: sum of totalItemCount over each folder and its subfolders.
+
+    Every request is a work item in its mailbox's queue. Each round takes at
+    most RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH items per mailbox
+    and sends them as sequential $batch calls of at most graph_batch_size
+    requests, keeping a mailbox's items for the round in the same $batch. A
+    call never has more than one $batch in flight, so a mailbox owned by one
     call never sees more than that many concurrent requests. Callers must not
     pass the same mailbox to two concurrent calls.
     """
@@ -72,8 +88,6 @@ class EORecoverableItemsEstimator(Estimator):
         """@returns Map of UPN to {folder label: count}. Failed or unscanned folders count 0."""
         if not mailboxes or None in mailboxes:
             raise Exception("Invalid user ids provided. Please check the list and ensure all the IDs are non-null.")
-        if self.config.recursive_email_scan:
-            raise NotImplementedError("Folder hierarchy mode for Recoverable Items is not implemented yet.")
 
         # De-duplicate case-insensitively so a mailbox is only requested once.
         unique_mailboxes: Dict[str, str] = {}
@@ -103,35 +117,47 @@ class EORecoverableItemsEstimator(Estimator):
             counts: Dict[str, Dict[str, int]],
             failures: List[Dict[str, Any]]
         ) -> None:
-        labels = list(RECOVERABLE_ITEMS_FOLDERS)
-        rounds = [
-            labels[i:i + RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH]
-            for i in range(0, len(labels), RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
-        ]
-        mailboxes_per_batch = max(1, self.config.graph_batch_size // RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
+        hierarchy_mode = self.config.recursive_email_scan
+        queues: Dict[str, Deque[_WorkItem]] = {
+            key: deque(self._initial_items(unique_mailboxes[key], hierarchy_mode)) for key in keys
+        }
+        visited: Dict[str, Set[str]] = {key: set() for key in keys}
         folder_failures: Dict[str, List[Dict[str, Any]]] = {key: [] for key in keys}
+        failed_folders: Dict[str, Set[str]] = {key: set() for key in keys}
+        mailboxes_per_batch = max(1, self.config.graph_batch_size // RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
 
-        for round_labels in rounds:
-            for start in range(0, len(keys), mailboxes_per_batch):
+        while not self.is_hard_stop_requested():
+            # Take up to the per-mailbox limit of pending items from every mailbox.
+            round_items: List[Tuple[str, List[_WorkItem]]] = []
+            for key in keys:
+                taken = []
+                while queues[key] and len(taken) < RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH:
+                    taken.append(queues[key].popleft())
+                if taken:
+                    round_items.append((key, taken))
+            if not round_items:
+                break
+
+            for start in range(0, len(round_items), mailboxes_per_batch):
                 if self.is_hard_stop_requested():
                     break
-                group = keys[start:start + mailboxes_per_batch]
-                requests, request_map = self._build_round(group, unique_mailboxes, round_labels)
+                group = round_items[start:start + mailboxes_per_batch]
+                requests, request_map = self._build_batch(group)
                 responses = self._execute_batch(requests)
 
-                for req_id, (key, label) in request_map.items():
-                    count, failure = self._parse_count_response(
-                        responses.get(req_id), unique_mailboxes[key], label
+                for req_id, (key, item) in request_map.items():
+                    item_failures, request_failed = self._handle_response(
+                        responses.get(req_id), item, unique_mailboxes[key],
+                        counts[key], queues[key], visited[key]
                     )
-                    if failure is not None:
-                        folder_failures[key].append(failure)
-                    else:
-                        counts[key][label] = count
+                    folder_failures[key].extend(item_failures)
+                    if request_failed and item.kind in ("count", "root"):
+                        failed_folders[key].add(item.label)
 
         for key, mailbox_failures in folder_failures.items():
             if not mailbox_failures:
                 continue
-            if len(mailbox_failures) == len(RECOVERABLE_ITEMS_FOLDERS):
+            if len(failed_folders[key]) == len(RECOVERABLE_ITEMS_FOLDERS):
                 first = mailbox_failures[0]
                 failures.append({
                     "userId": unique_mailboxes[key],
@@ -143,35 +169,49 @@ class EORecoverableItemsEstimator(Estimator):
             else:
                 failures.extend(mailbox_failures)
 
-    def _build_round(
-            self,
-            group: List[str],
-            unique_mailboxes: Dict[str, str],
-            round_labels: List[str]
-        ) -> Tuple[List[Dict[str, Any]], Dict[str, Tuple[str, str]]]:
-        requests: List[Dict[str, Any]] = []
-        request_map: Dict[str, Tuple[str, str]] = {}
-        encoded_filter = urllib.parse.quote(IPM_NOTE_FILTER, safe="")
+    def _initial_items(self, mailbox: str, hierarchy_mode: bool) -> List[_WorkItem]:
+        encoded_mailbox = urllib.parse.quote(mailbox, safe="@")
+        items = []
+        for label, well_known_name in RECOVERABLE_ITEMS_FOLDERS.items():
+            folder_url = f"/admin/exchange/mailboxes/{encoded_mailbox}/folders/{well_known_name}"
+            if hierarchy_mode:
+                items.append(_WorkItem("root", label, f"{folder_url}?{FOLDER_SELECT}"))
+            else:
+                encoded_filter = urllib.parse.quote(IPM_NOTE_FILTER, safe="")
+                items.append(_WorkItem(
+                    "count", label,
+                    f"{folder_url}/items?$filter={encoded_filter}&$count=true&$top=1&$select=id"
+                ))
+        return items
 
-        for key in group:
-            encoded_mailbox = urllib.parse.quote(unique_mailboxes[key], safe="@")
-            for label in round_labels:
+    def _children_item(self, mailbox: str, label: str, folder_id: str, depth: int) -> _WorkItem:
+        encoded_mailbox = urllib.parse.quote(mailbox, safe="@")
+        encoded_folder = urllib.parse.quote(folder_id, safe="")
+        return _WorkItem(
+            "children", label,
+            f"/admin/exchange/mailboxes/{encoded_mailbox}/folders/{encoded_folder}/childFolders?{FOLDER_SELECT}&$top=999",
+            depth=depth, folder_id=folder_id
+        )
+
+    def _build_batch(
+            self,
+            group: List[Tuple[str, List[_WorkItem]]]
+        ) -> Tuple[List[Dict[str, Any]], Dict[str, Tuple[str, _WorkItem]]]:
+        requests: List[Dict[str, Any]] = []
+        request_map: Dict[str, Tuple[str, _WorkItem]] = {}
+
+        for key, items in group:
+            for item in items:
                 req_id = str(len(requests))
-                requests.append({
-                    "id": req_id,
-                    "method": "GET",
-                    "url": (
-                        f"/admin/exchange/mailboxes/{encoded_mailbox}/folders/"
-                        f"{RECOVERABLE_ITEMS_FOLDERS[label]}/items"
-                        f"?$filter={encoded_filter}&$count=true&$top=1&$select=id"
-                    ),
-                    "headers": {"ConsistencyLevel": "eventual"},
-                })
-                request_map[req_id] = (key, label)
+                request = {"id": req_id, "method": "GET", "url": item.url}
+                if item.kind == "count":
+                    request["headers"] = {"ConsistencyLevel": "eventual"}
+                requests.append(request)
+                request_map[req_id] = (key, item)
 
         per_mailbox = Counter(key for key, _ in request_map.values())
         if per_mailbox and max(per_mailbox.values()) > RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH:
-            raise RuntimeError("Recoverable Items round exceeds the per-mailbox request limit.")
+            raise RuntimeError("Recoverable Items $batch exceeds the per-mailbox request limit.")
 
         return requests, request_map
 
@@ -197,17 +237,25 @@ class EORecoverableItemsEstimator(Estimator):
         finally:
             token_manager.return_token_slot(token_data)
 
-    def _parse_count_response(
+    def _handle_response(
             self,
             response: Optional[Dict[str, Any]],
+            item: _WorkItem,
             mailbox: str,
-            label: str
-        ) -> Tuple[int, Optional[Dict[str, Any]]]:
-        """@returns (count, None) on success, or (0, failure) on any error."""
-        def failure(failure_type: FailureType, status_code: Optional[int], message: str):
-            return 0, {
+            counts: Dict[str, int],
+            queue: Deque[_WorkItem],
+            visited: Set[str]
+        ) -> Tuple[List[Dict[str, Any]], bool]:
+        """Applies one response to the mailbox's counts and queue.
+
+        @returns (failures, whether the request itself failed)
+        """
+        resource = item.label if item.folder_id is None else f"{item.label} ({item.folder_id})"
+
+        def failure(failure_type: FailureType, status_code: Optional[int], message: str) -> Dict[str, Any]:
+            return {
                 "userId": mailbox,
-                "folderId": label,
+                "folderId": resource,
                 "isPartial": True,
                 "type": failure_type,
                 "statusCode": status_code,
@@ -215,19 +263,78 @@ class EORecoverableItemsEstimator(Estimator):
             }
 
         if not response:
-            return failure(FailureType.NOT_FOUND, None, "No response received for the request")
+            return [failure(FailureType.NOT_FOUND, None, "No response received for the request")], True
 
         status = response.get("status")
         body = response.get("body") or {}
-        error_message = body.get("error", {}).get("message") if isinstance(body, dict) else None
+        if status != 200:
+            error_message = body.get("error", {}).get("message") if isinstance(body, dict) else None
+            if status == 404:
+                return [failure(FailureType.NOT_FOUND, status, error_message or "Folder not found")], True
+            return [failure(FailureType.FAILURE_STATUS_CODE_ERROR, status, error_message or "Unknown error")], True
 
-        if status == 200:
+        if item.kind == "count":
             if "@odata.count" not in body:
-                return failure(FailureType.INVALID_DATA, status, "No @odata.count in response")
+                return [failure(FailureType.INVALID_DATA, status, "No @odata.count in response")], True
             try:
-                return int(body["@odata.count"]), None
+                counts[item.label] += int(body["@odata.count"])
             except (ValueError, TypeError):
-                return failure(FailureType.INVALID_DATA, status, f"Invalid @odata.count '{body['@odata.count']}'")
-        if status == 404:
-            return failure(FailureType.NOT_FOUND, status, error_message or "Folder not found")
-        return failure(FailureType.FAILURE_STATUS_CODE_ERROR, status, error_message or "Unknown error")
+                return [failure(FailureType.INVALID_DATA, status, f"Invalid @odata.count '{body['@odata.count']}'")], True
+            return [], False
+
+        if item.kind == "root":
+            if "id" not in body:
+                return [failure(FailureType.INVALID_DATA, status, "No folder id in response")], True
+            return self._apply_folders([body], item.label, 0, mailbox, counts, queue, visited, failure), False
+
+        # Child folder page.
+        if "value" not in body:
+            return [failure(FailureType.INVALID_DATA, status, "No value in childFolders response")], True
+        item_failures = self._apply_folders(body["value"], item.label, item.depth, mailbox, counts, queue, visited, failure)
+        if "@odata.nextLink" in body:
+            relative_url = get_relative_url(body["@odata.nextLink"], GRAPH_BASE_URL)
+            if relative_url.startswith("http"):
+                item_failures.append(failure(FailureType.INVALID_DATA, status, "Unexpected @odata.nextLink host"))
+            else:
+                queue.append(_WorkItem("children", item.label, f"/{relative_url}", depth=item.depth, folder_id=item.folder_id))
+        return item_failures, False
+
+    def _apply_folders(
+            self,
+            folders: List[Dict[str, Any]],
+            label: str,
+            depth: int,
+            mailbox: str,
+            counts: Dict[str, int],
+            queue: Deque[_WorkItem],
+            visited: Set[str],
+            failure: Callable[[FailureType, Optional[int], str], Dict[str, Any]]
+        ) -> List[Dict[str, Any]]:
+        """Adds folders' totalItemCount and queues their children. @returns Failures."""
+        item_failures = []
+        for folder in folders:
+            folder_id = folder.get("id")
+            if folder_id is None or folder_id in visited:
+                continue
+            visited.add(folder_id)
+
+            try:
+                counts[label] += int(folder.get("totalItemCount", 0))
+            except (ValueError, TypeError):
+                item_failures.append(failure(FailureType.INVALID_DATA, 200, f"Invalid totalItemCount '{folder.get('totalItemCount')}' for folder {folder_id}"))
+
+            try:
+                child_count = int(folder.get("childFolderCount") or 0)
+            except (ValueError, TypeError):
+                item_failures.append(failure(FailureType.INVALID_DATA, 200, f"Invalid childFolderCount '{folder.get('childFolderCount')}' for folder {folder_id}"))
+                child_count = 0
+
+            if child_count > 0:
+                if depth + 1 > self.config.max_allowed_depth:
+                    message = f"Depth limit {self.config.max_allowed_depth} reached under {label}; deeper folders not counted"
+                    if self.logger:
+                        self.logger(f"[WARNING] Recoverable Items: {mailbox} | {message}")
+                    item_failures.append(failure(FailureType.INVALID_DATA, 200, message))
+                else:
+                    queue.append(self._children_item(mailbox, label, folder_id, depth + 1))
+        return item_failures

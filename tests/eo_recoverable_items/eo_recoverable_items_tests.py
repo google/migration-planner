@@ -1,3 +1,4 @@
+from collections import Counter
 import threading
 import time
 import unittest
@@ -8,6 +9,7 @@ from unittest.mock import MagicMock
 
 from estimators.eo_recoverable_items_estimator import EORecoverableItemsEstimator
 from util.constants import (
+    GRAPH_BASE_URL,
     RECOVERABLE_ITEMS_FOLDERS,
     RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH,
 )
@@ -252,16 +254,274 @@ class TestEORecoverableItemsCountMode(unittest.TestCase):
         self.assertEqual(result["a@x.com"]["Versions"], 0)
         self.assertEqual(failures, [])
 
-    def test_hierarchy_mode_not_implemented(self):
-        self.config.recursive_email_scan = True
-        with self.assertRaises(NotImplementedError):
-            self.estimator.get_folder_counts(["a@x.com"], [])
-
     def test_invalid_input(self):
         with self.assertRaises(Exception):
             self.estimator.get_folder_counts([], [])
         with self.assertRaises(Exception):
             self.estimator.get_folder_counts(["a@x.com", None], [])
+
+
+class FakeFolderTreeGraph:
+    """Fake for UrlInvoker.execute_batch_request serving folder hierarchies.
+
+    `trees[(mailbox, label)]` is a nested node {"id", "count", "children"}.
+    childFolders responses are paginated by `page_size`. `failures[url_part]`
+    returns the given response for any request whose URL contains url_part.
+    """
+
+    def __init__(self, page_size: int = 999, delay: float = 0.0):
+        self.trees: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self.failures: Dict[str, Dict[str, Any]] = {}
+        self.page_size = page_size
+        self.delay = delay
+        self.batches: List[List[Dict[str, Any]]] = []
+        self.lock = threading.Lock()
+        self.in_flight_per_mailbox: Dict[str, int] = {}
+        self.max_in_flight_per_mailbox = 0
+        self.next_link_override: Optional[str] = None
+
+    @staticmethod
+    def node(folder_id: str, count: int, children: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        return {"id": folder_id, "count": count, "children": children or []}
+
+    def _find(self, mailbox: str, folder_id: str) -> Optional[Dict[str, Any]]:
+        stack = [tree for (m, _), tree in self.trees.items() if m == mailbox]
+        while stack:
+            node = stack.pop()
+            if node["id"] == folder_id:
+                return node
+            stack.extend(node["children"])
+        return None
+
+    @staticmethod
+    def _folder_body(node: Dict[str, Any]) -> Dict[str, Any]:
+        return {"id": node["id"], "totalItemCount": node["count"], "childFolderCount": len(node["children"])}
+
+    def _respond(self, url: str) -> Optional[Dict[str, Any]]:
+        for url_part, response in self.failures.items():
+            if url_part in url:
+                return response
+        path, _, query = url.partition("?")
+        parts = path.strip("/").split("/")
+        mailbox = urllib.parse.unquote(parts[3])
+        folder = urllib.parse.unquote(parts[5])
+        if len(parts) == 6:
+            node = self.trees.get((mailbox, WELL_KNOWN_TO_LABEL[folder]))
+            if node is None:
+                return {"status": 404, "body": {"error": {"message": "Folder not found."}}}
+            return {"status": 200, "body": self._folder_body(node)}
+
+        node = self._find(mailbox, folder)
+        if node is None:
+            return {"status": 404, "body": {"error": {"message": "Folder not found."}}}
+        skip = int(urllib.parse.parse_qs(query).get("$skiptoken", ["0"])[0])
+        page = node["children"][skip:skip + self.page_size]
+        body: Dict[str, Any] = {"value": [self._folder_body(child) for child in page]}
+        if skip + self.page_size < len(node["children"]):
+            body["@odata.nextLink"] = self.next_link_override or (
+                f"{GRAPH_BASE_URL}/admin/exchange/mailboxes/{parts[3]}/folders/{parts[5]}"
+                f"/childFolders?$skiptoken={skip + self.page_size}"
+            )
+        return {"status": 200, "body": body}
+
+    def execute_batch_request(self, session, batch_url, token_manager, token_data, requests, logger, stop_event=None, context=""):
+        mailboxes = [urllib.parse.unquote(req["url"].strip("/").split("/")[3]) for req in requests]
+        with self.lock:
+            self.batches.append(requests)
+            for mailbox in mailboxes:
+                self.in_flight_per_mailbox[mailbox] = self.in_flight_per_mailbox.get(mailbox, 0) + 1
+                self.max_in_flight_per_mailbox = max(self.max_in_flight_per_mailbox, self.in_flight_per_mailbox[mailbox])
+        try:
+            if self.delay:
+                time.sleep(self.delay)
+            result = {}
+            for req in requests:
+                response = self._respond(req["url"])
+                if response is not None:
+                    result[req["id"]] = dict(response, id=req["id"])
+            return result
+        finally:
+            with self.lock:
+                for mailbox in mailboxes:
+                    self.in_flight_per_mailbox[mailbox] -= 1
+
+
+class TestEORecoverableItemsHierarchyMode(unittest.TestCase):
+
+    def setUp(self):
+        self.config = ScanConfig(
+            tenant_id="test-tenant",
+            client_ids=["test-client"],
+            client_secrets=["test-secret"],
+            user_source="tenant",
+            csv_path="",
+            scan_email=True,
+            scan_recoverable_items=True,
+            recursive_email_scan=True,
+            concurrency=10,
+            retries=1,
+            backoff=1,
+        )
+        self.stop_event = threading.Event()
+        self.graph = FakeFolderTreeGraph()
+        self.url_invoker = MagicMock()
+        self.url_invoker.execute_batch_request.side_effect = self.graph.execute_batch_request
+        self.logger = MagicMock()
+        self.estimator = EORecoverableItemsEstimator(
+            config=self.config,
+            url_invoker=self.url_invoker,
+            logger=self.logger,
+            stop_event=self.stop_event,
+        )
+
+    def _set_flat_trees(self, mailbox: str, count: int = 0):
+        for label in RECOVERABLE_ITEMS_FOLDERS:
+            self.graph.trees[(mailbox, label)] = FakeFolderTreeGraph.node(f"{mailbox}-{label}", count)
+
+    def _assert_per_batch_limit(self):
+        for batch in self.graph.batches:
+            self.assertLessEqual(len(batch), self.config.graph_batch_size)
+            per_mailbox = Counter(req["url"].strip("/").split("/")[3] for req in batch)
+            self.assertLessEqual(max(per_mailbox.values()), RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
+
+    def test_sums_total_item_count_across_levels(self):
+        node = FakeFolderTreeGraph.node
+        self._set_flat_trees("a@x.com")
+        self.graph.trees[("a@x.com", "DiscoveryHolds")] = node("dh", 10, [
+            node("dh-1", 5, [node("dh-1-1", 2), node("dh-1-2", 3)]),
+            node("dh-2", 7),
+        ])
+        self.graph.trees[("a@x.com", "Purges")] = node("p", 4)
+        failures = []
+        result = self.estimator.get_folder_counts(["a@x.com"], failures)
+
+        self.assertEqual(result["a@x.com"], {"Deletions": 0, "Purges": 4, "DiscoveryHolds": 27, "Versions": 0})
+        self.assertEqual(failures, [])
+        self._assert_per_batch_limit()
+        urls = [req["url"] for batch in self.graph.batches for req in batch]
+        self.assertTrue(all("/items" not in url for url in urls))
+        self.assertTrue(all("$select=id,childFolderCount,totalItemCount" in url for url in urls))
+
+    def test_follows_child_folder_pagination(self):
+        node = FakeFolderTreeGraph.node
+        self.graph.page_size = 2
+        self._set_flat_trees("a@x.com")
+        self.graph.trees[("a@x.com", "Versions")] = node("v", 1, [node(f"v-{i}", 1) for i in range(5)])
+        failures = []
+        result = self.estimator.get_folder_counts(["a@x.com"], failures)
+
+        self.assertEqual(result["a@x.com"]["Versions"], 6)
+        self.assertEqual(failures, [])
+        child_requests = [req["url"] for batch in self.graph.batches for req in batch if "childFolders" in req["url"]]
+        self.assertEqual(len(child_requests), 3)
+
+    def test_child_failure_keeps_other_counts(self):
+        node = FakeFolderTreeGraph.node
+        self._set_flat_trees("a@x.com")
+        self.graph.trees[("a@x.com", "Deletions")] = node("d", 10, [
+            node("d-1", 5, [node("d-1-1", 100)]),
+            node("d-2", 3),
+        ])
+        self.graph.failures["/folders/d-1/childFolders"] = {
+            "status": 500, "body": {"error": {"message": "Server error."}}
+        }
+        failures = []
+        result = self.estimator.get_folder_counts(["a@x.com"], failures)
+
+        self.assertEqual(result["a@x.com"]["Deletions"], 18)
+        self.assertEqual(len(failures), 1)
+        self.assertTrue(failures[0]["isPartial"])
+        self.assertEqual(failures[0]["folderId"], "Deletions (d-1)")
+        self.assertEqual(failures[0]["type"], FailureType.FAILURE_STATUS_CODE_ERROR)
+
+    def test_root_failures(self):
+        self._set_flat_trees("a@x.com", count=2)
+        del self.graph.trees[("a@x.com", "Purges")]
+        failures = []
+        result = self.estimator.get_folder_counts(["a@x.com"], failures)
+
+        self.assertEqual(result["a@x.com"], {"Deletions": 2, "Purges": 0, "DiscoveryHolds": 2, "Versions": 2})
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["folderId"], "Purges")
+        self.assertEqual(failures[0]["type"], FailureType.NOT_FOUND)
+
+    def test_all_roots_failed_is_single_full_failure(self):
+        failures = []
+        result = self.estimator.get_folder_counts(["missing@x.com"], failures)
+
+        self.assertEqual(sum(result["missing@x.com"].values()), 0)
+        self.assertEqual(len(failures), 1)
+        self.assertFalse(failures[0]["isPartial"])
+
+    def test_depth_limit(self):
+        node = FakeFolderTreeGraph.node
+        self.config.max_allowed_depth = 1
+        self._set_flat_trees("a@x.com")
+        self.graph.trees[("a@x.com", "Deletions")] = node("d", 1, [node("d-1", 1, [node("d-1-1", 50)])])
+        failures = []
+        result = self.estimator.get_folder_counts(["a@x.com"], failures)
+
+        self.assertEqual(result["a@x.com"]["Deletions"], 2)
+        self.assertEqual(len(failures), 1)
+        self.assertIn("Depth limit 1", failures[0]["message"])
+        self.assertTrue(any("Depth limit 1" in call.args[0] for call in self.logger.call_args_list))
+
+    def test_revisited_folder_not_double_counted(self):
+        node = FakeFolderTreeGraph.node
+        self._set_flat_trees("a@x.com")
+        shared_child = node("shared", 9)
+        self.graph.trees[("a@x.com", "Deletions")] = node("d", 1, [node("d-1", 1, [shared_child]), node("d-2", 1, [shared_child])])
+        result = self.estimator.get_folder_counts(["a@x.com"], [])
+
+        self.assertEqual(result["a@x.com"]["Deletions"], 12)
+
+    def test_foreign_next_link_not_followed(self):
+        node = FakeFolderTreeGraph.node
+        self.graph.page_size = 1
+        self.graph.next_link_override = "https://evil.example.com/next"
+        self._set_flat_trees("a@x.com")
+        self.graph.trees[("a@x.com", "Deletions")] = node("d", 1, [node("d-1", 1), node("d-2", 1)])
+        failures = []
+        result = self.estimator.get_folder_counts(["a@x.com"], failures)
+
+        self.assertEqual(result["a@x.com"]["Deletions"], 2)
+        urls = [req["url"] for batch in self.graph.batches for req in batch]
+        self.assertFalse(any("evil.example.com" in url for url in urls))
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["type"], FailureType.INVALID_DATA)
+
+    def test_folder_ids_are_url_encoded(self):
+        node = FakeFolderTreeGraph.node
+        self._set_flat_trees("a@x.com")
+        self.graph.trees[("a@x.com", "Deletions")] = node("d", 1, [node("AA/B+c=", 1, [node("x", 1)])])
+        result = self.estimator.get_folder_counts(["a@x.com"], [])
+
+        urls = [req["url"] for batch in self.graph.batches for req in batch]
+        self.assertTrue(any("/folders/AA%2FB%2Bc%3D/childFolders" in url for url in urls))
+        self.assertEqual(result["a@x.com"]["Deletions"], 3)
+
+    def test_parallel_deep_trees_never_exceed_per_mailbox_limit(self):
+        node = FakeFolderTreeGraph.node
+        self.graph.delay = 0.002
+        self.graph.page_size = 2
+        mailboxes = [f"user{i}@x.com" for i in range(60)]
+        for mailbox in mailboxes:
+            for label in RECOVERABLE_ITEMS_FOLDERS:
+                self.graph.trees[(mailbox, label)] = node(f"{mailbox}-{label}", 1, [
+                    node(f"{mailbox}-{label}-{i}", 1, [node(f"{mailbox}-{label}-{i}-{j}", 1) for j in range(3)])
+                    for i in range(3)
+                ])
+        for concurrency in (10, 30, 100):
+            with self.subTest(concurrency=concurrency):
+                chunk_size = min(concurrency // 10, 20)
+                tasks = [mailboxes[i:i + chunk_size] for i in range(0, len(mailboxes), chunk_size)]
+                with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                    results = list(executor.map(lambda task: self.estimator.get_folder_counts(task, []), tasks))
+
+                self.assertLessEqual(self.graph.max_in_flight_per_mailbox, RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH)
+                self.assertTrue(all(counts == {label: 13 for label in RECOVERABLE_ITEMS_FOLDERS}
+                                    for result in results for counts in result.values()))
+        self._assert_per_batch_limit()
 
 
 if __name__ == "__main__":
