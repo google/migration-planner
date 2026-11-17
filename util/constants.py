@@ -26,10 +26,9 @@ USE_MSFT_BACKOFF = True
 # Requests) from Graph, Entra ID and SharePoint, and 503 (Server Too Busy)
 # from SharePoint. Both usually carry a Retry-After header.
 THROTTLING_STATUS_CODES: tuple[int, ...] = (429, 503)
-# Number of sub-requests the estimators pack into one Microsoft Graph JSON
-# $batch call (Graph allows at most 20). This is independent of the "Parallel
-# Batches" slider, which only controls the number of migration plan lanes.
-GRAPH_BATCH_REQUEST_SIZE: int = 10
+# Default number of sub-requests the estimators pack into one Microsoft Graph
+# JSON $batch call (ScanConfig.graph_batch_size). Graph allows at most 20.
+DEFAULT_GRAPH_BATCH_SIZE: int = 10
 
 # Chat Estimation Cost Weights (Seconds)
 BLENDED_MSG_COST_SEC: float = 0.75
