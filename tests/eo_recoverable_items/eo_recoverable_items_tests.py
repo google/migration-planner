@@ -576,5 +576,109 @@ class TestRecoverableItemsCsv(unittest.TestCase):
         self.assertNotIn("Recoverable Email Count", df.columns)
         self.assertFalse(any(line.startswith("Recoverable Emails:") for line in self._logs()))
 
+
+class _EtaEstimator:
+    """Uses the base Estimator ETA model without any network resources."""
+
+    def calculate_migration_eta(self, data):
+        from estimators.estimator import Estimator
+        return Estimator.calculate_migration_eta(self, data)
+
+    def shutdown(self):
+        pass
+
+
+class TestRecoverableItemsEta(unittest.TestCase):
+
+    def setUp(self):
+        from ui.exchange_online_ui import MigrationEstimatorTool
+
+        self.config = ScanConfig(
+            tenant_id="", client_ids=[], client_secrets=[], user_source="tenant", csv_path="",
+            scan_email=True, scan_recoverable_items=True, concurrency=10, retries=1, backoff=1,
+        )
+        self.tool = object.__new__(MigrationEstimatorTool)
+        self.tool.log_msg = MagicMock()
+        self.tool.ui_update = MagicMock()
+        self.tool.eta_min_users = _Var(1)
+        self.tool.eta_max_users = _Var(1)
+        self.tool.eta_max_batches = _Var(50)
+        self.tool.parallel_batches = _Var(1)
+        self.tool._get_scan_configuration = lambda: self.config
+        self.tool.factory = MagicMock()
+        self.tool.factory.get_in_place_archive_estimator.return_value = _EtaEstimator()
+        self.tool.factory.get_shared_mailbox_estimator.return_value = _EtaEstimator()
+        self.tool.factory.get_group_mailbox_estimator.return_value = _EtaEstimator()
+
+    def _plan(self, rows: List[Dict[str, Any]], drop_recoverable_column: bool = False):
+        import pandas as pd
+        df = pd.DataFrame(rows)
+        if drop_recoverable_column:
+            df = df.drop(columns=["Recoverable Email Count"])
+        return self.tool.calculate_migration_batches(df)
+
+    def _row(self, upn: str, row_type: str = "User", email: int = 0, shared: int = 0, recoverable: int = 0):
+        row = make_row(upn, row_type)
+        row["Email Count"] = email
+        row["Shared Mail Count"] = shared
+        row["Recoverable Email Count"] = recoverable
+        return row
+
+    def test_older_data_without_column_matches_zero_counts(self):
+        rows = [self._row("a@x.com", email=500), self._row("s@x.com", "Shared", shared=300)]
+        _, batches_without, eta_without, _ = self._plan([dict(r) for r in rows], drop_recoverable_column=True)
+        _, batches_zero, eta_zero, _ = self._plan([dict(r) for r in rows])
+
+        self.assertEqual(eta_without, eta_zero)
+        self.assertEqual([b["users"] for b in batches_without], [b["users"] for b in batches_zero])
+        self.assertTrue(all(b["total_recoverable_emails"] == 0 for b in batches_without))
+
+    def test_user_recoverable_emails_join_the_email_stream(self):
+        _, _, eta_with_recoverable, _ = self._plan([self._row("a@x.com", email=1000, recoverable=500)])
+        _, _, eta_as_email, _ = self._plan([self._row("a@x.com", email=1500)])
+
+        self.assertGreater(eta_with_recoverable, 0)
+        self.assertAlmostEqual(eta_with_recoverable, eta_as_email)
+
+    def test_shared_recoverable_emails_join_the_shared_stream(self):
+        _, _, eta_with_recoverable, _ = self._plan([self._row("s@x.com", "Shared", shared=1000, recoverable=500)])
+        _, _, eta_as_shared, _ = self._plan([self._row("s@x.com", "Shared", shared=1500)])
+
+        self.assertGreater(eta_with_recoverable, 0)
+        self.assertAlmostEqual(eta_with_recoverable, eta_as_shared)
+
+    def test_recoverable_emails_sort_heavy_mailboxes_first(self):
+        df_final, _, _, _ = self._plan([self._row("a@x.com", email=100), self._row("b@x.com", email=50, recoverable=200)])
+        self.assertEqual(df_final["User Principal Name / Group Mail"].tolist(), ["b@x.com", "a@x.com"])
+
+    def test_batches_report_recoverable_totals(self):
+        self.tool.eta_max_users = _Var(5)
+        self.tool.eta_min_users = _Var(5)
+        _, batches, _, _ = self._plan([self._row("a@x.com", email=10, recoverable=3),
+                                       self._row("s@x.com", "Shared", shared=10, recoverable=4)])
+        self.assertEqual(sum(b["total_recoverable_emails"] for b in batches), 7)
+
+    def test_result_data_includes_recoverable_totals(self):
+        stats = {key: 0 for key in ALL_STATS_KEYS}
+        stats.update({"emails": 100, "recoverable_items": 40})
+        rows = [self._row("a@x.com", email=100, recoverable=40)]
+        monitor = MagicMock()
+        monitor.get_stats.return_value = (0.0, 0.0, 0.0, 0.0)
+        self.tool.recoverable_folder_totals = None
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                for selected, expected in ((True, 40), (False, None)):
+                    with self.subTest(selected=selected):
+                        self.config.scan_recoverable_items = selected
+                        with patch("ui.exchange_online_ui.time.sleep"):
+                            self.tool._generate_final_report(self.config, [dict(r) for r in rows], [], [], stats, monitor, time.time())
+                        data = self.tool.ui_update.call_args_list[-1].kwargs["data"]
+                        self.assertEqual(data["total_recoverable_emails"], expected)
+                        self.assertEqual(data["total_items"], 140)
+            finally:
+                os.chdir(cwd)
+
 if __name__ == "__main__":
     unittest.main()

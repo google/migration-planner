@@ -354,6 +354,7 @@ Once started, you will see a real-time progress screen:
 The top cards display the total scope of the migration:
 *   **Users**: Total distinct users identified/scanned.
 *   **Emails / Events / Contacts / In-Place Archives / Group Mailboxes**: The aggregate sum of items across all users.
+*   **Recoverable Emails**: Shown when the Recoverable Emails source is selected. The total of IPM.Note emails in the Recoverable Items folders of user and shared mailboxes, also included in **Total Items**.
 
 The CSV report would include additional details at the more granular site level.
 
