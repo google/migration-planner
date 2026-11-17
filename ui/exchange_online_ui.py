@@ -1547,7 +1547,10 @@ class MigrationEstimatorTool(ctk.CTk):
         retries=self.retries.get(),
         backoff=self.backoff.get(),
         eta_max_users=self.eta_max_users.get(),
-        parallel_batches=self.parallel_batches.get(),
+        # ScanConfig.parallel_batches is the Graph $batch size used by the
+        # estimators. The "Parallel Batches" slider only controls migration
+        # plan lanes and is read directly in calculate_migration_batches.
+        parallel_batches=GRAPH_BATCH_REQUEST_SIZE,
     )
 
   def _authenticate_if_needed(
