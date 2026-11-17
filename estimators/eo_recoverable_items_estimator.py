@@ -14,18 +14,21 @@ from util.enums import FailureType
 from util.thread_safe_ds import AtomicInt
 from util.utils import ScanConfig, create_batches, get_batch_responses_map
 
-# Only plain emails are counted when the Recursive setting is off.
+# Only plain emails are counted.
 IPM_NOTE_FILTER = "type eq 'IPM.Note'"
+FOLDER_COUNT_API = (
+    "admin/exchange/mailboxes/{mailbox}/folders/{folder}/items?$filter="
+    + urllib.parse.quote(IPM_NOTE_FILTER, safe="")
+    + "&$count=true&$top=1&$select=id"
+)
 
 
 class EORecoverableItemsEstimator(Estimator):
     """Counts emails in the Recoverable Items folders of primary mailboxes.
 
     Mailboxes are identified by UPN. These folders never contain subfolders, so
-    each folder needs a single request:
-    - Recursive setting off: IPM.Note $count of the folder's items.
-    - Recursive setting on: the folder's totalItemCount, like the primary
-      mailbox recursive scan.
+    each folder needs a single server-side IPM.Note $count request, whatever the
+    Recursive setting (totalItemCount can't be filtered by item type).
 
     The folders are requested in sequential rounds of
     RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH folders, so a mailbox
@@ -116,12 +119,6 @@ class EORecoverableItemsEstimator(Estimator):
         """@returns Aggregate count per folder label across all calls."""
         return {label: total.get_value() for label, total in self.folder_totals.items()}
 
-    def _get_folder_api(self) -> str:
-        if self.config.recursive_email_scan:
-            return "admin/exchange/mailboxes/{mailbox}/folders/{folder}?$select=id,totalItemCount"
-        encoded_filter = urllib.parse.quote(IPM_NOTE_FILTER, safe="")
-        return "admin/exchange/mailboxes/{mailbox}/folders/{folder}/items?$filter=" + encoded_filter + "&$count=true&$top=1&$select=id"
-
     def _count_round(
             self,
             unique_mailboxes: Dict[str, str],
@@ -139,7 +136,7 @@ class EORecoverableItemsEstimator(Estimator):
                 placeholders.append({"mailbox": encoded_mailbox, "folder": well_known_name})
                 placeholder_to_target[(encoded_mailbox, well_known_name)] = (key, label)
 
-        batches = create_batches(self._get_folder_api(), placeholders, self.config.graph_batch_size, True)
+        batches = create_batches(FOLDER_COUNT_API, placeholders, self.config.graph_batch_size, True)
 
         futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
         batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -192,10 +189,9 @@ class EORecoverableItemsEstimator(Estimator):
             error_message = body.get("error", {}).get("message") if isinstance(body, dict) else None
             return failure(FailureType.FAILURE_STATUS_CODE_ERROR, status, error_message or "Unknown error")
 
-        count_field = "totalItemCount" if self.config.recursive_email_scan else "@odata.count"
-        if count_field not in body:
-            return failure(FailureType.INVALID_DATA, status, f"No {count_field} in response")
+        if "@odata.count" not in body:
+            return failure(FailureType.INVALID_DATA, status, "No @odata.count in response")
         try:
-            return int(body[count_field]), None
+            return int(body["@odata.count"]), None
         except (ValueError, TypeError):
-            return failure(FailureType.INVALID_DATA, status, f"Invalid {count_field} '{body[count_field]}'")
+            return failure(FailureType.INVALID_DATA, status, f"Invalid @odata.count '{body['@odata.count']}'")
