@@ -354,6 +354,7 @@ Once started, you will see a real-time progress screen:
 The top cards display the total scope of the migration:
 *   **Users**: Total distinct users identified/scanned.
 *   **Emails / Events / Contacts / In-Place Archives / Group Mailboxes**: The aggregate sum of items across all users.
+*   **Recoverable Emails**: Shown when the Recoverable Emails source is selected. The total of IPM.Note emails in the Recoverable Items folders of user and shared mailboxes, also included in **Total Items**.
 
 The CSV report would include additional details at the more granular site level.
 
@@ -362,6 +363,7 @@ The tool calculates an Estimated Completion Time (ETA) based on the email corpus
 *   **User Ordering**: Users are sorted in Ascending Order (Lightest users -> Heaviest users). The lightest users are packed into Batch 1, while the heaviest users usually end up in the final batches.
 *   Max(Emails , (Calendar Events + Contacts), In-Place Archives, Group Mails) determines the sorting logic.
 *   **Batch ETAs**: Calculated based on the regular emails, in-place archived emails and group mails corpus present in the batch.
+*   **Recoverable Emails**: They share the primary mailbox's quota, so a user mailbox's Recoverable Email Count is added to its Email Count, and a shared mailbox's to its Shared Mail Count, for sorting and ETAs. They are treated as unencrypted.
 *   **Bucketing**: Batches are distributed into Parallel Buckets.
     *   **Example**: If you selected 4 parallel batches, the tool creates 4 "lanes". As soon as Batch 1 finishes in Lane 1, Batch 5 immediately starts in that same lane.
 *   **Total ETA** = The duration of the single longest bucket(lane).

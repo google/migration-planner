@@ -408,6 +408,13 @@ class MigrationEstimatorTool(ctk.CTk):
             f"{data['total_encrypted_emails']:,}",
             "🔒",
         )
+      if data.get("total_recoverable_emails") is not None:
+        self.create_stat_card(
+            card_frame,
+            "Recoverable Emails",
+            f"{data['total_recoverable_emails']:,}",
+            "♻️",
+        )
       self.create_stat_card(
           card_frame,
           "Calendar Events",
@@ -1084,6 +1091,8 @@ class MigrationEstimatorTool(ctk.CTk):
         f"{batch['name']} - {users_str} 👥  |  {emails_str} 📩  |  {events_str}"
         f" 📅  |  {contacts_str} 📞 |  {in_place_archive_str} 🗃️ |  {shared_mailbox_str} 👥📧 | {group_mail_box_str} 👥📧"
     )
+    if self.last_scan_data.get("total_recoverable_emails") is not None:
+      info += f" | {self.format_metric(batch.get('total_recoverable_emails', 0))} ♻️"
     ctk.CTkLabel(
         f,
         text=info,
@@ -2691,6 +2700,7 @@ class MigrationEstimatorTool(ctk.CTk):
         "total_in_place_archives": stats["in_place_archives"],
         "total_shared_mails": stats["shared_mails"],
         "total_group_mails": stats["group_mails"],
+        "total_recoverable_emails": stats["recoverable_items"] if config.scan_recoverable_items else None,
         "total_group_threads": stats["group_threads"],
         "total_items": (
             stats["emails"]
@@ -2701,6 +2711,7 @@ class MigrationEstimatorTool(ctk.CTk):
             + stats["shared_mails"]
             + stats["group_mails"]
             + stats["group_threads"]
+            + stats["recoverable_items"]
         ),
         "total_eta": total_eta,
         "batches": batches,
@@ -2835,7 +2846,8 @@ class MigrationEstimatorTool(ctk.CTk):
         "Event Count",
         "In Place Archive Count",
         "Shared Mail Count",
-        "Group Post Count"
+        "Group Post Count",
+        "Recoverable Email Count"
     ]
     for col in target_cols:
       if col not in df.columns:
@@ -2843,10 +2855,16 @@ class MigrationEstimatorTool(ctk.CTk):
       else:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
+    # Recoverable emails share the primary mailbox's quota, so they join the
+    # email stream of user mailboxes and the shared mailbox stream of shared ones.
+    is_shared = df["Type"] == "Shared" if "Type" in df.columns else pd.Series(False, index=df.index)
+    df["EffectiveEmailCount"] = df["Email Count"] + df["Recoverable Email Count"].where(~is_shared, 0)
+    df["EffectiveSharedMailCount"] = df["Shared Mail Count"] + df["Recoverable Email Count"].where(is_shared, 0)
+
     # 1. Sort Users (Descending - Heaviest first for optimal packing)
     df["SortMetric"] = df.apply(
         lambda x: max(
-            (x["Email Count"] + x["Shared Mail Count"] + x["Group Post Count"]), (x["Event Count"] + x["Contact Count"]), x["In Place Archive Count"]
+            (x["EffectiveEmailCount"] + x["EffectiveSharedMailCount"] + x["Group Post Count"]), (x["Event Count"] + x["Contact Count"]), x["In Place Archive Count"]
         ),
         axis=1,
     )
@@ -2903,8 +2921,9 @@ class MigrationEstimatorTool(ctk.CTk):
     def get_batch_eta(subset_df):
       eta_email = 0.0
       if ENABLE_EMAIL_ETA:
-        # Email Count includes both encrypted and unencrypted emails
-        total_emails = subset_df["Email Count"].tolist()
+        # Email Count includes both encrypted and unencrypted emails; recoverable
+        # emails aren't scanned for encryption, so they count as unencrypted.
+        total_emails = subset_df["EffectiveEmailCount"].tolist()
         encrypted_emails = subset_df["Encrypted Email Count"].tolist()
         unencrypted_emails = [max(0, t - e) for t, e in zip(total_emails, encrypted_emails)]
         
@@ -2959,7 +2978,7 @@ class MigrationEstimatorTool(ctk.CTk):
       if ENABLE_SHARED_MAILBOX_ETA:
         eta_shared_mail_box = shared_mail_box_estimator.calculate_migration_eta(
           {
-            "item_counts": subset_df["Shared Mail Count"].tolist(),
+            "item_counts": subset_df["EffectiveSharedMailCount"].tolist(),
             "global_limit": ETA_EMAIL_GLOBAL_LIMIT,
             "user_limit": ETA_EMAIL_USER_LIMIT,
             "batch_size": ETA_EMAIL_BATCH_SIZE,
@@ -3039,6 +3058,7 @@ class MigrationEstimatorTool(ctk.CTk):
             "total_events": int(final_subset["Event Count"].sum()),
             "total_in_place_archives": int(final_subset["In Place Archive Count"].sum()),
             "total_shared_mails": int(final_subset["Shared Mail Count"].sum()),
+            "total_recoverable_emails": int(final_subset["Recoverable Email Count"].sum()),
             "total_group_mails": int(final_subset["Group Post Count"].sum()),
             "total_group_threads": int(final_subset["Group Thread Count"].sum()),
             "eta": w_eta,
@@ -3076,6 +3096,7 @@ class MigrationEstimatorTool(ctk.CTk):
                 current["total_events"] += next_batch["total_events"]
                 current["total_in_place_archives"] += next_batch["total_in_place_archives"]
                 current["total_shared_mails"] += next_batch["total_shared_mails"]
+                current["total_recoverable_emails"] += next_batch["total_recoverable_emails"]
                 current["total_group_mails"] += next_batch["total_group_mails"]
                 current["total_group_threads"] += next_batch["total_group_threads"]
                 
