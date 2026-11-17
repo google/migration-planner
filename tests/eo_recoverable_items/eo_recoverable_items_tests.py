@@ -1,3 +1,6 @@
+import glob
+import os
+import tempfile
 import threading
 import time
 import unittest
@@ -5,7 +8,7 @@ import urllib.parse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from estimators.eo_recoverable_items_estimator import EORecoverableItemsEstimator
 from util.constants import (
@@ -433,6 +436,105 @@ class TestRecoverableItemsScanPipeline(unittest.TestCase):
         self.tool._run_scan_phases(self.config, MagicMock(), None, [make_row("a@x.com")], [], [], stats)
 
         self.assertEqual(order, ["messages", "recoverable_items", "encrypted_messages", "contacts"])
+
+
+ALL_STATS_KEYS = ("emails", "encrypted_emails", "contacts", "calendars", "events", "in_place_archives",
+                  "shared_mails", "group_mails", "group_threads", "recoverable_items")
+
+
+class TestRecoverableItemsCsv(unittest.TestCase):
+
+    def setUp(self):
+        from ui.exchange_online_ui import MigrationEstimatorTool
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.config = ScanConfig(
+            tenant_id="", client_ids=[], client_secrets=[],
+            user_source="csv", csv_path=os.path.join(self.tmp.name, "input.csv"),
+            scan_email=False, scan_recoverable_items=True,
+            concurrency=10, retries=1, backoff=1,
+        )
+        self.tool = object.__new__(MigrationEstimatorTool)
+        self.tool.stop_scan_event = threading.Event()
+        self.tool.log_msg = MagicMock()
+        self.tool.ui_update = MagicMock()
+        self.tool.concurrency = _Var(self.config.concurrency)
+        self.tool.id_to_display_name = {}
+        self.tool.factory = MagicMock()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write_csv(self, columns: List[str], rows: List[List[Any]]):
+        import pandas as pd
+        pd.DataFrame(rows, columns=columns).to_csv(self.config.csv_path, index=False)
+
+    def _logs(self) -> List[str]:
+        return [call.args[0] for call in self.tool.log_msg.call_args_list]
+
+    def test_csv_with_all_columns_is_reused_without_scanning(self):
+        columns = ["Email Id", "Type"] + list(RECOVERABLE_ITEMS_COLUMNS.values())
+        self._write_csv(columns, [["a@x.com", "User", 1, 2, 3, 4], ["s@x.com", "Shared", 5, 6, 7, 8]])
+
+        all_users, existing_data, groups, shared = self.tool._resolve_target_users(self.config, None)
+        rows, stats = self.tool._prepare_batch_list(self.config, all_users, existing_data, groups, shared)
+        self.tool._run_scan_phases(self.config, None, None, rows, [], [], dict(stats))
+
+        self.assertIn("Skipping Authentication (All required data present in CSV).", self._logs())
+        self.assertIn("Skipping Recoverable Emails Scan (Data present or No Auth)", self._logs())
+        by_upn = {row["User Principal Name / Group Mail"]: row for row in rows}
+        self.assertEqual([by_upn["a@x.com"][c] for c in RECOVERABLE_ITEMS_COLUMNS.values()], [1, 2, 3, 4])
+        self.assertEqual([by_upn["s@x.com"][c] for c in RECOVERABLE_ITEMS_COLUMNS.values()], [5, 6, 7, 8])
+        self.assertEqual(stats["recoverable_items"], 36)
+        self.tool.factory.get_recoverable_items_estimator.assert_not_called()
+
+    def test_csv_missing_a_column_triggers_delta_scan(self):
+        columns = ["Email Id", "Type"] + list(RECOVERABLE_ITEMS_COLUMNS.values())[:3]
+        self._write_csv(columns, [["a@x.com", "User", 1, 2, 3]])
+        self.tool._resolve_from_csv = MagicMock(return_value=[])
+
+        with self.assertRaises(Exception):
+            self.tool._resolve_target_users(self.config, None)
+
+        manager = MagicMock()
+        self.tool._resolve_target_users(self.config, manager)
+        self.assertIn("MailboxItem.Read.All", manager.authenticate_all.call_args.kwargs["required_scopes"])
+
+    def _export(self, scan_recoverable_items: bool) -> "pd.DataFrame":
+        import pandas as pd
+
+        self.config.scan_email = True
+        self.config.scan_recoverable_items = scan_recoverable_items
+        rows = [make_row("a@x.com"), make_row("b@x.com")]
+        rows[0]["Email Count"] = 10
+        for i, column in enumerate(RECOVERABLE_ITEMS_COLUMNS.values()):
+            rows[0][column] = i + 1   # b@x.com keeps 0s, as after a failed scan
+        stats = {key: 0 for key in ALL_STATS_KEYS}
+        monitor = MagicMock()
+        monitor.get_stats.return_value = (0.0, 0.0, 0.0, 0.0)
+        self.tool.calculate_migration_batches = lambda df: (df.assign(**{"Suggested Batch": "Batch 1"}), [], 0.0, [])
+
+        cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        try:
+            with patch("ui.exchange_online_ui.time.sleep"):
+                self.tool._generate_final_report(self.config, rows, [], [], stats, monitor, time.time())
+            report = glob.glob(os.path.join("outputs", "*", "user_report_*.csv"))[0]
+            return pd.read_csv(report)
+        finally:
+            os.chdir(cwd)
+
+    def test_report_has_four_columns_after_email_count(self):
+        df = self._export(scan_recoverable_items=True)
+        columns = list(df.columns)
+        email_index = columns.index("Email Count")
+        self.assertEqual(columns[email_index + 1:email_index + 5], list(RECOVERABLE_ITEMS_COLUMNS.values()))
+        self.assertEqual(df.loc[0, list(RECOVERABLE_ITEMS_COLUMNS.values())].tolist(), [1, 2, 3, 4])
+        self.assertEqual(df.loc[1, list(RECOVERABLE_ITEMS_COLUMNS.values())].tolist(), [0, 0, 0, 0])
+
+    def test_report_has_no_recoverable_columns_when_unselected(self):
+        df = self._export(scan_recoverable_items=False)
+        self.assertFalse(any(column in df.columns for column in RECOVERABLE_ITEMS_COLUMNS.values()))
 
 if __name__ == "__main__":
     unittest.main()
