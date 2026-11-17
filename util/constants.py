@@ -114,21 +114,15 @@ ETA_ENCRYPTED_EMAIL_BATCH_SIZE = 1
 ETA_ENCRYPTED_EMAIL_BATCH_TIME = 8.2
 
 # --- Exchange Recoverable Items (Litigation Hold) ---
-# Folder label -> Graph well-known folder name in the primary mailbox's
-# Recoverable Items tree. Only these hardcoded names are ever put in a URL.
 RECOVERABLE_ITEMS_FOLDERS: dict[str, str] = {
     "Deletions": "recoverableitemsdeletions",
     "Purges": "recoverableitemspurges",
     "DiscoveryHolds": "recoverableitemsdiscoveryholds",
     "Versions": "recoverableitemsversions",
 }
-# Folder label -> user report column.
 RECOVERABLE_ITEMS_COLUMNS: dict[str, str] = {
     label: f"Recoverable {label} Count" for label in RECOVERABLE_ITEMS_FOLDERS
 }
 # Unique mailboxes handled by one scan task. A task sends one $batch at a time.
 RECOVERABLE_ITEMS_MAILBOXES_PER_TASK: int = 10
-# Requests for a single mailbox inside one $batch. Exchange allows 4
-# concurrent requests per mailbox per app; 2 keeps the limit even if an
-# abandoned (timed out) $batch is still running server-side during its retry.
 RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH: int = 2
