@@ -15,6 +15,7 @@ class ScanConfig:
   scan_email: bool = False
   recursive_email_scan: bool = False
   scan_encrypted_email: bool = False
+  scan_recoverable_items: bool = False
   scan_chat: bool = False
   scan_contact: bool = False
   scan_calendar: bool = False

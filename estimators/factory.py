@@ -2,6 +2,7 @@ from estimators.chat_estimator import ChatEstimator
 from estimators.eo_email_estimator import EOEmailEstimator
 from estimators.eo_group_mailbox_estimator import EOGroupMailBoxEstimator
 from estimators.eo_in_place_archive_estimator import EOInPlaceArchiveEstimator
+from estimators.eo_recoverable_items_estimator import EORecoverableItemsEstimator
 from estimators.eo_shared_mailbox_estimator import EOSharedMailBoxEstimator
 from estimators.file_estimator import FileEstimator
 from estimators.files_shallow.shallow_file_estimator import ShallowFileEstimator
@@ -33,6 +34,7 @@ class EstimatorFactory:
     self.in_place_archive_estimator = None
     self.files_estimator = None
     self.email_estimator = None
+    self.recoverable_items_estimator = None
     self.url_invoker = None
     self.chat_estimator = None
     self.mock_url_invoker = None
@@ -250,3 +252,17 @@ class EstimatorFactory:
       )
       self.email_estimator.set_id_to_display_name_map(self.id_to_display_name)
     return self.email_estimator
+
+  def get_recoverable_items_estimator(self, hard_reset=False):
+    if self.recoverable_items_estimator is None or hard_reset:
+      if self.recoverable_items_estimator is not None:
+        self.recoverable_items_estimator.shutdown()
+      url_invoker = self.get_url_invoker()
+      self.recoverable_items_estimator = EORecoverableItemsEstimator(
+          self.config,
+          url_invoker,
+          logger=self.logger,
+          stop_event=self.stop_event,
+      )
+      self.recoverable_items_estimator.set_id_to_display_name_map(self.id_to_display_name)
+    return self.recoverable_items_estimator
