@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 from estimators.eo_recoverable_items_estimator import EORecoverableItemsEstimator
 from util.constants import (
+    RECOVERABLE_ITEMS_COLUMNS,
     RECOVERABLE_ITEMS_FOLDERS,
     RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH,
 )
@@ -268,6 +269,170 @@ class TestEORecoverableItemsEstimator(unittest.TestCase):
         with self.assertRaises(Exception):
             self.estimator.get_folder_counts(["a@x.com", None], [])
 
+
+class _Var:
+    """Minimal stand-in for a Tk variable."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+
+class FakeRecoverableItemsEstimator:
+    """Records get_folder_counts calls and returns fixed per-folder counts."""
+
+    def __init__(self, counts: Dict[str, Dict[str, int]], partial_failures: Optional[Dict[str, str]] = None):
+        self.counts = counts
+        self.partial_failures = partial_failures or {}
+        self.calls: List[List[str]] = []
+        self.lock = threading.Lock()
+        self.on_call = None
+
+    def get_folder_counts(self, mailboxes, failures):
+        with self.lock:
+            self.calls.append(list(mailboxes))
+        if self.on_call is not None:
+            self.on_call()
+        for mailbox in mailboxes:
+            if mailbox.lower() in self.partial_failures:
+                failures.append({
+                    "userId": mailbox, "folderId": self.partial_failures[mailbox.lower()], "isPartial": True,
+                    "type": FailureType.NOT_FOUND, "statusCode": None, "message": "No response found for the request",
+                })
+        empty = {label: 0 for label in RECOVERABLE_ITEMS_FOLDERS}
+        return {mailbox: dict(self.counts.get(mailbox.lower(), empty)) for mailbox in mailboxes}
+
+    def shutdown(self):
+        pass
+
+
+def make_row(upn: str, row_type: str = "User") -> Dict[str, Any]:
+    row = {
+        "User Principal Name / Group Mail": upn,
+        "User ID / Group ID": f"id-{upn}",
+        "Type": row_type,
+        "Email Count": 0,
+        "Encrypted Email Count": 0,
+        "Contact Count": 0,
+        "Calendar Count": 0,
+        "Event Count": 0,
+        "In Place Archive Count": 0,
+        "Shared Mail Count": 0,
+        "Group Post Count": 0,
+        "Group Thread Count": 0,
+    }
+    row.update({column: 0 for column in RECOVERABLE_ITEMS_COLUMNS.values()})
+    return row
+
+
+class TestRecoverableItemsScanPipeline(unittest.TestCase):
+
+    def setUp(self):
+        from ui.exchange_online_ui import MigrationEstimatorTool
+
+        self.config = ScanConfig(
+            tenant_id="test-tenant",
+            client_ids=["test-client"],
+            client_secrets=["test-secret"],
+            user_source="tenant",
+            csv_path="",
+            scan_email=False,
+            scan_recoverable_items=True,
+            concurrency=30,
+            retries=1,
+            backoff=1,
+        )
+        self.tool = object.__new__(MigrationEstimatorTool)
+        self.tool.stop_scan_event = threading.Event()
+        self.tool.log_msg = MagicMock()
+        self.tool.ui_update = MagicMock()
+        self.tool.concurrency = _Var(self.config.concurrency)
+        self.tool.id_to_display_name = {}
+        self.tool.factory = MagicMock()
+        self.stats = {"recoverable_items": 0}
+
+    def _logs(self) -> List[str]:
+        return [call.args[0] for call in self.tool.log_msg.call_args_list]
+
+    def test_phase_deduplicates_chunks_and_fans_out(self):
+        counts = {label: i + 1 for i, label in enumerate(RECOVERABLE_ITEMS_FOLDERS)}  # 1, 2, 3, 4
+        estimator = FakeRecoverableItemsEstimator(
+            {"a@x.com": counts, "s@x.com": counts}, partial_failures={"s@x.com": "Purges"}
+        )
+        self.tool.factory.get_recoverable_items_estimator.return_value = estimator
+        rows = [make_row("a@x.com"), make_row("s@x.com", "Shared"), make_row("A@x.com")]  # duplicate of a@x.com
+        rows += [make_row(f"u{i}@x.com") for i in range(5)]
+
+        failures, partial = self.tool._run_recoverable_items_phase(self.config, MagicMock(), rows, self.stats)
+
+        requested = [mailbox.lower() for call in estimator.calls for mailbox in call]
+        self.assertEqual(len(requested), len(set(requested)))
+        self.assertEqual(set(requested), {"a@x.com", "s@x.com"} | {f"u{i}@x.com" for i in range(5)})
+        self.assertTrue(all(len(call) <= min(self.config.concurrency // 10, 20) for call in estimator.calls))
+        for row in rows[:3]:
+            self.assertEqual([row[column] for column in RECOVERABLE_ITEMS_COLUMNS.values()], [1, 2, 3, 4])
+        self.assertEqual(self.stats["recoverable_items"], 30)
+        self.assertEqual(failures, [])
+        self.assertEqual(len(partial), 1)
+        self.assertEqual(partial[0]["user"], "s@x.com")
+        self.assertEqual(partial[0]["failed_resource"], "Purges")
+
+
+    def test_scan_phases_only_send_user_and_shared_rows(self):
+        captured = {}
+
+        def fake_phase(config, manager, rows, stats):
+            captured["rows"] = rows
+            return [], []
+
+        self.tool._run_recoverable_items_phase = fake_phase
+        users = [make_row("a@x.com")]
+        shared = [make_row("s@x.com", "Shared")]
+        groups = [make_row("g@x.com", "Group Mailbox")]
+        stats = {key: 0 for key in ("emails", "encrypted_emails", "contacts", "calendars", "events", "in_place_archives",
+                                    "shared_mails", "group_mails", "group_threads", "recoverable_items")}
+
+        self.tool._run_scan_phases(self.config, MagicMock(), None, users, shared, groups, stats)
+
+        self.assertEqual([row["User Principal Name / Group Mail"] for row in captured["rows"]], ["a@x.com", "s@x.com"])
+
+    def test_permission_scope_only_when_selected(self):
+        self.tool._get_all_users_graph = MagicMock(return_value=[])
+        for selected in (True, False):
+            with self.subTest(selected=selected):
+                self.config.scan_recoverable_items = selected
+                manager = MagicMock()
+                self.tool._resolve_target_users(self.config, manager)
+                scopes = manager.authenticate_all.call_args.kwargs["required_scopes"]
+                self.assertEqual("MailboxItem.Read.All" in scopes, selected)
+
+    def test_phase_logs_same_events_as_primary_scan(self):
+        # Like the primary mailbox scan: a phase header and periodic progress lines only.
+        self.tool.factory.get_recoverable_items_estimator.return_value = FakeRecoverableItemsEstimator({})
+        rows = [make_row(f"u{i}@x.com") for i in range(100)]
+
+        self.tool._run_recoverable_items_phase(self.config, MagicMock(), rows, self.stats)
+
+        logs = self._logs()
+        self.assertEqual(logs[0], "\n--- Starting RECOVERABLE_ITEMS Scan ---")
+        self.assertTrue(all(line.startswith("Processed ") for line in logs[1:]))
+        self.assertTrue(logs[-1].startswith("Processed 100/100"))
+
+    def test_runs_right_after_primary_email_scan(self):
+        order = []
+        self.config.scan_email = True
+        self.config.scan_encrypted_email = True
+        self.config.scan_contact = True
+        self.tool.run_batch_phase_ui = lambda chunks, res_type, *args: order.append(res_type) or []
+        self.tool._run_recoverable_items_phase = lambda *args: order.append("recoverable_items") or ([], [])
+        stats = {key: 0 for key in ("emails", "encrypted_emails", "contacts", "calendars", "events", "in_place_archives",
+                                    "shared_mails", "group_mails", "group_threads", "recoverable_items")}
+
+        self.tool._run_scan_phases(self.config, MagicMock(), None, [make_row("a@x.com")], [], [], stats)
+
+        self.assertEqual(order, ["messages", "recoverable_items", "encrypted_messages", "contacts"])
 
 if __name__ == "__main__":
     unittest.main()
