@@ -67,6 +67,7 @@ class MigrationEstimatorTool(ctk.CTk):
     self.scan_email = ctk.BooleanVar(value=True)
     self.recursive_email_scan = ctk.BooleanVar(value=False)
     self.scan_encrypted_email = ctk.BooleanVar(value=False)
+    self.scan_recoverable_items = ctk.BooleanVar(value=False)
     self.scan_contact = ctk.BooleanVar(value=True)
     self.scan_calendar = ctk.BooleanVar(value=True)
     self.scan_in_place_archives = ctk.BooleanVar(value=True)
@@ -1332,6 +1333,8 @@ class MigrationEstimatorTool(ctk.CTk):
               label = "Emails"
             elif source == "encrypted_messages":
               label = "Encrypted Emails"
+            elif source == "recoverable_items":
+              label = "Recoverable Emails"
             elif source == "contacts":
               label = "Contacts"
             elif source == "in_place_archives":
@@ -1433,6 +1436,10 @@ class MigrationEstimatorTool(ctk.CTk):
     if self.scan_encrypted_email.get():
       self.create_progress_row(
           self.scan_container, "encrypted_messages", "Scanning Encrypted Emails"
+      )
+    if self.scan_recoverable_items.get():
+      self.create_progress_row(
+          self.scan_container, "recoverable_items", "Scanning Recoverable Items"
       )
     if self.scan_contact.get():
       self.create_progress_row(
@@ -1537,6 +1544,7 @@ class MigrationEstimatorTool(ctk.CTk):
         scan_email=self.scan_email.get(),
         recursive_email_scan=self.recursive_email_scan.get(),
         scan_encrypted_email=self.scan_encrypted_email.get(),
+        scan_recoverable_items=self.scan_recoverable_items.get(),
         scan_contact=self.scan_contact.get(),
         scan_calendar=self.scan_calendar.get(),
         scan_in_place_archives=self.scan_in_place_archives.get(),
@@ -1655,6 +1663,7 @@ class MigrationEstimatorTool(ctk.CTk):
         or (config.scan_in_place_archives and not have_in_place_archives)
         or (config.scan_shared_mail_boxes and not have_shared_mails)
         or (config.scan_group_mail_boxes and not have_group_mailboxes)
+        or config.scan_recoverable_items
     )
 
     # 3. Authenticate if required
@@ -1689,6 +1698,8 @@ class MigrationEstimatorTool(ctk.CTk):
         required_scopes.append("MailboxFolder.Read.All")
       if config.scan_group_mail_boxes and not have_group_mailboxes:
         required_scopes.append("Group.Read.All")
+      if config.scan_recoverable_items:
+        required_scopes.append("MailboxItem.Read.All")
 
       manager.authenticate_all(self.log_msg, required_scopes=required_scopes)
       if one_token_per_app_manager:
@@ -1811,7 +1822,8 @@ class MigrationEstimatorTool(ctk.CTk):
           "In Place Archive Count": 0,
           "Shared Mail Count": 0,
           "Group Post Count": 0,
-          "Group Thread Count": 0
+          "Group Thread Count": 0,
+          **{column: 0 for column in RECOVERABLE_ITEMS_COLUMNS.values()},
       }
       if key in existing_data:
         src = existing_data[key]
@@ -1843,7 +1855,8 @@ class MigrationEstimatorTool(ctk.CTk):
           "In Place Archive Count": 0,
           "Shared Mail Count": 0,
           "Group Post Count": 0,
-          "Group Thread Count": 0
+          "Group Thread Count": 0,
+          **{column: 0 for column in RECOVERABLE_ITEMS_COLUMNS.values()},
       }
       if key in existing_data:
         src = existing_data[key]
@@ -1865,7 +1878,8 @@ class MigrationEstimatorTool(ctk.CTk):
           "In Place Archive Count": 0,
           "Shared Mail Count": 0,
           "Group Post Count": 0,
-          "Group Thread Count": 0
+          "Group Thread Count": 0,
+          **{column: 0 for column in RECOVERABLE_ITEMS_COLUMNS.values()},
       }
       key = str(mailbox["userPrincipalName"]).lower().strip()
       if key in existing_data:
@@ -1883,7 +1897,8 @@ class MigrationEstimatorTool(ctk.CTk):
         "in_place_archives": sum(r["In Place Archive Count"] for r in csv_rows),
         "shared_mails": sum(r["Shared Mail Count"] for r in csv_rows),
         "group_mails": sum(r["Group Post Count"] for r in csv_rows),
-        "group_threads": sum(r["Group Thread Count"] for r in csv_rows)
+        "group_threads": sum(r["Group Thread Count"] for r in csv_rows),
+        "recoverable_items": sum(r[column] for r in csv_rows for column in RECOVERABLE_ITEMS_COLUMNS.values()),
     }
     return csv_rows, stats
 
@@ -1904,6 +1919,13 @@ class MigrationEstimatorTool(ctk.CTk):
     users_failed = 0
     users_partially_failed = 0
 
+    if resource_type in ["in_place_archives", "messages"]:
+      entity_type = "Users"
+    elif resource_type == "recoverable_items":
+      entity_type = "Mailboxes"
+    else:
+      entity_type = "Shared Mailboxes"
+
     executor = ThreadPoolExecutor(max_workers=config.concurrency)
     estimator: Estimator = None
     if resource_type == "in_place_archives":
@@ -1912,6 +1934,8 @@ class MigrationEstimatorTool(ctk.CTk):
       estimator = self.factory.get_shared_mailbox_estimator()
     elif resource_type == "messages":
       estimator = self.factory.get_email_estimator()
+    elif resource_type == "recoverable_items":
+      estimator = self.factory.get_recoverable_items_estimator()
     
     total_failures = []
     partial_failures = []
@@ -1923,8 +1947,13 @@ class MigrationEstimatorTool(ctk.CTk):
       future_to_failures_map: Dict[Future, List[Dict[str, Any]]] = {}
       for chunk in user_chunks:
         failures = []
-        future = executor.submit(estimator.calculate_resource_count, 
-            {"user_ids" : [row["User ID / Group ID"] if row["User ID / Group ID"] is not None else row["User Principal Name / Group Mail"] for row in chunk]}, failures)
+        if resource_type == "recoverable_items":
+          # Recoverable Items are addressed by UPN and counted per folder.
+          future = executor.submit(estimator.get_folder_counts,
+              [row["User Principal Name / Group Mail"] for row in chunk], failures)
+        else:
+          future = executor.submit(estimator.calculate_resource_count, 
+              {"user_ids" : [row["User ID / Group ID"] if row["User ID / Group ID"] is not None else row["User Principal Name / Group Mail"] for row in chunk]}, failures)
         future_to_chunk_map[future] = chunk
         future_to_failures_map[future] = failures
 
@@ -1937,7 +1966,10 @@ class MigrationEstimatorTool(ctk.CTk):
         chunk_count += 1
       
         processed_users += len(chunk)
-        chunk_total = sum(value for user_id, value in chunk_result.items())
+        if resource_type == "recoverable_items":
+          chunk_total = sum(sum(folder_counts.values()) for folder_counts in chunk_result.values())
+        else:
+          chunk_total = sum(value for user_id, value in chunk_result.items())
         phase_total += chunk_total
         
         id_to_upn_map = {row["User ID / Group ID"]: row["User Principal Name / Group Mail"] for row in chunk if row.get("User ID / Group ID") is not None}
@@ -1973,7 +2005,7 @@ class MigrationEstimatorTool(ctk.CTk):
         prog = processed_users / total_users if total_users > 0 else 0
         self.ui_update(
           "scan_progress",
-          entity_type="Users" if resource_type in ["in_place_archives", "messages"] else "Shared Mailboxes",
+          entity_type=entity_type,
           source=resource_type,
           progress=prog,
           cumulative=phase_total,
@@ -1995,15 +2027,21 @@ class MigrationEstimatorTool(ctk.CTk):
             user["Shared Mail Count"] = chunk_result.get(key, 0)
           elif resource_type == "messages":
             user["Email Count"] = chunk_result.get(key, 0)
+          elif resource_type == "recoverable_items":
+            folder_counts = chunk_result.get(user["User Principal Name / Group Mail"], {})
+            for label, column in RECOVERABLE_ITEMS_COLUMNS.items():
+              user[column] = folder_counts.get(label, 0)
         
         stat_key = "emails" if resource_type == "messages" else resource_type
         stats[stat_key] += chunk_total
         
       if self.stop_scan_event.is_set():
         pending_users_count = total_users - processed_users
+        if resource_type == "recoverable_items":
+          self.log_msg(f"Recoverable Items scan stopped: {pending_users_count} mailboxes not scanned (counted as 0).")
         self.ui_update(
           "scan_progress",
-          entity_type="Users" if resource_type in ["in_place_archives", "messages"] else "Shared Mailboxes",
+          entity_type=entity_type,
           source=resource_type,
           progress=1.0,
           cumulative=phase_total,
@@ -2018,7 +2056,7 @@ class MigrationEstimatorTool(ctk.CTk):
     except Exception as e:
       self.ui_update(
         "scan_progress",
-        entity_type="Users" if resource_type in ["in_place_archives", "messages"] else "Shared Mailboxes",
+        entity_type=entity_type,
         source=resource_type,
         progress=1.0,
         cumulative=phase_total,
@@ -2166,6 +2204,73 @@ class MigrationEstimatorTool(ctk.CTk):
     return total_failures
 
 
+  def _run_recoverable_items_phase(
+      self,
+      config: ScanConfig,
+      manager: Optional[TokenManager],
+      rows: List[Dict[str, Any]],
+      stats: Dict[str, int],
+  ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Counts Recoverable Items for user and shared mailbox rows."""
+    # A mailbox must only be scanned by one task, so de-duplicate by UPN
+    # (rows can repeat, e.g. with the load multiplier or duplicate CSV rows).
+    unique_rows: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+      unique_rows.setdefault(str(row["User Principal Name / Group Mail"]).strip().lower(), row)
+    mailboxes = list(unique_rows.values())
+
+    chunk_size = min(config.concurrency // 10, 20)
+    chunks = [mailboxes[i : i + chunk_size] for i in range(0, len(mailboxes), chunk_size)]
+    user_count = sum(1 for row in mailboxes if row["Type"] == "User")
+    self.log_msg(
+        f"Recoverable Items: {len(rows)} rows -> {len(mailboxes)} unique mailboxes"
+        f" ({user_count} User / {len(mailboxes) - user_count} Shared) | IPM.Note count per folder"
+        f" | {len(chunks)} tasks | {config.concurrency} workers | max"
+        f" {RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH} requests per mailbox at a time"
+    )
+
+    failures, partial_failures = self.run_batch_scan(
+        "recoverable_items", config, chunks, manager, None, stats, len(mailboxes)
+    )
+
+    # Copy the counts to duplicate rows and recompute the total over all rows,
+    # matching how the other workloads count repeated rows.
+    for row in rows:
+      source = unique_rows[str(row["User Principal Name / Group Mail"]).strip().lower()]
+      if source is not row:
+        for column in RECOVERABLE_ITEMS_COLUMNS.values():
+          row[column] = source.get(column, 0)
+    stats["recoverable_items"] = sum(row[column] for row in rows for column in RECOVERABLE_ITEMS_COLUMNS.values())
+
+    self._log_recoverable_items_summary(mailboxes, failures, partial_failures)
+    return failures, partial_failures
+
+  def _log_recoverable_items_summary(
+      self,
+      mailboxes: List[Dict[str, Any]],
+      failures: List[Dict[str, Any]],
+      partial_failures: List[Dict[str, Any]],
+  ) -> None:
+    def total(rows):
+      return sum(row[column] for row in rows for column in RECOVERABLE_ITEMS_COLUMNS.values())
+
+    user_rows = [row for row in mailboxes if row["Type"] == "User"]
+    shared_rows = [row for row in mailboxes if row["Type"] == "Shared"]
+    folder_breakdown = " | ".join(
+        f"{label} {sum(row[column] for row in mailboxes):,}"
+        for label, column in RECOVERABLE_ITEMS_COLUMNS.items()
+    )
+    self.log_msg("=" * 40)
+    self.log_msg("Recoverable Items Summary (IPM.Note)")
+    self.log_msg(f"  Mailboxes scanned : {len(mailboxes):,} (User {len(user_rows):,} | Shared {len(shared_rows):,})")
+    self.log_msg(f"  {folder_breakdown}")
+    self.log_msg(f"  Total             : {total(mailboxes):,} (User {total(user_rows):,} | Shared {total(shared_rows):,})")
+    self.log_msg(
+        f"  Failed mailboxes  : {len({f['user'] for f in failures}):,}"
+        f" | Partially failed: {len({f['user'] for f in partial_failures}):,}"
+    )
+    self.log_msg("=" * 40)
+
   def _run_scan_phases(
       self,
       config: ScanConfig,
@@ -2215,6 +2320,8 @@ class MigrationEstimatorTool(ctk.CTk):
     partial_in_place_archive_failures = []
     partial_shared_mail_box_failures = []
     partial_email_failures = []
+    failed_recoverable_items = []
+    partial_recoverable_items_failures = []
 
     can_scan = manager is not None
 
@@ -2262,6 +2369,28 @@ class MigrationEstimatorTool(ctk.CTk):
             total=total_users,
         )
         self.ui_update("phase_status", source="encrypted_messages", status="complete")
+
+    if config.scan_recoverable_items:
+      recoverable_rows = csv_rows + shared_csv_rows
+      if can_scan and recoverable_rows:
+        self.ui_update("phase_status", source="recoverable_items", status="running")
+        failed_recoverable_items, partial_recoverable_items_failures = self._run_recoverable_items_phase(
+            config, manager, recoverable_rows, stats
+        )
+        self.ui_update("phase_status", source="recoverable_items", status="complete")
+      else:
+        self.log_msg("Skipping Recoverable Items Scan (No mailboxes or No Auth)")
+        self.ui_update("phase_status", source="recoverable_items", status="running")
+        self.ui_update(
+            "scan_progress",
+            entity_type="Mailboxes",
+            source="recoverable_items",
+            progress=1.0,
+            cumulative=stats["recoverable_items"],
+            processed=len(recoverable_rows),
+            total=len(recoverable_rows),
+        )
+        self.ui_update("phase_status", source="recoverable_items", status="complete")
 
     if config.scan_contact:
       if can_scan and (not has_contact_data or config.user_source == "tenant"):
@@ -2374,7 +2503,7 @@ class MigrationEstimatorTool(ctk.CTk):
         self.ui_update("phase_status", source="group_mails", status="complete")
 
     # --- LOG FAILED USERS SUMMARY ---
-    if failed_emails or failed_encrypted_emails or failed_calendars or failed_contacts or failed_in_place_archives or failed_shared_mails or failed_group_mails:
+    if failed_emails or failed_encrypted_emails or failed_recoverable_items or failed_calendars or failed_contacts or failed_in_place_archives or failed_shared_mails or failed_group_mails:
       self.log_msg("\n" + "=" * 40)
 
       if failed_emails:
@@ -2387,6 +2516,13 @@ class MigrationEstimatorTool(ctk.CTk):
         self.log_msg("Encrypted Email Migration Failures")
         for f in failed_encrypted_emails:
           self.log_msg(f"User: {f['user']} | Cause: {f['cause']}")
+        self.log_msg("")  # Add blank line
+
+      if failed_recoverable_items:
+        self.log_msg("Recoverable Items Failures")
+        for f in failed_recoverable_items:
+          prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
+          self.log_msg(f"{prefix} Mailbox: {f['user']} | Cause: {f['cause']}")
         self.log_msg("")  # Add blank line
 
       if failed_calendars:
@@ -2427,7 +2563,7 @@ class MigrationEstimatorTool(ctk.CTk):
 
       self.log_msg("=" * 40)
     
-    if partial_in_place_archive_failures or partial_shared_mail_box_failures or partial_email_failures:
+    if partial_in_place_archive_failures or partial_shared_mail_box_failures or partial_email_failures or partial_recoverable_items_failures:
       if partial_in_place_archive_failures:
         self.log_msg("In Place Archive Migration Partial Failures")
         for f in partial_in_place_archive_failures:
@@ -2447,6 +2583,13 @@ class MigrationEstimatorTool(ctk.CTk):
         for f in partial_email_failures:
           prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
           self.log_msg(f"{prefix} User: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
+        self.log_msg("")  # Add blank line
+
+      if partial_recoverable_items_failures:
+        self.log_msg("Recoverable Items Partial Failures")
+        for f in partial_recoverable_items_failures:
+          prefix = "[WARNING]" if f.get("type", None) == FailureType.NOT_FOUND else "[ERROR]"
+          self.log_msg(f"{prefix} Mailbox: {f['user']} | Cause: {f['cause']} | Failed Resource: {f['failed_resource']}")
         self.log_msg("")  # Add blank line
 
       self.log_msg("=" * 40)
@@ -2496,6 +2639,12 @@ class MigrationEstimatorTool(ctk.CTk):
         f" Shared Mails: {stats['shared_mails']} |"
         f" Group Mails: {stats['group_mails']} | Group Threads: {stats['group_threads']}"
     )
+    if config.scan_recoverable_items:
+      folder_breakdown = " | ".join(
+          f"{label} {sum(r.get(column, 0) for r in csv_rows):,}"
+          for label, column in RECOVERABLE_ITEMS_COLUMNS.items()
+      )
+      self.log_msg(f"Recoverable Items: {stats['recoverable_items']} ({folder_breakdown})")
     self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
     self.log_msg(f"CPU Avg/Peak: {avg_cpu:.1f}% / {max_cpu:.1f}%")
     self.log_msg(f"RAM Avg/Peak: {avg_ram:.1f}% / {max_ram:.1f}%")
