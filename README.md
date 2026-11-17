@@ -418,6 +418,7 @@ Once the scan completes, the tool creates a folder in the `/outputs` directory n
 
 It contains:
 1.  **User Report (`user_report.csv`)**: A master list of all users, their item counts, and their suggested Batch (e.g., "Batch 1").
+    *   When **Recoverable Emails** is selected, the report has a `Recoverable Email Count` column: the total IPM.Note emails across the Deletions, Purges, DiscoveryHolds and Versions folders. A folder that couldn't be scanned counts as `0` (see the failure sections in the logs). Like the other count columns, it can be fed back in a CSV upload to skip re-scanning; older reports without this column simply trigger a scan for it.
 2.  **Batch Files (`suggested batches/`)**: Individual CSV files (Batch1.csv, Batch2.csv) ready for use in migration tool. Headers are formatted as **Source Exchange Email**.
 
 Execution logs are written live to `/logs/exchange_<timestamp>.log`, with each line flushed to disk as soon as it's logged, so the log survives crashes and force-quits. A new log file is created each time **Start scan** is clicked. The log contains detailed execution steps, system resource metrics (CPU/RAM), API errors, and full tracebacks of any unhandled exceptions.

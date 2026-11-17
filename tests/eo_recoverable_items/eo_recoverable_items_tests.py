@@ -1,3 +1,6 @@
+import glob
+import os
+import tempfile
 import threading
 import time
 import unittest
@@ -5,11 +8,10 @@ import urllib.parse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from estimators.eo_recoverable_items_estimator import EORecoverableItemsEstimator
 from util.constants import (
-    RECOVERABLE_ITEMS_COLUMNS,
     RECOVERABLE_ITEMS_FOLDERS,
     RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH,
 )
@@ -281,7 +283,7 @@ class _Var:
 
 
 class FakeRecoverableItemsEstimator:
-    """Records get_folder_counts calls and returns fixed per-folder counts."""
+    """Records calls and returns fixed per-folder counts, like the real estimator's API."""
 
     def __init__(self, counts: Dict[str, Dict[str, int]], partial_failures: Optional[Dict[str, str]] = None):
         self.counts = counts
@@ -304,6 +306,17 @@ class FakeRecoverableItemsEstimator:
         empty = {label: 0 for label in RECOVERABLE_ITEMS_FOLDERS}
         return {mailbox: dict(self.counts.get(mailbox.lower(), empty)) for mailbox in mailboxes}
 
+    def calculate_resource_count(self, data, failures):
+        folder_counts = self.get_folder_counts(data["user_ids"], failures)
+        return {upn: sum(counts.values()) for upn, counts in folder_counts.items()}
+
+    def get_folder_totals(self):
+        requested = {mailbox.lower() for call in self.calls for mailbox in call}
+        return {
+            label: sum(self.counts.get(mailbox, {}).get(label, 0) for mailbox in requested)
+            for label in RECOVERABLE_ITEMS_FOLDERS
+        }
+
     def shutdown(self):
         pass
 
@@ -323,7 +336,7 @@ def make_row(upn: str, row_type: str = "User") -> Dict[str, Any]:
         "Group Post Count": 0,
         "Group Thread Count": 0,
     }
-    row.update({column: 0 for column in RECOVERABLE_ITEMS_COLUMNS.values()})
+    row["Recoverable Email Count"] = 0
     return row
 
 
@@ -372,8 +385,9 @@ class TestRecoverableItemsScanPipeline(unittest.TestCase):
         self.assertEqual(set(requested), {"a@x.com", "s@x.com"} | {f"u{i}@x.com" for i in range(5)})
         self.assertTrue(all(len(call) <= min(self.config.concurrency // 10, 20) for call in estimator.calls))
         for row in rows[:3]:
-            self.assertEqual([row[column] for column in RECOVERABLE_ITEMS_COLUMNS.values()], [1, 2, 3, 4])
+            self.assertEqual(row["Recoverable Email Count"], 10)
         self.assertEqual(self.stats["recoverable_items"], 30)
+        self.assertEqual(self.tool.recoverable_folder_totals, {"Deletions": 2, "Purges": 4, "DiscoveryHolds": 6, "Versions": 8})
         self.assertEqual(failures, [])
         self.assertEqual(len(partial), 1)
         self.assertEqual(partial[0]["user"], "s@x.com")
@@ -433,6 +447,134 @@ class TestRecoverableItemsScanPipeline(unittest.TestCase):
         self.tool._run_scan_phases(self.config, MagicMock(), None, [make_row("a@x.com")], [], [], stats)
 
         self.assertEqual(order, ["messages", "recoverable_items", "encrypted_messages", "contacts"])
+
+
+ALL_STATS_KEYS = ("emails", "encrypted_emails", "contacts", "calendars", "events", "in_place_archives",
+                  "shared_mails", "group_mails", "group_threads", "recoverable_items")
+
+
+class TestRecoverableItemsCsv(unittest.TestCase):
+
+    def setUp(self):
+        from ui.exchange_online_ui import MigrationEstimatorTool
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.config = ScanConfig(
+            tenant_id="", client_ids=[], client_secrets=[],
+            user_source="csv", csv_path=os.path.join(self.tmp.name, "input.csv"),
+            scan_email=False, scan_recoverable_items=True,
+            concurrency=10, retries=1, backoff=1,
+        )
+        self.tool = object.__new__(MigrationEstimatorTool)
+        self.tool.stop_scan_event = threading.Event()
+        self.tool.log_msg = MagicMock()
+        self.tool.ui_update = MagicMock()
+        self.tool.concurrency = _Var(self.config.concurrency)
+        self.tool.id_to_display_name = {}
+        self.tool.factory = MagicMock()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write_csv(self, columns: List[str], rows: List[List[Any]]):
+        import pandas as pd
+        pd.DataFrame(rows, columns=columns).to_csv(self.config.csv_path, index=False)
+
+    def _logs(self) -> List[str]:
+        return [call.args[0] for call in self.tool.log_msg.call_args_list]
+
+    def test_csv_with_column_is_reused_without_scanning(self):
+        self._write_csv(["Email Id", "Type", "Recoverable Email Count"], [["a@x.com", "User", 10], ["s@x.com", "Shared", 26]])
+
+        all_users, existing_data, groups, shared = self.tool._resolve_target_users(self.config, None)
+        rows, stats = self.tool._prepare_batch_list(self.config, all_users, existing_data, groups, shared)
+        self.tool._run_scan_phases(self.config, None, None, rows, [], [], dict(stats))
+
+        self.assertIn("Skipping Authentication (All required data present in CSV).", self._logs())
+        self.assertIn("Skipping Recoverable Emails Scan (Data present or No Auth)", self._logs())
+        by_upn = {row["User Principal Name / Group Mail"]: row for row in rows}
+        self.assertEqual(by_upn["a@x.com"]["Recoverable Email Count"], 10)
+        self.assertEqual(by_upn["s@x.com"]["Recoverable Email Count"], 26)
+        self.assertEqual(stats["recoverable_items"], 36)
+        self.tool.factory.get_recoverable_items_estimator.assert_not_called()
+
+    def test_older_report_without_column_triggers_delta_scan(self):
+        self.config.scan_email = True
+        self._write_csv(["Email Id", "Type", "Email Count"], [["a@x.com", "User", 5]])
+        self.tool._resolve_from_csv = MagicMock(return_value=[{"userPrincipalName": "a@x.com", "id": "id-a"}])
+
+        with self.assertRaises(Exception):
+            self.tool._resolve_target_users(self.config, None)
+
+        manager = MagicMock()
+        all_users, existing_data, groups, shared = self.tool._resolve_target_users(self.config, manager)
+        self.assertEqual(manager.authenticate_all.call_args.kwargs["required_scopes"], ["User.Read.All", "MailboxItem.Read.All"])
+        rows, _ = self.tool._prepare_batch_list(self.config, all_users, existing_data, groups, shared)
+        self.assertEqual(rows[0]["Email Count"], 5)
+        self.assertEqual(rows[0]["Recoverable Email Count"], 0)
+
+    def test_older_report_is_unaffected_when_unselected(self):
+        self.config.scan_email = True
+        self.config.scan_recoverable_items = False
+        self._write_csv(["Email Id", "Type", "Email Count"], [["a@x.com", "User", 5]])
+
+        all_users, existing_data, groups, shared = self.tool._resolve_target_users(self.config, None)
+        rows, stats = self.tool._prepare_batch_list(self.config, all_users, existing_data, groups, shared)
+
+        self.assertIn("Skipping Authentication (All required data present in CSV).", self._logs())
+        self.assertEqual(rows[0]["Email Count"], 5)
+        self.assertEqual(stats["recoverable_items"], 0)
+
+    def test_blank_values_load_as_zero(self):
+        self._write_csv(["Email Id", "Type", "Recoverable Email Count"], [["a@x.com", "User", None], ["b@x.com", "User", 7]])
+
+        all_users, existing_data, groups, shared = self.tool._resolve_target_users(self.config, None)
+        rows, _ = self.tool._prepare_batch_list(self.config, all_users, existing_data, groups, shared)
+
+        by_upn = {row["User Principal Name / Group Mail"]: row for row in rows}
+        self.assertEqual(by_upn["a@x.com"]["Recoverable Email Count"], 0)
+        self.assertEqual(by_upn["b@x.com"]["Recoverable Email Count"], 7)
+
+    def _export(self, scan_recoverable_items: bool, folder_totals=None) -> "pd.DataFrame":
+        import pandas as pd
+
+        self.config.scan_email = True
+        self.config.scan_recoverable_items = scan_recoverable_items
+        self.tool.recoverable_folder_totals = folder_totals
+        rows = [make_row("a@x.com"), make_row("b@x.com")]
+        rows[0]["Email Count"] = 10
+        rows[0]["Recoverable Email Count"] = 10   # b@x.com keeps 0, as after a failed scan
+        stats = {key: 0 for key in ALL_STATS_KEYS}
+        stats["recoverable_items"] = 10
+        monitor = MagicMock()
+        monitor.get_stats.return_value = (0.0, 0.0, 0.0, 0.0)
+        self.tool.calculate_migration_batches = lambda df: (df.assign(**{"Suggested Batch": "Batch 1"}), [], 0.0, [])
+
+        cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        try:
+            with patch("ui.exchange_online_ui.time.sleep"):
+                self.tool._generate_final_report(self.config, rows, [], [], stats, monitor, time.time())
+            report = glob.glob(os.path.join("outputs", "*", "user_report_*.csv"))[0]
+            return pd.read_csv(report)
+        finally:
+            os.chdir(cwd)
+
+    def test_report_has_recoverable_email_count_column(self):
+        df = self._export(True, {"Deletions": 1, "Purges": 2, "DiscoveryHolds": 3, "Versions": 4})
+        columns = list(df.columns)
+        self.assertEqual(columns[columns.index("Email Count") + 1], "Recoverable Email Count")
+        self.assertEqual(df["Recoverable Email Count"].tolist(), [10, 0])
+        self.assertIn("Recoverable Emails: 10 (Deletions 1 | Purges 2 | DiscoveryHolds 3 | Versions 4)", self._logs())
+
+    def test_final_totals_line_without_breakdown_when_reused_from_csv(self):
+        self._export(True, None)
+        self.assertIn("Recoverable Emails: 10", self._logs())
+
+    def test_report_has_no_recoverable_column_when_unselected(self):
+        df = self._export(False)
+        self.assertNotIn("Recoverable Email Count", df.columns)
+        self.assertFalse(any(line.startswith("Recoverable Emails:") for line in self._logs()))
 
 if __name__ == "__main__":
     unittest.main()

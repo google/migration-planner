@@ -120,7 +120,4 @@ RECOVERABLE_ITEMS_FOLDERS: dict[str, str] = {
     "DiscoveryHolds": "recoverableitemsdiscoveryholds",
     "Versions": "recoverableitemsversions",
 }
-RECOVERABLE_ITEMS_COLUMNS: dict[str, str] = {
-    label: f"Recoverable {label} Count" for label in RECOVERABLE_ITEMS_FOLDERS
-}
 RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH: int = 2

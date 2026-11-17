@@ -68,6 +68,7 @@ class MigrationEstimatorTool(ctk.CTk):
     self.recursive_email_scan = ctk.BooleanVar(value=False)
     self.scan_encrypted_email = ctk.BooleanVar(value=False)
     self.scan_recoverable_items = ctk.BooleanVar(value=False)
+    self.recoverable_folder_totals = None
     self.scan_contact = ctk.BooleanVar(value=True)
     self.scan_calendar = ctk.BooleanVar(value=True)
     self.scan_in_place_archives = ctk.BooleanVar(value=True)
@@ -1591,6 +1592,7 @@ class MigrationEstimatorTool(ctk.CTk):
     have_in_place_archives = False
     have_shared_mails = False
     have_group_mailboxes = False
+    have_recoverable_items = False
 
     # 1. Parse CSV if applicable
     if config.user_source == "csv":
@@ -1631,6 +1633,8 @@ class MigrationEstimatorTool(ctk.CTk):
           have_shared_mails = True
         if "In Place Archive Count" in df_input.columns:
           have_in_place_archives = True
+        if "Recoverable Email Count" in df_input.columns:
+          have_recoverable_items = True
 
         have_type_col = "Type" in df_input.columns
         for _, row in df_input.iterrows():
@@ -1663,7 +1667,7 @@ class MigrationEstimatorTool(ctk.CTk):
         or (config.scan_in_place_archives and not have_in_place_archives)
         or (config.scan_shared_mail_boxes and not have_shared_mails)
         or (config.scan_group_mail_boxes and not have_group_mailboxes)
-        or config.scan_recoverable_items
+        or (config.scan_recoverable_items and not have_recoverable_items)
     )
 
     # 3. Authenticate if required
@@ -1698,7 +1702,7 @@ class MigrationEstimatorTool(ctk.CTk):
         required_scopes.append("MailboxFolder.Read.All")
       if config.scan_group_mail_boxes and not have_group_mailboxes:
         required_scopes.append("Group.Read.All")
-      if config.scan_recoverable_items:
+      if config.scan_recoverable_items and not have_recoverable_items:
         required_scopes.append("MailboxItem.Read.All")
 
       manager.authenticate_all(self.log_msg, required_scopes=required_scopes)
@@ -1787,6 +1791,7 @@ class MigrationEstimatorTool(ctk.CTk):
     have_in_place_archives = "In Place Archive Count" in sample
     have_shared_mails = "Shared Mail Count" in sample
     have_group_mails = "Group Post Count" in sample and "Group Thread Count" in sample
+    have_recoverable_items = "Recoverable Email Count" in sample
 
     def safe_int(val):
       try:
@@ -1823,7 +1828,7 @@ class MigrationEstimatorTool(ctk.CTk):
           "Shared Mail Count": 0,
           "Group Post Count": 0,
           "Group Thread Count": 0,
-          **{column: 0 for column in RECOVERABLE_ITEMS_COLUMNS.values()},
+          "Recoverable Email Count": 0,
       }
       if key in existing_data:
         src = existing_data[key]
@@ -1838,6 +1843,8 @@ class MigrationEstimatorTool(ctk.CTk):
           row["In Place Archive Count"] = safe_int(src.get("In Place Archive Count", 0))
         if have_shared_mails and config.scan_shared_mail_boxes:
           row["Shared Mail Count"] = safe_int(src.get("Shared Mail Count", 0))
+        if have_recoverable_items and config.scan_recoverable_items:
+          row["Recoverable Email Count"] = safe_int(src.get("Recoverable Email Count", 0))
       csv_rows.append(row)
     
     for u in groups:
@@ -1856,7 +1863,7 @@ class MigrationEstimatorTool(ctk.CTk):
           "Shared Mail Count": 0,
           "Group Post Count": 0,
           "Group Thread Count": 0,
-          **{column: 0 for column in RECOVERABLE_ITEMS_COLUMNS.values()},
+          "Recoverable Email Count": 0,
       }
       if key in existing_data:
         src = existing_data[key]
@@ -1879,13 +1886,15 @@ class MigrationEstimatorTool(ctk.CTk):
           "Shared Mail Count": 0,
           "Group Post Count": 0,
           "Group Thread Count": 0,
-          **{column: 0 for column in RECOVERABLE_ITEMS_COLUMNS.values()},
+          "Recoverable Email Count": 0,
       }
       key = str(mailbox["userPrincipalName"]).lower().strip()
       if key in existing_data:
         src = existing_data[key]
         if have_shared_mails and config.scan_shared_mail_boxes:
           row["Shared Mail Count"] = safe_int(src.get("Shared Mail Count", 0))
+        if have_recoverable_items and config.scan_recoverable_items:
+          row["Recoverable Email Count"] = safe_int(src.get("Recoverable Email Count", 0))
       csv_rows.append(row)
 
     stats = {
@@ -1898,7 +1907,7 @@ class MigrationEstimatorTool(ctk.CTk):
         "shared_mails": sum(r["Shared Mail Count"] for r in csv_rows),
         "group_mails": sum(r["Group Post Count"] for r in csv_rows),
         "group_threads": sum(r["Group Thread Count"] for r in csv_rows),
-        "recoverable_items": sum(r[column] for r in csv_rows for column in RECOVERABLE_ITEMS_COLUMNS.values()),
+        "recoverable_items": sum(r["Recoverable Email Count"] for r in csv_rows),
     }
     return csv_rows, stats
 
@@ -1948,9 +1957,9 @@ class MigrationEstimatorTool(ctk.CTk):
       for chunk in user_chunks:
         failures = []
         if resource_type == "recoverable_items":
-          # Recoverable Items are addressed by UPN and counted per folder.
-          future = executor.submit(estimator.get_folder_counts,
-              [row["User Principal Name / Group Mail"] for row in chunk], failures)
+          # Recoverable Items are addressed by UPN.
+          future = executor.submit(estimator.calculate_resource_count,
+              {"user_ids": [row["User Principal Name / Group Mail"] for row in chunk]}, failures)
         else:
           future = executor.submit(estimator.calculate_resource_count, 
               {"user_ids" : [row["User ID / Group ID"] if row["User ID / Group ID"] is not None else row["User Principal Name / Group Mail"] for row in chunk]}, failures)
@@ -1966,10 +1975,7 @@ class MigrationEstimatorTool(ctk.CTk):
         chunk_count += 1
       
         processed_users += len(chunk)
-        if resource_type == "recoverable_items":
-          chunk_total = sum(sum(folder_counts.values()) for folder_counts in chunk_result.values())
-        else:
-          chunk_total = sum(value for user_id, value in chunk_result.items())
+        chunk_total = sum(value for user_id, value in chunk_result.items())
         phase_total += chunk_total
         
         id_to_upn_map = {row["User ID / Group ID"]: row["User Principal Name / Group Mail"] for row in chunk if row.get("User ID / Group ID") is not None}
@@ -2028,9 +2034,7 @@ class MigrationEstimatorTool(ctk.CTk):
           elif resource_type == "messages":
             user["Email Count"] = chunk_result.get(key, 0)
           elif resource_type == "recoverable_items":
-            folder_counts = chunk_result.get(user["User Principal Name / Group Mail"], {})
-            for label, column in RECOVERABLE_ITEMS_COLUMNS.items():
-              user[column] = folder_counts.get(label, 0)
+            user["Recoverable Email Count"] = chunk_result.get(user["User Principal Name / Group Mail"], 0)
         
         stat_key = "emails" if resource_type == "messages" else resource_type
         stats[stat_key] += chunk_total
@@ -2229,9 +2233,9 @@ class MigrationEstimatorTool(ctk.CTk):
     for row in rows:
       source = unique_rows[str(row["User Principal Name / Group Mail"]).strip().lower()]
       if source is not row:
-        for column in RECOVERABLE_ITEMS_COLUMNS.values():
-          row[column] = source.get(column, 0)
-    stats["recoverable_items"] = sum(row[column] for row in rows for column in RECOVERABLE_ITEMS_COLUMNS.values())
+        row["Recoverable Email Count"] = source["Recoverable Email Count"]
+    stats["recoverable_items"] = sum(row["Recoverable Email Count"] for row in rows)
+    self.recoverable_folder_totals = self.factory.get_recoverable_items_estimator().get_folder_totals()
 
     return failures, partial_failures
 
@@ -2274,6 +2278,7 @@ class MigrationEstimatorTool(ctk.CTk):
     has_in_place_archives_data = any(r["In Place Archive Count"] > 0 for r in csv_rows)
     has_shared_mails_data = any(r["Shared Mail Count"] > 0 for r in shared_csv_rows)
     has_group_mails_data = any(r["Group Post Count"] > 0 for r in group_csv_rows)
+    has_recoverable_items_data = any(r["Recoverable Email Count"] > 0 for r in csv_rows + shared_csv_rows)
     failed_emails = []
     failed_encrypted_emails = []
     failed_contacts = []
@@ -2286,6 +2291,7 @@ class MigrationEstimatorTool(ctk.CTk):
     partial_email_failures = []
     failed_recoverable_items = []
     partial_recoverable_items_failures = []
+    self.recoverable_folder_totals = None
 
     can_scan = manager is not None
 
@@ -2316,14 +2322,14 @@ class MigrationEstimatorTool(ctk.CTk):
 
     if config.scan_recoverable_items:
       recoverable_rows = csv_rows + shared_csv_rows
-      if can_scan and recoverable_rows:
+      if can_scan and recoverable_rows and (not has_recoverable_items_data or config.user_source == "tenant"):
         self.ui_update("phase_status", source="recoverable_items", status="running")
         failed_recoverable_items, partial_recoverable_items_failures = self._run_recoverable_items_phase(
             config, manager, recoverable_rows, stats
         )
         self.ui_update("phase_status", source="recoverable_items", status="complete")
       else:
-        self.log_msg("Skipping Recoverable Emails Scan (No mailboxes or No Auth)")
+        self.log_msg("Skipping Recoverable Emails Scan (Data present or No Auth)")
         self.ui_update("phase_status", source="recoverable_items", status="running")
         self.ui_update(
             "scan_progress",
@@ -2604,11 +2610,12 @@ class MigrationEstimatorTool(ctk.CTk):
         f" Group Mails: {stats['group_mails']} | Group Threads: {stats['group_threads']}"
     )
     if config.scan_recoverable_items:
-      folder_breakdown = " | ".join(
-          f"{label} {sum(r.get(column, 0) for r in csv_rows):,}"
-          for label, column in RECOVERABLE_ITEMS_COLUMNS.items()
-      )
-      self.log_msg(f"Recoverable Emails: {stats['recoverable_items']} ({folder_breakdown})")
+      recoverable_line = f"Recoverable Emails: {stats['recoverable_items']}"
+      if self.recoverable_folder_totals:
+        recoverable_line += " (" + " | ".join(
+            f"{label} {count:,}" for label, count in self.recoverable_folder_totals.items()
+        ) + ")"
+      self.log_msg(recoverable_line)
     self.log_msg(f"System: {total_cpu_cores} Cores, {total_ram_gb:.1f}GB RAM")
     self.log_msg(f"CPU Avg/Peak: {avg_cpu:.1f}% / {max_cpu:.1f}%")
     self.log_msg(f"RAM Avg/Peak: {avg_ram:.1f}% / {max_ram:.1f}%")
@@ -2634,6 +2641,8 @@ class MigrationEstimatorTool(ctk.CTk):
       final_columns.append("Email Count")
     if config.scan_encrypted_email:
       final_columns.append("Encrypted Email Count")
+    if config.scan_recoverable_items:
+      final_columns.append("Recoverable Email Count")
     if config.scan_contact:
       final_columns.append("Contact Count")
     if config.scan_calendar:
