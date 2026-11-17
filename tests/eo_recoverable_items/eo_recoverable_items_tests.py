@@ -379,11 +379,6 @@ class TestRecoverableItemsScanPipeline(unittest.TestCase):
         self.assertEqual(partial[0]["user"], "s@x.com")
         self.assertEqual(partial[0]["failed_resource"], "Purges")
 
-        logs = self._logs()
-        self.assertTrue(any("8 rows -> 7 unique mailboxes (6 User / 1 Shared)" in line for line in logs))
-        self.assertIn("Recoverable Items Summary (IPM.Note)", logs)
-        self.assertTrue(any(line.strip() == "Deletions 2 | Purges 4 | DiscoveryHolds 6 | Versions 8" for line in logs))
-        self.assertTrue(any("Failed mailboxes  : 0 | Partially failed: 1" in line for line in logs))
 
     def test_scan_phases_only_send_user_and_shared_rows(self):
         captured = {}
@@ -413,17 +408,31 @@ class TestRecoverableItemsScanPipeline(unittest.TestCase):
                 scopes = manager.authenticate_all.call_args.kwargs["required_scopes"]
                 self.assertEqual("MailboxItem.Read.All" in scopes, selected)
 
-    def test_stop_is_logged(self):
-        estimator = FakeRecoverableItemsEstimator({})
-        estimator.on_call = self.tool.stop_scan_event.set
-        self.tool.factory.get_recoverable_items_estimator.return_value = estimator
-        self.config.concurrency = 10
-        rows = [make_row(f"u{i}@x.com") for i in range(50)]
+    def test_phase_logs_same_events_as_primary_scan(self):
+        # Like the primary mailbox scan: a phase header and periodic progress lines only.
+        self.tool.factory.get_recoverable_items_estimator.return_value = FakeRecoverableItemsEstimator({})
+        rows = [make_row(f"u{i}@x.com") for i in range(100)]
 
         self.tool._run_recoverable_items_phase(self.config, MagicMock(), rows, self.stats)
 
-        self.assertTrue(any(line.startswith("Recoverable Items scan stopped:") for line in self._logs()))
+        logs = self._logs()
+        self.assertEqual(logs[0], "\n--- Starting RECOVERABLE_ITEMS Scan ---")
+        self.assertTrue(all(line.startswith("Processed ") for line in logs[1:]))
+        self.assertTrue(logs[-1].startswith("Processed 100/100"))
 
+    def test_runs_right_after_primary_email_scan(self):
+        order = []
+        self.config.scan_email = True
+        self.config.scan_encrypted_email = True
+        self.config.scan_contact = True
+        self.tool.run_batch_phase_ui = lambda chunks, res_type, *args: order.append(res_type) or []
+        self.tool._run_recoverable_items_phase = lambda *args: order.append("recoverable_items") or ([], [])
+        stats = {key: 0 for key in ("emails", "encrypted_emails", "contacts", "calendars", "events", "in_place_archives",
+                                    "shared_mails", "group_mails", "group_threads", "recoverable_items")}
+
+        self.tool._run_scan_phases(self.config, MagicMock(), None, [make_row("a@x.com")], [], [], stats)
+
+        self.assertEqual(order, ["messages", "recoverable_items", "encrypted_messages", "contacts"])
 
 if __name__ == "__main__":
     unittest.main()
