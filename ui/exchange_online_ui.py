@@ -1936,6 +1936,14 @@ class MigrationEstimatorTool(ctk.CTk):
     phase_total = 0
     users_failed = 0
     users_partially_failed = 0
+    folders_failed = 0
+
+    def progress_summary():
+      return (
+          f"Processed {processed_users}/{total_users} | Failed:"
+          f" {users_failed}/{total_users} | Folders failed: {folders_failed}"
+          f" | {resource_type}: {phase_total}"
+      )
 
     if resource_type in ["in_place_archives", "messages"]:
       entity_type = "Users"
@@ -2010,13 +2018,11 @@ class MigrationEstimatorTool(ctk.CTk):
         users_partially_failed += len(
             set(failure["userId"] for failure in chunk_partial_failures if failure["userId"] is not None)
         )
+        folders_failed += len(chunk_partial_failures)
 
         # Update Progress
         if chunk_count % log_freq == 0 or chunk_count == len(user_chunks):
-          self.log_msg(
-                f"Processed {processed_users}/{total_users} | Failed:"
-                f" {users_failed}/{total_users} | {resource_type}: {phase_total}"
-            )
+          self.log_msg(progress_summary())
         prog = processed_users / total_users if total_users > 0 else 0
         self.ui_update(
           "scan_progress",
@@ -2050,6 +2056,7 @@ class MigrationEstimatorTool(ctk.CTk):
         
       if self.stop_scan_event.is_set():
         pending_users_count = total_users - processed_users
+        self.log_msg(progress_summary())
         self.ui_update(
           "scan_progress",
           entity_type=entity_type,
@@ -2059,6 +2066,7 @@ class MigrationEstimatorTool(ctk.CTk):
           processed=processed_users,
           success=processed_users - users_failed,
           failed=users_failed,
+          partially_failed=users_partially_failed,
           skipped=pending_users_count,
           total=total_users,
           extra_text="",
