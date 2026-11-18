@@ -1936,11 +1936,12 @@ class MigrationEstimatorTool(ctk.CTk):
     phase_total = 0
     users_failed = 0
     users_partially_failed = 0
+    folders_failed = 0
 
     def progress_summary():
       return (
           f"Processed {processed_users}/{total_users} | Failed:"
-          f" {users_failed}/{total_users} | Partially failed: {users_partially_failed}/{total_users}"
+          f" {users_failed}/{total_users} | Folders failed: {folders_failed}"
           f" | {resource_type}: {phase_total}"
       )
 
@@ -2017,6 +2018,7 @@ class MigrationEstimatorTool(ctk.CTk):
         users_partially_failed += len(
             set(failure["userId"] for failure in chunk_partial_failures if failure["userId"] is not None)
         )
+        folders_failed += len(chunk_partial_failures)
 
         # Update Progress
         if chunk_count % log_freq == 0 or chunk_count == len(user_chunks):

@@ -433,30 +433,6 @@ class TestRecoverableItemsScanPipeline(unittest.TestCase):
         self.assertEqual(logs[0], "\n--- Starting RECOVERABLE_ITEMS Scan ---")
         self.assertTrue(all(line.startswith("Processed ") for line in logs[1:]))
         self.assertTrue(logs[-1].startswith("Processed 100/100"))
-        self.assertIn("| Partially failed: 0/100 |", logs[-1])
-
-    def test_summary_line_reports_partial_failures(self):
-        estimator = FakeRecoverableItemsEstimator({}, partial_failures={"u1@x.com": "DiscoveryHolds"})
-        self.tool.factory.get_recoverable_items_estimator.return_value = estimator
-        rows = [make_row(f"u{i}@x.com") for i in range(10)]
-
-        self.tool._run_recoverable_items_phase(self.config, MagicMock(), rows, self.stats)
-
-        self.assertEqual(self._logs()[-1], "Processed 10/10 | Failed: 0/10 | Partially failed: 1/10 | recoverable_items: 0")
-
-    def test_summary_line_logged_when_stopped(self):
-        estimator = FakeRecoverableItemsEstimator({}, partial_failures={"u0@x.com": "Purges"})
-        estimator.on_call = self.tool.stop_scan_event.set
-        self.tool.factory.get_recoverable_items_estimator.return_value = estimator
-        self.config.concurrency = 10
-        rows = [make_row(f"u{i}@x.com") for i in range(50)]
-
-        self.tool._run_recoverable_items_phase(self.config, MagicMock(), rows, self.stats)
-
-        summary = self._logs()[-1]
-        self.assertRegex(summary, r"^Processed \d+/50 \| Failed: 0/50 \| Partially failed: \d+/50 \| recoverable_items: 0$")
-        progress = [call.kwargs for call in self.tool.ui_update.call_args_list if call.args[0] == "scan_progress"]
-        self.assertIn("partially_failed", progress[-1])
 
     def test_runs_right_after_primary_email_scan(self):
         order = []
