@@ -82,7 +82,7 @@ class UrlInvoker():
                     break
 
             if len(failed_responses) > 0:
-                logger(f"Consistent failures observed for the following: {",".join(response.get("body") for response in failed_responses)}")
+                logger(f"Consistent failures observed for the following: {','.join(str(response.get('body')) for response in failed_responses)}")
 
         except Exception as e:
             logger(f"Error in {context}: {e}")
@@ -146,17 +146,24 @@ class UrlInvoker():
                         time.sleep(2)
                         continue
 
-                    current_batch_map = {r["id"]: r for r in pending_requests}
+                    # Graph returns response ids as strings, while requests built by
+                    # create_batches use int ids, so match on the string form.
+                    current_batch_map = {str(r["id"]): r for r in pending_requests}
                     next_retry_requests = []
                     retry_after_delay = 0
                     needs_refresh = False
+
+                    def request_url(response_id):
+                        return current_batch_map.get(str(response_id), {}).get("url")
 
                     for response_item in batch_responses:
                         req_id = response_item.get("id")
                         status = response_item.get("status")
                         
                         if "body" not in response_item or not response_item["body"]:
-                            logger(f"WARNING: Response item {req_id} in {context} has missing or empty body! Status: {status}")
+                            logger(f"WARNING: Response item {req_id} in {context} has missing or empty body! Status: {status} | URL: {request_url(req_id)}")
+                        if status in [429, 401, 500, 502, 503, 504] and str(req_id) not in current_batch_map:
+                            logger(f"WARNING: Retryable response [{status}] in {context} could not be matched to its request and will not be retried | URL: {request_url(req_id)}")
                         if status == 429:
                             logger(f"Received Throttling error for {batch_url} | Response: {response_item}")
                             headers_429 = response_item.get("headers", {})
@@ -167,24 +174,31 @@ class UrlInvoker():
                             
                             retry_after_delay = max(retry_after_delay, wait_sec)
                             self.throttle_until = max(self.throttle_until, time.time() + wait_sec)
-                            if req_id in current_batch_map:
-                                next_retry_requests.append(current_batch_map[req_id])
+                            if str(req_id) in current_batch_map:
+                                next_retry_requests.append(current_batch_map[str(req_id)])
                         elif status == 401:
                             # Handle inner 401 (just in case single items fail authorization)
                             needs_refresh = True
-                            if req_id in current_batch_map:
-                                next_retry_requests.append(current_batch_map[req_id])
+                            if str(req_id) in current_batch_map:
+                                next_retry_requests.append(current_batch_map[str(req_id)])
                                 retry_after_delay = max(retry_after_delay, 2)
                         elif status in [500, 502, 503, 504]:
-                            if req_id in current_batch_map:
-                                next_retry_requests.append(current_batch_map[req_id])
+                            if str(req_id) in current_batch_map:
+                                next_retry_requests.append(current_batch_map[str(req_id)])
                                 retry_after_delay = max(retry_after_delay, 2)
-                        elif "error" in response_item["body"]:
+                        elif "error" in (response_item.get("body") or {}):
                             # Failsafe for uncaught errors; pass through so callers record accurate failure status/message.
                             successful_responses[req_id] = response_item
-                            logger(f"Error encountered in batch response in {context}: {response_item['body']['error']}")
+                            logger(f"Error encountered in batch response in {context}: [{status}] {response_item['body']['error']} | URL: {request_url(req_id)}")
                         else:
                             successful_responses[req_id] = response_item
+                            if not isinstance(status, int) or status < 200 or status >= 300:
+                                logger(f"Error encountered in batch response in {context}: [{status}] {str(response_item.get('body'))[:500]} | URL: {request_url(req_id)}")
+
+                    returned_ids = {str(response_item.get("id")) for response_item in batch_responses}
+                    for request in pending_requests:
+                        if str(request["id"]) not in returned_ids:
+                            logger(f"WARNING: No response item for request {request['id']} in {context} | URL: {request.get('url')}")
 
                     if next_retry_requests:
                         if stop_event and stop_event.is_set():
@@ -288,6 +302,7 @@ class UrlInvoker():
             logger(
                 f"WARNING: Max retries ({max_retries}) reached in {context}."
                 f" {len(pending_requests)} items dropped permanently."
+                f" URLs: {', '.join(str(request.get('url')) for request in pending_requests)}"
             )
         elif pending_requests and stop_event is not None and stop_event.is_set():
             logger(

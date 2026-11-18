@@ -22,6 +22,7 @@ python3 -m unittest tests.<package>.<module>
 | EO shared mailboxes - load | `python3 -m unittest tests.eo_shared_mail_boxes.load_tests` | Yes |
 | EO group mailboxes - sanity | `python3 -m unittest tests.eo_group_mailboxes.sanity_tests` | No |
 | EO recoverable items | `python3 -m unittest tests.eo_recoverable_items.eo_recoverable_items_tests` | No |
+| Connectors - UrlInvoker | `python3 -m unittest tests.connectors.url_invoker_tests` | No |
 
 ## Load tests need a fixture first
 
