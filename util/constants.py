@@ -121,3 +121,14 @@ RECOVERABLE_ITEMS_FOLDERS: dict[str, str] = {
     "Versions": "recoverableitemsversions",
 }
 RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH: int = 2
+RECOVERABLE_ITEMS_ITEM_TYPES: list[str] = [
+    "IPM.Note",
+    "IPM.Schedule.Meeting.Canceled",
+    "IPM.Schedule.Meeting.Request",
+    "IPM.Schedule.Meeting.Resp.Neg",
+    "IPM.Schedule.Meeting.Resp.Pos",
+    "IPM.Schedule.Meeting.Resp.Tent",
+    "IPM.Note.Secure",
+    "IPM.Note.Secure.Sign",
+    "IPM.Resend",
+]

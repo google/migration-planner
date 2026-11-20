@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 from estimators.eo_recoverable_items_estimator import EORecoverableItemsEstimator
 from util.constants import (
     RECOVERABLE_ITEMS_FOLDERS,
+    RECOVERABLE_ITEMS_ITEM_TYPES,
     RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH,
 )
 from util.enums import FailureType
@@ -139,7 +140,10 @@ class TestEORecoverableItemsEstimator(unittest.TestCase):
             self.assertEqual(req["method"], "GET")
             self.assertEqual(req["headers"]["ConsistencyLevel"], "eventual")
             self.assertTrue(req["url"].startswith("admin/exchange/mailboxes/o%27neil%23x@x.com/folders/"))
-            self.assertTrue(req["url"].endswith("/items?$filter=type%20eq%20%27IPM.Note%27&$count=true&$top=1&$select=id"))
+            expected_filter = urllib.parse.quote(
+                " or ".join(f"type eq '{item_type}'" for item_type in RECOVERABLE_ITEMS_ITEM_TYPES), safe=""
+            )
+            self.assertTrue(req["url"].endswith(f"/items?$filter={expected_filter}&$count=true&$top=1&$select=id"))
         self.assertEqual({request_target(req)[1] for req in requests}, set(RECOVERABLE_ITEMS_FOLDERS))
 
     def test_recursive_setting_does_not_change_requests(self):

@@ -152,7 +152,7 @@ def build_eo_resource_checkbox_list(self, ctk):
   ctk.CTkLabel(
       self.adv_frame,
       text=(
-          "* Recoverable Emails counts emails (IPM.Note) in the Recoverable Items folders"
+          "* Recoverable Emails counts emails, including meeting and secure emails, in the Recoverable Items folders"
           " (Deletions, Purges, DiscoveryHolds and Versions) of user and shared mailboxes."
       ),
       font=FONT_BODY_SMALL,

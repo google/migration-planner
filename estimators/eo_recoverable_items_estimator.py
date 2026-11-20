@@ -8,17 +8,18 @@ from util.connectors import UrlInvoker
 from util.constants import (
     GRAPH_BASE_URL,
     RECOVERABLE_ITEMS_FOLDERS,
+    RECOVERABLE_ITEMS_ITEM_TYPES,
     RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH,
 )
 from util.enums import FailureType
 from util.thread_safe_ds import AtomicInt
 from util.utils import ScanConfig, create_batches, get_batch_responses_map
 
-# Only plain emails are counted.
-IPM_NOTE_FILTER = "type eq 'IPM.Note'"
+# The admin API rejects `type in (...)`, so the item types are or-ed together.
+ITEM_TYPE_FILTER = " or ".join(f"type eq '{item_type}'" for item_type in RECOVERABLE_ITEMS_ITEM_TYPES)
 FOLDER_COUNT_API = (
     "admin/exchange/mailboxes/{mailbox}/folders/{folder}/items?$filter="
-    + urllib.parse.quote(IPM_NOTE_FILTER, safe="")
+    + urllib.parse.quote(ITEM_TYPE_FILTER, safe="")
     + "&$count=true&$top=1&$select=id"
 )
 
@@ -27,8 +28,9 @@ class EORecoverableItemsEstimator(Estimator):
     """Counts emails in the Recoverable Items folders of primary mailboxes.
 
     Mailboxes are identified by UPN. These folders never contain subfolders, so
-    each folder needs a single server-side IPM.Note $count request, whatever the
-    Recursive setting (totalItemCount can't be filtered by item type).
+    each folder needs a single server-side $count request over the item types in
+    RECOVERABLE_ITEMS_ITEM_TYPES, whatever the Recursive setting (totalItemCount
+    can't be filtered by item type).
 
     The folders are requested in sequential rounds of
     RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH folders, so a mailbox
