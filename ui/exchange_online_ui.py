@@ -1795,6 +1795,7 @@ class MigrationEstimatorTool(ctk.CTk):
     # Check what we have in existing_data
     sample = next(iter(existing_data.values())) if existing_data else {}
     have_email = "Email Count" in sample
+    have_encrypted_email = "Encrypted Email Count" in sample
     have_contact = "Contact Count" in sample
     have_calendar = "Calendar Count" in sample and "Event Count" in sample
     have_in_place_archives = "In Place Archive Count" in sample
@@ -1843,6 +1844,8 @@ class MigrationEstimatorTool(ctk.CTk):
         src = existing_data[key]
         if have_email and config.scan_email:
           row["Email Count"] = safe_int(src.get("Email Count", 0))
+        if have_encrypted_email and config.scan_encrypted_email:
+          row["Encrypted Email Count"] = safe_int(src.get("Encrypted Email Count", 0))
         if have_contact and config.scan_contact:
           row["Contact Count"] = safe_int(src.get("Contact Count", 0))
         if have_calendar and config.scan_calendar:
