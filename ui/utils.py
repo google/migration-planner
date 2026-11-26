@@ -113,7 +113,7 @@ def build_eo_resource_checkbox_list(self, ctk):
   ).pack(side="left", padx=10)
   ctk.CTkCheckBox(
       scan_options_frame,
-      text="Recoverable Emails",
+      text="Recoverable Items",
       variable=self.scan_recoverable_items,
       corner_radius=4,
       fg_color=COLOR_PRIMARY,
@@ -152,7 +152,7 @@ def build_eo_resource_checkbox_list(self, ctk):
   ctk.CTkLabel(
       self.adv_frame,
       text=(
-          "* Recoverable Emails counts emails, including meeting and secure emails, in the Recoverable Items folders"
+          "* Recoverable Items counts emails, including meeting and secure emails, in the Recoverable Items folders"
           " (Deletions, Purges, DiscoveryHolds and Versions) of user and shared mailboxes."
       ),
       font=FONT_BODY_SMALL,
