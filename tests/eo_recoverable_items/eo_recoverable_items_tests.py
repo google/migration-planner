@@ -340,7 +340,7 @@ def make_row(upn: str, row_type: str = "User") -> Dict[str, Any]:
         "Group Post Count": 0,
         "Group Thread Count": 0,
     }
-    row["Recoverable Email Count"] = 0
+    row["Recoverable Items Count"] = 0
     return row
 
 
@@ -389,7 +389,7 @@ class TestRecoverableItemsScanPipeline(unittest.TestCase):
         self.assertEqual(set(requested), {"a@x.com", "s@x.com"} | {f"u{i}@x.com" for i in range(5)})
         self.assertTrue(all(len(call) <= min(self.config.concurrency // 10, 20) for call in estimator.calls))
         for row in rows[:3]:
-            self.assertEqual(row["Recoverable Email Count"], 10)
+            self.assertEqual(row["Recoverable Items Count"], 10)
         self.assertEqual(self.stats["recoverable_items"], 30)
         self.assertEqual(self.tool.recoverable_folder_totals, {"Deletions": 2, "Purges": 4, "DiscoveryHolds": 6, "Versions": 8})
         self.assertEqual(failures, [])
@@ -488,17 +488,17 @@ class TestRecoverableItemsCsv(unittest.TestCase):
         return [call.args[0] for call in self.tool.log_msg.call_args_list]
 
     def test_csv_with_column_is_reused_without_scanning(self):
-        self._write_csv(["Email Id", "Type", "Recoverable Email Count"], [["a@x.com", "User", 10], ["s@x.com", "Shared", 26]])
+        self._write_csv(["Email Id", "Type", "Recoverable Items Count"], [["a@x.com", "User", 10], ["s@x.com", "Shared", 26]])
 
         all_users, existing_data, groups, shared = self.tool._resolve_target_users(self.config, None)
         rows, stats = self.tool._prepare_batch_list(self.config, all_users, existing_data, groups, shared)
         self.tool._run_scan_phases(self.config, None, None, rows, [], [], dict(stats))
 
         self.assertIn("Skipping Authentication (All required data present in CSV).", self._logs())
-        self.assertIn("Skipping Recoverable Emails Scan (Data present or No Auth)", self._logs())
+        self.assertIn("Skipping Recoverable Items Scan (Data present or No Auth)", self._logs())
         by_upn = {row["User Principal Name / Group Mail"]: row for row in rows}
-        self.assertEqual(by_upn["a@x.com"]["Recoverable Email Count"], 10)
-        self.assertEqual(by_upn["s@x.com"]["Recoverable Email Count"], 26)
+        self.assertEqual(by_upn["a@x.com"]["Recoverable Items Count"], 10)
+        self.assertEqual(by_upn["s@x.com"]["Recoverable Items Count"], 26)
         self.assertEqual(stats["recoverable_items"], 36)
         self.tool.factory.get_recoverable_items_estimator.assert_not_called()
 
@@ -515,7 +515,7 @@ class TestRecoverableItemsCsv(unittest.TestCase):
         self.assertEqual(manager.authenticate_all.call_args.kwargs["required_scopes"], ["User.Read.All", "MailboxItem.Read.All"])
         rows, _ = self.tool._prepare_batch_list(self.config, all_users, existing_data, groups, shared)
         self.assertEqual(rows[0]["Email Count"], 5)
-        self.assertEqual(rows[0]["Recoverable Email Count"], 0)
+        self.assertEqual(rows[0]["Recoverable Items Count"], 0)
 
     def test_older_report_is_unaffected_when_unselected(self):
         self.config.scan_email = True
@@ -530,14 +530,14 @@ class TestRecoverableItemsCsv(unittest.TestCase):
         self.assertEqual(stats["recoverable_items"], 0)
 
     def test_blank_values_load_as_zero(self):
-        self._write_csv(["Email Id", "Type", "Recoverable Email Count"], [["a@x.com", "User", None], ["b@x.com", "User", 7]])
+        self._write_csv(["Email Id", "Type", "Recoverable Items Count"], [["a@x.com", "User", None], ["b@x.com", "User", 7]])
 
         all_users, existing_data, groups, shared = self.tool._resolve_target_users(self.config, None)
         rows, _ = self.tool._prepare_batch_list(self.config, all_users, existing_data, groups, shared)
 
         by_upn = {row["User Principal Name / Group Mail"]: row for row in rows}
-        self.assertEqual(by_upn["a@x.com"]["Recoverable Email Count"], 0)
-        self.assertEqual(by_upn["b@x.com"]["Recoverable Email Count"], 7)
+        self.assertEqual(by_upn["a@x.com"]["Recoverable Items Count"], 0)
+        self.assertEqual(by_upn["b@x.com"]["Recoverable Items Count"], 7)
 
     def _export(self, scan_recoverable_items: bool, folder_totals=None) -> "pd.DataFrame":
         import pandas as pd
@@ -547,7 +547,7 @@ class TestRecoverableItemsCsv(unittest.TestCase):
         self.tool.recoverable_folder_totals = folder_totals
         rows = [make_row("a@x.com"), make_row("b@x.com")]
         rows[0]["Email Count"] = 10
-        rows[0]["Recoverable Email Count"] = 10   # b@x.com keeps 0, as after a failed scan
+        rows[0]["Recoverable Items Count"] = 10   # b@x.com keeps 0, as after a failed scan
         stats = {key: 0 for key in ALL_STATS_KEYS}
         stats["recoverable_items"] = 10
         monitor = MagicMock()
@@ -564,21 +564,21 @@ class TestRecoverableItemsCsv(unittest.TestCase):
         finally:
             os.chdir(cwd)
 
-    def test_report_has_recoverable_email_count_column(self):
+    def test_report_has_recoverable_items_count_column(self):
         df = self._export(True, {"Deletions": 1, "Purges": 2, "DiscoveryHolds": 3, "Versions": 4})
         columns = list(df.columns)
-        self.assertEqual(columns[columns.index("Email Count") + 1], "Recoverable Email Count")
-        self.assertEqual(df["Recoverable Email Count"].tolist(), [10, 0])
-        self.assertIn("Recoverable Emails: 10 (Deletions 1 | Purges 2 | DiscoveryHolds 3 | Versions 4)", self._logs())
+        self.assertEqual(columns[columns.index("Email Count") + 1], "Recoverable Items Count")
+        self.assertEqual(df["Recoverable Items Count"].tolist(), [10, 0])
+        self.assertIn("Recoverable Items: 10 (Deletions 1 | Purges 2 | DiscoveryHolds 3 | Versions 4)", self._logs())
 
     def test_final_totals_line_without_breakdown_when_reused_from_csv(self):
         self._export(True, None)
-        self.assertIn("Recoverable Emails: 10", self._logs())
+        self.assertIn("Recoverable Items: 10", self._logs())
 
     def test_report_has_no_recoverable_column_when_unselected(self):
         df = self._export(False)
-        self.assertNotIn("Recoverable Email Count", df.columns)
-        self.assertFalse(any(line.startswith("Recoverable Emails:") for line in self._logs()))
+        self.assertNotIn("Recoverable Items Count", df.columns)
+        self.assertFalse(any(line.startswith("Recoverable Items:") for line in self._logs()))
 
 
 class _EtaEstimator:
@@ -618,14 +618,14 @@ class TestRecoverableItemsEta(unittest.TestCase):
         import pandas as pd
         df = pd.DataFrame(rows)
         if drop_recoverable_column:
-            df = df.drop(columns=["Recoverable Email Count"])
+            df = df.drop(columns=["Recoverable Items Count"])
         return self.tool.calculate_migration_batches(df)
 
     def _row(self, upn: str, row_type: str = "User", email: int = 0, shared: int = 0, recoverable: int = 0):
         row = make_row(upn, row_type)
         row["Email Count"] = email
         row["Shared Mail Count"] = shared
-        row["Recoverable Email Count"] = recoverable
+        row["Recoverable Items Count"] = recoverable
         return row
 
     def test_older_data_without_column_matches_zero_counts(self):
