@@ -57,7 +57,7 @@ class EOEmailEstimator(Estimator):
         folder_api = "users/{userId}/mailFolders?$select=id,displayName,childFolderCount,totalItemCount&$top=999"
 
         top_level_folders: Dict[str, List[Dict[str, Any]]] = {}      # Map of User to top level folder list.
-        user_batches = create_batches(folder_api, user_id_maps, self.config.parallel_batches, True)
+        user_batches = create_batches(folder_api, user_id_maps, self.config.graph_batch_size, True)
 
         futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
         batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -110,7 +110,7 @@ class EOEmailEstimator(Estimator):
                     })
                         
         while pending_next_items and not self.is_hard_stop_requested():
-            batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+            batches = create_batches("{url}", pending_next_items, self.config.graph_batch_size, True)
             
             next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
             next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}

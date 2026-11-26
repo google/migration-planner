@@ -82,7 +82,7 @@ class EOGroupMailBoxEstimator(Estimator):
         # We use a dummy placeholder to create a batch request.
         # This allows us to reuse the batching and pagination utilities.
         placeholders = [{"tenant_query": "all_groups"}]
-        user_batches = create_batches(graph_user_endpoint, placeholders, self.config.parallel_batches, True)
+        user_batches = create_batches(graph_user_endpoint, placeholders, self.config.graph_batch_size, True)
         
         futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
         batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -124,7 +124,7 @@ class EOGroupMailBoxEstimator(Estimator):
                             self.logger("[WARNING] No response found for group API.")
 
         while pending_next_items and not self.is_hard_stop_requested():
-            batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+            batches = create_batches("{url}", pending_next_items, self.config.graph_batch_size, True)
             
             next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
             next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -167,7 +167,7 @@ class EOGroupMailBoxEstimator(Estimator):
         thread_api = "groups/{group_id}/threads?$select=id&$top=10"
         
         group_id_maps = [{"group_id": group_id} for group_id in group_ids]
-        group_batches = create_batches(thread_api, group_id_maps, self.config.parallel_batches, True)
+        group_batches = create_batches(thread_api, group_id_maps, self.config.graph_batch_size, True)
         
         futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
         batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -219,7 +219,7 @@ class EOGroupMailBoxEstimator(Estimator):
                     })
 
         while pending_next_items and not self.is_hard_stop_requested():
-            batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+            batches = create_batches("{url}", pending_next_items, self.config.graph_batch_size, True)
             
             next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
             next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -281,7 +281,7 @@ class EOGroupMailBoxEstimator(Estimator):
         post_api = "groups/{group_id}/threads/{thread_id}/posts?$count=true&$select=id&$top=1"
         
         # Optimize Batch Size
-        optimal_batch_size = min(self.config.parallel_batches, min(20, len(group_id_to_thread_ids)))
+        optimal_batch_size = min(self.config.graph_batch_size, min(20, len(group_id_to_thread_ids)))
         batches = create_batches(post_api, flattened_items, optimal_batch_size, True)
         
         # Refine batches to ensure no duplicate groups in any batch

@@ -640,7 +640,7 @@ class FileEstimator(Estimator):
     ):
         try:
             site_url = "/sites/{siteId}/sites?$select=id,webUrl,isPersonalSite&$top=999"
-            batches = create_batches(site_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
+            batches = create_batches(site_url, [{"siteId": site_id} for site_id in site_ids], self.config.graph_batch_size, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
             batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -709,7 +709,7 @@ class FileEstimator(Estimator):
                         })
 
             while pending_next_items and not self.is_hard_stop_requested():
-                batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+                batches = create_batches("{url}", pending_next_items, self.config.graph_batch_size, True)
                 
                 next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
                 next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -912,7 +912,7 @@ class FileEstimator(Estimator):
     ): 
         try:
             recycle_bin_url = "/sites/{siteId}/recycleBin/items?$top=999&$select=size"
-            batches = create_batches(recycle_bin_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
+            batches = create_batches(recycle_bin_url, [{"siteId": site_id} for site_id in site_ids], self.config.graph_batch_size, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
             batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -977,7 +977,7 @@ class FileEstimator(Estimator):
                         })
 
             while pending_next_items and not self.is_hard_stop_requested():
-                batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+                batches = create_batches("{url}", pending_next_items, self.config.graph_batch_size, True)
                 
                 next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
                 next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -1024,7 +1024,7 @@ class FileEstimator(Estimator):
     ) -> int:
         try:
             list_url = "/sites/{siteId}/lists?$select=id&$top=999"
-            batches = create_batches(list_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
+            batches = create_batches(list_url, [{"siteId": site_id} for site_id in site_ids], self.config.graph_batch_size, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
             batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -1089,7 +1089,7 @@ class FileEstimator(Estimator):
                         })
 
             while pending_next_items and not self.is_hard_stop_requested():
-                batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+                batches = create_batches("{url}", pending_next_items, self.config.graph_batch_size, True)
                 
                 next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
                 next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -1272,7 +1272,7 @@ class FileEstimator(Estimator):
                                 resp["body"]["value"] = filtered_dls
 
             drive_url = "/sites/{siteId}/drives?$select=id,name,driveType,webUrl&$top=999"
-            batches = create_batches(drive_url, [{"siteId": site_id} for site_id in site_ids], self.config.parallel_batches, True)
+            batches = create_batches(drive_url, [{"siteId": site_id} for site_id in site_ids], self.config.graph_batch_size, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
             batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -1338,7 +1338,7 @@ class FileEstimator(Estimator):
                         })
 
             while pending_next_items and not self.is_hard_stop_requested():
-                batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+                batches = create_batches("{url}", pending_next_items, self.config.graph_batch_size, True)
                 
                 next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
                 next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -1578,7 +1578,7 @@ class FileEstimator(Estimator):
         try:
             # use delta api to fetch the folders
             delta_api = "/drives/{driveId}/root/delta?$top=1000&$select=id,parentReference,name,webUrl,folder,file,remoteItem,size"
-            batches = create_batches(delta_api, [{"driveId": drive_id} for drive_id in drive_ids], self.config.parallel_batches, True)
+            batches = create_batches(delta_api, [{"driveId": drive_id} for drive_id in drive_ids], self.config.graph_batch_size, True)
 
             futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
             batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
@@ -1728,7 +1728,7 @@ class FileEstimator(Estimator):
                         })
 
             while pending_next_items and not self.is_hard_stop_requested():
-                batches = create_batches("{url}", pending_next_items, self.config.parallel_batches, True)
+                batches = create_batches("{url}", pending_next_items, self.config.graph_batch_size, True)
 
                 next_futures_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
                 next_batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}

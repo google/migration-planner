@@ -26,6 +26,9 @@ USE_MSFT_BACKOFF = True
 # Requests) from Graph, Entra ID and SharePoint, and 503 (Server Too Busy)
 # from SharePoint. Both usually carry a Retry-After header.
 THROTTLING_STATUS_CODES: tuple[int, ...] = (429, 503)
+# Default number of sub-requests the estimators pack into one Microsoft Graph
+# JSON $batch call (ScanConfig.graph_batch_size). Graph allows at most 20.
+DEFAULT_GRAPH_BATCH_SIZE: int = 10
 
 # Chat Estimation Cost Weights (Seconds)
 BLENDED_MSG_COST_SEC: float = 0.75
@@ -109,3 +112,23 @@ ETA_ENCRYPTED_EMAIL_USER_LIMIT = 6
 ETA_ENCRYPTED_EMAIL_BATCH_SIZE = 1
 # Using 0.5 of actual speed here (Actual observed was ~4.1s per batch / 1.46 QPS)
 ETA_ENCRYPTED_EMAIL_BATCH_TIME = 8.2
+
+# --- Exchange Recoverable Items (Litigation Hold) ---
+RECOVERABLE_ITEMS_FOLDERS: dict[str, str] = {
+    "Deletions": "recoverableitemsdeletions",
+    "Purges": "recoverableitemspurges",
+    "DiscoveryHolds": "recoverableitemsdiscoveryholds",
+    "Versions": "recoverableitemsversions",
+}
+RECOVERABLE_ITEMS_MAX_REQUESTS_PER_MAILBOX_PER_BATCH: int = 2
+RECOVERABLE_ITEMS_ITEM_TYPES: list[str] = [
+    "IPM.Note",
+    "IPM.Schedule.Meeting.Canceled",
+    "IPM.Schedule.Meeting.Request",
+    "IPM.Schedule.Meeting.Resp.Neg",
+    "IPM.Schedule.Meeting.Resp.Pos",
+    "IPM.Schedule.Meeting.Resp.Tent",
+    "IPM.Note.Secure",
+    "IPM.Note.Secure.Sign",
+    "IPM.Resend",
+]

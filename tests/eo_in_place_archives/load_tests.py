@@ -79,7 +79,7 @@ class TestEOInPlaceArchiveLoad(unittest.TestCase):
             scan_group_mail_boxes=False,
             scan_shared_mail_boxes=False,
             concurrency=10,
-            parallel_batches=20,
+            graph_batch_size=20,
             hierarchial_crawl_batch_limit=4,
             load_multiplier=1,
             retries=1,

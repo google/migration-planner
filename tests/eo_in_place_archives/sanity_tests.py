@@ -35,7 +35,7 @@ class TestEOInPlaceArchiveEstimator(unittest.TestCase):
             scan_group_mail_boxes=False,
             scan_shared_mail_boxes=False,
             concurrency=2,
-            parallel_batches=2,
+            graph_batch_size=2,
             hierarchial_crawl_batch_limit=2,
             load_multiplier=1,
             retries=1,

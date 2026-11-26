@@ -2090,7 +2090,6 @@ class FileMigrationEstimatorTool(MigrationEstimatorTool):
 
   def _get_scan_configuration(self):
     config = super()._get_scan_configuration()
-    config.parallel_batches = 10
     config.includePersonalSites = self.val_include_personal_sites
     config.includeTeamSites = self.val_include_team_sites
     config.include_recycle_bin_contents = self.val_include_recycle_bin_contents

@@ -52,7 +52,7 @@ class EOSharedMailBoxEstimator(Estimator):
         batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
         batch_id_to_future_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
         user_id_maps = [{"userId": user_id} for user_id in user_ids]
-        user_batches = create_batches(mailbox_setting_endpoint, user_id_maps, self.config.parallel_batches, True)
+        user_batches = create_batches(mailbox_setting_endpoint, user_id_maps, self.config.graph_batch_size, True)
 
         idx = 0
         for batch in user_batches:
@@ -85,7 +85,7 @@ class EOSharedMailBoxEstimator(Estimator):
         shared_mailbox_ids = self._get_shared_mail_boxes(user_ids, failures)
 
         shared_mail_count_endpoint = "/users/{userId}/messages?$count=true&$top=1&$select=id"
-        shared_mail_box_batches = create_batches(shared_mail_count_endpoint, [{"userId": mail_id} for mail_id in shared_mailbox_ids], self.config.parallel_batches, True)
+        shared_mail_box_batches = create_batches(shared_mail_count_endpoint, [{"userId": mail_id} for mail_id in shared_mailbox_ids], self.config.graph_batch_size, True)
 
         batch_id_to_batch_map: Dict[int, List[Dict[str, Any]]] = {}
         batch_id_to_future_map: Dict[int, Future[List[Dict[str, Any]]]] = {}
